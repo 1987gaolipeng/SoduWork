@@ -2,15 +2,18 @@
 (function (global) {
   'use strict';
   function create(ctx) {
-function loadText(tab) {
+function previewKey(file) { return ctx.workScope() + ':' + locationKey(file); }
+
+function loadText(tab, inlineText) {
     const file = tab.file;
-    if (file.readSnapshot) {
-      ctx.WB.previewRequest = null; ctx.WB.previewKey = 'tool-read:' + fileKey(file);
+    const key = previewKey(file);
+    if (file.readSnapshot || typeof inlineText === 'string') {
+      ctx.WB.previewRequest = null; ctx.WB.previewKey = file.readSnapshot ? 'tool-read:' + fileKey(file) : key;
       ctx.WB.previewLoading = false; ctx.WB.previewError = '';
-      ctx.WB.previewText = file.readSnapshot.text; ctx.WB.previewTooBig = Boolean(file.readSnapshot.truncated);
+      ctx.WB.previewText = file.readSnapshot?.text ?? inlineText;
+      ctx.WB.previewTooBig = Boolean(file.readSnapshot?.truncated);
       return;
     }
-    const key = ctx.workScope() + ':' + ctx.artifactKey(file) + ':' + (file.at || 0);
     if (ctx.WB.previewKey === key) return;
     const token = {}, ownsPreview = ctx.previewOwner();
     ctx.WB.previewRequest = token;
@@ -106,13 +109,13 @@ function promoteFileTab(tab, files) {
     if (Object.prototype.hasOwnProperty.call(ctx.WB.editorDrafts, oldId)) {
       ctx.WB.editorDrafts[newId] = ctx.WB.editorDrafts[oldId]; delete ctx.WB.editorDrafts[oldId];
     }
-    const oldPreviewKey = scope + ':' + ctx.artifactKey(previous) + ':' + (previous.at || 0);
+    const oldPreviewKey = previewKey(previous);
     if (ctx.WB.previewKey === oldPreviewKey) {
       // Completed unchanged bytes remain usable. In-flight local reads lose
       // their token so they cannot replace the later artifact response.
       ctx.WB.previewRequest = null;
       ctx.WB.previewKey = !changed && !ctx.WB.previewLoading && !ctx.WB.previewError
-        ? scope + ':' + ctx.artifactKey(next) + ':' + (next.at || 0) : '';
+        ? previewKey(next) : '';
       ctx.WB.previewLoading = false;
     }
     if (ctx.WB.autoPreviewKey === scope + ':artifact:' + ctx.artifactKey(previous))
@@ -144,7 +147,10 @@ function restoreFileView(tab) {
   }
 
 function canEditFile(file) {
-    return Boolean(file && !file.readSnapshot && !file.taskId && (file.path || file.relative));
+    if (!file || file.readSnapshot || file.taskId || !(file.path || file.relative)) return false;
+    // Markdown preview can return only a prefix of a large file. Its source
+    // remains readable, but must not overwrite the full document with that prefix.
+    return !(ctx.WB.previewTooBig && ctx.WB.previewKey === previewKey(file) && ctx.previewKind(file) === 'markdown');
   }
 
 function isCodeFile(file) {
@@ -156,6 +162,10 @@ function isCodeFile(file) {
 
 function isEditorFile(file) {
     return Boolean(file?.readSnapshot) || isCodeFile(file) || Boolean(fileChangeFor(file));
+  }
+
+function hasSourceViews(tab) {
+    return tab.sourceViews || isEditorFile(tab.file) || tab.view === 'code' || tab.view === 'diff';
   }
 
 function codeMode(file) {
@@ -172,21 +182,28 @@ function codeMode(file) {
 function destroyEditor() {
     if (!ctx.WB.editor) return;
     try {
-      if (ctx.WB.editor.instance && typeof ctx.WB.editor.instance.getValue === 'function') {
-        ctx.WB.editorDrafts[ctx.WB.editor.id] = ctx.WB.editor.instance.getValue();
-      }
       if (typeof ctx.WB.editor.instance.toTextArea === 'function') ctx.WB.editor.instance.toTextArea();
     } catch (_) { /* a replaced tab may already have detached the editor */ }
     ctx.WB.editor = null;
   }
 
-function editorSource(file) {
+function fileDraft(file) {
+    const draft = ctx.WB.editorDrafts[fileKey(file)];
+    // After a successful save the journal can still contain the old bytes.
+    // Prefer the saved text until the file index publishes its next version.
+    return draft && (!draft.saved || (draft.at === file.at && draft.size === file.size)) ? draft : null;
+  }
+
+function inlineSource(file) {
     if (file?.readSnapshot) return file.readSnapshot.text;
-    const id = fileKey(file);
-    if (Object.prototype.hasOwnProperty.call(ctx.WB.editorDrafts, id)) return ctx.WB.editorDrafts[id];
-    const change = fileChangeFor(file);
-    if (change && change.after && typeof change.after.text === 'string') return change.after.text;
-    return ctx.WB.previewText || '';
+    const draft = fileDraft(file);
+    if (draft) return draft.text;
+    const after = fileChangeFor(file)?.after;
+    if (!after?.textTruncated && typeof after?.text === 'string') return after.text;
+  }
+
+function editorSource(file) {
+    return inlineSource(file) ?? ctx.WB.previewText ?? '';
   }
 
 function mountEditor(tab) {
@@ -201,23 +218,23 @@ function mountEditor(tab) {
     const id = fileKey(file);
     const initial = editorSource(file);
     textarea.value = initial;
+    const changed = text => {
+      ctx.WB.editorDrafts[id] = { text };
+      const save = ctx.WB.root?.querySelector('[data-wb-code-save]');
+      if (save) save.disabled = Boolean(tab.saving);
+    };
     if (global.CodeMirror && typeof global.CodeMirror.fromTextArea === 'function') {
       const instance = global.CodeMirror.fromTextArea(textarea, {
         lineNumbers: true, mode: codeMode(file), readOnly: canEditFile(file) ? false : 'nocursor',
         lineWrapping: false, tabSize: 2, indentUnit: 2,
         viewportMargin: 80, autofocus: false,
       });
-      instance.on('change', () => {
-        ctx.WB.editorDrafts[id] = instance.getValue();
-        ctx.WB.editorDirty = true;
-        const save = ctx.WB.root?.querySelector('[data-wb-code-save]');
-        if (save) save.disabled = false;
-      });
+      instance.on('change', () => changed(instance.getValue()));
       ctx.WB.editor = { id, instance };
     } else {
       textarea.className = 'ncw-editor-fallback';
       textarea.readOnly = !canEditFile(file);
-      textarea.addEventListener('input', () => { ctx.WB.editorDrafts[id] = textarea.value; ctx.WB.editorDirty = true; });
+      textarea.addEventListener('input', () => changed(textarea.value));
       ctx.WB.editor = { id, instance: textarea };
     }
     restoreFileView(tab);
@@ -267,10 +284,12 @@ function codeModeToolbar(tab, libraryButton) {
     const change = fileChangeFor(tab.file);
     const diff = change ? '<button type="button" data-wb-code-view="diff" aria-pressed="' + (tab.view === 'diff') + '">' +
       '<span aria-hidden="true">↔</span><span>Diff</span></button>' : '';
-      return ctx.info.documentToolbar(tab, libraryButton, false, fileLocation(tab)) + '<div class="ncw-code-modebar" role="toolbar" aria-label="代码查看方式">' +
-      '<button type="button" data-wb-code-view="code" aria-pressed="' + (tab.view !== 'diff') + '">源码</button>' + diff +
+    const preview = tab.kind === 'markdown' ? '<button type="button" data-wb-code-view="preview" aria-pressed="' + (tab.view === 'preview') + '">预览</button>' : '';
+    const draft = fileDraft(tab.file);
+    return ctx.info.documentToolbar(tab, libraryButton, false, fileLocation(tab)) + '<div class="ncw-code-modebar" role="toolbar" aria-label="代码查看方式">' +
+      '<button type="button" data-wb-code-view="code" aria-pressed="' + (tab.view === 'code') + '">源码</button>' + diff + preview +
       '<button type="button" data-wb-code-copy title="复制当前文件">复制</button>' +
-      '<button type="button" data-wb-code-save disabled' + (canEditFile(tab.file) ? '' : ' hidden') + ' title="保存到当前工作区">保存</button></div>';
+      '<button type="button" data-wb-code-save' + (draft && !draft.saved && !tab.saving ? '' : ' disabled') + (canEditFile(tab.file) ? '' : ' hidden') + ' title="保存到当前工作区">保存</button></div>';
   }
 
 function codeEditorBody(tab) {
@@ -337,17 +356,15 @@ function tabBody(tab) {
           '<video src="' + ctx.esc(ctx.WB.previewText) + '" controls preload="metadata" playsinline aria-label="播放视频：' + ctx.esc(tab.file.name) + '"></video>') + '</div>';
     }
     if (tab.kind === 'markdown' || tab.kind === 'text') {
-      const change = fileChangeFor(tab.file);
-      const hasInlineChangeText = tab.view === 'code' && typeof change?.after?.text === 'string';
-      // Created/changed files already carry bounded text in the change journal;
-      // render that immediately instead of waiting for a second filesystem read.
-      if (tab.view !== 'diff' && !hasInlineChangeText) loadText(tab);
+      // Source and its requested preview share the same draft/journal contents.
+      // Ordinary document previews continue to read the published artifact.
+      if (tab.view !== 'diff') loadText(tab, tab.view === 'code' || tab.sourceViews ? inlineSource(tab.file) : undefined);
       const body = tab.view === 'diff' ? diffBody(tab)
         : ctx.WB.previewLoading ? '<div class="ncw-loading"><span></span>正在准备预览…</div>'
         : ctx.WB.previewError ? '<div class="ncw-preview-error">' + ctx.esc(ctx.WB.previewError) + '</div>'
         : tab.view === 'code' || tab.kind === 'text' ? codeEditorBody(tab)
         : ctx.markdown(ctx.WB.previewText);
-      return (isEditorFile(tab.file) || tab.view === 'code' || tab.view === 'diff' ? codeModeToolbar(tab, ctx.libraryUploadButton(tab.file)) : ctx.info.documentToolbar(tab, ctx.libraryUploadButton(tab.file), false, fileLocation(tab))) +
+      return (hasSourceViews(tab) ? codeModeToolbar(tab, ctx.libraryUploadButton(tab.file)) : ctx.info.documentToolbar(tab, ctx.libraryUploadButton(tab.file), false, fileLocation(tab))) +
         (ctx.WB.previewTooBig ? '<div class="ncw-truncated" role="status">' + (tab.file?.readSnapshot ?
           '仅显示本次工具返回的部分内容。' : '文件较大，仅预览前 2 MB；完整内容可在原生应用中打开。') + '</div>' : '') + body;
     }
@@ -486,9 +503,12 @@ function bindWorkbench(root, getContext) {
       }
       if (hit.hasAttribute('data-wb-code-view')) {
         const tab = ctx.activeTab();
-        if (!tab || (!isEditorFile(tab.file) && tab.view !== 'code' && tab.view !== 'diff')) return;
+        const view = hit.dataset.wbCodeView;
+        if (!tab || tab.file?.readSnapshot || !hasSourceViews(tab)) return;
+        if (view !== 'code' && view !== 'diff' && !(view === 'preview' && tab.kind === 'markdown')) return;
         tab.autoPreview = false;
-        tab.view = hit.dataset.wbCodeView === 'diff' ? 'diff' : 'code';
+        tab.sourceViews = true;
+        tab.view = view;
         ctx.WB.manualClosed = false; ctx.paint(); return;
       }
       if (hit.hasAttribute('data-wb-code-copy')) {
@@ -503,14 +523,24 @@ function bindWorkbench(root, getContext) {
         const value = ctx.WB.editor?.instance?.getValue ? ctx.WB.editor.instance.getValue() : editorSource(tab?.file);
         const api = ctx.sessionApi();
         const target = tab?.file?.path || tab?.file?.relative;
-        if (!target || !api?.writeOutput || value == null || hit.disabled) return;
-        hit.disabled = true;
+        if (!target || !api?.writeOutput || value == null || hit.disabled || tab.saving) return;
+        const draft = fileDraft(tab.file), owner = ctx.previewOwner();
+        const { at, size } = tab.file;
+        tab.saving = hit.disabled = true;
         Promise.resolve(api.writeOutput(ctx.context().ref, target, value)).then(result => {
           if (!result || result.ok === false) throw Error(result?.reason || '保存失败');
-          delete ctx.WB.editorDrafts[fileKey(tab.file)]; ctx.WB.editorDirty = false;
-          hit.disabled = true;
-          if (typeof global.petSay === 'function') global.petSay('文件已保存');
-        }).catch(error => { hit.disabled = false; if (typeof global.petSay === 'function') global.petSay(error.message || '保存失败'); });
+          if (!owner()) return;
+          if (draft && fileDraft(tab.file) === draft) {
+            Object.assign(draft, { saved: true, at, size });
+          }
+          if (ctx.activeTab() === tab && typeof global.petSay === 'function') global.petSay('文件已保存');
+        }).catch(error => { if (owner() && ctx.activeTab() === tab && typeof global.petSay === 'function') global.petSay(error.message || '保存失败'); })
+          .finally(() => {
+            tab.saving = false;
+            if (!owner() || ctx.activeTab() !== tab) return;
+            const save = ctx.WB.root?.querySelector('[data-wb-code-save]'), current = fileDraft(tab.file);
+            if (save) save.disabled = !current || Boolean(current.saved);
+          });
         return;
       }
       if (hit.hasAttribute('data-wb-open')) { ctx.WB.open = true; ctx.WB.manualClosed = false; ctx.paint(); return; }
