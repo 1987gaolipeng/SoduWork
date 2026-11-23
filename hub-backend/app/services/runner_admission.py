@@ -363,14 +363,12 @@ class AdmissionQueue:
                 if item.ref == str(ref or "") and item.state in states]
         return max(rows, key=lambda item: item.sequence) if rows else None
 
-    def claim_next(self, active: int, limit: int, can_start: bool,
-                   blocked_refs: set[str] | None = None,
-                   hub_blocked: bool = False,
-                   local_refs: set[str] | None = None) -> AdmissionItem | None:
-        limit = max(MIN_CONCURRENCY, min(MAX_CONCURRENCY, int(limit or 1)))
-        if not can_start or int(active or 0) >= limit:
-            return None
-        waiting = self._ordered_waiting()
+    def _eligible_waiting(self, blocked_refs, hub_blocked, local_refs) -> list[AdmissionItem]:
+        active_refs = {item.ref for item in self._items.values()
+                       if item.state in {"starting", "running"}}
+        active_refs.update(str(ref) for ref in (blocked_refs or ()) if ref)
+        waiting = [item for item in self._items.values()
+                   if item.state == "queued" and item.ref not in active_refs]
         if hub_blocked:
             from .runner_event_scope import payload_destination
             def local_item(item):
@@ -381,27 +379,36 @@ class AdmissionQueue:
                          payload.get("op") == "job.comment" and
                          item.ref in (local_refs or set())))
             waiting = [item for item in waiting if local_item(item)]
-        if not waiting:
+        interactive = [item for item in waiting if item.category == INTERACTIVE]
+        return interactive or waiting
+
+    @staticmethod
+    def _slots_full(active: int, limit: int, category: str) -> bool:
+        limit = max(MIN_CONCURRENCY, min(MAX_CONCURRENCY, int(limit or 1)))
+        if category != INTERACTIVE and limit > 1:
+            limit -= 1  # Reserve one slot for a conversation.
+        return int(active or 0) >= limit
+
+    def claim_next(self, active: int, limit: int, can_start: bool,
+                   blocked_refs: set[str] | None = None,
+                   hub_blocked: bool = False,
+                   local_refs: set[str] | None = None) -> AdmissionItem | None:
+        if not can_start or self._slots_full(active, limit, INTERACTIVE):
             return None
-        active_refs = {item.ref for item in self._items.values()
-                       if item.state in {"starting", "running"}}
-        active_refs |= {str(ref) for ref in (blocked_refs or set()) if str(ref)}
-        # A follow-up waiting behind its own still-running conversation is not runnable.
-        # It must keep that conversation serial, but it must not freeze unrelated
-        # background work when another execution slot is available.
-        interactive_runnable = any(
-            item.category == INTERACTIVE and item.ref not in active_refs
-            for item in waiting)
-        for item in waiting:
-            if item.ref in active_refs:
-                continue
-            if item.category != INTERACTIVE:
-                if interactive_runnable:
-                    continue
-                if limit > 1 and int(active or 0) >= limit - 1:
-                    continue
-            return self._update(item, state="starting", started_at=time.time())
-        return None
+        waiting = self._eligible_waiting(blocked_refs, hub_blocked, local_refs)
+        item = min(waiting, key=lambda row: (PRIORITY[row.category], row.sequence), default=None)
+        if item is None or self._slots_full(active, limit, item.category):
+            return None
+        return self._update(item, state="starting", started_at=time.time())
+
+    def wait_reason(self, item: AdmissionItem, active: int, limit: int, can_start: bool,
+                    blocked_refs: set[str] | None = None, hub_blocked: bool = False,
+                    local_refs: set[str] | None = None) -> str:
+        if item.state != "queued" or (can_start and not self._slots_full(active, limit, item.category)):
+            return ""
+        if not any(row.key == item.key for row in self._eligible_waiting(blocked_refs, hub_blocked, local_refs)):
+            return ""
+        return "execution_slot" if can_start else "resource_pressure"
 
     def mark_running(self, key: str, result: dict | None = None) -> AdmissionItem | None:
         item = self.get(key)

@@ -37,6 +37,14 @@ Direct development uses local configuration and data; keep it separate from real
 
 API documentation: **http://127.0.0.1:9080/docs**. Health check: `GET /healthz`.
 
+## Diagnosing queued dispatches
+
+When the Runner first accepts a dispatch, its log records the execution reference and queue position.
+While it is queued, `GET /api/v1/tasks/{tid}/ai-status` can return `runner.waitReason`.
+`resource_pressure` means the Runner's resource budget is blocking new starts.
+`execution_slot` means all slots available to this work are occupied.
+The field is optional. Poll the same task to see the current reason or its transition to running.
+
 ## Desktop-local Runner event recovery
 
 Desktop-local Runner executions persist their event destination separately from the

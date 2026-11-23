@@ -24,6 +24,14 @@ python3 -m venv .venv
 
 打开 http://127.0.0.1:9080/docs 查看 API 文档，健康检查为 `GET /healthz`。
 
+## 排查派活排队
+
+Runner 首次接收派活时会在日志中记录执行引用和队列位置。任务排队期间，
+`GET /api/v1/tasks/{tid}/ai-status` 可返回 `runner.waitReason`。
+`resource_pressure` 表示资源准入策略暂停启动新任务。
+`execution_slot` 表示这项工作可用的执行槽已被占用。
+该字段为可选项。再次查询同一任务即可看到当前等待原因或已开始执行的状态。
+
 ## 桌面本地 Runner 事件恢复
 
 桌面本地 Runner 执行会将事件去向与会话别名分别持久化。本地历史不会进入 Hub
