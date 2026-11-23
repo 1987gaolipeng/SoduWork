@@ -52,8 +52,11 @@ async def edit(rid: str, body: svc.MemoryPatch, client=Depends(current_client), 
 
 
 @router.delete("/{rid}")
-async def delete(rid: str, client=Depends(current_client), session=Depends(get_session)):
-    return await svc.delete(session, client, rid)
+async def delete(
+    rid: str, revision: int | None = Query(None, ge=1, le=2**31 - 1),
+    client=Depends(current_client), session=Depends(get_session),
+):
+    return await svc.delete(session, client, rid, revision)
 
 
 @router.post("/{rid}/archive")
