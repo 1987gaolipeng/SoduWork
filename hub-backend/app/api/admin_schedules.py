@@ -7,7 +7,8 @@ from ..db import get_session
 from ..deps import require_perm
 from ..models import User
 from ..services import audit, rbac
-from .schedule_contract import apply_schedule_update as _sch_apply, schedule_payload
+from .schedule_contract import apply_schedule_update as _sch_apply
+from .schedule_contract import schedule_payload
 
 router = APIRouter()
 template_router = APIRouter()
