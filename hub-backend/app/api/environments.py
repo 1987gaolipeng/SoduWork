@@ -10,12 +10,15 @@ from ..models import User
 from ..services import (approval_policies as policy_svc, audit, catalog_names, deployments,
                         environment_service as svc, project_setup, rbac,
                         release_control, runner_hub)
+from ..services.environment_contracts import InvalidHealthCheck
 from .input_validation import parse_integer
 
 router = APIRouter(prefix="/api/v1/admin", tags=["environments"])
 
 
 def _bad(error: ValueError) -> HTTPException:
+    if isinstance(error, InvalidHealthCheck):
+        return HTTPException(status_code=400, detail=str(error))
     if isinstance(error, svc.InvalidRunnerSelector):
         return HTTPException(status_code=422, detail=str(error))
     if isinstance(error, svc.InvalidEnvironmentTier):
