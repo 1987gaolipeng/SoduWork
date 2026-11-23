@@ -321,7 +321,7 @@ async def edit(session: AsyncSession, client, rid: str, body: MemoryPatch) -> di
     return {"ok": True, "item": view(row, True)}
 
 
-async def delete(session: AsyncSession, client, rid: str) -> dict:
+async def delete(session: AsyncSession, client, rid: str, revision: int | None = None) -> dict:
     """Permanently remove a client-owned summary record.
 
     Client deletion is intentionally separate from archive/restore: callers can
@@ -329,7 +329,16 @@ async def delete(session: AsyncSession, client, rid: str) -> dict:
     forget a summary. ``get`` enforces the owner and organization boundary.
     """
     row = await get(session, client, rid)
-    await session.delete(row)
+    # Older clients omit the revision; still guard against edits after this read.
+    expected_revision = row.revision if revision is None else revision
+    deleted_id = await session.scalar(sql_delete(MemoryRecord).where(
+        MemoryRecord.id == row.id, MemoryRecord.owner_user_id == row.owner_user_id,
+        MemoryRecord.org_id == row.org_id, MemoryRecord.scope == row.scope,
+        MemoryRecord.revision == expected_revision,
+    ).returning(MemoryRecord.id))
+    if deleted_id is None:
+        await session.rollback()
+        raise HTTPException(409, "memory changed; reload before deleting")
     await session.commit()
     return {"ok": True}
 
