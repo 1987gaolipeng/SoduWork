@@ -1,5 +1,5 @@
 """Organization-scoped automation administration and template catalog."""
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -170,18 +170,15 @@ async def delete_ai_schedule(sid: str, user: User = Depends(require_perm("task.d
 
 
 @router.get("/ai-schedules/{sid}/runs")
-async def list_ai_schedule_runs(sid: str, limit: int = 20,
+async def list_ai_schedule_runs(sid: str, limit: int = Query(20, ge=1, le=200),
                                 user: User = Depends(require_perm("task.dispatch")),
                                 session: AsyncSession = Depends(get_session)):
-    # README contracts limit as 1-200; 0 or negatives must not act as "unlimited".
-    if not 1 <= limit <= 200:
-        raise HTTPException(422, "limit 只允许 1-200")
     from .admin import _sch_api, _sch_apply, _scoped_ai_schedule
 
     from ..models import AiSchedule
     from ..services import schedules as sch
     s = await _scoped_ai_schedule(session, sid, user)
-    items = await sch.list_runs(session, sid, limit=limit)
+    items = await sch.list_runs(session, sid, limit=limit, max_limit=200)
     await session.commit()
     return {"items": items}
 
