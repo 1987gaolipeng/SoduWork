@@ -2,6 +2,7 @@
 device management. Superusers see all records; other users see their department subtree and
 unassigned devices. Client.user_ref determines device ownership.
 """
+import hashlib
 import logging
 import uuid
 from datetime import date as calendar_date
@@ -48,6 +49,7 @@ from ..schemas import (
     UserBatchUpdate,
     UserCreate,
     UserUpdate,
+    attachment_role,
     attachment_to_api,
     client_to_api,
     task_to_api,
@@ -1189,7 +1191,7 @@ async def upload_task_attachment(
     ct = file.content_type or "application/octet-stream"
     # The column default is applied at flush; the storage key needs the id now.
     a = Attachment(id=str(uuid.uuid4()), task_id=tid, filename=fn, content_type=ct, size=len(data),
-                   uploaded_by="admin:" + user.id)
+                   uploaded_by="admin:" + user.id, evidence_meta={"sha256": hashlib.sha256(data).hexdigest()})
     a.storage_key = f"att/{tid}/{a.id}/{fn}"
     a.backend = storage.put(a.storage_key, data, ct)
     session.add(a)
@@ -1199,6 +1201,34 @@ async def upload_task_attachment(
                     {"taskId": tid, "size": len(data),
                      "contentType": ct[:120]})
     return attachment_to_api(a)
+
+
+@router.delete("/tasks/{tid}/attachments/{aid}")
+async def withdraw_task_attachment(
+    tid: str, aid: str, user: User = Depends(require_perm("task.dispatch")), session: AsyncSession = Depends(get_session),
+):
+    from ..services import gate_contract
+    from .attachments import remove_unreferenced_object
+
+    task = await _assert_task_in_scope(session, user, tid)
+    row = await session.scalar(select(Attachment).where(Attachment.task_id == tid, Attachment.id == aid).with_for_update())
+    if row is None:
+        raise HTTPException(404, "附件不存在")
+    meta = row.evidence_meta or {}
+    owner = meta.get("ownerUserId")
+    owns_upload = owner == user.id if owner else row.uploaded_by in {"admin:" + user.id, "user:" + user.id}
+    if not (user.is_super or task.owner_user_id == user.id or owns_upload):
+        raise HTTPException(403, "无权撤回该附件")
+    if attachment_role(row) != "input" or row.source_ref or row.workflow_run_id or row.node_run_id or meta.get("cloudRequestId"):
+        raise HTTPException(409, "只能撤回普通需求输入附件")
+    if await gate_contract.references_attachment(session, row):
+        raise HTTPException(409, "附件已被固定版本或审批引用，不能撤回")
+    storage_key, backend = row.storage_key, row.backend
+    await session.delete(row)
+    audit.add(session, user, "task.attachment.delete", "attachment", aid, row.filename, {"taskId": tid})
+    await session.commit()
+    await remove_unreferenced_object(session, aid, storage_key, backend)
+    return {"ok": True}
 
 
 @router.get("/tasks/{tid}")

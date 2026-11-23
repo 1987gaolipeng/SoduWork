@@ -181,10 +181,13 @@ async def members(q: str = Query(default="", max_length=100), isActive: bool | N
         # Escape wildcards so a user name search remains literal and bounded.
         match = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         filters.append(or_(User.username.ilike(match, escape="\\"), User.display_name.ilike(match, escape="\\")))
-    total = await session.scalar(select(func.count()).select_from(User).where(*filters))
-    users = list((await session.scalars(select(User).where(*filters).order_by(
-        User.created_at, User.id).offset(offset).limit(limit))).all())
-    return {"total": total, "items": await member_items(session, users), "offset": offset, "limit": limit}
+    total = (await session.execute(select(func.count()).select_from(User).where(*filters))).scalar_one()
+    items = []
+    if offset < total:
+        users = list((await session.scalars(select(User).where(*filters).order_by(
+            User.created_at, User.id).offset(offset).limit(limit))).all())
+        items = await member_items(session, users)
+    return {"total": total, "items": items, "offset": offset, "limit": limit}
 
 
 async def member_items(session, users):
