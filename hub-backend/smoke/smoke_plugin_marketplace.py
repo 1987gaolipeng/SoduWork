@@ -348,7 +348,7 @@ async def main():
         await session.commit()
         user = await session.get(models.User, USER)
         approved = await plugin_api.trust_version(
-            VERSION, {"enabled": True, "note": "企业内部审核"},
+            VERSION, plugin_api.PluginVersionTrustRequest(trusted=True, reason="企业内部审核"),
             user, session)
     chk("企业内部插件无需发布评测即可由管理员审核上架",
             approved["trustState"] == "approved"
