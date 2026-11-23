@@ -148,6 +148,10 @@ async def main() -> None:
         for path in ("audit", "audit/export.csv"):
             aliases = {"action": params["action"], "actorId": child_actor.id,
                        "from": params["since"], "to": params["until"]}
+            check(f"{path} limits the ordered results after filtering and offset",
+                  await get_ids(path, {**aliases, "offset": 400, "limit": 2}) == ["fixture-004", "fixture-003"])
+            check(f"{path} returns no records for an explicit zero limit",
+                  await get_ids(path, {**aliases, "limit": 0}) == [])
             check(f"{path} applies the inclusive start, exclusive end, exact ID and offset",
                   await get_ids(path, {**aliases, "offset": 404}) == ["fixture-000"])
             check(f"{path} returns no records at the end of the matching range",
@@ -161,7 +165,7 @@ async def main() -> None:
             check(f"{path} intersects actor name and exact actor ID filters",
                   await get_ids(path, {**aliases, "actor": "no such actor"}) == [])
             for field, value in (("actorId", "not-a-uuid"), ("from", "bad"), ("to", "bad"),
-                                 ("offset", -1), ("offset", 2**63)):
+                                 ("offset", -1), ("offset", 2**63), ("limit", -1)):
                 invalid = await client.get(path, params={field: value}, headers=headers)
                 check(f"{path} rejects {field}={value} with its field name",
                       invalid.status_code == 422 and any(error["loc"] == ["query", field]
@@ -180,6 +184,13 @@ async def main() -> None:
             check(f"{path} 拒绝反向时间区间", invalid.status_code == 422)
             overflow = await client.get(path, params={"since": "0001-01-01T00:00:00+01:00"}, headers=headers)
             check(f"{path} 拒绝无法表示的 UTC 时间", overflow.status_code == 422)
+
+        check("CSV honors an explicit limit across streaming batches",
+              await get_ids("audit/export.csv", {**params, "limit": 401}) ==
+              [row["id"] for row in exported[:401]])
+        oversized = await client.get("audit/export.csv", params={"limit": 2**63}, headers=headers)
+        check("CSV rejects limits outside the database integer range",
+              oversized.status_code == 422 and oversized.json()["detail"][0]["loc"] == ["query", "limit"])
 
 
 async def run() -> None:

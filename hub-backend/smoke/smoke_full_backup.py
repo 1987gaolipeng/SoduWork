@@ -162,5 +162,59 @@ for invalid_section in ("blobs", "entries"):
             ok("size" in str(exc).lower(), f"invalid {invalid_section} size identified")
         else:
             raise AssertionError(f"invalid {invalid_section} size passed verification")
+# --- #1203 regression: an unlistable directory must fail the backup ---
+import os as _os
+from unittest import mock as _mock
+
+with tempfile.TemporaryDirectory(prefix="soduwork-full-unlistable-") as root_name:
+    root = Path(root_name)
+    database = root / "source.sqlite3"
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute("CREATE TABLE task(id TEXT PRIMARY KEY)")
+        connection.commit()
+    uploads = root / "uploads"
+    receipts = uploads / "receipts"
+    receipts.mkdir(parents=True)
+    (uploads / "readme.txt").write_text("ok", encoding="utf-8")
+    (receipts / "invoice.txt").write_text("secret", encoding="utf-8")
+    empty_dir = root / "emptydir"
+    empty_dir.mkdir()
+    key = generate_key(root / "backup.key")
+
+    real_scandir = _os.scandir
+
+    def denying_scandir(path, *args, **kwargs):
+        # shutil.rmtree on Linux calls os.scandir with an int file descriptor
+        # during temp-dir cleanup; only intercept real path arguments (#1203).
+        if not isinstance(path, (str, _os.PathLike)):
+            return real_scandir(path, *args, **kwargs)
+        if Path(path).name == "receipts":
+            raise PermissionError(5, "Access denied.", str(path))
+        return real_scandir(path, *args, **kwargs)
+
+    # 1) unlistable sub-directory must fail create
+    try:
+        with _mock.patch("os.scandir", denying_scandir):
+            create_bundle(database_url=sqlite_url(database), sources=[f"uploads={uploads}"],
+                          output=root / "t1.sfb", key_file=key, release="unlistable-sub")
+        ok(False, "create must fail when a sub-directory cannot be listed (#1203)")
+    except FullBackupError:
+        ok(True, "unlistable sub-directory fails the backup")
+
+    # 2) unlistable explicit source must fail create
+    try:
+        with _mock.patch("os.scandir", denying_scandir):
+            create_bundle(database_url=sqlite_url(database), sources=[f"receipts={receipts}"],
+                          output=root / "t2.sfb", key_file=key, release="unlistable-src")
+        ok(False, "create must fail when the explicit source cannot be listed (#1203)")
+    except FullBackupError:
+        ok(True, "unlistable explicit source fails the backup")
+
+    # 3) a genuinely empty directory must still succeed
+    meta = create_bundle(database_url=sqlite_url(database), sources=[f"empty={empty_dir}"],
+                         output=root / "t3.sfb", key_file=key, release="empty-ok")
+    ok(isinstance(meta, dict), "empty directory backup succeeds")
+    ok(verify_bundle(bundle_path=root / "t3.sfb", key_file=key)["ok"],
+       "empty-directory bundle verifies")
 
 print(f"full backup smoke: {checks} checks passed")
