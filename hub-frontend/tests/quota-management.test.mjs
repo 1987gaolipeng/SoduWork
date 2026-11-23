@@ -231,7 +231,7 @@ test('quota inputs are removed from user editing and login policy saves cannot c
   assert.doesNotMatch(users, /tokenQuota|quotaMode|quotaLimit/)
   const calls = []
   const page = await createComponentHarness(new URL('../src/screens/ClientAccessPolicy.jsx', import.meta.url), { dependencies: {
-    '../api.js': { api: { clientAuthPolicy: async () => ({ allowSelfRegistration: true, defaultOrgId: '', defaultRoleId: '', tokenLimitEnabled: true, monthlyTokenLimit: 500 }), orgs: async () => [], roles: async () => [], saveClientAuthPolicy: async value => { calls.push(value); return value } } },
+    '../api.js': { api: { clientAuthPolicy: async () => ({ allowSelfRegistration: true, defaultOrgId: '', defaultRoleId: '', tokenLimitEnabled: true, monthlyTokenLimit: 500 }), orgs: async () => [], roleOptions: async () => [], saveClientAuthPolicy: async value => { calls.push(value); return value } } },
     '../ui.jsx': { Icon: 'Icon', SelectMenu: 'SelectMenu', toast() {} }, './client-access-policy.css': {},
   } })
   page.render(); await page.flush()
