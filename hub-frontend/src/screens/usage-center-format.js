@@ -12,13 +12,6 @@ export const count = (value) => new Intl.NumberFormat(getLocale(), {
   notation: numeric(value) >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1,
 }).format(numeric(value))
 
-export function money(value, empty = tx("待对账")) {
-  const amount = numeric(value) / 1000000
-  if (!amount) return empty
-  if (amount < 0.01) return '< $0.01'
-  return '$' + amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
 export function duration(ms) {
   const mins = numeric(ms) / 60000
   if (!mins) return tx("0 分钟")

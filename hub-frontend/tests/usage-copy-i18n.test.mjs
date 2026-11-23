@@ -60,19 +60,25 @@ test('the rendered Chinese usage copy uses 用量 consistently for records, tool
   const pulse = await mount(t, screen, { privateExports: ['Pulse'], exportName: 'Pulse', dependencies: dependencies({}), props: {
     data: { days: 90, summary: { tokens: 1000, sessions: 6819, requests: 100 }, users: [] },
   } })
+  assert.deepEqual(pulse.nodes(node => node.type?.name === 'Metric').map(node => node.props.label), ['Token 总用量', '活跃成员', 'AI 活跃时长'])
   const metric = pulse.nodes(node => node.type?.name === 'Metric')[0]
   assert.equal(metric.props.note, '近 90 天 · 6,819 条用量记录')
   assert.equal(metric.props.unit, 'Tokens')
   const member = await mount(t, screen, { privateExports: ['UsageDetails'], exportName: 'UsageDetails', dependencies: dependencies({}), props: {
-    data: { users: [{ userId: 'one', label: '客户用药研发项目', sessions: 2, tokens: 1000 }] }, total: 1000,
+    data: { users: [{ userId: 'one', label: '客户用药研发项目', sessions: 2, tokens: 1000 }],
+      byAgent: [{ agent: 'pi', model: 'test', tokens: 1000, costMicrousd: 12340000 }] }, total: 1000,
   } })
+  assert.equal(textOf(member.nodes(node => node.type === 'th').at(-1)), '用量占比')
+  assert.equal(member.nodes(node => node.type === 'td').length, 4)
   member.act(() => member.nodes(node => node.props.id === 'ugc-tab-members')[0].props.onClick())
-  assert.equal(textOf(member.nodes(node => node.type === 'th').at(-2)), '用量占比')
+  assert.equal(textOf(member.nodes(node => node.type === 'th').at(-1)), '用量占比')
+  assert.equal(member.nodes(node => node.type === 'td').length, 4)
   assert.ok(member.nodes(node => node.type === 'button').some(node => textOf(node) === '客户用药研发项目'), 'authored business names are not globally replaced')
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
   const trend = await mount(t, chart, { exportName: 'TrendPanel', dependencies: dependencies({}), props: {
     days: 1, points: [{ key: today, tokens: 1000, sessions: 141 }],
   } })
+  assert.deepEqual(trend.nodes(node => node.type === 'button').map(textOf), ['Token 用量', '模型请求'])
   trend.act(() => trend.nodes(node => node.type === 'svg' && node.props.onFocus)[0].props.onFocus())
   const tooltip = trend.nodes(node => node.props.className?.includes('ugc-chart-tip'))[0]
   assert.match(textOf(tooltip), /141 条用量记录/)
@@ -101,6 +107,8 @@ for (const locale of ['zh-CN', 'en-US', 'ja-JP', 'ko-KR']) {
     const recent = await mount(t, screen, { privateExports: ['RecentLedger'], exportName: 'RecentLedger', dependencies: dependencies({}), props: {
       rows: [{ id: 'one', title: '客户用药研发项目', sourceType: 'task', sourceLabel: '需求执行', agent: 'pi', model: '客户模型', tokens: 1000 }],
     } })
+    assert.equal(recent.nodes(node => node.type === 'th').length, 5)
+    assert.equal(recent.nodes(node => node.type === 'td').length, 5)
     assert.ok(recent.nodes(node => node.type === 'small').some(node => textOf(node) === tx('需求执行')))
     assert.ok(recent.nodes(node => node.type === 'b').some(node => textOf(node) === '客户用药研发项目'))
     assert.ok(recent.nodes(node => node.type === 'b').some(node => textOf(node) === 'Pi'))

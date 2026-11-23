@@ -4,7 +4,7 @@ import { api } from '../api.js'
 import { Icon } from '../ui.jsx'
 import { FilterSelect } from '../FilterControls.jsx'
 import { Empty, PanelHead, SceneLedger, TrendPanel } from './usage-center-charts.jsx'
-import { agentName, count, duration, money, numeric, precise, ratio, sceneLabel, share, when } from './usage-center-format.js'
+import { agentName, count, duration, numeric, precise, ratio, sceneLabel, share, when } from './usage-center-format.js'
 import './usage-center.css'
 
 function mergeOptions(previous, next, key, label) {
@@ -93,20 +93,17 @@ export default function UsageCenter() {
 function Pulse({ data }) {
   const uiLocale = useLocale();
   const summary = data.summary || {}
-  const costQuality = data.costQuality || {}
-  const knownZero = costQuality.records > 0 && !costQuality.unknown && !costQuality.otherCurrency
   const activeUsers = (data.users || []).filter((item) => item.userId && numeric(item.tokens) > 0).length
   return <section className="ugc-metrics" aria-label={tx("用量概览")}>
     <Metric icon="activity" label={tx("Token 总用量")} value={count(summary.tokens)} unit="Tokens" note={tx("近 {0} 天 · {1} 条用量记录", [data.days || 30, precise(summary.sessions)])} detail={`${precise(summary.tokens)} Tokens`} />
-    <Metric icon="ticket" label={tx("已知模型成本")} value={money(summary.costMicrousd, knownZero ? '$0.00' : summary.sessions ? tx("待对账") : '—')} tone="cost" detail={summary.costMicrousd || knownZero ? "USD " + (numeric(summary.costMicrousd) / 1000000).toFixed(6) : undefined} note={summary.costMicrousd || knownZero ? tx("USD · 仅包含已知价格的成本") : tx("价格未知时仍统计 Token 用量")} />
     <Metric icon="users" label={tx("活跃成员")} value={precise(activeUsers)} unit={tx("人")} note={tx("当前范围内产生 Token 用量的成员")} />
     <Metric icon="monitor" label={tx("AI 活跃时长")} value={duration(summary.durationMs)} note={tx("{0} 次模型请求", [precise(summary.requests)])} />
   </section>
 }
 
-function Metric({ icon, label, value, unit, note, tone = '', detail }) {
+function Metric({ icon, label, value, unit, note, detail }) {
   const uiLocale = useLocale();
-  return <article className={'ugc-metric ' + tone}><div className="ugc-metric-head"><span>{label}</span><i><Icon name={icon} /></i></div>
+  return <article className="ugc-metric"><div className="ugc-metric-head"><span>{label}</span><i><Icon name={icon} /></i></div>
     <div className="ugc-metric-value" title={detail}><b>{value}</b>{unit && <span>{unit}</span>}</div><p>{note}</p></article>
 }
 
@@ -174,7 +171,7 @@ function UsageDetails({ data, total, userId, agent, onMember, onAgent }) {
         <table className="ugc-detail-table"><thead><tr>
           <th>{members ? tx("成员") : tx("底座")}</th><th className={members ? 'num' : ''}>{members ? tx("记录") : tx("模型")}</th>
           <th className="num" aria-sort="descending">{tx("Token 用量")} <span aria-hidden="true">↓</span></th>
-          <th className="num">{tx("用量占比")}</th><th className="num">{tx("已知成本")}</th>
+          <th className="num">{tx("用量占比")}</th>
         </tr></thead><tbody>{matches.slice((current - 1) * pageSize, current * pageSize).map(row => {
           const id = members ? row.userId : row.agent, active = Boolean(id && selected === id)
           const name = nameOf(row)
@@ -187,7 +184,6 @@ function UsageDetails({ data, total, userId, agent, onMember, onAgent }) {
             <td className="num" title={precise(row.tokens)}><b>{count(row.tokens)}</b></td>
             <td className="num"><span className="ugc-share-cell"><em>{share(row.tokens, total, 1)}</em>
               <span className="ugc-share"><i style={{ width: ratio(row.tokens, total) + '%' }} /></span></span></td>
-            <td className="num ugc-muted">{money(row.costMicrousd, row.costKnown && row.currency === "USD" ? "$0.00" : undefined)}</td>
           </tr>
         })}</tbody></table></div> : <Empty text={term ? tx("没有匹配的结果") : members ? tx("当前范围还没有成员用量") : tx("当前范围还没有 Agent 用量")}
           note={term ? tx("试试其他关键词") : undefined} />}
@@ -206,12 +202,12 @@ function RecentLedger({ rows, names }) {
     <PanelHead icon="file" title={tx("最近用量记录")} description={tx("核对消耗来源与异常峰值")} meta={tx("最近 {0} 条", [rows.length])} />
     {!rows.length ? <Empty text={tx("当前范围还没有最近记录")} /> : <>
       <div className="ugc-table-wrap" tabIndex="0" role="region" aria-label={tx("最近用量记录，可横向滚动")}><table className="ugc-recent-table">
-        <thead><tr><th>{tx("工作内容 / 场景")}</th><th>{tx("成员")}</th><th>{tx("Agent / 模型")}</th><th className="num">{tx("Token 用量")}</th><th className="num">{tx("已知成本")}</th><th className="num">{tx("时间")}</th></tr></thead>
+        <thead><tr><th>{tx("工作内容 / 场景")}</th><th>{tx("成员")}</th><th>{tx("Agent / 模型")}</th><th className="num">{tx("Token 用量")}</th><th className="num">{tx("时间")}</th></tr></thead>
         <tbody>{rows.slice((current - 1) * 8, current * 8).map((row) => <tr key={row.id}>
           <td><b className="ugc-record-title" title={row.title}>{row.title || tx("AI 使用")}</b><small>{sceneLabel(row.sourceType, row.sourceLabel)}</small></td>
           <td><span className="ugc-record-user" title={row.user}>{row.user || tx("未绑定用户")}</span></td>
           <td><b className="ugc-record-agent">{agentName(row.agent, names)}</b><small className="ugc-record-model" title={row.model}>{row.model || tx("跟随默认模型")}</small></td>
-          <td className="num" title={precise(row.tokens)}><b>{count(row.tokens)}</b></td><td className="num"><span className={row.costMicrousd ? '' : 'ugc-muted'}>{money(row.costMicrousd, row.costKnown && row.currency === "USD" ? "$0.00" : undefined)}</span></td>
+          <td className="num" title={precise(row.tokens)}><b>{count(row.tokens)}</b></td>
           <td className="num ugc-muted">{when(row.occurredAt)}</td>
         </tr>)}</tbody>
       </table></div><Pager page={current} pages={pages} total={rows.length} onChange={setPage} label={tx("用量记录")} />
@@ -233,6 +229,6 @@ function QualityFooter({ quality }) {
 
 function UsageSkeleton() {
   const uiLocale = useLocale();
-  return <div className="ugc-skeleton" aria-label={tx("正在加载企业用量")}><div className="ugc-sk-metrics">{[0, 1, 2, 3].map((i) => <span key={i} />)}</div>
+  return <div className="ugc-skeleton" aria-label={tx("正在加载企业用量")}><div className="ugc-sk-metrics">{[0, 1, 2].map((i) => <span key={i} />)}</div>
     <div className="ugc-sk-panels"><span /><span /></div></div>
 }
