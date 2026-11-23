@@ -410,7 +410,8 @@
       kind: 'browser', label: '新标签页', url: '' }, true);
   }
   function openFiles() {
-    if (!WB.files.length) return null;
+    if (!WB.files.length && !WB.changes.length) return null;
+    WB.manualClosed = false;
     return addTab({ key: 'files:' + workScope(), kind: 'files', label: '文件' }, true);
   }
   // A settled delivery can refresh its artifact index more than once (for
@@ -605,13 +606,19 @@
   }
   function filesHtml() {
     const rows = WB.files.slice().sort((left, right) => Number(right.at || 0) - Number(left.at || 0));
-    return '<section class="ncw-files" aria-label="会话文件"><header><div><b>工作区文件</b><span>点击打开，或直接引用到对话</span></div><button type="button" data-wb-new title="新建浏览页签">＋ 浏览</button></header>' +
+    // The index may contain only historical files while this turn has tool receipts.
+    const fallbackChanges = WB.summaryFiles.length ? [] : WB.changes;
+    return '<section class="ncw-files" aria-label="会话文件"><header><div><b>工作区文件</b>' +
+      (rows.length ? '<span>点击打开，或直接引用到对话</span>' : '') +
+      '</div><button type="button" data-wb-new title="新建浏览页签">＋ 浏览</button></header>' +
       (rows.length ? '<div class="ncw-file-list">' + rows.map((file) => {
         const id = fileKey(file), name = file.name || baseName(file.path || file.relative) || '文件';
         return '<article class="ncw-file-row"><button type="button" data-wb-file="' + esc(id || file.path) + '" title="打开 ' + esc(name) + '">' + ICONS.file + '<span><b data-user-content>' + esc(name) + '</b><small>' + esc(size(file.size)) + '</small></span></button>' + libraryUploadButton(file) +
           '<button type="button" data-wb-reference-file="' + esc(id || file.path) + '" title="引用到对话">' + ICONS.quote + '</button>' +
           '<button type="button" data-wb-copy-file="' + esc(id || file.path) + '" title="复制文件位置">' + ICONS.copy + '</button></article>';
-      }).join('') + '</div>' : '<div class="ncw-files-empty">本次对话还没有可查看的文件。</div>') + '</section>';
+      }).join('') + '</div>' : '') +
+      (fallbackChanges.length ? '<div class="ncw-file-list ncw-change-list"><b>本轮修改</b>' + info.changeRows(fallbackChanges) + '</div>' : '') +
+      (!rows.length && !fallbackChanges.length ? '<div class="ncw-files-empty">本次对话还没有可查看的文件。</div>' : '') + '</section>';
   }
   function libraryUploadButton(file) {
     return global.LibraryTransfer?.button(file, context().ref, 'data-wb-library-upload') || '';
@@ -750,13 +757,14 @@
     }
     if (global.ChatChrome) ChatChrome.workbenchState({
       open: Boolean(WB.open), maximized: Boolean(WB.open && WB.maximized), count, has: Boolean(has),
+      canOpenFiles: Boolean(WB.files.length || WB.changes.length),
       summary: {
         // Pass the full file list; the overlay owns progressive display and its twelve-item initial limit.
         // This keeps list expansion consistent with the total badge.
         files: WB.summaryFiles.map((item) => ({ name: item.name, path: artifactKey(item), size: size(item.size),
           workspace: previewKind(item) !== 'external' })),
         services: WB.services.filter((item) => item.url),
-        changes: WB.changes.slice(-8),
+        changes: WB.changes,
       },
     });
     if (WB.open) scheduleNative(); else hideNative();
@@ -812,7 +820,7 @@
     const signature = scope + '::' + nextFiles.map((item) => artifactKey(item) + ':' + item.at + ':' + item.size + ':' + (item.title || '') + ':' + (item.change?.action || '')).join('|') + '::' +
       nextSummaryFiles.map(artifactKey).join('|') + '::' +
       selection.images.map(item => artifactKey(item) + ':' + Boolean(item.changedInTurn)).join('|') + '::' +
-      nextChanges.map((item) => item.id + ':' + item.state).join('|') + '::' +
+      JSON.stringify(nextChanges.map(item => [item.id, item.action, item.path, item.state])) + '::' +
       (WB.fileChanges?.capturedAt || 0) + '::' +
       nextServices.map((item) => item.id + ':' + item.state + ':' + item.url).join('|');
     if (signature === WB.signature) { scheduleNative(); return; }

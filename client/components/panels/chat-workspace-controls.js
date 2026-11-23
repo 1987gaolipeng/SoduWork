@@ -549,8 +549,25 @@ function bindWorkbench(root, getContext) {
         return;
       }
       if (hit.hasAttribute('data-wb-tool')) {
-        const target = [...root.querySelectorAll('[data-tool]')].find((node) => node.dataset.tool === hit.dataset.wbTool);
-        if (target) { target.click(); target.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        const id = hit.dataset.wbTool, change = ctx.WB.changes.find(item => String(item.id) === id);
+        if (!change) return;
+        const find = attr => global.ChatDomPatch.findDataNode(root, attr, id);
+        if (!change.fileChange) {
+          if (!find('data-tool-node')) ctx.context().revealTool?.(id);
+          const target = find('data-tool'), row = target || find('data-tool-node');
+          if (row) {
+            const group = row.closest('.ntool-batch:not(.open)')?.querySelector('[data-tool-group]');
+            group?.click();
+            target?.click();
+            row.focus({ preventScroll: true });
+            row.scrollIntoView({ block: 'center' });
+            return;
+          }
+        }
+        const file = ctx.links.workspaceFileTarget(change.path, ctx.WB.files,
+          ctx.WB.fileChanges?.cwd || ctx.context().cwd || ctx.context().intent?.cwd);
+        if (file) ctx.openOutput(ctx.artifactKey(file));
+        else global.petSay?.('当前会话中找不到这条修改记录');
         return;
       }
       if (hit.hasAttribute('data-wb-copy')) { copyText(hit.dataset.wbCopy, hit); return; }

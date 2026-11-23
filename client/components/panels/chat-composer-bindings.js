@@ -532,6 +532,12 @@ function _bind(el) {
     }
     if (global.ChatWorkbench) ChatWorkbench.bind(el, () => ({
       ref: ctx._ref, cwd: ctx._wd?.dir, intent: ctx._sessionOptions, pending: ctx._pending,
+      revealTool(id) {
+        const tool = ctx._snap?.tools?.find(item => String(item.id) === id);
+        if (!tool) return;
+        const size = (ctx._snap.messages?.length || 0) - Math.max(0, Number(tool.after) || 0);
+        if (size > ctx._messageWindowSize) { ctx._messageWindowSize = size; ctx._render(); }
+      },
     }));
     if (global.ChatWorkbenchAnnotations) ChatWorkbenchAnnotations.bind(el, {
       scope: () => ctx._sessionId || ctx._ref || 'draft:' + ctx._viewEpoch,

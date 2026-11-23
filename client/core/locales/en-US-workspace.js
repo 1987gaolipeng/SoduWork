@@ -179,6 +179,7 @@
     '网页预览': 'Web preview', '本地服务': 'Local service', '工作与成果区': 'Work and outputs', '调整对话与成果宽度': 'Resize chat and output panes',
     '拖动调整宽度，双击恢复等宽': 'Drag to resize; double-click for equal widths', '发送全部注释': 'Send all annotations', '最大化成果区': 'Maximize outputs', '隐藏成果区': 'Hide outputs',
     '新标签页': 'New tab', '打开文件面板（Ctrl+Shift+O）': 'Open files (Ctrl+Shift+O)', '新建浏览页签': 'New browser tab', '这份文件暂时读不出来': 'Cannot read this file',
+    '打开文件面板': 'Open files', '当前会话中找不到这条修改记录': 'This change is unavailable in the current conversation',
     '后退': 'Back', '前进': 'Forward', '标注网页元素': 'Annotate page elements', '进入标注模式，点击网页元素添加批量修改标注': 'Enter annotation mode and select page elements to describe your changes',
     '批注': 'Annotate', '输入网址': 'Enter a URL', '在系统浏览器打开': 'Open in browser', '引用页面内容到对话': 'Add page content to chat', '复制页面地址': 'Copy page URL',
     '开始浏览': 'Start browsing', '输入网址，或等待 SoduWork 启动程序后自动打开。': 'Enter a URL, or wait for SoduWork to launch and open the app.', '正在准备页面…': 'Preparing the page…',
