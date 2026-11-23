@@ -382,6 +382,19 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
                 updated = await self.request("PATCH", endpoint, json={"competencies": ["Writing"]})
                 self.assertEqual(updated["competencies"], ["Writing"])
 
+    async def test_existing_scenario_key_returns_conflict_in_its_organization(self):
+        route = "admin/work-catalog/scenarios"
+        body = {"orgId": "row-0", "key": "review", "name": "First review", "enabled": False}
+        first = await self.request("POST", route, json=body)
+        duplicate = await self.request("POST", route, 409, json={**body, "key": " REVIEW ", "name": "Second review"})
+        self.assertEqual(duplicate["detail"], "这个场景标识已经存在")
+        catalog = await self.request("GET", "admin/work-catalog?orgId=row-0")
+        matching = [item for item in catalog["scenarios"] if item["key"] == "review"]
+        self.assertEqual([(item["id"], item["name"]) for item in matching], [(first["id"], "First review")])
+        other = await self.request("POST", route, json={**body, "orgId": "row-1"})
+        self.assertNotEqual(other["id"], first["id"])
+        await self.request("POST", route, 400, json={**body, "key": "bad key"})
+
     async def test_users_and_positions_require_an_existing_department(self):
         body = {"username": "candidate", "password": "example-password", "orgId": "missing"}
         self.assertEqual((await self.request("POST", "admin/users", 400, json=body))["detail"], "部门不存在")
