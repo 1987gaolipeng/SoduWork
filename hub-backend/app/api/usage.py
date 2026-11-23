@@ -112,9 +112,10 @@ async def admin_runner_usage(
     """
     from ..services import runner_admin_scope
     from .admin import _visible_client_ids
-    return {"days": max(1, min(365, int(days or 30))),
+    window = max(1, min(365, int(days or 30)))
+    return {"days": window,
             "runners": await usage_stats.runner_usage(
-                session, days=days,
+                session, days=window,
                 task_client_ids=await _visible_client_ids(session, user),
                 runner_client_ids=await runner_admin_scope.admin_allowed(session, user),
                 runner_org_ids=await runner_admin_scope.admin_orgs(session, user))}
