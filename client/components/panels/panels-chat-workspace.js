@@ -380,6 +380,24 @@
     paint();
     return true;
   }
+  function openCommandRecord(tool) {
+    if (!WB.root || !global.ChatTools?.render(tool)?.recordAvailable) return false;
+    const args = tool.args || {};
+    const raw = args.command ?? args.cmd ?? args.script ?? args.argv ?? args.code ?? args.chars;
+    // Keep both the beginning and the exit diagnostics, even for a single very long line.
+    const bound = value => {
+      const text = typeof value === 'string' ? value : '';
+      return text.length <= 32768 ? text : text.slice(0, 16384) + '\n…\n' + text.slice(-16384);
+    };
+    const input = Array.isArray(raw) ? raw.slice(0, 128).map(bound).join(' ') + (raw.length > 128 ? ' …' : '') : raw;
+    const record = { input: bound(input), output: bound(tool.result || tool.partial) };
+    WB.manualClosed = false;
+    if (!WB.open) resetSplit(WB.root);
+    addTab({ key: 'command:' + workScope() + ':' + tool.id, kind: 'command-record',
+      label: '执行记录', record, autoPreview: false }, true);
+    paint();
+    return true;
+  }
   function openService(item, activate) {
     // item.title is already the translated display string; the label source
     // must stay the original Chinese so a later switch back can re-translate.
@@ -965,7 +983,7 @@
   }
   global.ChatWorkbench = { bind: bindWorkbench, render: renderWorkbench, reset: resetWorkbench,
                            toggle: toggleWorkbench, maximize: maximizeWorkbench,
-                           openOutput, openInput, openLink, openPath, openSavedDelivery, state: workbenchState, syncAnnotations };
+                           openOutput, openInput, openLink, openPath, openCommandRecord, openSavedDelivery, state: workbenchState, syncAnnotations };
   global.addEventListener?.('soduwork-data-scope-changed', resetWorkbench);
   // Re-translate the cached, protected labels when the client language changes
   // mid-session; the DOM adapter never touches them (user content).
