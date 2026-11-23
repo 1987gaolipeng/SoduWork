@@ -221,7 +221,7 @@ async def list_orgs(session: AsyncSession, scope: set[str] | None, *, page: Page
     if not include_managed:
         q = q.where(business_visible(models.OrgUnit))
     if scope is not None:
-        q = q.where(models.OrgUnit.id.in_(scope or {"__none__"}))
+        q = q.where(models.OrgUnit.id.in_(scope))
     rows, total = await select_rows(session, q, page)
     return list_result([org_to_api(o) for o in rows], total)
 

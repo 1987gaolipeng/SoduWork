@@ -68,6 +68,41 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, expected, (method, path, response.status_code))
         return response.json()
 
+    async def test_directory_reads_follow_admin_and_selector_permissions(self):
+        self.user.is_super = False
+        self.user._perms = set()
+        async with self.sessions() as session, session.begin():
+            child = await session.get(models.OrgUnit, "row-1")
+            child.parent_id = self.user.org_id
+        own = await self.request("GET", "admin/orgs?limit=1")
+        self.assertEqual(([row["id"] for row in own["items"]], own["total"]), (["row-0"], 1))
+        await self.request("GET", "admin/orgs?includeManaged=true", 403)
+        for path in ("roles", "permissions", "domains", "role-options"):
+            await self.request("GET", "admin/" + path, 403)
+        for permission in ("user.manage", "identity.manage", "client.assign"):
+            self.user._perms = {permission}
+            options = await self.request("GET", "admin/role-options")
+            self.assertEqual(len(options), 3)
+            self.assertTrue(all(set(row) == {"id", "name"} for row in options))
+            await self.request("GET", "admin/roles", 403)
+        self.user._perms = {"user.manage"}
+        self.assertEqual((await self.request("GET", "admin/orgs?limit=1"))["total"], 2)
+        self.assertEqual(len(await self.request("GET", "admin/domains")), 3)
+        async with self.sessions() as session, session.begin():
+            child = await session.get(models.OrgUnit, "row-1")
+            child.data_source = "test"
+        self.assertEqual((await self.request("GET", "admin/orgs?limit=1"))["total"], 1)
+        self.assertEqual((await self.request("GET", "admin/orgs?includeManaged=true&limit=1"))["total"], 2)
+        self.user._perms = {"task.dispatch"}
+        await self.request("GET", "admin/orgs?includeManaged=true", 403)
+        self.assertEqual((await self.request("GET", "admin/domains?limit=1"))["total"], 3)
+        self.user._perms = {"role.manage"}
+        self.assertTrue(all("permissions" in role for role in await self.request("GET", "admin/roles")))
+        await self.request("GET", "admin/permissions")
+        self.user._perms = set()
+        self.user.org_id = None
+        self.assertEqual(await self.request("GET", "admin/orgs?limit=1"), {"items": [], "total": 0})
+
     async def test_first_chat_uses_current_models_and_only_the_signed_in_accounts_recent_report(self):
         async def reporting_device(session=Depends(get_session)):
             return await session.get(models.Client, self.device.id)

@@ -197,6 +197,7 @@ export const api = {
   deleteOrg: (id) => call('DELETE', '/admin/orgs/' + id),
   // Roles and permission points.
   roles: () => call('GET', '/admin/roles'),
+  roleOptions: () => call('GET', '/admin/role-options'),
   permissions: () => call('GET', '/admin/permissions'),
   createRole: (b) => call('POST', '/admin/roles', b),
   updateRole: (id, b) => call('PATCH', '/admin/roles/' + id, b),

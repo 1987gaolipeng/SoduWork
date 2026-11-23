@@ -89,7 +89,9 @@ export default function Orgs() {
   const workspaceRef = useViewportHeight(420)
   const uiLocale = useLocale();
   const orgs = useAsync(() => api.orgs(true))
-  const users = useAsync(() => api.users().catch(() => []))
+  const canReadMembers = can('user.manage')
+  const users = useAsync(() => canReadMembers ? api.users() : Promise.resolve([]))
+  const showMembers = canReadMembers && !users.error
   const [selectedId, setSelectedId] = useState('')
   const [expanded, setExpanded] = useState(null)
   const [query, setQuery] = useState('')
@@ -138,7 +140,7 @@ export default function Orgs() {
     await reload()
   }
 
-  function renderNode(org, depth = 0) {
+  function renderTreeNode(org, depth = 0) {
     if (!visibleIds.has(org.id)) return null
     const childRows = (byParent[org.id] || []).filter((child) => visibleIds.has(child.id))
     const open = isOpen(org.id)
@@ -149,30 +151,30 @@ export default function Orgs() {
         aria-expanded={childRows.length ? Boolean(open) : undefined}
         onClick={() => setSelectedId(org.id)}
         onKeyDown={(event) => {
-          if (event.target !== event.currentTarget) return
-          if (event.key === 'Enter' || event.key === ' ') {
+          if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
             event.preventDefault()
             setSelectedId(org.id)
           }
         }}>
-        <button className={'og-tree-toggle' + (childRows.length ? (open ? ' open' : '') : ' leaf')}
-          aria-label={open ? tx("收起子部门") : tx("展开子部门")} onClick={(event) => { event.stopPropagation(); childRows.length && toggle(org.id) }}>
+        {childRows.length ? <button type="button" className={'og-tree-toggle' + (open ? ' open' : '')}
+          aria-expanded={Boolean(open)} aria-label={open ? tx("收起子部门") : tx("展开子部门")}
+          onClick={(event) => { event.stopPropagation(); toggle(org.id) }}>
           <Icon name="chevron" />
-        </button>
-        {matchesName(org) && can('org.manage') ? records.checkbox(org) : <span className="og-tree-mark"><Icon name="building" /></span>}
+        </button> : <span className="og-tree-toggle leaf" aria-hidden="true" />}
+        {records.checkbox(org) || <span className="og-tree-mark"><Icon name="building" /></span>}
         <span className="og-tree-name" title={org.name}>{org.name}</span>
         <RecordSource row={org} />
       </div>
       {childRows.length > 0 && open && <div className="og-tree-children">
-        {childRows.map(child => renderNode(child, depth + 1))}
+        {childRows.map((child) => renderTreeNode(child, depth + 1))}
       </div>}
     </div>
   }
 
   const summary = <dl className="og-summary" aria-label={tx("组织汇总")}>
       <div><dt>{tx("部门")}</dt><dd>{list.length}</dd></div>
-      <div><dt>{tx("成员")}</dt><dd>{people.length}</dd></div>
-      <div><dt>{tx("启用账号")}</dt><dd>{activePeople}</dd></div>
+      {showMembers && <div><dt>{tx("成员")}</dt><dd>{people.length}</dd></div>}
+      {showMembers && <div><dt>{tx("启用账号")}</dt><dd>{activePeople}</dd></div>}
     </dl>
 
   return <div className="org-governance">
@@ -195,8 +197,8 @@ export default function Orgs() {
         <div className="og-tree" role="tree">
           {allOrgs.length === 0
             ? <div className="og-tree-empty"><Icon name="building" /><b>{tx("还没有组织")}</b><span>{tx("创建第一个顶级部门后开始搭建组织。")}</span></div>
-            : roots.map(root => renderNode(root))}
-          {allOrgs.length > 0 && visibleIds.size === 0 && <div className="og-tree-empty"><Icon name="search" /><b>{tx("没有匹配的部门")}</b></div>}
+            : roots.map((root) => renderTreeNode(root))}
+          {allOrgs.length > 0 && visibleIds.size === 0 && <div className="og-tree-empty"><Icon name="search" /><b>{tx("没有匹配的部门")}</b>{keyword && <span>{tx("换一个关键词继续查找。")}</span>}</div>}
         </div>
       </aside>
 
@@ -210,10 +212,10 @@ export default function Orgs() {
             </div>
             <div className="og-detail-toolbar">
               <dl className="og-facts">
-                <div><dt>{directMembers.length}</dt><dd>{tx("直属成员")}</dd></div>
+                {showMembers && <div><dt>{directMembers.length}</dt><dd>{tx("直属成员")}</dd></div>}
                 <div><dt>{children.length}</dt><dd>{tx("下属部门")}</dd></div>
                 <div><dt>{descendants.size}</dt><dd>{tx("全部下级部门")}</dd></div>
-                <div><dt>{allMemberCount}</dt><dd>{tx("管辖成员")}</dd></div>
+                {showMembers && <div><dt>{allMemberCount}</dt><dd>{tx("管辖成员")}</dd></div>}
               </dl>
               <div className="og-detail-actions admin-row-actions">
                 {can('org.manage') && !selected.isArchived && <button className="btn btn-primary btn-sm" onClick={() => setModal({ parentId: selected.id })}><Icon name="plus" />{tx("新建下属部门")}</button>}
@@ -233,19 +235,19 @@ export default function Orgs() {
                 return <button key={child.id} onClick={() => setSelectedId(child.id)}>
                   <span className="og-list-icon"><Icon name="building" /></span>
                   <span><b title={child.name}>{child.name}</b><small>{childBranches ? tx("{0} 个下级部门", [childBranches]) : tx("末级部门")}</small></span>
-                  <em>{childMembers}{tx(" 名直属成员")}</em><Icon name="chevron" />
+                  {showMembers && <em>{childMembers}{tx(" 名直属成员")}</em>}<Icon name="chevron" />
                 </button>
               })}</div>}
           </section>
 
-          <section className="og-section og-members">
+          {showMembers && <section className="og-section og-members">
             <header><div><h3>{tx("直属成员")}</h3><p>{tx("这里只展示直接归属于当前部门的成员。")}</p></div><span>{directMembers.length}</span></header>
             {directMembers.length === 0 ? <div className="og-section-empty"><Icon name="users" /><div><b>{tx("暂无直属成员")}</b><span>{tx("可在“用户管理”中调整成员所属部门。")}</span></div></div>
               : <div className="og-member-list">{directMembers.map((user) => {
                 const name = user.displayName || user.username
                 return <article key={user.id}><span className="og-avatar" style={{ '--avatar-color': avatarColor(name) }}>{name.slice(0, 1)}</span><div><b title={name}>{name}</b><small title={'@' + user.username}>@{user.username}</small></div>{user.isSuper && <span className="og-role">{tx("超级管理员")}</span>}<span className={'og-user-state ' + (user.isActive ? 'on' : 'off')}><i />{user.isActive ? tx("启用") : tx("停用")}</span></article>
               })}</div>}
-          </section>
+          </section>}
         </>}
       </main>
     </section>
