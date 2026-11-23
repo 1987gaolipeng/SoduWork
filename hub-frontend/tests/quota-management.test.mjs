@@ -146,6 +146,15 @@ test('plan edits require a preview of the current draft before saving', async ()
   page.unmount()
 })
 
+test('a transient preview failure allows a revision-checked plan save', async () => {
+  const { page, saves } = await planHarness({}, () => ({ error: 'offline' }))
+  assert.equal(footerButtons(page)[1].props.disabled, false)
+  page.act(() => footerButtons(page)[1].props.onClick())
+  await page.flush()
+  assert.equal(saves[0].revision, config.revision)
+  page.unmount()
+})
+
 test('preview ignores superseded results, retries failures and skips invalid drafts', async () => {
   const requests = []
   const props = { config, draft: trial, onConflict() {} }
@@ -222,7 +231,7 @@ test('quota inputs are removed from user editing and login policy saves cannot c
   assert.doesNotMatch(users, /tokenQuota|quotaMode|quotaLimit/)
   const calls = []
   const page = await createComponentHarness(new URL('../src/screens/ClientAccessPolicy.jsx', import.meta.url), { dependencies: {
-    '../api.js': { api: { clientAuthPolicy: async () => ({ allowSelfRegistration: true, defaultOrgId: '', defaultRoleId: '', tokenLimitEnabled: true, monthlyTokenLimit: 500 }), orgs: async () => [], roles: async () => [], saveClientAuthPolicy: async value => { calls.push(value); return value } } },
+    '../api.js': { api: { clientAuthPolicy: async () => ({ allowSelfRegistration: true, defaultOrgId: '', defaultRoleId: '', tokenLimitEnabled: true, monthlyTokenLimit: 500 }), orgs: async () => [], roleOptions: async () => [], saveClientAuthPolicy: async value => { calls.push(value); return value } } },
     '../ui.jsx': { Icon: 'Icon', SelectMenu: 'SelectMenu', toast() {} }, './client-access-policy.css': {},
   } })
   page.render(); await page.flush()
