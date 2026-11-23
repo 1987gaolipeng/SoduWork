@@ -186,6 +186,7 @@ class Task(Base):
     tags: Mapped[list] = mapped_column(JSON, default=list)
     created_by: Mapped[str | None] = mapped_column(String(36), default=None)        # Creator user ID.
     created_by_name: Mapped[str] = mapped_column(String(64), default="")            # Creator display-name snapshot.
+    review_recipient_user_id: Mapped[str | None] = mapped_column(String(36), default=None)
     assignee_user_id: Mapped[str | None] = mapped_column(String(36), default=None)  # Assigned or responsible user.
     # Requester identity used to send completion receipts to the person who raised the work.
     # Internal requesters use requester_user_id and receive direct client notifications.
@@ -910,6 +911,7 @@ class User(Base):
     role_id: Mapped[str | None] = mapped_column(String(36), default=None)
     is_super: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_test_account: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     auth_version: Mapped[int] = mapped_column(Integer, default=1)
     # Professional positions are independent of permissions; multiple positions support workflow routing.
     positions: Mapped[list] = mapped_column(JSON, default=list)   # List of Position IDs.

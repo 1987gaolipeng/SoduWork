@@ -80,12 +80,14 @@
   function deliveryProgress(task, context) {
     const phase = stage(task), routing = task.workRouting || {}, turn = routing.conversationTurn || {};
     if (task.canViewExecution === false || task.reviewedAt || ['closed', 'delivered'].includes(phase)) return null;
-    const issue = turn.deliveryIssue;
+    const issue = turn.deliveryIssue?.code === 'review_unassigned' && phase === 'delivering' &&
+      task.reviewSubmission?.ok ? null : turn.deliveryIssue;
     const gate = approval(task, context);
     const restoredReview = task.canReview === true && gate?.action === 'review' && gate.status === 'pending' &&
       Boolean(issue?.artifactVersionId) && String(gate.artifactVersionId || gate.artifact?.id || '') === String(issue.artifactVersionId);
     if (issue?.code === 'review_unassigned' && !restoredReview) return {text:'验收受阻', className:'is-stalled',
-      guidance:deliveryGuidance.review_unassigned, reason:String(issue.reason || ''), blocked:true};
+      guidance:task.reviewSubmission?.reason || deliveryGuidance.review_unassigned,
+      reason:task.reviewSubmission?.reason ? '' : String(issue.reason || ''), blocked:true};
     if (phase === 'reviewing' || approval(task, context)?.action === 'review' || waitingOn(task, context).length) return null;
     if (issue?.code) {
       const pending = ['capture_pending', 'sync_pending'].includes(issue.code);
@@ -151,9 +153,7 @@
   }
   function roles(task) { return Array.isArray(task.myRoles) ? task.myRoles : []; }
   function approval(task, context) { return stage(task) === 'closed' ? undefined : context?.approvals?.get(String(task.id)); }
-  // Delivery review is a creator-owned decision.  Keep this presentation
-  // predicate aligned with Hub's authoritative approval routing so stale
-  // inbox snapshots cannot make the executor's card actionable again.
+  // The Hub resolves the assigned reviewer. Older payloads used the creator role.
   function canReview(task) {
     return Boolean(task && task.canReview !== false &&
       (task.canReview === true || roles(task).includes('creator')));
@@ -232,7 +232,7 @@
     if (delivery?.blocked || (delivery && !pending && !canResumeRework(task) && !canSubmitReview(task)))
       return {text:delivery.guidance || delivery.reason || delivery.text, action:'查看详情', icon:delivery.blocked ? 'attention' : 'confirm', attention:delivery.blocked};
     if (pending?.action === 'review' && !canReview(task)) {
-      return { text: '等待需求创建人确认交付', action: '查看详情', icon: 'progress' };
+      return { text: '已提交验收，等待验收人处理', action: '查看详情', icon: 'progress' };
     }
     if (pending) {
       const labels = { baseline: '确认需求与完成标准', review: '核对成果并确认交付', merge: '确认代码合并',
@@ -242,7 +242,9 @@
     if (phase === 'delivered') return { text: '查看成果与验收记录', action: '查看交付', icon: 'complete' };
     if (phase === 'reviewing') return { text: '已提交验收，等待验收人处理', action: '查看交付', icon: 'confirm' };
     if (canResumeRework(task)) return { text: '按验收意见继续修改', action: '继续修正', icon: 'edit', attention: true };
-    if (canSubmitReview(task)) return { text: '本轮执行已结束，可提交验收', action: '查看并提交', icon: 'confirm', attention: true };
+    if (canSubmitReview(task)) return task.reviewSubmission?.ok === false
+      ? {text:'请先确定验收人', action:'查看详情', icon:'attention', attention:true}
+      : { text: '本轮执行已结束，可提交验收', action: '查看并提交', icon: 'confirm', attention: true };
     if (task.ai?.state === 'failed') return { text: '执行未完成，查看原因', action: '查看执行情况', icon: 'attention', attention: actionable(task, context) };
     if (task.ai?.state === 'dispatching') return { text: task.ai.attentionRaised ? '派发待确认，查看执行情况' : '正在安排 AI 执行',
       action: '查看执行情况', icon: task.ai.attentionRaised ? 'attention' : 'progress', attention: actionable(task, context) };

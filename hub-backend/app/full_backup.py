@@ -9,13 +9,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
-from contextlib import closing
-from datetime import datetime, timezone
 import hashlib
 import io
 import json
 import os
-from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import secrets
 import shutil
@@ -23,6 +20,9 @@ import sqlite3
 import struct
 import tarfile
 import tempfile
+from contextlib import closing
+from datetime import datetime, timezone
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Iterable
 
 from cryptography.exceptions import InvalidTag
@@ -31,8 +31,12 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from .data_backup import BackupError, backup_database, verify_backup
-
+from .data_backup import (
+    BackupError,
+    backup_database,
+    manifest_byte_count,
+    verify_backup,
+)
 
 MAGIC = b"SODUWORKFB01"
 NONCE_SIZE = 12
@@ -415,11 +419,11 @@ def _load_sidecar(bundle: Path) -> dict[str, Any]:
     path = bundle.with_name(bundle.name + SIDECAR_SUFFIX)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         raise FullBackupError(f"Backup envelope manifest cannot be read: {exc}") from exc
     if payload.get("filename") != bundle.name:
         raise FullBackupError("Backup envelope filename does not match")
-    if int(payload.get("size") or -1) != bundle.stat().st_size:
+    if manifest_byte_count(payload.get("size"), FullBackupError) != bundle.stat().st_size:
         raise FullBackupError("Backup envelope size does not match")
     if payload.get("sha256") != _sha256(bundle):
         raise FullBackupError("Backup envelope checksum does not match")
@@ -443,11 +447,11 @@ def _validate_tar(archive: tarfile.TarFile) -> tuple[dict[str, Any], dict[str, t
         raise FullBackupError("Bundle manifest cannot be read")
     try:
         manifest = json.loads(stream.read().decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except ValueError as exc:
         raise FullBackupError("Bundle manifest is invalid") from exc
     if manifest.get("formatVersion") != FORMAT_VERSION or manifest.get("kind") != "full-backup":
         raise FullBackupError("Unsupported full backup format")
-    declared = {str(item.get("sha256")): int(item["size"]) if "size" in item else -1
+    declared = {str(item.get("sha256")): manifest_byte_count(item.get("size"), FullBackupError)
                 for item in manifest.get("blobs") or []}
     referenced: set[str] = set()
     logical_paths: set[tuple[str, str]] = set()
@@ -465,7 +469,7 @@ def _validate_tar(archive: tarfile.TarFile) -> tuple[dict[str, Any], dict[str, t
             _safe_symlink_target(str(entry["path"]), str(entry.get("target") or ""))
         elif kind == "file":
             checksum = str(entry.get("blob") or "")
-            entry_size = int(entry["size"]) if "size" in entry else -1
+            entry_size = manifest_byte_count(entry.get("size"), FullBackupError)
             if checksum not in declared or entry_size != declared[checksum]:
                 raise FullBackupError("Bundle entry does not match its declared blob")
             referenced.add(checksum)

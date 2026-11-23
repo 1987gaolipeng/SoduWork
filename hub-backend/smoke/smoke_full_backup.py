@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 from contextlib import closing
+import io
 import json
 from pathlib import Path
 import shutil
 import sqlite3
+import tarfile
 import tempfile
 
 from app.full_backup import (
     FullBackupError, _safe_symlink_target, _decrypt_file, _encrypt_file,
-    _read_key, create_bundle, extract_bundle, generate_key, verify_bundle,
+    _read_key, _validate_tar, create_bundle, extract_bundle, generate_key, verify_bundle,
 )
 
 
@@ -70,6 +72,15 @@ with tempfile.TemporaryDirectory(prefix="soduwork-full-smoke-") as root_name:
     verified = verify_bundle(output, key)
     ok(verified["ok"] and verified["schemaRevision"] == "smoke-001", "bundle verifies")
     ok(verified["tables"] == 2, "database inventory is present")
+    for bad_size in ("abc", float("inf"), output.stat().st_size + 0.5):
+        sidecar.write_text(json.dumps({**public, "size": bad_size}), encoding="utf-8")
+        try:
+            verify_bundle(output, key)
+        except FullBackupError:
+            ok(True, "invalid envelope size reported as a full backup error")
+        else:
+            raise AssertionError("invalid envelope size passed verification")
+    sidecar.write_text(public_text, encoding="utf-8")
     restored = root / "restored"
     try:
         extract_bundle(output, key, restored, confirm_target="wrong")
@@ -128,5 +139,28 @@ with tempfile.TemporaryDirectory(prefix="soduwork-full-smoke-") as root_name:
     _decrypt_file(rotation_cipher, rotation_output, _read_key(key))
     ok(rotation_output.read_bytes() == rotation_plain.read_bytes(),
        "streaming encryption primitives support controlled key rotation")
+
+# Validate the two independent size fields before extraction of any file.
+for invalid_section in ("blobs", "entries"):
+    manifest = {
+        "formatVersion": 1, "kind": "full-backup", "sources": [{"name": "uploads"}],
+        "blobs": [{"sha256": "a" * 64, "size": 0}],
+        "entries": [{"kind": "file", "path": "sample", "source": "uploads", "blob": "a" * 64, "size": 0}],
+    }
+    manifest[invalid_section][0]["size"] = "abc"
+    raw = json.dumps(manifest).encode("utf-8")
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        member = tarfile.TarInfo("manifest.json")
+        member.size = len(raw)
+        archive.addfile(member, io.BytesIO(raw))
+    buffer.seek(0)
+    with tarfile.open(fileobj=buffer) as archive:
+        try:
+            _validate_tar(archive)
+        except FullBackupError as exc:
+            ok("size" in str(exc).lower(), f"invalid {invalid_section} size identified")
+        else:
+            raise AssertionError(f"invalid {invalid_section} size passed verification")
 
 print(f"full backup smoke: {checks} checks passed")

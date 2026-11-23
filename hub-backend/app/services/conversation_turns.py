@@ -148,7 +148,8 @@ def _delivery_hint(reason: str, files: list[str]) -> str:
 
 async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str,
                             provider: str = "", files: list,
-                            categories: dict | None = None,
+                            categories: dict | None = None, declared_paths: set[str] | None = None,
+                            replacements: dict[str, list[str]] | None = None,
                             outcome: str = "completed") -> dict:
     """Ingest conversation-turn outputs through shared classification, validation, versioning, and
     review. Only completed turns create candidates; incomplete turns retain evidence without
@@ -265,7 +266,9 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
                            "sha256": hashlib.sha256(data).hexdigest(),
                            "identifier": turn_id, "round": round_no,
                            "conversationId": conversation_id,
-                           "category": category, "verification": verification},
+                           "category": category, "verification": verification,
+                           **({"requestedOutput": True} if declared_paths and fn in declared_paths else {}),
+                           **({"replaces": replacements[fn]} if replacements and replacements.get(fn) else {})},
             created_at=datetime.now(timezone.utc)))
         got.append(fn)
         received.add(fn)
@@ -369,10 +372,7 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
             # For transparent encryption failures, changing output format may work where regeneration does not.
             reason = str(error)[:500]
             from . import approval_routing
-            reviewers = await approval_routing.preview_assignments(session, task, "review", {}) if artifact else {"ok": True}
-            missing_reviewer = not reviewers["ok"]
-            if missing_reviewer:
-                reason = "需求创建人缺失或账号不可用，验收受阻；请恢复创建人账号，或联系管理员核实需求归属后处理"
+            missing_reviewer = isinstance(error, approval_routing.ReviewAssignmentUnavailable)
             _delivery_issue(task, "review_unassigned" if missing_reviewer else "invalid_delivery", reason,
                             artifact_version_id=artifact.id if missing_reviewer else "")
             # The generic reason may say no reviewable outputs remain.

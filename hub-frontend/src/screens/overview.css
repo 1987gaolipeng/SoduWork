@@ -1,4 +1,21 @@
 .gov-page:lang(ko){word-break:keep-all;overflow-wrap:break-word}
+.first-chat-setup{padding:16px 18px}
+.first-chat-setup header,.first-chat-setup header>div,.first-chat-actions,.first-chat-progress{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.first-chat-setup header{justify-content:space-between}
+.first-chat-setup h2{font-size:1.15rem}
+.first-chat-progress,.first-chat-setup>p{margin:8px 0;color:var(--ink-2)}
+.first-chat-progress progress{width:8rem;max-width:100%;height:8px;accent-color:var(--accent)}
+.first-chat-setup ol{padding-inline-start:1.5rem}
+.first-chat-setup li{padding:8px 0;border-top:1px solid var(--line-2)}
+.first-chat-setup li>div:first-child{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.first-chat-setup li small{color:var(--ink-2)}
+.first-chat-setup li[aria-current=step]::marker{color:var(--accent);font-weight:700}
+.first-chat-actions{margin-top:4px}
+.first-chat-actions label{display:inline-flex;align-items:center;gap:6px;max-width:100%}
+.first-chat-actions select{min-width:0;max-width:16rem;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);padding:5px}
+.first-chat-actions a{text-decoration:none}
+.first-chat-reopen{align-self:flex-start;justify-self:start}
+@media(min-width:1000px){.first-chat-setup ol{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:2.25rem}}
 .gov-page{--gov-radius:10px;display:flex;flex-direction:column;gap:14px;color:var(--ink)}
 .gov-ledger{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line);border-radius:var(--gov-radius);background:var(--surface);overflow:hidden}
 .gov-metric{position:relative;display:grid;grid-template-columns:1fr auto;gap:5px 12px;min-width:0;padding:16px 18px;border-right:1px solid var(--line-2)}.gov-metric:last-child{border-right:0}

@@ -133,7 +133,7 @@ class RecoveredCreatorDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.deliver(tid)).status_code, 200)
         denied = await self.call("POST", "tasks/" + tid + "/submit-review", json={})
         self.assertEqual(denied.status_code, 409, denied.text)
-        self.assertIn("当前只能分配给 0 人", denied.text)
+        self.assertIn("未记录创建人", denied.json()["detail"])
         async with self.engine.begin() as connection:
             self.assertEqual(await connection.run_sync(migration.migrate_data), 1)
         async with self.sessions() as session:

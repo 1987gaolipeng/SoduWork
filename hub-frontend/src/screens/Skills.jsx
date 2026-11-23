@@ -433,6 +433,12 @@ export function RepoSkills({ repoId, repoName }) {
   const own = selected !== null
   const shown = own ? [...selected] : company
 
+  function discard() {
+    const saved = data.cfg?.byRepo?.[repoId]
+    setSelected(saved ? new Set(saved) : null)
+    setOpen(false)
+  }
+
   async function save(next) {
     setBusy(true)
     try {
@@ -464,10 +470,10 @@ export function RepoSkills({ repoId, repoName }) {
           <Icon name="pencil" />{tx("配置")}</button>
       </div>
       {open && (
-        <Modal wide title={'Skill · ' + (repoName || tx("这个工程"))} icon="plug" onClose={() => setOpen(false)}
-          foot={<>
+        <Modal draft={[...shown].sort()} wide title={'Skill · ' + (repoName || tx("这个工程"))} icon="plug" onClose={discard}
+          foot={dismiss => <>
             <button className="btn btn-ghost" disabled={busy} onClick={() => save(null)}>{tx("改回公司默认")}</button>
-            <span className="ml-auto" /><button className="btn btn-ghost" onClick={() => setOpen(false)}>{tx("取消")}</button>
+            <span className="ml-auto" /><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
             <button className="btn btn-primary" disabled={busy}
               onClick={() => save(selected || new Set(company))}>{busy ? tx("保存中…") : tx("保存")}</button>
           </>}>

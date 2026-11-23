@@ -69,7 +69,7 @@ test('chat shows the thinking setting for classified Hub errors and SDK stream e
   assert.equal(errors.forDisplay({ error: { status: 400, code: 'InvalidParameter', message: 'thinking.type' } }),
     '模型服务返回了暂时无法处理的错误（HTTP 400）');
   assert.equal(errors.forDisplay({ error: { status: 401, code: 'thinking_disabled_unsupported' } }),
-    '模型服务拒绝了当前凭据或模型权限（HTTP 401）');
+    '模型服务拒绝了当前凭据或模型权限。个人服务请在「我的模型」检查个人 Key，企业服务请联系管理员核对模型授权（HTTP 401）');
 });
 
 test('a request transformed to omit the tool result cannot report a tool continuation', async () => {

@@ -237,7 +237,7 @@ async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl 
       return failure;
     }
     const d = await res.json();
-    if (!d || !d.ok) return { ok: false, reason: custom && d?.reason === '此底座不使用企业模型配置，请检查执行底座'
+    if (!d || !d.ok) return { ok: false, ...(d?.providerPinned === true ? { providerPinned: true } : {}), reason: custom && d?.reason === '此底座不使用企业模型配置，请检查执行底座'
       ? '后台尚不支持新底座的模型配置，请更新后台后重试' : (d && d.reason) || '后台没给出可用的模型' };
     if (!d.key || !d.model) return { ok: false, reason: '后台回的配置不完整（缺 key 或 model）' };
     const thinkingConflict = thinkingCapabilities.conflict({ ...d, id: d.model });

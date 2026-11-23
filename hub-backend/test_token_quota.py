@@ -82,6 +82,31 @@ class TokenQuotaTests(unittest.IsolatedAsyncioTestCase):
         return await self.http.post("/api/v1/usage/events", headers=headers or self.headers,
             json={"sourceId": key, "usage": {"input": total}})
 
+    async def test_usage_timestamps_are_validated_before_recording_a_batch(self):
+        route = "/api/v1/usage/events"
+        event = {"sourceId": "sample", "usage": {"input": 1}}
+        for stamp in ("not-a-date", "2026-13-45", "", None, 12345, "2026-11-21T99:99:99Z",
+                      "0001-01-01T00:00:00+08:00", "9999-12-31T23:59:59Z"):
+            with self.subTest(occurredAt=stamp):
+                response = await self.http.post(route, headers=self.headers, json={"events": [
+                    event, {**event, "sourceId": "invalid", "occurredAt": stamp}]})
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertIn("occurredAt", response.json()["detail"])
+        async with self.sessions() as session:
+            self.assertIsNone(await session.scalar(select(models.AIUsageEvent.id)))
+            self.assertIsNone(await session.scalar(select(models.AIUsageDaily.id)))
+
+        before = datetime.now(timezone.utc)
+        samples = [event, {**event, "sourceId": "offset", "occurredAt": "2026-11-21T16:30:00+08:00"},
+                   {**event, "sourceId": "naive", "occurredAt": "2026-11-21T16:30:00"}]
+        response = await self.http.post(route, headers=self.headers, json={"events": samples})
+        self.assertEqual(response.status_code, 200, response.text)
+        stamps = [datetime.fromisoformat(row["occurredAt"]) for row in response.json()["events"]]
+        self.assertLessEqual(before, stamps[0])
+        self.assertLessEqual(stamps[0], datetime.now(timezone.utc))
+        self.assertEqual(stamps[1], datetime(2026, 11, 21, 8, 30, tzinfo=timezone.utc))
+        self.assertEqual(stamps[2], datetime(2026, 11, 21, 16, 30, tzinfo=timezone.utc))
+
     async def test_existing_proxy_tickets_cannot_bypass_quota(self):
         ticket = device_auth.issue_proxy_ticket(self.devices[0])[0]
         await self.policy(10)

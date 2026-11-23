@@ -250,7 +250,7 @@ async function _agLoad(force) {
 }
 
 function _agProbeContext(a) {
-  return JSON.stringify([a.key, a.version || '', a.bin || '', a.model || '', a.modelEffective || '',
+  return JSON.stringify([a.key, a.version || '', a.bin || '', a.model || '', a.modelProviderId || '', a.modelEffective || '',
     a.modelGone === true, a.configRevision || '', a.runtimeRevision || '']);
 }
 
@@ -552,6 +552,10 @@ let _agDrawerShown = false;
    Offer the selector only for agents that use the shared model service. Codex
    use their own accounts and models; explain this instead of showing an ineffective selector,
    consistent with the milestone view. */
+function _agChoiceValue(row) {
+  return row.providerId ? JSON.stringify([row.providerId, row.name]) : row.name;
+}
+
 function _agModelHtml(a) {
   if (!a.modelPick) {
     return '<div class="ag-model is-own"><span class="ag-model-cap">模型</span>' +
@@ -567,15 +571,17 @@ function _agModelHtml(a) {
       (localHint || '<span class="ag-model-own">还没有能用的模型，先去「我的模型」配一把 key</span>') + '</div>';
   }
   const fallback = a.modelEffective || '';
-  const cur = a.modelAutomatic ? fallback : a.model || '';
+  const saved = a.modelAutomatic ? fallback : a.model || '';
+  const choice = list.find(row => row.name === saved && (!a.modelProviderId || a.modelProviderId === row.providerId));
+  const cur = choice ? _agChoiceValue(choice) : saved;
   const fallbackLabel = list.find(model => model.name === fallback)?.label || fallback;
   return '<div class="ag-model' + (a.modelGone ? ' is-bad' : '') + '">' +
     '<span class="ag-model-cap">模型</span>' +
     '<select class="ag-model-sel" data-amodel="' + esc(a.key) + '" data-amodel-value="' + esc(cur) + '">' +
       '<option value=""' + (cur ? '' : ' selected') + '>跟这台 SoduWork 的默认' +
         (fallback && !cur ? '（' + esc(fallbackLabel) + '）' : '') + '</option>' +
-      list.map(m => '<option value="' + esc(m.name) + '"' +
-        (m.name === cur ? ' selected' : '') + '>' + esc(m.label || m.name) +
+      list.map(m => '<option value="' + esc(_agChoiceValue(m)) + '"' +
+        (_agChoiceValue(m) === cur ? ' selected' : '') + '>' + esc(m.label || m.name) +
         (m.provider ? ' · ' + esc(_agTx(m.provider)) : '') +
         (m.providerKind === 'anthropic' ? ' · Anthropic' : '') +
         (m.keyFrom === 'mine' ? ' · 走我的额度' : '') + '</option>').join('') +
@@ -589,7 +595,7 @@ function _agModelHtml(a) {
     (list.some(m => m.providerKind === 'anthropic')
       ? '<span class="ag-model-warn" role="note">企业模型对话通道只支持 OpenAI 兼容协议；列表中的 Anthropic 模型需使用支持其协议的 Agent。</span>' : '') +
     (a.modelGone
-      ? '<span class="ag-model-warn">' + (a.localModelDefault
+      ? '<span class="ag-model-warn">' + (a.localModelDefault || a.modelProviderId
         ? '请主动选择可用模型后再执行，不会自动切换模型'
         : '这个模型现在用不了，派活会退回默认' + (fallback ? '（' + esc(fallback) + '）' : '')) + '</span>'
       : '') +
@@ -737,7 +743,8 @@ function _agBind(box) {
     const before = el.getAttribute('data-amodel-value') || '';
     el.disabled = true;
     try {
-      await SoduWorkAPI.setAgentModel(key, val);
+      const choice = (_agData?.models || []).find(row => _agChoiceValue(row) === val);
+      await SoduWorkAPI.setAgentModel(key, choice?.name || val, choice?.providerId);
       if (scope !== _agScopeEpoch) return;
       try { window.soduWorkAPI?.broadcast?.('models'); } catch (_) {}
       const hit = (_agData?.agents || []).find(x => x.key === key);
@@ -748,7 +755,7 @@ function _agBind(box) {
         const job = _agJobs[ak];
         if (_agParse(ak).key === key && job.action === 'probe' && job.state === 'done') job.context = '';
       });
-      if (hit) { hit.model = val; hit.modelGone = false; }
+      if (hit) { hit.model = choice?.name || val; hit.modelProviderId = choice?.providerId || ''; hit.modelGone = false; }
       if (typeof petSay === 'function') {
         petSay(val ? ('好，' + ((hit && hit.name) || key) + ' 以后用 ' + val)
           : (((hit && hit.name) || key) + ' 改回跟默认模型走'));

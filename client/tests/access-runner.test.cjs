@@ -34,6 +34,12 @@ test('an old Runner cannot silently execute a new access policy',async()=>{
  const adapter=createRunnerRuntimeAdapter({runnerRuntime:{rpc:async()=>({ok:true,data:{installed:true,state:'ready'}})}});
  await assert.rejects(adapter.createSession({native:{runner:{openOptions:{cwd:os.tmpdir(),accessPolicy:policy.create('standard',os.tmpdir())}}}}),/权限模式/);
 });
+test('Runner detection failures are reported separately from unsupported access modes',async()=>{
+ const adapter=createRunnerRuntimeAdapter({runnerRuntime:{rpc:async()=>({ok:false,error:'不认识的执行底座'})}});
+ await assert.rejects(
+  adapter.createSession({native:{runner:{openOptions:{cwd:os.tmpdir(),accessPolicy:policy.create('standard',os.tmpdir())}}}}),
+  error=>error.code==='RUNNER_PROBE_FAILED' && /探测失败/.test(error.message) && !/权限模式/.test(error.message));
+});
 test('approval IPC forwards modern and legacy answers only from the currently attached window', async () => {
   const first = { id: 2 }, second = { id: 3 }, accepted = [];
   const handle = { attachedWindow: { webContents: first },

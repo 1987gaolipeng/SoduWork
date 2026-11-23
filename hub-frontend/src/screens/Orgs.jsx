@@ -281,8 +281,8 @@ function OrgModal({ spec, orgs, onClose, onDone }) {
     finally { setBusy(false) }
   }
 
-  return <Modal className="org-editor" title={editing ? tx("编辑部门") : tx("新建部门")} icon="building" onClose={onClose}
-    foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : editing ? tx("保存部门") : tx("创建部门")}</button></>}>
+  return <Modal className="org-editor" title={editing ? tx("编辑部门") : tx("新建部门")} icon="building" draft={[name, parentId]} onClose={onClose}
+    foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : editing ? tx("保存部门") : tx("创建部门")}</button></>}>
     <div className="og-modal-copy"><b>{editing ? tx("调整部门身份与组织位置") : tx("把新部门放到正确的管理范围内")}</b><span>{tx("成员不会随部门自动移动，需要在用户管理中单独调整归属。")}</span></div>
     <label className="og-modal-field"><span>{tx("部门名称")}</span><input className="f-in" value={name} onChange={(event) => setName(event.target.value)} placeholder={tx("例如：产品研发中心")} autoFocus /></label>
     <div className="og-modal-field"><span id={`${formId}-parent-label`}>{tx("上级部门")}</span><SelectMenu searchable aria-labelledby={`${formId}-parent-label`} className="f-in" value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">{tx("作为顶级部门")}</option>{options.map((option) => <option key={option.id} value={option.id} data-path={option.path}>{option.label}</option>)}</SelectMenu></div>

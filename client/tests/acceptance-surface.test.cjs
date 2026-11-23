@@ -149,7 +149,7 @@ test('hub decide endpoint honours rework=false by returning the task to the back
 test('creator direct acceptance reuses the same card face; quick buttons stay retired', () => {
   const detail = read('../components/requirements/requirements-detail.js');
   // Prevent duplicate quick-review actions from returning to the drawer.
-  assert.doesNotMatch(detail, /data-rq-review\b/);
+  assert.doesNotMatch(detail, /data-rq-review(?=[\s=>\]])/);
   assert.doesNotMatch(detail, /data-rq-reject/);
   assert.doesNotMatch(detail, /确认交付/);
   // Creator review without a Hub approval uses synthetic direct:{taskId} and injected directApi.

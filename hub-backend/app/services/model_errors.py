@@ -120,7 +120,7 @@ def public_failure(value) -> str:
     if status == 403:
         return "模型请求被拒绝" + suffix
     if status == 401:
-        return "模型服务拒绝了当前凭据或模型权限" + suffix + "；请检查模型授权或切换有权限的模型。"
+        return "模型服务拒绝了当前凭据或模型权限" + suffix + "。个人服务请在「我的模型」检查个人 Key，企业服务请联系管理员核对模型授权。"
     if status == 429:
         return "模型服务当前繁忙或额度受限" + suffix + "；请稍后重试或检查模型额度。"
     if status in {408, 425} or status >= 500 or re.search(
