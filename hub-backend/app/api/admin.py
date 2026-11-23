@@ -2272,17 +2272,33 @@ async def delete_integration(iid: str, user: User = Depends(require_perm("integr
 
 # Audit log.
 
-def _audit_filters(action: str | None = None, actor: str | None = None,
-                   since: AwareDatetime | None = None, until: AwareDatetime | None = None):
+def _audit_date(value: datetime | None, name: str, alias_value: datetime | None, alias: str) -> datetime | None:
+    if value is not None and alias_value is not None and value != alias_value:
+        raise HTTPException(422, [{"loc": ["query", alias], "type": "value_error",
+                                   "msg": f"{alias} and {name} must identify the same instant"}])
+    if alias_value is not None:
+        value, name = alias_value, alias
     # SQLite stores UTC without an offset; compare the same instants on both databases.
     try:
-        since = since.astimezone(timezone.utc) if since is not None else None
-        until = until.astimezone(timezone.utc) if until is not None else None
+        return value.astimezone(timezone.utc) if value is not None else None
     except OverflowError:
-        raise HTTPException(422, "时间超出支持范围") from None
+        raise HTTPException(422, [{"loc": ["query", name], "type": "value_error",
+                                   "msg": "Timestamp is outside the supported UTC range"}]) from None
+
+
+def _audit_filters(
+    action: str | None = None, actor: str | None = None,
+    actor_id: Annotated[uuid.UUID | None, Query(alias="actorId")] = None,
+    since: AwareDatetime | None = None, until: AwareDatetime | None = None,
+    from_date: Annotated[AwareDatetime | None, Query(alias="from")] = None,
+    to_date: Annotated[AwareDatetime | None, Query(alias="to")] = None,
+):
+    since = _audit_date(since, "since", from_date, "from")
+    until = _audit_date(until, "until", to_date, "to")
     if since is not None and until is not None and since >= until:
         raise HTTPException(422, "开始时间必须早于结束时间")
-    return {"action": action, "actor": actor, "since": since, "until": until}
+    return {"action": action, "actor": actor, "actor_id": str(actor_id) if actor_id is not None else None,
+            "since": since, "until": until}
 
 
 @router.get("/audit")
@@ -2301,11 +2317,12 @@ async def list_audit(
 @router.get("/audit/export.csv")
 async def export_audit(
     filters: dict = Depends(_audit_filters),
+    offset: Annotated[int, Query(ge=0, le=2**63-1)] = 0,
     user: User = Depends(require_perm("audit.view")),
     session: AsyncSession = Depends(get_session),
 ):
-    """Download every matching event in the same order and scope as the audit list."""
-    chunks = await audit.export_csv(session, user, settings.soduwork_env.strip().lower(), **filters)
+    """Download matching events from the offset in the same order and scope as the audit list."""
+    chunks = await audit.export_csv(session, user, settings.soduwork_env.strip().lower(), offset=offset, **filters)
     return StreamingResponse(chunks, media_type="text/csv", headers={
         "Content-Disposition": 'attachment; filename="audit-log.csv"',
         "Cache-Control": "no-store",

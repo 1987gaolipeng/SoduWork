@@ -54,9 +54,9 @@ async def main() -> None:
                              org_id=root.id, role_id=audit_role.id, is_active=True)
         root_actor = models.User(id="u-audit-root", username="root-actor",
                                  display_name="总部管理员", org_id=root.id, is_active=True)
-        child_actor = models.User(id="u-audit-child", username="child-actor",
+        child_actor = models.User(username="child-actor",
                                   display_name="研发管理员", org_id=child.id, is_active=True)
-        other_actor = models.User(id="u-audit-other", username="other-actor",
+        other_actor = models.User(username="other-actor",
                                   display_name="外地管理员", org_id=sibling.id, is_active=True)
         super_user = models.User(id="u-audit-super", username="super-auditor",
                                  display_name="超级管理员", org_id=root.id,
@@ -64,6 +64,8 @@ async def main() -> None:
         session.add_all([root, child, sibling, audit_role, viewer, root_actor,
                          child_actor, other_actor, super_user])
         await session.commit()
+        # An actor's display name can contain a different actor's exact ID.
+        root_actor.display_name = f"总部管理员 {child_actor.id}"
         await audit.log(session, root_actor, "project.update", "project", "p-root", "总部项目")
         await audit.log(session, child_actor, "task.dispatch", "task", "t-child", "研发任务")
         await audit.log(session, other_actor, "client.assign", "client", "c-other", "外地终端")
@@ -136,7 +138,39 @@ async def main() -> None:
         response = await client.get("audit/export.csv", params={**params, "actor": "不存在"}, headers=headers)
         empty = csv.DictReader(io.StringIO(response.content.decode("utf-8-sig")))
         check("无匹配时仍返回 CSV 表头", empty.fieldnames and "id" in empty.fieldnames and not list(empty))
+        async def get_ids(path, query):
+            result = await client.get(path, params=query, headers=headers)
+            result.raise_for_status()
+            if path.endswith(".csv"):
+                return [row["id"] for row in csv.DictReader(io.StringIO(result.content.decode("utf-8-sig")))]
+            return [row["id"] for row in result.json()["items"]]
+
         for path in ("audit", "audit/export.csv"):
+            aliases = {"action": params["action"], "actorId": child_actor.id,
+                       "from": params["since"], "to": params["until"]}
+            check(f"{path} applies the inclusive start, exclusive end, exact ID and offset",
+                  await get_ids(path, {**aliases, "offset": 404}) == ["fixture-000"])
+            check(f"{path} returns no records at the end of the matching range",
+                  await get_ids(path, {**aliases, "offset": matching}) == [])
+            check(f"{path} accepts matching date aliases in different time zones",
+                  await get_ids(path, {**aliases, "since": start.isoformat(), "offset": 404}) == ["fixture-000"])
+            check(f"{path} never treats an actor name as an exact actor ID",
+                  await get_ids(path, {"actorId": child_actor.id, "action": "project.update"}) == [])
+            check(f"{path} retains the department scope for exact ID searches",
+                  await get_ids(path, {"actorId": other_actor.id}) == [])
+            check(f"{path} intersects actor name and exact actor ID filters",
+                  await get_ids(path, {**aliases, "actor": "no such actor"}) == [])
+            for field, value in (("actorId", "not-a-uuid"), ("from", "bad"), ("to", "bad"),
+                                 ("offset", -1), ("offset", 2**63)):
+                invalid = await client.get(path, params={field: value}, headers=headers)
+                check(f"{path} rejects {field}={value} with its field name",
+                      invalid.status_code == 422 and any(error["loc"] == ["query", field]
+                                                         for error in invalid.json()["detail"]))
+            for alias, name in (("from", "since"), ("to", "until")):
+                conflict = await client.get(path, params={alias: start.isoformat(), name: end.isoformat()},
+                                            headers=headers)
+                check(f"{path} rejects conflicting {alias} and {name} values",
+                      conflict.status_code == 422 and conflict.json()["detail"][0]["loc"] == ["query", alias])
             unauthorized = await client.get(path)
             forbidden = await client.get(path, headers={"Authorization": "Bearer " + sign_token(root_actor.id)})
             check(f"{path} 校验登录和 audit.view 权限",
