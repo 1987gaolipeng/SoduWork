@@ -45,8 +45,8 @@ async def _get_or_create_session(session: AsyncSession, task_id: str,
     at the same time. A SELECT followed by INSERT is not atomic; a savepoint keeps
     the outer business transaction alive, then the losing writer loads the winner.
     """
-    row = (await session.execute(select(am.ExecutionSession).where(
-        am.ExecutionSession.ref == ref).limit(1))).scalar_one_or_none()
+    query = select(am.ExecutionSession).where(am.ExecutionSession.ref == ref).with_for_update()
+    row = (await session.execute(query)).scalar_one_or_none()
     if row is not None:
         return row
     candidate = am.ExecutionSession(task_id=task_id, ref=ref)
@@ -56,8 +56,7 @@ async def _get_or_create_session(session: AsyncSession, task_id: str,
             await session.flush()
         return candidate
     except IntegrityError:
-        row = (await session.execute(select(am.ExecutionSession).where(
-            am.ExecutionSession.ref == ref).limit(1))).scalar_one_or_none()
+        row = (await session.execute(query)).scalar_one_or_none()
         if row is None:
             raise
         return row
@@ -298,6 +297,7 @@ def settlement_is_current(row: am.ExecutionSession, mark: dict | None = None) ->
 
 
 def session_api(row: am.ExecutionSession, *, items: list | None = None) -> dict:
+    from .queued_dispatch_lease import status_fields
     meta = dict(row.metadata_ or {})
     settlement = dict(meta.get("terminalSettlement") or {})
     state = canonical_state(row.state, "running")
@@ -319,6 +319,7 @@ def session_api(row: am.ExecutionSession, *, items: list | None = None) -> dict:
         "lastEventAt": _loaded_iso(row, "last_event_at"),
         "canStop": state in {"queued", "dispatching", "running"},
         "queued": state == "queued",
+        **status_fields(state, meta),
         "queuePosition": max(0, int(meta.get("queuePosition") or 0)),
         "queueClass": str(meta.get("queueClass") or ""),
         "detached": bool(meta.get("detached")),
@@ -431,8 +432,37 @@ async def _allowed(session: AsyncSession, runner, task: models.Task, *, ref: str
     return runner_hub.in_scope(runner, allowed_clients, allowed_orgs)
 
 
+def apply_admission_receipt(row: am.ExecutionSession, receipt: dict) -> bool:
+    """Merge the initial dispatch receipt without rewinding later Runner telemetry."""
+    state = canonical_state(receipt.get("state"))
+    previous = canonical_state(row.state)
+    meta = dict(row.metadata_ or {})
+    key = receipt.get("admissionKey")
+    if (not state or is_terminal(previous)
+            or (key and meta.get("admissionKey") and meta["admissionKey"] != key)
+            or int(meta.get("round") or 1) > int(receipt.get("round") or 1)
+            or (state == "queued" and previous not in {"", "queued"})):
+        return False
+    row.state = state
+    if state in {"dispatching", "running"}:
+        row.started_at = row.started_at or datetime.now(timezone.utc)
+    elif is_terminal(state):
+        row.finished_at = row.finished_at or datetime.now(timezone.utc)
+        if receipt.get("error"):
+            meta["error"] = receipt["error"]
+    meta["queued"] = state == "queued"
+    position = receipt.get("queuePosition", meta.get("queuePosition"))
+    meta["queuePosition"] = max(0, int(position or 0)) if state == "queued" else 0
+    if "queueClass" in receipt:
+        meta["queueClass"] = str(receipt["queueClass"] or "")[:24]
+    if key and receipt.get("turnCorrelationVersion") == 1:
+        meta.update(admissionKey=key, turnCorrelationVersion=1)
+    row.metadata_ = meta
+    return True
+
+
 async def record_dispatch(session: AsyncSession, task: models.Task, dispatch: dict, *,
-                          workflow_run_id: str = "", node_run_id: str = "") -> None:
+                          workflow_run_id: str = "", node_run_id: str = "") -> am.ExecutionSession | None:
     """Persist an execution immediately after successful dispatch, before its first heartbeat. This
     establishes authoritative routing for terminals, directories, artifacts, and cancellation;
     later heartbeats idempotently update the same ref.
@@ -445,6 +475,14 @@ async def record_dispatch(session: AsyncSession, task: models.Task, dispatch: di
                     or str(dispatch.get("assigneeId") or "").startswith("local:")):
         rid = "backend-local"
     row = await _get_or_create_session(session, task.id, ref)
+    # A legacy positive probe only supplies existence. Prefer telemetry already
+    # recorded for this ref over the historical running fallback.
+    applied = False
+    if dispatch.get("state") or not row.runner_id:
+        state = canonical_state(dispatch.get("state"), "running")
+        if state not in {"queued", "dispatching", "running"} and not is_terminal(state):
+            state = "running"
+        applied = apply_admission_receipt(row, {**dispatch, "state": state})
     row.task_id = task.id
     # Persist exact plugin-node identity in the dispatch transaction so evidence never relies on time-window inference.
     if workflow_run_id:
@@ -455,9 +493,12 @@ async def record_dispatch(session: AsyncSession, task: models.Task, dispatch: di
         from . import runner_hub
         runner = None if rid == "backend-local" else runner_hub.get(rid)
         row.runner_id = rid
-        row.runner_client_id = str(
-            task.owner_client_id if rid == "backend-local"
-            else getattr(runner, "client_id", "") or "")[:64]
+        if rid == "backend-local":
+            row.runner_client_id = str(task.owner_client_id or "")[:64]
+        elif "runnerClientId" in dispatch:
+            row.runner_client_id = str(dispatch["runnerClientId"] or "")[:64]
+        elif not row.runner_client_id:
+            row.runner_client_id = str(getattr(runner, "client_id", "") or "")[:64]
         row.host = str(dispatch.get("host") or getattr(runner, "host", "")
                        or ("后端执行机" if rid == "backend-local" else "")
                        or row.host or "")[:100]
@@ -467,23 +508,16 @@ async def record_dispatch(session: AsyncSession, task: models.Task, dispatch: di
                      or row.engine or "")[:60]
     if dispatch.get("model"):
         row.model = str(dispatch.get("model") or "")[:160]
-    row.state = canonical_state(row.state)
-    incoming_state = canonical_state(dispatch.get("state"), "running")
-    if row.state not in _TERMINAL:
-        row.state = (incoming_state if incoming_state in {
-            "queued", "dispatching", "running"} else "running")
-    if row.state in {"dispatching", "running"}:
-        row.started_at = row.started_at or datetime.now(timezone.utc)
     meta = dict(row.metadata_ or {})
     meta.setdefault("round", max(1, int(dispatch.get("round") or 1)))
-    meta["queued"] = row.state == "queued"
-    meta["queuePosition"] = max(0, int(dispatch.get("queuePosition") or 0))
-    meta["queueClass"] = str(dispatch.get("queueClass") or "")[:24]
-    if dispatch.get("runnerBootId"):
-        # Queue payloads deliberately stay in Runner memory.  Persist only the process
-        # identity so a later reconnect can distinguish a network flap (same boot) from
-        # a real process restart that has lost the queue.
+    if applied and dispatch.get("runnerBootId"):
+        # Bind the acknowledged receipt to the process that supplied it.
         meta["runnerBootId"] = str(dispatch.get("runnerBootId") or "")[:64]
+    if applied and rid and rid != "backend-local" and dispatch.get("state") == "queued":
+        from .queued_dispatch_lease import renew
+        now = datetime.now(timezone.utc)
+        renew(meta, now)
+        row.updated_at = now
     from . import execution_identity
     identity_data = dict(dispatch)
     if rid and rid != "backend-local":
@@ -515,6 +549,7 @@ async def record_dispatch(session: AsyncSession, task: models.Task, dispatch: di
                            {"ref": ref, "by": "dispatch"})
     await project_context.record_dispatch(
         session, task, dispatch, execution_ref=ref)
+    return row
 
 
 async def task_runner_route(session: AsyncSession, task_id: str) -> dict:
@@ -554,55 +589,6 @@ async def warm_remote_cache(session: AsyncSession) -> int:
     for row in rows:
         ai_remote.remember(row.ref, row.runner_id)
     return len(rows)
-
-
-async def reconcile_runner_restart(session: AsyncSession, runner) -> list[dict]:
-    """Close queued rows whose in-memory admission queue died with a Runner process.
-
-    A WebSocket reconnect keeps ``boot_id`` and therefore keeps the live queue.  A
-    process restart changes it; queued payloads (and their short-lived credentials) are
-    intentionally not persisted.  Leaving those rows as ``queued`` forever is worse than
-    an explicit interruption: the normal task retry/redispatch path can safely rebuild
-    fresh credentials and inputs, while an old payload cannot be replayed safely.
-    """
-    runner_id = str(getattr(runner, "id", "") or "")[:80]
-    boot_id = str(getattr(runner, "boot_id", "") or "")[:64]
-    if not runner_id or not boot_id:
-        return []
-    rows = list((await session.execute(select(am.ExecutionSession).where(
-        am.ExecutionSession.runner_id == runner_id,
-        am.ExecutionSession.state == "queued",
-    ))).scalars().all())
-    stale = []
-    for row in rows:
-        meta = dict(row.metadata_ or {})
-        previous_boot = str(meta.get("runnerBootId") or "")
-        # Old rows have no reliable process identity.  Do not guess: only new-protocol
-        # rows can be closed authoritatively.
-        if not previous_boot or previous_boot == boot_id:
-            continue
-        row.state = "interrupted"
-        row.finished_at = row.finished_at or datetime.now(timezone.utc)
-        meta["queued"] = False
-        meta["queuePosition"] = 0
-        meta["error"] = (
-            "执行机在需求排队期间重启，内存队列已安全失效；请从需求中重新安排执行。")
-        meta["interruptedReason"] = "runner-restarted-before-launch"
-        meta["observedRunnerBootId"] = boot_id
-        row.metadata_ = meta
-        stale.append(row)
-        session.add(models.TaskEvent(
-            task_id=row.task_id, kind="ai.session_reconciled", actor="SoduWork",
-            detail={"ref": row.ref, "from": "queued", "to": "interrupted",
-                    "reason": meta["error"], "runnerId": runner_id}))
-    if not stale:
-        return []
-    task_ids = {row.task_id for row in stale}
-    tasks = {task.id: task for task in list((await session.execute(
-        select(models.Task).where(models.Task.id.in_(task_ids)))).scalars().all())}
-    return [{"taskId": row.task_id,
-             "clientId": str(getattr(tasks.get(row.task_id), "owner_client_id", "") or ""),
-             "session": session_api(row)} for row in stale]
 
 
 async def reconcile_local_sessions(session: AsyncSession) -> int:
@@ -823,9 +809,13 @@ async def ingest_runner_snapshots(session: AsyncSession, runner, snapshots: list
         previous_round = int(previous_meta.get("round") or 1)
         incoming_round = int(snap.get("round") or previous_round)
         incoming_state = canonical_state(snap.get("status") or snap.get("state"))
+        direct_key = "dispatch:" + ref
+        stale_queue = (incoming_round == previous_round == 1 and incoming_state == "queued"
+                       and old_state in {"starting", "running"}
+                       and (snap.get("admissionKey") or previous_meta.get("admissionKey")) == direct_key)
         if (incoming_round < previous_round or
                 (incoming_round == previous_round and (
-                    int(snap.get("seq") or 0) < int(row.seq or 0) or
+                    stale_queue or int(snap.get("seq") or 0) < int(row.seq or 0) or
                     (old_state in _TERMINAL and incoming_state not in _TERMINAL)))):
             # Delayed transport may repair historical gaps but cannot rewind a
             # newer round, its billing identity, approvals or terminal settlement.
@@ -894,6 +884,14 @@ async def ingest_runner_snapshots(session: AsyncSession, runner, snapshots: list
             meta.pop("turnCorrelationVersion", None)
         meta["executionIdentity"] = execution_identity.from_snapshot(
             meta.get("executionIdentity"), snap, runner)
+        if (incoming_state == "queued" and next_round == 1 and runner_id not in ("", "backend-local")
+                and meta.get("admissionKey") in (None, "", "dispatch:" + ref)):
+            from .queued_dispatch_lease import renew
+            renew(meta, now)
+            row.updated_at = now
+        elif new_turn or row.state != "queued":
+            for key in ("queueLeaseCheckedAt", "queueLeaseProbeAt", "queueLeaseStatus", "queueLeaseReason"):
+                meta.pop(key, None)
         if not row.model and "model" not in snap:
             row.model = str(meta["executionIdentity"].get("model") or "")[:160]
         row.metadata_ = meta

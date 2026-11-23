@@ -2159,11 +2159,18 @@ async def admin_ai_status_task(
     from ..services import ai_exec
     await _assert_task_in_scope(session, user, tid)
     ev = await ai_exec.last_dispatch_event(session, tid)   # Recognize historical multica.* events as well.
+    from ..services.dispatch_reconcile import status_for_uncertain
+    pending = await status_for_uncertain(session, tid)
+    if pending:
+        return {"dispatched": True, "done": False, **pending}
     if ev is None:
         return {"dispatched": False}
     d = ev.detail or {}
     ctx = await ai_exec.load(session)
     s = await _aio.to_thread(ai_exec.status_sync, ctx, d.get("ref") or d.get("issueId", ""))
+    if not (s.get("ok") or s.get("done")):
+        from ..services.queued_dispatch_lease import status_for_task
+        s.update(await status_for_task(session, tid, d.get("ref") or d.get("issueId", "")))
     # Import available outputs idempotently: avoid duplicate attachments and unchanged URL events.
     # Check output existence directly; running status is not a reliable prerequisite.
     if s.get("ok") and (s.get("attachments") or s.get("artifactUrl")):

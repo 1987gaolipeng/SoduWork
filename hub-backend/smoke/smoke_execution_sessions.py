@@ -6,6 +6,7 @@ import asyncio
 import os
 import sys
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 
 from sqlalchemy import func, select
 
@@ -21,7 +22,7 @@ sys.path.insert(0, ".")
 from app import automation_models as am, models  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.services import (ai_exec, ai_local, dispatch_attempts,  # noqa: E402
-                          execution_sessions, execution_settlement,
+                          execution_sessions, execution_settlement, queued_dispatch,
                           tasks as task_service)
 
 CID = "u-smoke-execution-session"
@@ -172,17 +173,45 @@ async def main():
             })
         chk("Unregistered runners cannot overwrite queue identity or position",
             unknown is None and execution_sessions.session_api(queued_row).get("queuePosition") == 2)
-        same_process = Runner()
-        same_process.boot_id = "boot-original"
-        same_boot = await execution_sessions.reconcile_runner_restart(s, same_process)
-        chk("Runner 仅断线重连时保留仍有效的内存队列", same_boot == [], same_boot)
         restarted = Runner()
+        restarted.alive = lambda: True
+        restarted.caps = []
         restarted.boot_id = "boot-new"
-        recovered = await execution_sessions.reconcile_runner_restart(s, restarted)
+        restarted.call = AsyncMock()
+        candidate = queued_dispatch.Candidate.from_row(queued_row)
+        legacy = await queued_dispatch.probe(restarted, REF_QUEUE)
+        chk("Changing boot alone cannot interrupt a queued dispatch on a legacy Runner",
+            not await queued_dispatch.apply_receipt(s, restarted, candidate, legacy)
+            and queued_row.state == "queued" and not restarted.call.called)
+        restarted.caps = ["admit1"]
+        evidence = {"has": True, "persisted": True, "admissionDurable": True,
+                    "bootId": "boot-new", "ref": REF_QUEUE, "admissionKey": "dispatch:" + REF_QUEUE,
+                    "state": "queued", "queued": True, "queuePosition": 1, "queueClass": "task"}
+        restarted.call.return_value = {"ok": True, "data": dict(evidence, admissionKey="other")}
+        wrong_key = await queued_dispatch.probe(restarted, REF_QUEUE)
+        chk("An unrelated journal entry cannot renew the acknowledged dispatch", not wrong_key.get("receipt"))
+        restarted.call.return_value = {"ok": True, "data": evidence}
+        confirmed = await queued_dispatch.probe(restarted, REF_QUEUE)
+        recovered = await queued_dispatch.apply_receipt(s, restarted, candidate, confirmed)
         await s.commit()
-        chk("Runner 进程重启后排队幽灵单收敛为可重试的中断态",
-            len(recovered) == 1 and recovered[0]["session"]["status"] == "interrupted"
-            and "重新安排执行" in recovered[0]["session"]["error"], recovered)
+        chk("A durable queue receipt survives process replacement with its real position and no redispatch",
+            len(recovered) == 1 and recovered[0]["session"]["status"] == "queued"
+            and recovered[0]["session"]["queuePosition"] == 1 and queued_row.started_at is None
+            and queued_row.metadata_.get("runnerBootId") == "boot-new"
+            and queued_row.metadata_.get("queueLeaseCheckedAt")
+            and all(call.args == ("job.has", {"ref": REF_QUEUE, "admissionKey": "dispatch:" + REF_QUEUE})
+                    for call in restarted.call.await_args_list), recovered)
+        chk("A second Hub cannot overwrite the receipt with its older view",
+            await queued_dispatch.lock_candidate(s, candidate) is None)
+        await s.refresh(queued_row)
+        candidate = queued_dispatch.Candidate.from_row(queued_row)
+        restarted.call.return_value = {"ok": True, "data": dict(evidence, state="failed", error="test failure")}
+        terminal = await queued_dispatch.probe(restarted, REF_QUEUE)
+        settled = await queued_dispatch.apply_receipt(s, restarted, candidate, terminal)
+        await s.commit()
+        chk("A terminal journal receipt requests the normal terminal settlement",
+            len(settled) == 1 and settled[0].get("settleTerminal") == "failed"
+            and settled[0]["session"]["status"] == "failed", settled)
 
     inserted = asyncio.Event()
 

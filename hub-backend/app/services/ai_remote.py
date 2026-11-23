@@ -342,6 +342,11 @@ def dispatch_sync(cfg: dict, t, files: list | None = None,
     expected_ref = dispatch_identity.execution_ref(dispatch_id)
     if r is None:
         return {"ok": False, "error": "那台执行机不在线了（%s）" % (rid or "没指定")}
+    if (assignee or {}).get("dispatchIntentAt") and (
+            str(assignee.get("runnerBootId") or "") != str(getattr(r, "boot_id", "") or "")
+            or str(assignee.get("clientId") or "") != str(r.client_id or "")):
+        return {"ok": False, "code": "RUNNER_ROUTE_CHANGED", "retryable": True,
+                "error": "执行机连接已更换，请刷新后重新安排执行"}
     if not runner_hub.can_dispatch(r):
         return {"ok": False, "error": "本机 Runner 当前不接新需求，请恢复接单后重试"}
     allowed = cfg.get("allowedClients")
