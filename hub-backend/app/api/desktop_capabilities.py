@@ -17,8 +17,12 @@ router = APIRouter(prefix="/api/v1/desktop-capabilities", tags=["mobile"])
 OPERATIONS = {"catalog", "library.call", "conversation.history", "skill.set", "plugin.get", "plugin.preflight", "plugin.install", "plugin.use"}
 
 
+def canonical_bytes(body):
+    return json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
 def digest(body):
-    return hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(canonical_bytes(body)).hexdigest()
 
 
 def owner(client):
@@ -81,7 +85,7 @@ async def request(cid: str, body: dict = Body(...), client=Depends(current_clien
             or body.get("operation") not in OPERATIONS or not isinstance(body.get("args"), dict)
             or not isinstance(body.get("requestId"), str)
             or not re.fullmatch(r"[a-zA-Z0-9_-]{8,80}", body["requestId"])
-            or len(json.dumps(body, ensure_ascii=False).encode()) > 512_000):
+            or len(canonical_bytes(body)) > 512_000):
         raise HTTPException(422, "操作内容不正确")
     uid = owner(client)
     _, runner = await resolve(session, client, cid)
