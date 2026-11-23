@@ -7,7 +7,7 @@ from fastapi import APIRouter, Body, Depends, Query, Response
 
 from .. import models
 from ..db import get_session
-from ..deps import current_client, require_perm
+from ..deps import current_client, require_perm, without_device_heartbeat
 from ..services import audit, memory_records as svc
 
 router = APIRouter(prefix="/api/v1/memories", tags=["memory-records"])
@@ -32,13 +32,12 @@ async def create(body: svc.MemoryWrite, client=Depends(current_client), session=
 
 
 @router.get("/organization-context")
+@without_device_heartbeat
 async def organization_context(response: Response, client=Depends(current_client), session=Depends(get_session)):
     from ..services import org_memory
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["Vary"] = "Authorization"
-    value = await org_memory.for_client(session, client)
-    await session.commit()
-    return value
+    return await org_memory.for_client(session, client)
 
 
 @router.get("/{rid}")
