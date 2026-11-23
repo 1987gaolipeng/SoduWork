@@ -51,7 +51,7 @@ export function PlanEditor({ plan, config, onConfig, onClose, onSaved }) {
     finally { setBusy(false) }
   }
   return <Modal draft={draft} title={plan ? tx('编辑套餐') : tx('新建套餐')} icon="ticket" wide className="qm-editor" onClose={busy ? undefined : onClose}
-    foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx('取消')}</button><button className="btn btn-primary" disabled={busy || conflict || !!impact.pending || !!impact.error} onClick={save}>{busy ? tx('保存中…') : refreshed ? tx('覆盖此项并保存') : tx('保存套餐')}</button></>}>
+    foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx('取消')}</button><button className="btn btn-primary" disabled={busy || conflict || !!impact.pending} onClick={save}>{busy ? tx('保存中…') : refreshed ? tx('覆盖此项并保存') : tx('保存套餐')}</button></>}>
     <p className="qm-note">{trial ? tx('注册后自动领取一次。修改只影响之后注册的新用户，已有试用不会延长或重置。') : tx('每个自然月重新计算。修改立即生效，切换套餐或调整额度不会清空已用量。')}</p>
     <label className="qm-field"><span>{tx('套餐名称')}</span><input className="f-in" value={draft.name} maxLength={60} onChange={e => setDraft({ ...draft, name: e.target.value })} /></label>
     <label className="qm-field"><span>{tx('套餐说明')}</span><input className="f-in" value={draft.description} maxLength={300} onChange={e => setDraft({ ...draft, description: e.target.value })} /></label>
@@ -91,7 +91,7 @@ export function MemberEditor({ member, config, onConfig, onClose, onSaved }) {
     finally { setBusy(false) }
   }
   return <Modal draft={draft} title={tx('分配成员额度')} icon="users" wide className="qm-editor" onClose={busy ? undefined : onClose}
-    foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx('取消')}</button><button className="btn btn-primary" disabled={busy || conflict || impact.pending || !!impact.error} onClick={save}>{busy ? tx('保存中…') : refreshed ? tx('覆盖此项并保存') : tx('保存分配')}</button></>}>
+    foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx('取消')}</button><button className="btn btn-primary" disabled={busy || conflict || impact.pending} onClick={save}>{busy ? tx('保存中…') : refreshed ? tx('覆盖此项并保存') : tx('保存分配')}</button></>}>
     <div className="qm-member-identity"><b>{member.displayName || member.username}</b><span>{member.username}</span></div>
     <p className="qm-note">{tx('调整后立即生效，当前周期已用量保留；新注册试用只能领取一次。')}</p>
     {current.quota.models?.some(row => row.unattributedUsed > 0) && <p className="qm-help">{tx('部分旧版用量未记录服务商，已计入同模型额度；真实总用量只计算一次。')}</p>}

@@ -6,7 +6,17 @@ import logging
 import os
 import uuid
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +26,13 @@ from ..db import get_session
 from ..deps import current_ai_client, current_client
 from ..models import Attachment, Client, Task
 from ..schemas import attachment_to_api
-from ..services import attachment_ownership, resource_access, storage, task_access, task_requirements
+from ..services import (
+    attachment_ownership,
+    resource_access,
+    storage,
+    task_access,
+    task_requirements,
+)
 from ..services.library_conversation_save import stream_digest
 
 router = APIRouter(prefix="/api/v1", tags=["attachments"])
