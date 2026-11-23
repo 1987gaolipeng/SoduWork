@@ -41,6 +41,18 @@ async def catalog(chk):
         all("agent_route_selection.resolve_sync" in inspect.getsource(fn) for fn in (
             plugin_route_readiness.check, plugin_evaluations.start,
             workflow_engine._execute_ai)), "路由规则不能在插件子系统中复制")
+    from app.services import plugin_manifest
+    source = {"key": "source", "type": "ai", "config": {"prompt": "Choose a branch"}}
+    branch = {"key": "branch", "type": "ai", "config": {"prompt": "Run the branch", "when": {"node": "source", "equals": True}}}
+    _, normalized, _ = plugin_manifest.normalize(BASE, {"nodes": [branch, source]})
+    chk("Conditional sources become graph dependencies", normalized["nodes"][0]["dependsOn"] == ["source"])
+    for nodes in ([branch], [branch, {**source, "dependsOn": ["branch"]}]):
+        try:
+            plugin_manifest.normalize(BASE, {"nodes": nodes})
+        except ValueError:
+            chk("Missing and cyclic conditional sources are rejected", True)
+        else:
+            chk("Missing and cyclic conditional sources are rejected", False)
     route_node = {
         "key": "review", "type": "ai_review", "name": "AI 审查",
         "config": {"agentKind": "local:qwen", "model": "review-v1",
