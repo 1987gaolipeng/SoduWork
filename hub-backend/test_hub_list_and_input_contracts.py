@@ -17,7 +17,7 @@ from app import automation_models, models
 from app.db import Base, get_session
 from app.deps import current_client, current_user
 from app.library_models import LibraryFolder, LibraryItem
-from app.api import admin, approvals, clients, deliveries, environments, first_chat, library, runner_ws, tasks, usage, work_catalog
+from app.api import admin, approvals, clients, deliveries, environments, first_chat, library, quotas, runner_ws, tasks, usage, work_catalog
 from app.permissions import ALL_KEYS
 
 
@@ -152,6 +152,25 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(field, result["detail"])
         await self.request("POST", "admin/deployment-targets", expected=404,
                            json={"repoId": "missing", "environmentId": "staging"})
+
+    async def test_account_status_filters_before_pagination_and_keeps_legacy_lists(self):
+        self.app.include_router(quotas.router)
+        async with self.sessions() as session, session.begin():
+            member = await session.get(models.User, "row-1")
+            member.is_active = False
+        for path in ("admin/users", "admin/quotas/members"):
+            with self.subTest(path=path):
+                legacy = await self.request("GET", path)
+                self.assertEqual(len(legacy if isinstance(legacy, list) else legacy["items"]), 3)
+                disabled = await self.request("GET", path + "?isActive=false&limit=1")
+                self.assertEqual(disabled["total"], 1)
+                self.assertEqual([(u["id"], u["isActive"]) for u in disabled["items"]], [("row-1", False)])
+                active = await self.request("GET", path + "?isActive=true&limit=1&offset=1")
+                self.assertEqual(active["total"], 2)
+                self.assertEqual(len(active["items"]), 1)
+                self.assertTrue(active["items"][0]["isActive"])
+        result = await self.request("GET", "admin/quotas/members?q=row-1&isActive=true")
+        self.assertEqual((result["items"], result["total"]), ([], 0))
 
     async def test_admin_and_device_list_windows(self):
         for i in range(2):

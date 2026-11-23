@@ -52,10 +52,14 @@ async def report_usage(
     if not incoming or len(incoming) > 100 or any(not isinstance(item, dict) for item in incoming):
         raise HTTPException(status_code=400, detail="没有可上报的用量")
     incoming = [_validate_event_time(item) for item in incoming]
-    rows = []
+    receipts = []
     try:
-        for item in incoming:
-            rows.append(await usage_ledger.from_client(session, client, item))
+        prepared = [await usage_ledger.prepare_client_event(session, client, item) for item in incoming]
+        for key, values in prepared:
+            row, status = await usage_ledger.record_cumulative(session, key, values)
+            receipts.append({**usage_ledger.to_api(row), "status": status})
+    except usage_ledger.InvalidUsageSource as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
@@ -63,8 +67,7 @@ async def report_usage(
     quota = await client_access.quota_status(
         session, str(client.user_ref or ""))
     # Exhaustion changes AI admission, not identity or business connectivity.
-    return {"ok": True, "accepted": len(rows),
-            "events": [usage_ledger.to_api(row) for row in rows],
+    return {"ok": True, "accepted": len(receipts), "events": receipts,
             "quota": quota}
 
 
@@ -112,9 +115,10 @@ async def admin_runner_usage(
     """
     from ..services import runner_admin_scope
     from .admin import _visible_client_ids
-    return {"days": max(1, min(365, int(days or 30))),
+    window = max(1, min(365, int(days or 30)))
+    return {"days": window,
             "runners": await usage_stats.runner_usage(
-                session, days=days,
+                session, days=window,
                 task_client_ids=await _visible_client_ids(session, user),
                 runner_client_ids=await runner_admin_scope.admin_allowed(session, user),
                 runner_org_ids=await runner_admin_scope.admin_orgs(session, user))}
