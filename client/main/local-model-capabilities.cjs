@@ -173,7 +173,7 @@ async function check(input, options = {}) {
           stored.targets[model.id]?.runSequence !== runSequence || controller.signal.reason?.message === 'Configuration changed') {
         throw Error('本地模型配置在检测期间已变化，请重新检测');
       }
-      if (controller.signal.aborted) report = { reportVersion: 2, apiFamily: contract.API_FAMILY,
+      if (controller.signal.aborted) report = { reportVersion: 3, apiFamily: contract.API_FAMILY,
         checkedAt: new Date().toISOString(), compatibility: previous?.compatibility,
         checks: Object.fromEntries(input.checks.map(key => [key, { status: 'cancelled', code: 'cancelled', checkedAt: new Date().toISOString() }])) };
       const evidence = contract.mergeEvidence(stored.targets[model.id].evidence,

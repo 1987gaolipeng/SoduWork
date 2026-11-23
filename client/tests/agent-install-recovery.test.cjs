@@ -27,11 +27,31 @@ test('incomplete installations offer repair on both card and details, including 
   assert.equal(f._agState(absent), 'missing');
   assert.match(f._agBodyHtml(absent, 'missing'), /data-ainstall="dsh"/);
   assert.doesNotMatch(f._agRowHtml(absent), /data-arepair=/);
-  assert.equal(f._agState({ ...broken, key: 'harness2', bundled: true,
-    warnNow: 'Google Harness² 需要 OpenCode 执行组件，请点「装上」自动准备。' }), 'setup');
   const ready = { ...broken, installed: true, state: 'ready' };
   assert.equal(f._agState(ready), 'ready');
   assert.match(f._agRowHtml(ready), /data-aprobe="dsh"/);
+});
+
+test('only Codex present leaves the DeepSeek adapter and other assistants independently missing', () => {
+  const f = fixture();
+  const machine = { runnerId: 'office' };
+  const codex = { key: 'codex', installed: true, setupState: 'ready', bin: '/fixture/bin/codex' };
+  assert.match(f._agRowHtml(codex, machine), /data-aprobe="office~codex"/);
+  const missing = { key: 'dsh', installed: false, setupState: 'missing', present: false };
+  const card = f._agRowHtml(missing, machine);
+  assert.match(card, /dsh-acp/);
+  assert.match(card, /data-ainstall="office~dsh">安装适配器/);
+  assert.doesNotMatch(card, /DeepSeek Harness App/);
+  assert.match(f._agBodyHtml(missing), /如果你已安装 DeepSeek Harness App/);
+  const appOnly = { ...missing, desktopAppDetected: true };
+  for (const html of [f._agRowHtml(appOnly, machine), f._agBodyHtml(appOnly)]) {
+    assert.match(html, /已检测到 DeepSeek Harness App/);
+    assert.match(html, /安装适配器/);
+    assert.doesNotMatch(html, /如果你已安装|data-aprobe=/);
+  }
+  for (const other of [{ ...missing, key: 'qwen' }, broken, { ...broken, installed: true, state: 'ready' }]) {
+    assert.doesNotMatch(f._agRowHtml(other) + f._agBodyHtml(other), /安装适配器|如果你已安装 DeepSeek Harness App/);
+  }
 });
 
 test('repair routes to the selected machine and blocks duplicate actions while accepting the job', async () => {

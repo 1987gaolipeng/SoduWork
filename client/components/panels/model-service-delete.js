@@ -15,11 +15,19 @@ function _mdDeleteCatalogState(providers, models) {
   ]));
 }
 
+function _mdDeleteManagedCatalog(providers, models, excludedId = '') {
+  const own = providers.filter(row => row.personal === true && row.localOnly !== true && row.id !== excludedId);
+  const ids = new Set(own.map(row => row.id));
+  return { providers: own, models: models.filter(row => row.localOnly !== true && ids.has(row.providerId)) };
+}
+
 function _mdGuardServiceDelete(plan) {
+  const provider = _mdProvider(plan.pid);
+  if (provider && (provider.personal !== true || (provider.localOnly === true) !== plan.local))
+    throw _mdDeleteError(_mdDeleteText('此服务无法删除，请刷新后重试。'));
   if (plan.local || !plan.body) return;
-  const otherManaged = id => id !== plan.pid && !_mdProvider(id)?.localOnly;
-  const providers = _mdData.providers.filter(row => !row.localOnly && row.id !== plan.pid);
-  const models = _mdMyModels.filter(row => !row.localOnly && otherManaged(row.providerId));
+  const otherManaged = id => id !== plan.pid && _mdProvider(id)?.personal === true && _mdProvider(id)?.localOnly !== true;
+  const { providers, models } = _mdDeleteManagedCatalog(_mdData.providers, _mdMyModels, plan.pid);
   // The Hub does not return the deletion's committed revision. Keep unrelated
   // drafts saveable instead of admitting a deletion that would lock them out.
   if (Object.keys(_mdKeyEdits).some(otherManaged) ||
@@ -30,7 +38,7 @@ function _mdGuardServiceDelete(plan) {
 
 async function _mdPrepareServiceDelete(pid) {
   const provider = _mdProvider(pid);
-  if (!provider?.personal) throw _mdDeleteError(_mdDeleteText('此服务无法删除，请刷新后重试。'));
+  if (provider?.personal !== true) throw _mdDeleteError(_mdDeleteText('此服务无法删除，请刷新后重试。'));
   const plan = { pid, name: String(provider.name || '').trim() ? provider.name : _mdDeleteText('未命名服务'), local: provider.localOnly === true,
     loadId: _mdLoadId, scope: SoduWorkAPI.taskStorageKey?.('ops'),
     draftOnly: _mdNew?.id === pid && !_mdData.providers.some(row => row.id === pid) };
@@ -42,7 +50,7 @@ async function _mdPrepareServiceDelete(pid) {
   if (catalog.revision !== (plan.local ? _mdData.localRevision : _mdData.revision))
     throw _mdDeleteError(_mdDeleteText('服务配置已变化，请重新打开模型页面后重试。'));
   const stored = catalog.providers.find(row => row.id === pid);
-  if (stored && (!stored.personal || (stored.localOnly === true) !== plan.local))
+  if (stored && (stored.personal !== true || (stored.localOnly === true) !== plan.local))
     throw _mdDeleteError(_mdDeleteText('此服务无法删除，请刷新后重试。'));
   plan.count = catalog.myModels.filter(row => row.providerId === pid).length;
   plan.hasKey = Boolean(stored && ((stored.myKeyLen || 0) > 0 ||
@@ -53,12 +61,11 @@ async function _mdPrepareServiceDelete(pid) {
       localModels: catalog.myModels.filter(row => row.providerId !== pid),
       localKeys: { [pid]: null }, localRevision: catalog.revision };
   } else {
-    const localIds = new Set(catalog.providers.filter(row => row.localOnly).map(row => row.id));
+    const own = _mdDeleteManagedCatalog(catalog.providers, catalog.myModels, pid);
     // Removing a personal provider also removes its saved key on the Hub.
     // A redundant raw-ID key patch would be ambiguous when a device service
     // has the same ID, since the deleted managed provider is absent below.
-    plan.body = { providers: catalog.providers.filter(row => !row.localOnly && row.id !== pid),
-      models: catalog.myModels.filter(row => !row.localOnly && !localIds.has(row.providerId) && row.providerId !== pid),
+    plan.body = { providers: own.providers, models: own.models,
       keys: {}, expectedRevision: catalog.revision };
   }
   _mdGuardServiceDelete(plan);
@@ -78,7 +85,7 @@ function _mdApplyServiceDeletion(plan, result, latest) {
   for (const type of ['image', 'video']) if (_mdData.mediaUsable?.[type])
     _mdData.mediaUsable[type] = _mdData.mediaUsable[type].filter(row => row.providerId !== pid);
   delete _mdKeyEdits[pid]; delete _mdTest[pid]; _mdDrafts.delete(pid); _mdLocalKeyIds.delete(pid);
-  for (const key of _mdChecks.keys()) if (JSON.parse(key)[0] === pid) _mdChecks.delete(key);
+  _mdClearProviderChecks(pid);
   if (_mdNew?.id === pid) _mdNew = null;
   if (_mdValidation?.providerId === pid) _mdValidation = null;
   if (plan.local) {
@@ -87,11 +94,11 @@ function _mdApplyServiceDeletion(plan, result, latest) {
   } else if (plan.body) {
     // Preserve edits to other providers; clear the flag if only the deleted
     // provider had edits. Compare user-editable fields, not derived probe data.
-    _mdManagedDirty = Object.keys(_mdKeyEdits).some(id => !_mdProvider(id)?.localOnly) ||
-      _mdDeleteCatalogState(_mdData.providers.filter(row => !row.localOnly),
-        _mdMyModels.filter(row => !row.localOnly && !_mdProvider(row.providerId)?.localOnly)) !==
-      _mdDeleteCatalogState(plan.body.providers, plan.body.models);
-    const hasManagedEditor = [..._mdDrafts].some(([id, draft]) => !_mdProvider(id)?.localOnly && (draft.original || draft.changed));
+    const own = _mdDeleteManagedCatalog(_mdData.providers, _mdMyModels);
+    const managedId = id => _mdProvider(id)?.personal === true && _mdProvider(id)?.localOnly !== true;
+    _mdManagedDirty = Object.keys(_mdKeyEdits).some(managedId) ||
+      _mdDeleteCatalogState(own.providers, own.models) !== _mdDeleteCatalogState(plan.body.providers, plan.body.models);
+    const hasManagedEditor = [..._mdDrafts].some(([id, draft]) => managedId(id) && (draft.original || draft.changed));
     _mdManagedNeedsReload = latest?.revision == null || _mdManagedDirty || hasManagedEditor;
     if (!_mdManagedNeedsReload) {
       // Public fields cannot reveal a same-length secret change. Accept a read
@@ -108,7 +115,7 @@ function _mdApplyServiceDeletion(plan, result, latest) {
         (_mdData.mediaUsable?.[type] || []).filter(isLocal).concat((latest.mediaUsable?.[type] || []).filter(row => !isLocal(row)))]));
     }
   }
-  _mdDirty = _mdLocalDirty || _mdManagedDirty || Object.keys(_mdKeyEdits).length > 0;
+  _mdDirty = _mdLocalDirty || _mdManagedDirty || Object.keys(_mdKeyEdits).some(id => _mdProvider(id)?.personal === true);
   if (_mdOpen === pid) _mdOpen = neighbour;
   if (_mdEditor === pid || _mdEditor === '__new__:' + pid) _mdEditor = '';
 }
@@ -128,9 +135,8 @@ function _mdDeleteService(plan) {
         try {
           const candidate = await SoduWorkAPI.myModels();
           if (candidate?.revision != null && Array.isArray(candidate.providers) && Array.isArray(candidate.myModels)) {
-            const localIds = new Set(candidate.providers.filter(row => row.localOnly).map(row => row.id));
-            if (_mdDeleteCatalogState(candidate.providers.filter(row => !row.localOnly),
-              candidate.myModels.filter(row => !row.localOnly && !localIds.has(row.providerId))) ===
+            const own = _mdDeleteManagedCatalog(candidate.providers, candidate.myModels);
+            if (_mdDeleteCatalogState(own.providers, own.models) ===
               _mdDeleteCatalogState(plan.body.providers, plan.body.models)) latest = candidate;
           }
         } catch (_) { /* Keep the revision locked until a successful, consistent read. */ }
@@ -156,7 +162,7 @@ function _mdDeleteService(plan) {
 function _mdCloseDeleteDialog() { _mdDeleteDialog?.finish(false); }
 
 function _mdConfirmServiceDelete(pid) {
-  if (_mdSaveFlight || _mdDeleteDialog || !_mdProvider(pid)?.personal) return;
+  if (_mdSaveFlight || _mdDeleteDialog || _mdProvider(pid)?.personal !== true) return;
   const dialog = document.createElement('dialog');
   dialog.id = 'mdDeleteDialog'; dialog.className = 'md-delete-dialog';
   dialog.setAttribute('aria-labelledby', 'mdDeleteTitle'); dialog.setAttribute('aria-describedby', 'mdDeleteDescription');

@@ -6,7 +6,6 @@ import hashlib
 import io
 import json
 import os
-import platform
 import shutil
 import sys
 import tarfile
@@ -14,6 +13,7 @@ import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, ".")
 
@@ -30,12 +30,7 @@ def _manifest(path: str, value: dict) -> None:
 
 
 def _native_names() -> tuple[str, ...]:
-    if os.name != "nt":
-        return ()
-    machine = platform.machine().lower()
-    arch = "x64" if machine in ("amd64", "x86_64", "x64") else "arm64"
-    return (f"@img/sharp-win32-{arch}", f"@koromix/koffi-win32-{arch}",
-            f"@vscode/ripgrep-win32-{arch}")
+    return dsh_runtime._required_native_packages()
 
 
 def _integrity(path: str) -> str:
@@ -46,12 +41,30 @@ def _integrity(path: str) -> str:
 def _native_archive(folder: str, name: str, version: str) -> str:
     slug = name.replace("@", "").replace("/", "-")
     package = os.path.join(folder, slug, "package")
-    _manifest(os.path.join(package, "package.json"),
-              {"name": name, "version": version})
-    if name.startswith("@vscode/ripgrep-win32-"):
-        binary = Path(package) / "bin" / "rg.exe"
+    manifest = {"name": name, "version": version}
+    if name.startswith("@vscode/ripgrep-"):
+        files = ["bin/rg.exe" if "-win32-" in name else "bin/rg"]
+    elif name.startswith("@koromix/koffi-"):
+        target = name.removeprefix("@koromix/koffi-").replace("-", "_")
+        files = ["index.js", target + "/koffi.node"]
+        if target.startswith("linux_"):
+            files.append(target.replace("linux_", "musl_") + "/koffi.node")
+    elif "sharp-libvips-" in name:
+        binary = "lib/libvips-cpp.fixture" + (".dylib" if "darwin" in name else ".so")
+        manifest["exports"] = {"./binary": "./" + binary}
+        files = ["lib/index.js", binary]
+    else:
+        target = name.removeprefix("@img/sharp-")
+        files = ["index.cjs", f"lib/sharp-{target}-{version}.node"]
+        if "win32" in name:
+            _manifest(os.path.join(package, "versions.json"), {"vips": "8.18.7"})
+            files += ["lib/libvips-42.dll", "lib/libvips-cpp-8.18.7.dll"]
+    _manifest(os.path.join(package, "package.json"), manifest)
+    for relative in files:
+        binary = Path(package) / relative
         binary.parent.mkdir(parents=True, exist_ok=True)
-        binary.write_bytes(b"MZ fixture binary")
+        binary.write_bytes(b"native fixture")
+        binary.chmod(0o755)
     archive = os.path.join(folder, slug + ".tgz")
     with tarfile.open(archive, "w:gz") as bundle:
         bundle.add(package, arcname="package")
@@ -60,7 +73,7 @@ def _native_archive(folder: str, name: str, version: str) -> str:
 
 def _native_fixtures(folder: str) -> dict[str, dict]:
     fixtures = {}
-    versions = ("0.35.3", "3.1.6", "1.18.0")
+    versions = ("0.35.5", "3.1.1", "1.18.0", "1.3.4")
     for name, version in zip(_native_names(), versions):
         archive = _native_archive(folder, name, version)
         fixtures[name] = {
@@ -74,20 +87,11 @@ def _runtime_tree(root: str, fixtures: dict[str, dict],
                   *, install_native: bool) -> None:
     _manifest(os.path.join(root, "node_modules", "@deepseek-ai", "dsh",
                            "package.json"), {"version": VERSION})
-    names = _native_names()
-    if names:
-        _manifest(os.path.join(root, "node_modules", "sharp", "package.json"), {
-            "name": "sharp", "version": "0.35.3",
-            "optionalDependencies": {names[0]: fixtures[names[0]]["version"]},
-        })
-        _manifest(os.path.join(root, "node_modules", "koffi", "package.json"), {
-            "name": "koffi", "version": "3.1.6",
-            "optionalDependencies": {names[1]: fixtures[names[1]]["version"]},
-        })
-        _manifest(os.path.join(root, "node_modules", "@vscode", "ripgrep", "package.json"), {
-            "name": "@vscode/ripgrep", "version": "1.18.0",
-            "optionalDependencies": {names[2]: fixtures[names[2]]["version"]},
-        })
+    for owner, version in (("sharp", "0.35.5"), ("koffi", "3.1.1"), ("@vscode/ripgrep", "1.18.0")):
+        selected = {name: item["version"] for name, item in fixtures.items()
+                    if ("sharp" if "/sharp-" in name else "koffi" if "/koffi-" in name else "@vscode/ripgrep") == owner}
+        _manifest(os.path.join(root, "node_modules", *owner.split("/"), "package.json"),
+                  {"name": owner, "version": version, "optionalDependencies": selected})
     packages = {}
     for name, item in fixtures.items():
         packages["node_modules/" + name] = {
@@ -95,13 +99,9 @@ def _runtime_tree(root: str, fixtures: dict[str, dict],
             "optional": True,
         }
         if install_native:
-            _manifest(os.path.join(root, "node_modules", *name.split("/"),
-                                   "package.json"),
-                      {"name": name, "version": item["version"]})
-            if name.startswith("@vscode/ripgrep-win32-"):
-                binary = Path(root) / "node_modules" / name / "bin" / "rg.exe"
-                binary.parent.mkdir(parents=True, exist_ok=True)
-                binary.write_bytes(b"MZ fixture binary")
+            dsh_runtime._safe_extract(item["archive"],
+                                      os.path.join(root, "node_modules", *name.split("/")),
+                                      strip_prefix="package")
     _manifest(os.path.join(root, "package-lock.json"),
               {"lockfileVersion": 3, "packages": packages})
 
@@ -176,9 +176,81 @@ def _long_path_extraction() -> None:
             shutil.rmtree(native_stage, ignore_errors=True)
 
 
+def _native_platform_matrix() -> int:
+    checks = 0
+    for system, libc in (("win32", ""), ("darwin", ""), ("linux", "glibc"), ("linux", "musl")):
+        for arch in ("x64", "arm64"):
+            with tempfile.TemporaryDirectory(prefix="dsh-native-matrix-") as data_root, \
+                    patch.object(dsh_runtime.sys, "platform", system), \
+                    patch.object(dsh_runtime, "_arch", return_value=arch), \
+                    patch.object(dsh_runtime, "_linux_libc", return_value=libc), \
+                    patch.object(acp_agents, "find_bin", return_value=None):
+                # This is the native/custom wrapper matrix; do not discover a
+                # real installed Node from the machine running the fixture.
+                # Selected npm Node identities have their own regression matrix.
+                sharp_target = "linuxmusl" if libc == "musl" else system
+                names = dsh_runtime._required_native_packages()
+                assert names[:3] == (f"@img/sharp-{sharp_target}-{arch}",
+                                     f"@koromix/koffi-{system}-{arch}",
+                                     f"@vscode/ripgrep-{system}-{arch}")
+                assert names[3:] == (() if system == "win32" else
+                                     (f"@img/sharp-libvips-{sharp_target}-{arch}",))
+                fixtures = _native_fixtures(os.path.join(data_root, "packs"))
+                root = dsh_runtime.host_root(data_root)
+                _runtime_tree(root, fixtures, install_native=True)
+                assert dsh_runtime.runtime_issue(data_root, VERSION) == ""
+                checks += 3
+                executable = os.path.join(data_root, "adapter")
+                Path(executable).write_text("fixture")
+                with patch.object(dsh_runtime, "_probe_runtime", return_value="") as probe:
+                    assert dsh_runtime.boot_issue(executable, data_root, VERSION) == ""
+                    assert dsh_runtime.boot_issue(executable, data_root, VERSION) == ""
+                    assert probe.call_count == 1
+                    checks += 3
+                    for spec in dsh_runtime._native_specs(root):
+                        manifest = Path(dsh_runtime._package_file(root, spec["name"]))
+                        original = manifest.read_bytes()
+                        value = json.loads(original)
+                        value["version"] = "0.0.0-wrong"
+                        manifest.write_text(json.dumps(value))
+                        assert spec["name"] in dsh_runtime.boot_issue(executable, data_root, VERSION)
+                        manifest.write_bytes(original)
+                        manifest.rename(str(manifest) + ".removed")
+                        assert spec["name"] in dsh_runtime.runtime_issue(data_root, VERSION)
+                        Path(str(manifest) + ".removed").rename(manifest)
+                        checks += 2
+                        for filename in dsh_runtime._native_files(root, spec["name"], spec["version"]):
+                            binary = Path(filename)
+                            fingerprint = dsh_runtime._fingerprint(executable, data_root, VERSION)
+                            binary.rename(str(binary) + ".removed")
+                            assert spec["name"] in dsh_runtime.boot_issue(executable, data_root, VERSION)
+                            assert dsh_runtime._fingerprint(executable, data_root, VERSION) != fingerprint
+                            Path(str(binary) + ".removed").rename(binary)
+                            checks += 2
+                    assert dsh_runtime.boot_issue(executable, data_root, VERSION) == ""
+                    assert probe.call_count == 2  # restored binaries invalidate the cached handshake
+                    checks += 2
+                sentinel = Path(root) / "active-sentinel"
+                sentinel.write_text("keep")
+                stage = tempfile.mkdtemp(prefix=".dsh-host-stage-", dir=os.path.dirname(root))
+                _runtime_tree(stage, fixtures, install_native=True)
+                spec = dsh_runtime._native_specs(stage)[0]
+                Path(dsh_runtime._native_files(stage, spec["name"], spec["version"])[1]).unlink()
+                assert spec["name"] in dsh_runtime.stage_boot_issue(executable, stage, VERSION)
+                try:
+                    dsh_runtime.activate_stage(stage, data_root, VERSION)
+                    raise AssertionError("broken native stage activated")
+                except RuntimeError as exc:
+                    assert spec["name"] in str(exc)
+                assert sentinel.read_text() == "keep"
+                checks += 3
+                dsh_runtime.discard_stage(stage)
+    return checks
+
+
 def main() -> int:
     _long_path_extraction()
-    checks = 0
+    checks = _native_platform_matrix()
     with tempfile.TemporaryDirectory(prefix="soduwork-dsh-runtime-") as data_root:
         fixtures = _native_fixtures(os.path.join(data_root, "native-fixtures"))
         issue = dsh_runtime.runtime_issue(data_root, VERSION)
@@ -193,7 +265,7 @@ def main() -> int:
         checks += 1
         if _native_names():
             ripgrep = _native_names()[2]
-            binary = Path(root) / "node_modules" / ripgrep / "bin" / "rg.exe"
+            binary = Path(root) / "node_modules" / ripgrep / "bin" / ("rg.exe" if os.name == "nt" else "rg")
             binary.unlink()
             assert ripgrep in dsh_runtime.runtime_issue(data_root, VERSION)
             binary.write_bytes(b"MZ fixture binary")
@@ -203,6 +275,46 @@ def main() -> int:
         env = {}
         dsh_runtime.apply_env(env, data_root)
         assert env["DSH_PATH"] == root and env["DSH_TELEMETRY_DISABLED"] == "1"
+        checks += 1
+
+        loader_root = Path(data_root) / "loader fixtures"
+        loader_root.mkdir()
+        loader = loader_root / "dsh_acp_settlement.mjs"
+        storage = loader_root / "dsh_session_storage.mjs"
+        for resource in (loader, storage):
+            resource.write_text("// Fixture", encoding="utf-8")
+        loader, storage = loader.resolve(), storage.resolve()
+        for platform_name, os_name in (("darwin", "posix"), ("linux", "posix"), ("win32", "nt")):
+            platform_os = SimpleNamespace(name=os_name, path=os.path)
+            options = ["--import=" + loader.as_uri()]
+            if os_name == "nt":
+                options.insert(0, "--import=" + storage.as_uri())
+            platform_env = {"NODE_OPTIONS": "--require missing-inherited.cjs --invalid-option"}
+            with patch.object(dsh_runtime, "os", platform_os), \
+                    patch.object(dsh_runtime.sys, "platform", platform_name), \
+                    patch.object(dsh_runtime, "__file__", str(loader_root / "dsh_runtime.py")):
+                dsh_runtime.apply_env(platform_env, data_root)
+                assert platform_env["NODE_OPTIONS"].split() == options
+                assert platform_env["SODUWORK_DSH_ACP_SETTLEMENT"] == "1"
+                assert platform_env["DSH_PATH"] == root
+                if os_name == "nt":
+                    assert platform_env["SODUWORK_DSH_STORAGE_RUNTIME"] == root
+                else:
+                    assert "SODUWORK_DSH_STORAGE_RUNTIME" not in platform_env
+                first = dict(platform_env)
+                dsh_runtime.apply_env(platform_env, data_root)
+                assert platform_env == first, "Repeated environment setup must keep one copy of each loader"
+            checks += 1
+
+        missing_loader_root = Path(data_root) / "missing-settlement-resource"
+        missing_loader_root.mkdir()
+        missing_loader_root.joinpath("dsh_session_storage.mjs").write_text("// Fixture", encoding="utf-8")
+        with patch.object(dsh_runtime, "__file__", str(missing_loader_root / "dsh_runtime.py")):
+            try:
+                dsh_runtime.apply_env({}, data_root)
+                raise AssertionError("A missing child-settlement loader must prevent execution")
+            except RuntimeError as exc:
+                assert "子代理等待组件缺失" in str(exc)
         checks += 1
 
         workspace = os.path.join(data_root, "workspace")
@@ -352,6 +464,7 @@ def main() -> int:
         original_popen = dsh_runtime.subprocess.Popen
         original_kill = dsh_runtime._kill_tree
         spawned = []
+        launches = []
 
         def fake_kill(proc) -> None:
             proc.killed = True
@@ -360,7 +473,10 @@ def main() -> int:
 
         def use_process(proc):
             spawned.append(proc)
-            dsh_runtime.subprocess.Popen = lambda *args, **kwargs: proc
+            def fake_popen(*args, **kwargs):
+                launches.append((args, kwargs))
+                return proc
+            dsh_runtime.subprocess.Popen = fake_popen
 
         try:
             dsh_runtime._kill_tree = fake_kill
@@ -381,6 +497,40 @@ def main() -> int:
             assert request["params"]["protocolVersion"] == 1
             assert request["params"]["clientInfo"]["name"] == "soduwork-runtime-probe"
             checks += 4
+
+            staged_root = os.path.join(data_root, "staged host")
+            os.makedirs(staged_root)
+            for platform_name, os_name in (("darwin", "posix"), ("linux", "posix"), ("win32", "nt")):
+                platform_os = SimpleNamespace(**vars(os))
+                platform_os.name = os_name
+                platform_os.environ = {
+                    "NODE_OPTIONS": "--require missing-inherited.cjs --invalid-option",
+                    "ELECTRON_RUN_AS_NODE": "1", "DSH_PATH": root,
+                }
+                options = ["--import=" + loader.as_uri()]
+                if os_name == "nt":
+                    options.insert(0, "--import=" + storage.as_uri())
+                use_process(_FakeProcess(stdout=response))
+                probe_root = os.path.join(data_root, "probe-" + platform_name)
+                with patch.object(dsh_runtime, "os", platform_os), \
+                        patch.object(dsh_runtime.sys, "platform", platform_name), \
+                        patch.object(dsh_runtime, "__file__", str(loader_root / "dsh_runtime.py")):
+                    assert dsh_runtime._probe_runtime("fake-dsh", staged_root, probe_root, 0.3) == ""
+                args, kwargs = launches[-1]
+                assert args == (["fake-dsh"],)
+                probe_env = kwargs["env"]
+                assert probe_env["NODE_OPTIONS"].split() == options
+                assert probe_env["SODUWORK_DSH_ACP_SETTLEMENT"] == "1"
+                assert probe_env["DSH_PATH"] == kwargs["cwd"] == staged_root
+                assert os.path.dirname(probe_env["DSH_HOME"]) == probe_root
+                assert "ELECTRON_RUN_AS_NODE" not in probe_env
+                if os_name == "nt":
+                    assert probe_env["SODUWORK_DSH_STORAGE_RUNTIME"] == staged_root
+                    assert "creationflags" in kwargs and "start_new_session" not in kwargs
+                else:
+                    assert "SODUWORK_DSH_STORAGE_RUNTIME" not in probe_env
+                    assert kwargs["start_new_session"] is True
+                checks += 1
 
             early = _FakeProcess(
                 stderr="plugin tree failed to load: Cannot find module sharp\n",

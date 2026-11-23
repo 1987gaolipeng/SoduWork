@@ -5,9 +5,9 @@ const { createProcessSession } = require('./process-session');
 const app = name => ({ getPath: () => path.join(os.tmpdir(), 'soduwork-recovery-fixture', name) });
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   promise.catch(() => {}); return { promise, resolve, reject }; }
-function fixture(t) {
+function fixture(t, options = {}) {
   const generations = [];
-  const runtime = createProcessSession({ recoveryTimeoutMs: 50, hostFactory: (target, hostOptions) => {
+  const runtime = createProcessSession({ recoveryTimeoutMs: 50, ...options, hostFactory: (target, hostOptions) => {
     let dead = false, pending = false, failure = null, gate, cachedRejection;
     const operations = [], handles = new Map();
     const host = {
@@ -66,6 +66,36 @@ test('recovery retries a pending cleanup with a bounded attempt count before ope
   const opened = await runtime.open({ app: profile });
   assert.equal(opened.ok, true);
   assert.deepEqual(attempts, [1, 2, 3]);
+});
+
+test('a warmup waiting for cleanup rechecks account ownership before creating a replacement', async t => {
+  const { identity } = require('../../tests/helpers/platform-session-fixture.cjs');
+  let current = identity();
+  const f = fixture(t, { identityOf: () => current }), profile = app('warmup-owner-race');
+  const first = current;
+  await f.runtime.open({ app: profile, identity: first });
+  const gate = f.generations[0].crash();
+  const warmup = f.runtime.prewarm(profile, first);
+  await new Promise(resolve => setImmediate(resolve));
+  current = identity('two'); gate.resolve();
+  await assert.rejects(warmup, { code: 'RUNTIME_IDENTITY_CHANGED' });
+  assert.equal(f.generations.length, 1, 'stale preparation cannot create a replacement worker');
+});
+
+test('a stale warmup cannot retire the current account worker across a microtask boundary', async t => {
+  const { identity } = require('../../tests/helpers/platform-session-fixture.cjs');
+  const first = identity(), second = identity('two');
+  let current = second, flip = false;
+  const f = fixture(t, { identityOf: () => {
+    const captured = current;
+    if (flip) { flip = false; queueMicrotask(() => { current = second; }); }
+    return captured;
+  } }), profile = app('warmup-microtask-owner-race');
+  await f.runtime.open({ app: profile, identity: second });
+  current = first; flip = true;
+  await assert.rejects(f.runtime.prewarm(profile, first), { code: 'RUNTIME_IDENTITY_CHANGED' });
+  assert.equal(f.generations[0].isDead(), false, 'the current account worker remains available');
+  assert.equal(f.generations.length, 1);
 });
 
 test('recovery stops after the configured pending-cleanup attempts and never creates a replacement host', async t => {

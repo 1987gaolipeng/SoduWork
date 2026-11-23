@@ -70,6 +70,8 @@ async function checkCatalogUsage({ win, js, waitFor, sleep, screenshot, changeLo
     fixtures[keys[0]] = catalog; fixtures[keys[1]] = runtime; fixtures[keys[2]] = usage
     win.setSize(1280, 1000)
     await navigate('models', 'document.querySelectorAll(".model-runtime-live .model-load-card strong").length === 2 && document.querySelectorAll(".model-provider").length === 4', 'model overview fixture')
+    await js('document.querySelector(".model-runtime-overview-toggle").click()')
+    await waitFor('!document.querySelector(".model-runtime-overview-body").hidden', 'overview expanded')
     for (const locale of ['zh-CN', 'en-US', 'ja-JP', 'ko-KR']) {
       await changeLocale(locale)
       const overview = await readOverview()
@@ -89,7 +91,7 @@ async function checkCatalogUsage({ win, js, waitFor, sleep, screenshot, changeLo
       record('model dimension labels match the selected language ' + locale, JSON.stringify(overview.groups.map(group => group.label)) === JSON.stringify(groupLabels[locale]), overview.groups)
       if (locale === 'zh-CN') {
         record('Chinese model groups explain their dimensions', JSON.stringify(overview.groups.map(group => group.label)) === JSON.stringify(['目录配置', '实时负载', '近一小时请求情况']), overview.groups)
-        record('configured provider does not imply a live health probe', overview.statuses.find(item => item.name === 'Customer gateway 客户网关').status === '已配置' && overview.groups[0].text.includes('配置完整'), overview)
+        record('provider card counts catalog chat models alongside the configuration summary', overview.statuses.find(item => item.name === 'Customer gateway 客户网关').status === '可对话（3）' && overview.groups[0].text.includes('配置完整'), overview)
       }
       if (locale === 'en-US') record('model group labels have no untranslated Chinese', !/[\u3400-\u9fff]/.test(languageSnapshots[locale]), languageSnapshots[locale])
       if (locale === 'ja-JP') record('model group labels use Japanese', /[\u3040-\u30ff]/.test(languageSnapshots[locale]), languageSnapshots[locale])
@@ -117,12 +119,16 @@ async function checkCatalogUsage({ win, js, waitFor, sleep, screenshot, changeLo
     fixtures[keys[1]] = { ...runtime, running: 2, queued: 2, policy: { ...policy, globalConcurrent: 2, queueSize: 2 } }
     win.setSize(1280, 1000)
     await navigate('models', 'document.querySelector(".model-runtime-live .model-load-card strong")?.textContent === "2"', 'saturated capacity')
+    await js('document.querySelector(".model-runtime-overview-toggle").click()')
+    await waitFor('!document.querySelector(".model-runtime-overview-body").hidden', 'saturated overview expanded')
     await changeLocale('zh-CN')
     const saturated = await readOverview()
     record('full concurrent and waiting capacity has truthful bounded meters', saturated.progress.length === 2 && saturated.progress.every(item => item.value === 2 && item.max === 2), saturated)
     await resetScroll(); await screenshot('model-dimensions-full-capacity')
     fixtures[keys[1]] = { ...runtime, running: 0, queued: 0, policy: { ...policy, queueSize: 0 }, lastHour: { started: 0, waitMs: 0, timeout: 0, queueTimeout: 0, rateLimited: 0 }, groups: [] }
     await navigate('models', 'document.querySelector(".model-runtime-live .model-load-card strong")?.textContent === "0"', 'disabled queue and no requests')
+    await js('document.querySelector(".model-runtime-overview-toggle").click()')
+    await waitFor('!document.querySelector(".model-runtime-overview-body").hidden', 'empty overview expanded')
     const empty = await readOverview()
     record('disabled waiting queue is explained and no samples are not zero wait', empty.live[1].text.includes('未启用排队') && empty.recent[0]?.value === '—' && empty.recent.slice(1).every(item => item.value === '0') && !JSON.stringify(empty).includes('NaN'), empty)
     await resetScroll(); await screenshot('model-dimensions-no-queue')

@@ -262,7 +262,7 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 
 /* The empty composer is a roomy work surface. Its add menu opens downward. */
 .compose-panel[data-stage='compose'] .cp-mid{position:relative;gap:17px;padding:28px 28px 7vh}
-.compose-panel[data-stage='compose'] .ai-disclaimer{position:absolute;left:0;right:0;bottom:16px;margin:0}
+.compose-panel[data-stage='compose'] .ai-disclaimer{position:absolute;left:0;right:0;bottom:var(--composer-disclaimer-gap,16px)}
 .compose-panel[data-stage='compose'] .work-composer.cp-box{width:min(800px,calc(100% - 32px));min-width:280px;max-width:800px;box-sizing:border-box;border-radius:18px;
   box-shadow:0 1px 2px rgba(16,24,40,.035),0 0 26px -19px rgba(16,24,40,.26)}
 .compose-panel[data-stage='compose'] .work-composer.cp-box:focus-within{
@@ -462,9 +462,6 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
   place-items:center;align-self:center;overflow:hidden;border:1px solid color-mix(in srgb,var(--line) 62%,transparent);
   border-radius:10px;background:var(--bg-0);box-shadow:0 1px 2px rgba(20,30,48,.035)}
 .cp-runtime-pop .cp-runtime-row>.runtime-brand>img{width:19px;height:19px;object-fit:contain}
-.cp-runtime-pop .cp-runtime-row>.runtime-brand.agent-brand-pi>img{width:16px;height:16px}
-.cp-runtime-pop .cp-runtime-row>.runtime-brand.agent-brand-codex>img,
-.cp-runtime-pop .cp-runtime-row>.runtime-brand.agent-brand-codex-harness>img{width:22px;height:22px}
 .cp-runtime-pop .cp-runtime-row>.cp-runtime-copy{display:flex!important;min-width:0;flex-direction:column;gap:0}
 .cp-runtime-pop .cp-runtime-head{display:flex!important;min-width:0;flex-direction:row!important;flex-wrap:wrap;align-items:center;gap:1px 6px}
 .cp-runtime-pop .cp-runtime-head>b{flex:0 0 100%;min-width:0;overflow:hidden;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:560;

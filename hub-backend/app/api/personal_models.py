@@ -28,9 +28,9 @@ def _local_provider_ids(client) -> set[str]:
     return ids
 
 
-def _purge_local_model_state(client) -> bool:
+def _purge_local_model_state(client, protected_ids=()) -> bool:
     """Remove legacy local model services, models, and keys from the Hub-owned client row."""
-    local_ids = _local_provider_ids(client)
+    local_ids = _local_provider_ids(client) - set(protected_ids)
     if not local_ids:
         return False
     changed = False
@@ -77,22 +77,25 @@ async def my_models(
     """
     from ..services import model_catalog
     from ..services import model_config_guard
-    if _purge_local_model_state(client):
+    providers = await model_catalog.effective_provider_map(session, client)
+    organization_ids = {pid for pid, provider in providers.items() if not provider.get("personal")}
+    if _purge_local_model_state(client, organization_ids):
         await session.commit()
         await session.refresh(client)
     cat = await model_catalog.catalog(session, client)
-    # Include each provider's models so users can see what their credentials enable.
-    # Exclude disabled providers, but retain enabled providers without organization credentials.
-    # Personal credentials may enable models unavailable through organization credentials.
+    # Keep enabled managed providers visible as read-only metadata even when
+    # organization credentials are missing. Personal services remain separate.
     byp: dict[str, list] = {}
     for m in cat["models"]:
         if m["enabled"]:
             byp.setdefault(m["providerId"], []).append(m)
     from ..services import model_capabilities
     from ..services.model_defaults import public_defaults
-    own_models = [{**row, "own": True} for row in (getattr(client, "models", None) or []) if isinstance(row, dict)]
+    providers = await model_catalog.effective_provider_map(session, client)
+    own_models = [{**row, "own": True} for row in (getattr(client, "models", None) or [])
+                  if isinstance(row, dict) and providers.get(row.get("providerId"), {}).get("personal")]
     await model_capabilities.enrich(session, own_models,
-        await model_catalog.effective_provider_map(session, client), client)
+        providers, client)
     usable_models = await model_catalog.usable(session, client, "chat")
     return {
         "providers": [{
@@ -121,7 +124,7 @@ async def put_my_models(
     client: Client = Depends(current_client),
     session: AsyncSession = Depends(get_session),
 ):
-    """Save Hub-managed personal providers, models, and credential overrides.
+    """Save personal providers, models, and credentials; managed services are read-only.
 
     Client-local services and models are persisted by the desktop client and are rejected here.
     Empty key values preserve existing keys; null explicitly removes a personal key.
@@ -131,11 +134,34 @@ async def put_my_models(
     from sqlalchemy import select
     from ..models import ModelProvider
     from ..services import model_catalog
-    from ..services import model_config_guard
+    from ..services import model_config_guard, model_runtime
+    # Serialize ownership decisions with organization provider creation/deletion.
+    await model_runtime.lock_setting(session, "model_catalog_edit_lock_v1")
     await model_config_guard.personal(session, client, body.get("expectedRevision"),
         allow_patch=not any(k in body for k in ("providers", "models")))
-    _purge_local_model_state(client)
-    valid_ids = {p.id for p in (await session.execute(select(ModelProvider))).scalars().all()}
+    organization_ids = set((await session.scalars(select(ModelProvider.id))).all())
+    # Validate every supplied item, including entries beyond the list limit,
+    # before touching any personal state. Client flags cannot confer ownership.
+    def personal_id(value):
+        pid = str(value or "").strip().lower()[:48]
+        if pid in organization_ids:
+            raise HTTPException(status_code=403, detail="组织模型服务由管理员管理，客户端只能修改个人服务")
+        return pid
+    for field, identity in (("providers", "id"), ("models", "providerId")):
+        if isinstance(body.get(field), list):
+            for value in body[field]:
+                if isinstance(value, dict):
+                    personal_id(value.get(identity))
+    if isinstance(body.get("keys"), dict):
+        for pid in body["keys"]:
+            personal_id(pid)
+    _purge_local_model_state(client, organization_ids)
+    config_before = dict(client.config or {})
+    historical_providers = [row for row in (config_before.get("modelProviders") or [])
+                            if isinstance(row, dict) and str(row.get("id") or "").strip().lower() in organization_ids]
+    historical_models = [row for row in (client.models or [])
+                         if isinstance(row, dict) and str(row.get("providerId") or "").strip().lower() in organization_ids]
+    valid_ids = set()
     if isinstance(body.get("providers"), list):
         rows, seen = [], set()
         for raw in body["providers"][:30]:
@@ -150,12 +176,6 @@ async def put_my_models(
                                     detail="本地模型配置由客户端管理，不能保存到 Hub")
             if base and not base.startswith(("http://", "https://")):
                 raise HTTPException(status_code=400, detail="接口地址要以 http(s):// 开头")
-            if pid in valid_ids:
-                p = await session.get(ModelProvider, pid)
-                if base and base.rstrip("/") != str(p.base_url or "").rstrip("/"):
-                    rows.append({"id": pid, "baseUrl": base})
-                seen.add(pid)
-                continue
             if not pid.startswith("custom-") or not _re.fullmatch(r"[a-z0-9_-]+", pid):
                 raise HTTPException(status_code=400, detail="自定义模型服务标识不合法")
             name = str(raw.get("name") or "").strip()[:64]
@@ -171,20 +191,20 @@ async def put_my_models(
         cfg = dict(client.config or {})
         old_custom = {str(x.get("id") or "") for x in (cfg.get("modelProviders") or [])
                       if isinstance(x, dict) and x.get("personal")}
-        cfg["modelProviders"] = rows
+        cfg["modelProviders"] = historical_providers + rows
         client.config = cfg
         new_custom = {x["id"] for x in rows if x.get("personal")}
-        removed = old_custom - new_custom
+        removed = old_custom - new_custom - organization_ids
     else:
         removed = set()
-        valid_ids |= {p["id"] for p in await model_catalog.providers_for_client(session, client)}
+        valid_ids = {p["id"] for p in await model_catalog.providers_for_client(session, client) if p.get("personal")}
     cur = dict(getattr(client, "model_keys", None) or {})
     keys = body.get("keys")
     if isinstance(keys, dict):
         for pid, v in keys.items():
             pid = str(pid).strip().lower()[:48]
             if v is None:
-                cur.pop(pid, None)  # Remove the personal key and fall back to organization credentials.
+                cur.pop(pid, None)
             elif str(v).strip():
                 if pid not in valid_ids:
                     raise HTTPException(status_code=400, detail="模型服务不存在，请刷新后重试")
@@ -216,19 +236,30 @@ async def put_my_models(
                             "ctxWindow": context_size})
             elif pid and nm:
                 raise HTTPException(status_code=400, detail="模型服务不存在，请刷新后重试")
-        client.models = out
+        client.models = historical_models + out
+
+    async def usable_lists():
+        return {
+            "usable": await model_catalog.usable(session, client, "chat"),
+            "mediaUsable": {
+                "image": await model_catalog.usable(session, client, "image"),
+                "video": await model_catalog.usable(session, client, "video"),
+            },
+        }
+
+    receipt = None
+    if body.get("returnRevision") is True:
+        # Capture every list under the same write lock as the revision.
+        await session.flush()
+        receipt = await usable_lists()
+        receipt["revision"] = model_config_guard.revision(client)
     await session.commit()
     await session.refresh(client)
     from ..services.client_domain_events import device_changed
     await device_changed(client, "models")
-    return {
-        "ok": True,
-        "usable": await model_catalog.usable(session, client, "chat"),
-        "mediaUsable": {
-            "image": await model_catalog.usable(session, client, "image"),
-            "video": await model_catalog.usable(session, client, "video"),
-        },
-    }
+    if receipt is None:
+        receipt = await usable_lists()
+    return {"ok": True, **receipt}
 
 
 @router.post("/my-models/test")
@@ -237,14 +268,14 @@ async def test_my_model(
     client: Client = Depends(current_model_client),
     session: AsyncSession = Depends(get_session),
 ):
-    """Probe the client's currently effective credential, preferring a personal key over the
-    organization's key.
-    """
+    """Probe only a saved personal service using the client's own credential."""
     import asyncio as _aio
 
     from ..services import model_catalog
     pid = str(body.get("providerId") or "").strip()
     p = (await model_catalog.effective_provider_map(session, client)).get(pid)
+    if p is not None and not p.get("personal"):
+        raise HTTPException(status_code=403, detail="组织模型服务只能由管理员检测")
     if p is None or not p["enabled"]:
         raise HTTPException(status_code=404, detail="没有这个模型服务，或者它已经被停用了")
     key, key_from = model_catalog.provider_key(p, client)

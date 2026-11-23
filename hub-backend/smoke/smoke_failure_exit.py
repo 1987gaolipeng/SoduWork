@@ -3,6 +3,7 @@
 import asyncio
 import os
 import sys
+from unittest.mock import patch
 
 DB = os.path.abspath(".smoke-failexit.db")
 for sfx in ("", "-shm", "-wal"):
@@ -17,9 +18,10 @@ from sqlalchemy import select  # noqa: E402
 
 from app import automation_models as am  # noqa: E402
 from app import models  # noqa: E402
+from app.api import plugins  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.realtime import hub  # noqa: E402
-from app.services import workflow_engine, workflow_runs  # noqa: E402
+from app.services import ai_exec, workflow_engine, workflow_runs  # noqa: E402
 
 ok = fail = 0
 pushed = []
@@ -80,7 +82,47 @@ async def main():
 
         # Retry a failed AI gate.
         run, up, bad = await build(s, "r-ai", "implement", "ai")
-        node = await workflow_runs.retry_failed_gate(s, run, actor="张三")
+        user = models.User(id="monitor-admin", is_super=True)
+        user._perms = {"plugin.run"}
+        provider = models.ModelProvider(id="retry-fixture", name="Retry fixture",
+                                        api_key="fixture-only", base_url="https://retry.invalid/v1")
+        s.add_all([provider, models.ModelDef(id="retry-alt", provider_id=provider.id, name="fixture-model")])
+        bad.executor = {"resolved": {"model": "fixture-model"}}
+        await s.commit()
+        detail = await plugins.run_detail(run.id, user, s)
+        failed_node = next(n for n in detail["nodes"] if n["id"] == bad.id)
+        chk("继承的模型是唯一可用模型时不显示换模型", failed_node["retryModels"] == [])
+        bad.executor = {}
+        with patch("app.services.llm.load", return_value={
+                "llm_base_url": provider.base_url, "llm_api_key": provider.api_key,
+                "llm_model": "fixture-model"}):
+            detail = await plugins.run_detail(run.id, user, s)
+            failed_node = next(n for n in detail["nodes"] if n["id"] == bad.id)
+            chk("尚未记录执行器时也排除当前默认模型", failed_node["retryModels"] == [])
+        run.context = {"executionOverrides": {"implement": {"agentKind": "local:pi",
+                                                             "runnerTags": ["test"], "model": "original"}}}
+        await s.commit()
+        detail = await plugins.run_detail(run.id, user, s)
+        failed_node = next(n for n in detail["nodes"] if n["id"] == bad.id)
+        chk("失败的托管 AI 节点只列可切换模型", failed_node["retryModels"] == ["fixture-model"])
+        up.state = "running"
+        detail = await plugins.run_detail(run.id, user, s)
+        failed_node = next(n for n in detail["nodes"] if n["id"] == bad.id)
+        chk("其他节点运行中不提供无法执行的重试", not failed_node["diagnosis"]["retryable"]
+            and "retryModels" not in failed_node)
+        up.state = "succeeded"
+        try:
+            await workflow_runs.retry_failed_gate(s, run, actor="张三", node_key="implement",
+                                                  source_node_id="stale-attempt")
+            chk("过期的失败记录不能重试新尝试", False)
+        except ValueError as exc:
+            chk("过期的失败记录不能重试新尝试", "刷新" in str(exc) and run.state == "failed")
+        node = await workflow_runs.retry_failed_gate(s, run, actor="张三", node_key="implement", source_node_id=bad.id,
+                                                     execution={"model": "fixture-model"})
+        chk("只换模型保留原执行路由", run.context["executionOverrides"]["implement"] == {
+            "agentKind": "local:pi", "runnerTags": ["test"], "model": "fixture-model", "modelSource": "catalog"})
+        chk("从失败节点保留上游输入", node.input["dependencies"]["prepare"] == up.output and
+            node.input["manualRetry"]["sourceNodeId"] == bad.id)
         chk("★AI 关失败之后能重试", node is not None and node.node_type == "ai")
         chk("重试是新起一次尝试，不是改旧的", node.attempt == bad.attempt + 1 and node.state == "queued")
         chk("失败证据留着没被抹掉", bad.state == "failed" and bad.error == "CLI 退出码 1")
@@ -93,6 +135,32 @@ async def main():
             models.TaskEvent.task_id == "t-fail",
             models.TaskEvent.kind == "plugin.gate_retry"))).scalars().all()
         chk("重试记进了任务时间线", len(ev) == 1, ev)
+        running_detail = await plugins.run_detail(run.id, user, s)
+        chk("历史失败不提供重试或换模型", all(not n["diagnosis"].get("retryable") and
+            "retryModels" not in n for n in running_detail["nodes"]))
+
+        # The new provider exists only in the catalog. Execute the real outbox and
+        # model admission path, replacing the synthetic Runner's transport.
+        def available_seat(_ctx, kind, *_args):
+            return {"id": kind} if kind in {"local:codex", "local:opencode"} else None
+
+        with (patch.object(ai_exec, "LOCAL_AGENT_KINDS", ["local:codex", "local:opencode"]),
+              patch.object(ai_exec, "resolve_kind", side_effect=available_seat),
+              patch.object(ai_exec, "dispatch_sync", return_value={
+                  "ok": True, "issueId": "retry-ref", "assigneeCli": "opencode",
+                  "model": "fixture-model"}) as dispatch,
+              patch.object(ai_exec, "status_sync", return_value={"ok": True, "running": True})):
+            await workflow_engine.tick(s)
+        await s.refresh(node)
+        chk("换模型重试已进入执行", node.state == "running" and dispatch.call_count == 1, node.error)
+        if dispatch.called:
+            ctx, _, _, seat, extra = dispatch.call_args.args
+            config = ctx["cfg"] if ctx["name"] == "local" else ctx["localCfg"]
+            chk("执行使用所选模型的服务地址和凭据", config["llm"]["model"] == "fixture-model"
+                and config["llm"]["base"] == provider.base_url and config["llm"]["key"] == provider.api_key
+                and extra["agentExecution"]["model"] == "fixture-model")
+            chk("共享模型降级时仍使用支持该网关的执行器", seat["id"] == "local:opencode"
+                and extra["agentExecution"]["kind"] == seat["id"])
 
         # Retry a failed AI-review gate.
         run2, _, _ = await build(s, "r-review", "review", "ai_review")
@@ -174,14 +242,14 @@ async def main():
         run7.state, cur7.state, cur7.error = "running", "running", ""
         await s.commit()
         node7 = await workflow_runs.redispatch_running_gate(
-            s, run7, actor="张三", execution={"agentKind": "local:claude"})
+            s, run7, actor="张三", execution={"agentKind": "local:qwen"})
         chk("★运行中的 AI 关能重新派", node7 is not None and node7.state == "queued"
             and node7.attempt == 2, node7 and node7.state)
         chk("原尝试被判死且注明人工重派", cur7.state == "failed"
             and (cur7.output or {}).get("failureKind") == "manual_redispatch", cur7.output)
         chk("换的底座写进了 executionOverrides",
             ((run7.context or {}).get("executionOverrides") or {}).get("implement", {})
-            .get("agentKind") == "local:claude", run7.context)
+            .get("agentKind") == "local:qwen", run7.context)
         chk("run 回到运行中", run7.state == "running", run7.state)
         ev7 = (await s.execute(select(models.TaskEvent).where(
             models.TaskEvent.task_id == "t-fail",

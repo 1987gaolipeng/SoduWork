@@ -214,10 +214,10 @@ class IMFixture:
                      "admissionKey": key, "turnState": "done", "admissionStartSeq": round_no * 3 - 1}]}])
             await session.commit()
 
-    async def enterprise_incoming(self, identifier, credentials, text, event_id, provider, *, tamper=False, tenant=None, timestamp=None, challenge=False):
+    async def enterprise_incoming(self, identifier, credentials, text, event_id, provider, *, tamper=False, tenant=None, timestamp=None, challenge=False, sender="fixture-user"):
         if provider == "wecom":
             raw = ("challenge-ok" if challenge else "<xml><ToUserName>" + credentials["corp_id"] + "</ToUserName>"
-                "<AgentID>1000001</AgentID><FromUserName>fixture-user</FromUserName><MsgType>text</MsgType>"
+                "<AgentID>1000001</AgentID><FromUserName>" + escape(sender) + "</FromUserName><MsgType>text</MsgType>"
                 "<MsgId>" + str(event_id) + "</MsgId><CreateTime>" + str(int(time.time())) + "</CreateTime><Content>"
                 + escape(text) + "</Content></xml>").encode()
             key = b"w" * 32

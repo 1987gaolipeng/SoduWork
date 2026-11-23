@@ -7,6 +7,39 @@ const path = require('node:path');
 const outputs = require('../main/pi-session/outputs');
 const runtime = require('../main/conversation/artifact-runtime');
 
+test('journal inventory recovery preserves scope, exclusion rules and completeness requirements', async t => {
+  const {cwd, write} = fixture(t), since = Date.now() - 1000;
+  const journal = require('../main/conversation/file-change-journal');
+  write('historical.md', 1000);
+  const before = await journal.snapshot(cwd);
+  write('new.md', 1000); write('node_modules/private.md', 1000); write('.hidden.md', 1000);
+  const changes = journal.compare(before, await journal.snapshot(cwd), {turnId:'turn'});
+  const sync = outputs.scan(cwd, since, since, changes);
+  const asyncScan = await outputs.scanAsync(cwd, since, since, changes);
+  assert.deepEqual(asyncScan.files.map(x => x.relative), ['new.md']);
+  assert.deepEqual(sync, asyncScan);
+  for (const bad of [{...changes, truncated:true}, {...changes, cwd:path.dirname(cwd)},
+    {...changes, files:changes.files.map(x => ({...x, after:{...x.after, hash:'meta:7:1000'}}))}]) {
+    assert.deepEqual((await outputs.scanAsync(cwd, since, since, bad)).files, []);
+  }
+  const [recovered, ordinary] = await Promise.all([
+    outputs.scanAsync(cwd, since, since, changes), outputs.scanAsync(cwd, since, since),
+  ]);
+  assert.equal(recovered.files.length, 1); assert.equal(ordinary.files.length, 0);
+});
+
+test('journal recovery accepts a workspace root alias without following links inside it', async t => {
+  const {cwd, write} = fixture(t), since = Date.now() - 1000;
+  const journal = require('../main/conversation/file-change-journal');
+  const before = await journal.snapshot(cwd);
+  write('report.md', 1000);
+  const changes = journal.compare(before, await journal.snapshot(cwd), {turnId:'turn'});
+  const other = fixture(t), alias = path.join(other.cwd, 'workspace');
+  fs.symlinkSync(cwd, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.deepEqual((await outputs.scanAsync(alias, since, since, changes)).files.map(x => x.relative), ['report.md']);
+  assert.deepEqual(outputs.scan(alias, since, since, changes).files.map(x => x.relative), ['report.md']);
+});
+
 function fixture(t) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-output-async-'));
   t.after(() => {
@@ -38,6 +71,8 @@ test('completed content changes retain an indexed edit despite timestamp precisi
   assert.deepEqual(marked.files.filter(file => file.changedInTurn).map(file => file.name), ['report.md']);
   assert.equal(marked.delivery.items.find(file => file.name === 'report.md').changedInTurn, true);
   assert.ok(scanned.files.every(file => !file.changedInTurn), 'Keep the original scan immutable');
+  assert.ok(outputs.withJournal(scanned, {...changes, truncated:true}).files.every(file => !file.changedInTurn),
+    'an incomplete before inventory must not promote historical files as new');
   for (const change of [{ size: 999 }, { mtimeMs: turn + 99 }, { path: '../outside.md' }, { exists: false }]) {
     const stale = structuredClone(changes); Object.assign(stale.files[0].after, change);
     assert.ok(outputs.withJournal(scanned, stale).files.every(file => !file.changedInTurn));

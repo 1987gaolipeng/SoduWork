@@ -129,11 +129,15 @@ test('any main-window conversation may select an application and queued turns ke
     const handle = { snapshot: () => ({ activePlugins: [] }) }, sender = { isDestroyed: () => false };
     guard.bind(handle, sender, '', f.app);
     const ordinary = {}; guard.guardSend(handle, ordinary);
+    assert.equal(ordinary.clearPluginSelection, true, 'a queued unbound turn cannot acquire a later application');
     const a = { pluginIds: [first.pluginId] }; guard.guardSend(handle, a);
     const b = { pluginIds: [second.pluginId] }; guard.guardSend(handle, b);
     await ordinary.beforeTurn(); assert.equal(guard.forSession(handle), null);
     await a.beforeTurn(); assert.equal(guard.forSession(handle).connection.token, first.key + '-fixture-key');
     await b.beforeTurn(); assert.equal(guard.forSession(handle).connection.token, second.key + '-fixture-key');
+    await ordinary.beforeTurn();
+    assert.equal(guard.forSession(handle), null);
+    assert.deepEqual(ordinary.pluginIds, [], 'the queued selection stays paired with its captured application identity');
     guard.bind(handle, sender, first.pluginId, f.app);
     const inAnotherApp = { pluginIds: [second.pluginId] }; guard.guardSend(handle, inAnotherApp); await inAnotherApp.beforeTurn();
     assert.equal(guard.forSession(handle).pluginId, second.pluginId, 'an explicit application selection also works from another application conversation');
@@ -152,6 +156,38 @@ test('any main-window conversation may select an application and queued turns ke
     assert.throws(() => lease.readCurrent(), /不存在/);
   } finally { f.cleanup(); }
 });
+test('ordinary chat marks captured inheritance while explicit selections remain strict', async () => {
+  const f = fixture(), guard = require('../main/pi-session/app-mcp-grant.cjs');
+  try {
+    const handle = { snapshot: () => ({ activePlugins: ['local:removed-method'] }) };
+    guard.bind(handle, {}, '', f.app);
+    const inherited = { pluginIds: [] };
+    await guard.guardSend(handle, inherited);
+    assert.deepEqual(inherited.pluginIds, ['local:removed-method']);
+    assert.equal(inherited.inheritedPluginSelection, true, 'the runtime must distinguish inheritance from an explicit request');
+    assert.equal(inherited.clearPluginSelection, undefined);
+    await inherited.beforeTurn();
+    assert.equal(guard.forSession(handle), null);
+    const explicit = { pluginIds: ['local:removed-method'] };
+    await guard.guardSend(handle, explicit);
+    assert.deepEqual(explicit.pluginIds, ['local:removed-method']);
+    assert.equal(explicit.inheritedPluginSelection, undefined);
+    const cleared = { pluginIds: [], clearPluginSelection: true };
+    await guard.guardSend(handle, cleared);
+    assert.equal(cleared.clearPluginSelection, true);
+  } finally { f.cleanup(); }
+});
+
+test('a removed application association cannot silently become ordinary chat', () => {
+  const f = fixture(), guard = require('../main/pi-session/app-mcp-grant.cjs');
+  try {
+    const handle = { appPluginId: 'local:removed-app', snapshot: () => ({ activePlugins: ['local:removed-app'] }) };
+    guard.bind(handle, {}, '', f.app);
+    assert.throws(() => guard.guardSend(handle, { pluginIds: [] }), /不存在|不可用/);
+    assert.equal(handle.appPluginId, 'local:removed-app');
+  } finally { f.cleanup(); }
+});
+
 test('market history turns restore owned MCP without a window and retain installation, queue and account boundaries', async () => {
   const f = fixture(), guard = require('../main/pi-session/app-mcp-grant.cjs');
   const origin = f.binding.origin, pluginId = 'market-history';

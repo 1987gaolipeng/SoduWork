@@ -107,15 +107,15 @@ export function McpForm({ initial, template, onClose, onSave, busy, publishLabel
   }
   const field = f => f.type === 'boolean'
     ? <label key={f.key} className="chk-inline connector-write"><input type="checkbox" checked={env[f.key] === 'true'}
-        onChange={e => setEnv(f.key, String(e.target.checked))} /><span>{f.label}<small>{tx('仅在需要创建、修改或发送内容时开启')}</small></span></label>
+        onChange={e => setEnv(f.key, String(e.target.checked))} /><span>{f.label}{f.key === 'ALLOW_WRITES' && <small>{tx('仅在需要创建、修改或发送内容时开启')}</small>}</span></label>
     : <label key={f.key} className="df-field"><span className="f-lbl">{f.label}{!f.required && <em>{tx('选填')}</em>}</span>
         <input className="f-in" type={f.secret ? 'password' : 'text'} autoComplete="off" value={env[f.key] || ''}
           onPaste={e => { const value = window.SoduWorkConnectorConfig.credentialPaste(f.key, e.clipboardData.getData('text/plain'));
             if (value !== null) { e.preventDefault(); setEnv(f.key, value) } }}
           onChange={e => setEnv(f.key, e.target.value)} placeholder={f.example || ''} /></label>
   return (
-    <Modal className="connector-form-modal" title={tx(initial?.id ? '管理连接' : '添加连接器')} icon="plug" onClose={onClose}
-      foot={<><button className="btn btn-ghost" onClick={onClose}>{tx('取消')}</button><span className="ml-auto" />{extraAction}
+    <Modal draft={{ v, argsText, envText, hdrText, allowed, denied }} className="connector-form-modal" title={tx(initial?.id ? '管理连接' : '添加连接器')} icon="plug" onClose={onClose}
+      foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx('取消')}</button><span className="ml-auto" />{extraAction}
         <button className="btn btn-primary" disabled={busy || testing} onClick={() => run()}>
           {busy || connecting ? tx('正在连接…') : publishLabel || tx(initial?.id ? '保存并连接' : '连接')}</button></>}>
       <div className="connector-form">

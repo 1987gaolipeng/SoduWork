@@ -180,7 +180,7 @@ if (typeof electron === 'string') {
     await screenshot('sequence-1100');
 
     // Tool and message attribution can differ within one user turn and across run IDs.
-    state.tools[1].sourceAgent = source('claude', 'run-tools');
+    state.tools[1].sourceAgent = source('qwen', 'run-tools');
     later.sourceAgent = source('codex', 'run-final');
     await js(`ctx._activeCollabTaskId='crew-task';ctx._collaborationTrace={runs:[{id:'run-one',state:'running',nodes:[
       {key:'first',name:'Read',state:'succeeded',executor:{resolved:{agentKind:'pi'}}},
@@ -194,9 +194,9 @@ if (typeof electron === 'string') {
     await publish(state); await openToolBatches();
     await stacked('completed');
     const brands = await js('Array.from(document.querySelectorAll(".nchat-agent-source .agent-brand"),e=>Array.from(e.classList).find(c=>c.startsWith("agent-brand-")))');
-    assert.deepEqual(new Set(brands), new Set(['agent-brand-pi', 'agent-brand-claude', 'agent-brand-codex']));
+    assert.deepEqual(new Set(brands), new Set(['agent-brand-pi', 'agent-brand-qwen', 'agent-brand-codex']));
     assert.equal(brands.length, 3, 'one stack deduplicates its participants');
-    report.results.push('Messages and tools from Pi, Claude and Codex across three run IDs form one deduplicated crew stack');
+    report.results.push('Messages and tools from Pi, Qwen and Codex across three run IDs form one deduplicated crew stack');
 
     for (const width of [1100, 360]) {
       await viewport(width);

@@ -38,8 +38,44 @@ test('run sequence wins over wall-clock rollback while legacy timestamp ordering
     checks: { imageInput: check('passed', '2026-11-15T01:00:00Z') } };
   const newer = { ...previous, runSequence: 2, checks: { imageInput: check('unsupported', '2026-11-15T00:59:59Z') } };
   assert.equal(c.mergeEvidence(previous, newer).checks.imageInput.status, 'unsupported');
-  assert.equal(c.mergeEvidence(previous, newer).verifiedChecks.imageInput.status, 'unsupported');
+  assert.deepEqual(c.mergeEvidence(previous, newer).verifiedChecks.imageInput, previous.checks.imageInput);
   assert.equal(c.mergeEvidence({ ...previous, runSequence: undefined }, { ...newer, runSequence: undefined }).checks.imageInput.status, 'passed');
+});
+
+test('an image rejection preserves only the same target’s proven image route', () => {
+  const c = contract();
+  const keys = ['imageInput', 'streaming', 'toolCalling'];
+  const makeReport = (runSequence, status, configRevision = 'target') => ({
+    reportVersion: 2, apiFamily: 'chat-completions', configRevision, runSequence,
+    checks: Object.fromEntries(keys.map(key => [key, check(status, '2026-11-15T00:0' + runSequence + ':00Z')])),
+  });
+  const first = makeReport(1, 'passed');
+  let saved = first;
+  for (const sequence of [2, 3]) {
+    const rejection = makeReport(sequence, 'unsupported');
+    saved = c.mergeEvidence(saved, rejection);
+    assert.deepEqual(saved.checks, rejection.checks);
+    assert.deepEqual(saved.verifiedChecks.imageInput, first.checks.imageInput);
+    assert.deepEqual(saved.verifiedChecks.toolCalling, rejection.checks.toolCalling);
+    assert.deepEqual(saved.verifiedChecks.streaming, rejection.checks.streaming);
+    assert.deepEqual(c.runtimeFields({}, saved).input, ['text', 'image']);
+  }
+  assert.equal(c.profile({ capabilities: { imageInput: 'supported' } }, saved).imageInput.conflict, true);
+  const disabled = c.runtimeFields({ capabilities: { imageInput: 'unsupported' } }, saved);
+  assert.deepEqual(disabled.input, ['text']);
+  assert.ok(!disabled.capabilityProfile.imageInput.conflict);
+  assert.equal(c.runtimeFields({ imageRouting: 'vision-fallback' }, saved).imageRouting, 'vision-fallback');
+  for (const status of ['inconclusive', 'cancelled', 'skipped']) {
+    const later = c.mergeEvidence(saved, makeReport(4, status));
+    assert.equal(later.checks.imageInput.status, status);
+    assert.deepEqual(later.verifiedChecks.imageInput, first.checks.imageInput);
+    assert.equal(c.profile({ capabilities: { imageInput: 'supported' } }, later).imageInput.conflict, true);
+    assert.ok(!c.profile({ capabilities: { imageInput: 'unsupported' } }, later).imageInput.conflict);
+  }
+  const changed = c.mergeEvidence(saved, makeReport(4, 'unsupported', 'new-target'));
+  assert.deepEqual(c.runtimeFields({}, changed).input, ['text']);
+  const recovered = c.mergeEvidence(saved, makeReport(4, 'passed'));
+  assert.deepEqual(recovered.verifiedChecks.imageInput, recovered.checks.imageInput);
 });
 
 test('legacy tool and stream conclusions require a strict recheck without losing image proof or declarations', () => {
@@ -79,7 +115,8 @@ test('runtime projection routes images and carries verified compatibility withou
 test('only functional changes alter runtime revisions and conflicts remain visible', () => {
   const c = contract();
   const first = { apiFamily: 'chat-completions', checks: { imageInput: check('passed') } };
-  const later = { ...first, checks: { imageInput: check('passed', '2026-11-16T00:00:00Z') } };
+  const later = { ...first, checks: { imageInput: { ...check('passed', '2026-11-16T00:00:00Z'),
+    stage: 'output', detailCode: 'expected_output_mismatch' } } };
   assert.equal(c.runtimeRevision('target', c.runtimeFields({}, first)), c.runtimeRevision('target', c.runtimeFields({}, later)));
   const conflict = c.profile({ capabilities: { imageInput: 'unsupported' } }, first).imageInput;
   assert.equal(conflict.state, 'unsupported');

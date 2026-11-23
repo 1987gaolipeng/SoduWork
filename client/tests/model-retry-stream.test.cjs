@@ -34,6 +34,110 @@ function streamError(status = 503, message = '模型并发调度连接中断，�
   } };
 }
 
+const denial = 'Bearer synthetic-credential https://fixture.invalid/private synthetic-prompt';
+function deny(response) {
+  response.writeHead(403, { 'content-type': 'application/json' });
+  response.end(JSON.stringify({ error: { message: denial } }));
+}
+
+test('A conversation shows personal and company credential guidance when the model service returns HTTP 401', async t => {
+  const f = await fixture(t);
+  f.reply(() => ({ respond(response) {
+    response.writeHead(401, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ error: { message: denial } }));
+  } }));
+  await f.handle.submit('验证模型凭据提示。').completion;
+  const snapshot = f.handle.snapshot();
+  assert.equal(f.requests.length, 1);
+  assert.equal(snapshot.completion.retryable, false);
+  assert.match(snapshot.completion.error, /「我的模型」.*个人 Key.*企业服务.*管理员.*HTTP 401/);
+  assert.ok(snapshot.statusText.includes(snapshot.completion.error));
+  assert.doesNotMatch(snapshot.statusText, /synthetic-|fixture\.invalid/);
+});
+
+test('initial HTTP 403 returns one neutral error without tools or retries', async t => {
+  const f = await fixture(t);
+  f.reply(() => ({ respond: deny }));
+  await f.handle.submit('Answer without tools.').completion;
+  const snapshot = f.handle.snapshot();
+  assert.equal(f.requests.length, 1);
+  assert.equal(snapshot.tools.length, 0);
+  assert.equal(snapshot.completion.retryable, false);
+  assert.equal(snapshot.completion.error, '模型请求被拒绝（HTTP 403）');
+  assert.ok(snapshot.statusText.includes(snapshot.completion.error));
+  assert.doesNotMatch(snapshot.statusText, /synthetic-|fixture\.invalid/);
+});
+
+test('a Hub trace reaches the real session after a rejected tool continuation', async t => {
+  const f = await fixture(t);
+  const trace = '0123456789abcdef0123456789abcdef';
+  f.reply((_body, count) => count === 1 ? { tool: 'write', args: { path: 'trace.txt', content: 'retained' } }
+    : { respond(response) {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.end('data: ' + JSON.stringify({ error: { type: 'soduwork_proxy_error', code: 403,
+        message: 'HTTP 403: rejected [soduwork-trace:' + trace + ']', upstreamRequestId: 'private-provider-id' } }) + '\n\n');
+    } });
+  await f.handle.submit('Write trace.txt and summarize.').completion;
+  const snapshot = f.handle.snapshot();
+  assert.equal(snapshot.completion.error, '工具已完成，请求模型继续生成时被拒绝（HTTP 403） [soduwork-trace:' + trace + ']');
+  assert.equal(snapshot.completion.retryable, false);
+  assert.equal(fs.readFileSync(path.join(f.cwd, 'trace.txt'), 'utf8'), 'retained');
+  assert.equal(f.requests.length, 2);
+  assert.doesNotMatch(snapshot.statusText, /private-provider-id/);
+});
+
+for (const status of [200, 403]) {
+  test('same model and credentials succeed on direct inference, tool continuation returns ' + status, async t => {
+    const f = await fixture(t);
+    const provider = JSON.parse(fs.readFileSync(path.join(f.agentDir, 'models.json'))).providers.soduwork;
+    const target = new URL(provider.baseUrl + '/chat/completions');
+    const model = provider.models[0].id, authorization = 'Bearer ' + process.env.SODUWORK_PROXY_KEY;
+    const controls = [];
+    f.reply(body => {
+      if (body.stream !== false && body.messages.at(-1).role !== 'tool') {
+        return { tool: 'write', args: { path: 'report.md', content: 'fixture report' } };
+      }
+      return { respond(response) {
+        controls.push([body.model, response.req.url, response.req.headers.authorization === authorization]);
+        if (body.stream === false) {
+          response.writeHead(200, { 'content-type': 'application/json' });
+          response.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }));
+        } else if (status === 403) {
+          deny(response);
+        } else {
+          response.writeHead(200, { 'content-type': 'text/event-stream' });
+          response.end('data: ' + JSON.stringify({ choices: [{ index: 0, delta: { content: 'Done' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n');
+        }
+      } };
+    });
+    const direct = await fetch(target, { method: 'POST', headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ model, stream: false, messages: [{ role: 'user', content: 'ping' }] }) });
+    assert.equal(direct.status, 200);
+    assert.equal((await direct.json()).choices[0].message.content, 'ok');
+    await f.handle.submit('Write report.md and summarize.').completion;
+    const snapshot = f.handle.snapshot();
+    assert.deepEqual(controls, Array(2).fill([model, target.pathname, true]));
+    assert.equal(f.requests.length, 3);
+    assert.equal(snapshot.tools.filter(row => row.name === 'write' && row.state === 'done').length, 1);
+    assert.equal(fs.readFileSync(path.join(f.cwd, 'report.md'), 'utf8'), 'fixture report');
+    if (status === 403) {
+      assert.equal(snapshot.completion.reason, 'error');
+      assert.equal(snapshot.completion.retryable, false);
+      assert.equal(snapshot.completion.error, '工具已完成，请求模型继续生成时被拒绝（HTTP 403）');
+      assert.ok(snapshot.statusText.includes(snapshot.completion.error));
+      assert.doesNotMatch(snapshot.statusText, /synthetic-|fixture\.invalid/);
+    } else {
+      assert.equal(snapshot.completion.reason, 'stop');
+      f.reply(() => ({ respond: deny }));
+      await f.handle.submit('Start a different task.').completion;
+      assert.equal(f.requests.length, 4);
+      assert.ok(f.requests.at(-1).messages.some(row => row.role === 'tool'));
+      assert.equal(f.handle.snapshot().completion.error, '模型请求被拒绝（HTTP 403）');
+      assert.equal(f.handle.snapshot().completion.retryable, false);
+    }
+  });
+}
+
 test('three transient stream failures recover automatically without replaying a completed tool', { timeout: 15000 }, async t => {
   const f = await fixture(t);
   f.reply((_body, count) => count === 1 ? { tool: 'write', args: { path: 'report.md', content: '# Saved once' } }

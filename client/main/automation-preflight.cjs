@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const platforms = require('../core/plugin-platforms');
 const scopeOf = identity => require('./platform-connections/runtime.cjs').connectionScope(identity);
 const OPAQUE_LOCAL_MODEL = /^local:model-[a-f0-9]{32}$/;
-const ACCOUNT_RUNTIMES = new Set(['codex', 'claude']);
+const ACCOUNT_RUNTIMES = new Set(['codex']);
 const check = (key, state, label) => ({ key, state, label });
 const outcome = (state, message, checks = []) => ({ state, message, checks });
 

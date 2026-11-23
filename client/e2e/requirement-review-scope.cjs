@@ -46,7 +46,8 @@ app.whenReady().then(async()=>{
       tasks=[{...base,id:'submitted-manual',title:'手工交付已提交验收'},
         {...base,id:'submitted-agent',title:'智能体交付已提交验收',ai:{state:'done'}},
         {...base,id:'submitted-legacy',title:'旧版已提交记录',status:'done'},
-        {...base,id:'manual-submit',title:'手工完成，待本人提交验收',requirementStage:'delivering',canSubmitReview:true},
+        {...base,id:'manual-submit',title:'手工完成，待本人提交验收',requirementStage:'delivering',canSubmitReview:true,
+          reviewSubmission:{ok:false, candidates:[], canAssign:true, reason:'此需求没有记录创建人，请指定验收人。'}},
         {...base,id:'ordinary-manual',title:'仍需本人完成的手动工作',requirementStage:'delivering'},
         {...base,id:'own-review',title:'当前轮到本人验收',myRoles:['creator'],canReview:true,ai:{state:'done'}},
         {...base,id:'attention-review',title:'已提交但有明确关注事项',ai:{state:'done',attentionRaised:true}},
@@ -54,6 +55,12 @@ app.whenReady().then(async()=>{
         {...base,id:'unrelated',title:'其他人的交付验收',myRoles:[]}];
       fixtureApprovals=[{taskId:'own-review',id:'own-gate',action:'review'},
         {taskId:'submitted-manual',id:'stale-gate',action:'review'}];
+      SoduWorkAPI.listTeammates=async()=>({mates:[{id:'reviewer',name:'合成验收人'}]});
+      SoduWorkAPI.setReviewRecipient=async(id,userId)=>{
+        if(id!=='manual-submit'||userId!=='reviewer') throw Error('Unexpected assignment');
+        return tasks.find(row=>row.id===id).reviewSubmission={ok:true,canAssign:true,reason:'',
+          candidates:[{userId,userName:'合成验收人'}]};
+      };
       window.beforeReviewRows=JSON.stringify(tasks);RequirementsBoard.render(true);
     })()`);
     const personal=['attention-review','explicit-request','manual-submit','ordinary-manual','own-review'];
@@ -64,6 +71,15 @@ app.whenReady().then(async()=>{
 
     await click('[data-rq-actions="manual-submit"]');
     await click('[data-rq-move="manual-submit"][data-rq-target="reviewing"]');
+    assert.equal(await js("fixtureCalls.some(row=>row[0]==='submit-review')"), false);
+    assert.equal(await js("document.querySelector('[data-rq-submit-review]').disabled"),true);
+    assert.match(await js("document.querySelector('#rqReviewRecipient').innerText"), /没有记录创建人/);
+    await click('[data-rq-review-picker]>summary');
+    await js("const select=document.querySelector('[data-rq-review-user]');select.value='reviewer';select.dispatchEvent(new Event('change'));void 0");
+    await click('[data-rq-save-reviewer]');
+    assert.match(await js("document.querySelector('#rqReviewRecipient').innerText"), /合成验收人/);
+    await click('.rq-detail-more>summary');
+    await click('[data-rq-submit-review]');
     await until("tasks.find(row=>row.id==='manual-submit').requirementStage==='reviewing'&&!document.querySelector('.hb-body [data-hbid=manual-submit]')",'submitted item leaves personal actions');
     assert.equal(await js("tasks.find(row=>row.id==='manual-submit').status"),'doing');
     assert.deepEqual(await ids(),personal.filter(id=>id!=='manual-submit'));
@@ -90,6 +106,12 @@ app.whenReady().then(async()=>{
     assert.deepEqual(await ids(),personal);
     await js("fixtureIdentity='fixture:reviewer:tasks';tasks=[{...tasks.find(row=>row.id==='submitted-manual'),myRoles:['creator'],canReview:true}];fixtureApprovals=[];dispatchEvent(new Event('soduwork-data-scope-changed'))");
     assert.deepEqual(await ids(),['submitted-manual']);
+    await js(`Object.assign(tasks[0],{myRoles:[],readOnly:true,canViewExecution:false});
+      fixtureApprovals=[{id:'assigned-gate',taskId:tasks[0].id,action:'review',status:'pending'}];
+      RequirementsBoard.render(true);RequirementsBoard.move(tasks[0].id,'delivered')`);
+    assert.equal(await js("document.querySelector('[data-rq-approval-card] [data-tfd-approval-id]')?.dataset.tfdApprovalId"),'assigned-gate');
+    assert.equal(await js("document.querySelector('[data-rq-execution]')"),null);
+    report.checks.push('Moving a review-only task to Delivered opens its assigned approval without an execution write');
     assert.deepEqual(await js("fixtureCalls.filter(row=>['patch','review','assign'].includes(row[0]))"),[]);
     assert.deepEqual(await js('fixtureErrors'),[]);
     report.checks.push('Returned rework becomes an executor action again; an account switch shows only the new reviewer projection even before the approval inbox refreshes');

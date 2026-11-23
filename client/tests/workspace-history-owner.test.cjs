@@ -45,6 +45,152 @@ function fixture(user = 'user-a', options = {}) {
 }
 const row = (id = 'private-a') => ({ id, title: 'Private A', usedHarnesses: ['pi', 'qwen'] });
 
+async function cloudCacheFixture(t) {
+  const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'sw-cloud-cache-display-'));
+  const identity = require('./helpers/platform-session-fixture.cjs').identity();
+  let current = identity;
+  const store = require('../main/conversation/replica-store.cjs').create(path.join(root, 'history.sqlite'));
+  const history = require('../main/conversation/shared-history.cjs').create({
+    app: { getPath: () => root }, session: { findBySessionId: () => null }, store, identityOf: () => current,
+  });
+  t.after(async () => { await history.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  const cloud = { id: 'cloud-display-original', title: 'Same title', taskId: 'task-one',
+    adapterId: 'pi', cloud: true, locationMode: 'remote', state: 'running', at: 100 };
+  await history.capture({ historyRow: () => cloud, snapshot: () => ({
+    messages: [{ role: 'user', text: 'Synthetic cloud input' }],
+  }) }, identity);
+  const copy = (await history.page()).chats[0];
+  const manual = { ...copy, id: 'explicitly-saved-copy', displayCloudSourceId: undefined };
+  store.register([manual]);
+  let remote = [cloud];
+  const f = fixture('one', { local: true, realHistory: true, history: async options => options.source === 'local'
+    ? history.page() : { ok: true, chats: remote } });
+  return { ...f, cloud, copy, manual, history, store, identity, switchIdentity(value) { current = value; },
+    setRemote(rows) { remote = rows; }, ids: () => Array.from(f.ctx.paintedRows, row => row.id) };
+}
+
+test('automatic cloud capture displays one original through live refresh and restart, retaining an explicit saved copy', async t => {
+  const f = await cloudCacheFixture(t);
+  await f.api.refreshConversationHistory(); await tick();
+  assert.deepEqual(new Set(f.ids()), new Set([f.cloud.id, f.manual.id]));
+  const key = f.ctx.paintedRows.find(row => row.id === f.cloud.id)._uiKey;
+  for (const state of ['running', 'completed', 'running']) {
+    f.api.updateChatState({ sessionId: f.cloud.id, presence: { ...f.cloud, state } });
+    await f.api.refreshConversationHistory(); await tick();
+    assert.deepEqual(new Set(f.ids()), new Set([f.cloud.id, f.manual.id]));
+    assert.equal(f.ctx.paintedRows.find(row => row.id === f.cloud.id)._uiKey, key);
+  }
+  // Reload from the existing automatic capture, without recapturing or migrating it.
+  const restarted = fixture('one', { local: true, realHistory: true, history: async options => options.source === 'local'
+    ? f.history.page() : { ok: true, chats: [f.cloud] } });
+  await restarted.api.refreshConversationHistory(); await tick();
+  assert.deepEqual(new Set(Array.from(restarted.ctx.paintedRows, row => row.id)), new Set([f.cloud.id, f.manual.id]));
+  assert.equal(f.store.get(f.copy.id).source.id, f.cloud.id);
+  assert.deepEqual(f.store.get(f.copy.id).historyAliasIds, [], 'Display joins cannot become lifecycle aliases');
+});
+
+test('automatic cloud cache remains a read-only fallback and keeps its display key when the original returns', async t => {
+  const f = await cloudCacheFixture(t);
+  f.setRemote([]);
+  await f.api.refreshConversationHistory(); await tick();
+  const cached = f.ctx.paintedRows.find(row => row.id === f.copy.id);
+  assert.equal(cached.offlineCloudCache, true);
+  assert.equal(cached.state, 'completed', 'A cached running snapshot must not imply local execution');
+  const view = await f.history.open(f.copy.id);
+  assert.equal((await view.send('do not execute')).accepted, false);
+  await view.close();
+  f.setRemote([f.cloud]);
+  await f.api.refreshConversationHistory(); await tick();
+  assert.deepEqual(new Set(f.ids()), new Set([f.cloud.id, f.manual.id]));
+  assert.equal(f.ctx.paintedRows.find(row => row.id === f.cloud.id)._uiKey, cached._uiKey);
+  f.api.updateChatState({ kind: 'history-lifecycle', sessionId: f.cloud.id,
+    presence: { ...f.cloud, archived: true, lifecycleRevision: 1 } });
+  assert.ok(f.ids().includes(f.copy.id), 'Hiding the original retains its independently stored cache');
+  f.api.updateChatState({ kind: 'history-lifecycle', sessionId: f.cloud.id,
+    presence: { ...f.cloud, archived: false, deleted: false, lifecycleRevision: 2 } });
+  f.ctx.displayPlacement = () => new Set([f.copy.id]);
+  f.api.renderChats();
+  assert.equal(f.ctx.paintedRows.find(row => row.id === f.cloud.id).displaySlotId, f.copy.id);
+  assert.equal((await f.history.lifecycle(f.copy.id, 'delete')).conversation.deleted, true);
+  await f.api.refreshConversationHistory(); await tick();
+  assert.ok(f.ids().includes(f.cloud.id), 'Deleting the cache cannot hide the executable original');
+});
+
+test('a confirmed cloud deletion clears the merged row through selection, stale refresh and reload', async t => {
+  const f = await cloudCacheFixture(t);
+  let confirmations = 0;
+  f.window.SoduWorkConfirmDialog = { open: async () => { confirmations++; return true; } };
+  f.window.WorkspaceHost = { open: async () => true };
+  f.window.soduWorkAPI.conversationSession.deleteHistory = async (id, options) => {
+    assert.equal(id, f.cloud.id);
+    if (!options?.confirmed) return { ok: false, needsConfirm: true, confirm: {} };
+    f.setRemote([]);
+    const copies = await f.history.deleteCloudCaches([id]);
+    return { ok: true, id, deleted: true, aliasIds: [id, ...copies] };
+  };
+  await f.api.refreshConversationHistory(); await tick();
+  f.ctx.active = 'create'; f.ctx.activeChatId = f.cloud.id;
+  assert.equal(await f.api.deleteHistoryChat(f.cloud.id), true);
+  assert.equal(confirmations, 1);
+  assert.deepEqual(f.ids(), [f.manual.id]);
+  f.ctx.root = { querySelectorAll: () => [] };
+  f.api.setActiveChat(f.manual.id);
+  f.api.updateChatState({ sessionId: f.cloud.id, presence: { ...f.cloud, state: 'completed' } });
+  await f.api.refreshConversationHistory(); await tick();
+  assert.deepEqual(f.ids(), [f.manual.id]);
+  const restarted = fixture('one', { local: true, realHistory: true, history: async options => options.source === 'local'
+    ? f.history.page() : { ok: true, chats: [] } });
+  await restarted.api.refreshConversationHistory(); await tick();
+  assert.deepEqual(Array.from(restarted.ctx.paintedRows, row => row.id), [f.manual.id]);
+});
+
+test('cloud cache display follows exact directory aliases and active selection without merging namesakes or lifecycle targets', async t => {
+  const f = await cloudCacheFixture(t);
+  const canonical = { ...f.cloud, id: 'cloud-sync-canonical', historyAliasIds: [f.cloud.id] };
+  const unrelated = { ...f.cloud, id: 'another-conversation', historyAliasIds: [] };
+  f.setRemote([canonical, unrelated]);
+  await f.api.refreshConversationHistory(); await tick();
+  assert.deepEqual(new Set(f.ids()), new Set([canonical.id, unrelated.id, f.manual.id]));
+  const button = id => ({ dataset: { chatId: id }, classList: {
+    selected: false, contains() { return this.selected; },
+    toggle(_name, selected) { this.selected = selected; } }, setAttribute() {} });
+  const originalButton = button(canonical.id), unrelatedButton = button(unrelated.id);
+  f.ctx.root = { querySelectorAll: () => [originalButton, unrelatedButton] };
+  f.ctx.active = 'create'; f.api.setActiveChat(f.copy.id);
+  assert.equal(originalButton.classList.selected, true);
+  assert.equal(unrelatedButton.classList.selected, false);
+  const opens = [];
+  f.window.WorkspaceHost = { open: async (...args) => { opens.push(args); return true; } };
+  f.window.soduWorkAPI.conversationSession.deleteHistory = async id => ({ ok: true, id, deleted: true, localOnly: true });
+  f.api.setActiveChat(canonical.id);
+  await f.api.deleteHistoryChat(f.copy.id);
+  assert.equal(f.ctx.activeChatId, canonical.id, 'Cache deletion cannot close the selected cloud original');
+  assert.deepEqual(opens, []);
+});
+
+test('automatic cloud display proof validates the captured key, owner and Hub without persisting aliases', async t => {
+  const f = await cloudCacheFixture(t), original = f.copy;
+  assert.equal(original.displayCloudSourceId, f.cloud.id);
+  assert.deepEqual(original.historyAliasIds, []);
+  assert.equal(f.store.get(original.id).displayCloudSourceId, undefined, 'Proof is computed for this read only');
+  for (const patch of [
+    { id: 'user-saved-copy' }, { importedHistory: true }, { importDigest: 'a'.repeat(64) },
+    { source: { ...original.source, id: 'same-title-different-conversation' } },
+    { source: { ...original.source, account: 'two' } },
+    { source: { ...original.source, hub: 'https://other.invalid' } },
+    { locationMode: 'account', location: 'account' },
+  ]) {
+    f.store.register([{ ...original, ...patch, displayCloudSourceId: f.cloud.id }]);
+    const row = (await f.history.page()).chats.find(row => row.id === (patch.id || original.id));
+    assert.equal(row?.displayCloudSourceId, undefined, JSON.stringify(patch));
+    f.store.register([original]);
+  }
+  f.switchIdentity(require('./helpers/platform-session-fixture.cjs').identity('two'));
+  assert.equal((await f.history.page()).chats.some(row => row.id === original.id), false);
+  f.switchIdentity({ ...f.identity, hub: 'https://other.invalid' });
+  assert.equal((await f.history.page()).chats.some(row => row.id === original.id), false);
+});
+
 test('a reloaded signed-out shell loads persisted native history under the first authenticated main-process actor', async t => {
   const os = require('node:os');
   const auth = require('../main/device-auth');
@@ -94,6 +240,19 @@ test('account changes clear private rows and reject a late history response with
   assert.equal(f.ctx.chatItems.length, 0); assert.equal(f.ctx.historyLoad, next, 'old finally cannot clear B in-flight request');
   f.pending[1].resolve({ ok: true, chats: [{ id: 'private-b', title: 'B', usedHarnesses: ['claude'] }] }); await next;
   assert.deepEqual(f.ctx.chatItems.map(item => item.id), ['private-b']);
+});
+
+test('a late history read cannot overwrite a newer draft selection event without execution status', async () => {
+  const f = fixture('user-a', { realHistory: true });
+  const draft = { id: 'automation-draft', title: 'Draft', workOnly: true, usedHarnesses: [], draftAdapterId: 'qwen' };
+  f.api.setChats([draft]);
+  const loading = f.api.refreshConversationHistory(); await tick();
+  f.api.updateChatState({ kind: 'work-draft-selection-saved', sessionId: draft.id,
+    presence: { ...draft, draftAdapterId: 'codex-harness' } });
+  assert.equal(f.ctx.chatItems[0].draftAdapterId, 'codex-harness');
+  f.pending[0].resolve({ ok: true, chats: [draft] }); await loading;
+  assert.equal(f.ctx.chatItems[0].draftAdapterId, 'codex-harness');
+  assert.equal(f.ctx.chatItems[0].workOnly, true);
 });
 
 test('A to B to A rejects both previous epochs and restores the current account title', async () => {
@@ -649,3 +808,79 @@ for (const action of ['delete', 'archive']) {
     });
   }
 }
+
+test('account directory refresh retains runtime provenance learned from opening a local conversation', async () => {
+  for (const presenceId of ['multi-runtime', 'native-segment']) {
+    const saved = { id: 'multi-runtime', title: 'Multiple runtimes', state: 'completed', adapterId: 'qwen',
+      usedHarnesses: ['qwen'], at: 1 };
+    let blocked = false, release;
+    const response = () => ({ ok: true, chats: [saved], localCatalog: { workspace: 'runtime-profile', revision: 1,
+      items: [{ id: saved.id, historyAliasIds: ['native-segment'] }] } });
+    const f = fixture('user-a', { local: true, realHistory: true, history: async options => options.source === 'local'
+      ? blocked ? new Promise(resolve => { release = resolve; }) : response() : { ok: true, chats: [] } });
+    await f.api.refreshLocalHistory(); await tick();
+    f.api.updateChatState({ kind: 'opened', presence: { ...saved, id: presenceId, usedHarnesses: ['pi', 'qwen'] } });
+    assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), ['pi', 'qwen']);
+    blocked = true;
+    const loading = f.api.refreshConversationHistory(); await tick(); await f.ctx.historyLoad;
+    assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), ['pi', 'qwen'],
+      'A separate account directory read cannot restore the stale local runtime badge');
+    blocked = false; release(response()); await loading; await tick();
+    assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), ['pi', 'qwen']);
+  }
+});
+
+test('late history and trailing durable snapshots cannot shrink observed runtime provenance', async () => {
+  for (const afterPresence of [false, true]) {
+    const f = fixture('user-a', { realHistory: true });
+    const saved = { id: 'multi-runtime', title: 'Multiple runtimes', adapterId: 'qwen', usedHarnesses: ['qwen'] };
+    f.api.setChats([saved]);
+    let loading;
+    if (!afterPresence) { loading = f.api.refreshConversationHistory(); await tick(); }
+    // Runtime provenance may arrive without a status transition.
+    f.api.updateChatState({ kind: 'opened', presence: { ...saved, usedHarnesses: ['pi', 'qwen'] } });
+    if (afterPresence) { loading = f.api.refreshConversationHistory(); await tick(); }
+    f.pending[0].resolve({ ok: true, chats: [{ ...saved, usedHarnesses: ['qwen', 'kimi'] }] });
+    await loading;
+    assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), ['pi', 'qwen', 'kimi']);
+  }
+});
+
+test('retained runtime provenance never crosses conversations or account epochs', async () => {
+  const f = fixture('user-a', { realHistory: true });
+  f.api.setChats([{ id: 'multi-runtime', title: 'Shared title', usedHarnesses: ['pi', 'qwen'] }]);
+  const first = f.api.refreshConversationHistory(); await tick();
+  f.pending[0].resolve({ ok: true, chats: [{ id: 'other', title: 'Shared title', usedHarnesses: [] }] }); await first;
+  assert.deepEqual(Array.from(f.ctx.chatItems.find(row => row.id === 'other').usedHarnesses), []);
+  await f.switch('user-b');
+  f.pending[1].resolve({ ok: true, chats: [{ id: 'multi-runtime', title: 'Other account', usedHarnesses: [] }] });
+  await f.ctx.historyLoad;
+  assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), []);
+});
+
+test('an explicitly unused draft never inherits usage from its selected or stale runtime', async () => {
+  for (const afterPresence of [false, true]) {
+    const f = fixture('user-a', { realHistory: true });
+    const draft = { id: 'unused', title: 'Draft', adapterId: 'qwen', workOnly: true };
+    f.api.setChats([draft]);
+    let loading;
+    if (!afterPresence) { loading = f.api.refreshConversationHistory(); await tick(); }
+    f.api.updateChatState({ kind: 'work-draft-selection-saved', presence: { ...draft, usedHarnesses: [], draftAdapterId: 'kimi' } });
+    if (afterPresence) { loading = f.api.refreshConversationHistory(); await tick(); }
+    f.pending[0].resolve({ ok: true, chats: [{ ...draft, usedHarnesses: ['qwen'] }] }); await loading;
+    assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), []);
+    assert.equal(f.ctx.chatItems[0].draftAdapterId, 'kimi');
+  }
+});
+
+test('a later executed history row can add genuine usage to a previously unused draft', async () => {
+  const f = fixture('user-a', { realHistory: true });
+  const draft = { id: 'unused', title: 'Draft', adapterId: 'qwen', workOnly: true, usedHarnesses: [] };
+  f.api.setChats([draft]);
+  f.api.updateChatState({ kind: 'work-draft-selection-saved', presence: { ...draft, draftAdapterId: 'kimi' } });
+  const loading = f.api.refreshConversationHistory(); await tick();
+  f.pending[0].resolve({ ok: true, chats: [{ ...draft, adapterId: 'kimi', workOnly: false,
+    count: 2, usedHarnesses: ['kimi'] }] }); await loading;
+  assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), ['kimi']);
+  assert.equal(f.ctx.chatItems[0].workOnly, false);
+});

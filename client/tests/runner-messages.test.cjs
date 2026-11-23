@@ -75,8 +75,8 @@ test('archived Codex streamed warnings stay hidden across history pages', async 
   assert.deepEqual(session.snapshot().messages.map(message => message.text || message.blocks[0].text), ['Create a report', 'Report ready.']);
 });
 async function until(check) { for (let i = 0; i < 300; i++) { if (check()) return; await delay(10); } throw Error('Timeout'); }
-test('Harness2 raw and bounded snapshots preserve separate completed-turn token receipts after reopening', async t => {
-  const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime('harness2'),
+test('Kimi raw and bounded snapshots preserve separate completed-turn token receipts after reopening', async t => {
+  const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime('kimi'),
     modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'fixture', key: 'fixture' } }) },
     runnerRuntime: { async rpc(op) {
       if (op === 'job.session') return { ok: true, data: { status: 'done', usage: { output: 9999 }, tokens: { input: 3000 }, items: [
@@ -139,7 +139,7 @@ test('ACP text deltas render immediately and settle the same assistant block', (
   assert.equal(state.messages[0].blocks[0].done, true);
 });
 
-for (const adapterId of ['harness2', 'opencode']) test(adapterId + ' publishes closed activity in its first terminal snapshot', async t => {
+for (const adapterId of ['kimi', 'opencode']) test(adapterId + ' publishes closed activity in its first terminal snapshot', async t => {
   let release;
   const ready = new Promise(resolve => { release = resolve; });
   const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime(adapterId),

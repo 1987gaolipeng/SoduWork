@@ -394,16 +394,22 @@ function create({ app, handle, plugin, identityOf, skillDirs, deviceGrants, asse
     try { return await runNode(node, inputs, record, persist, token); }
     finally { if (active.get(node) === token) active.delete(node); }
   }
-  async function answerPermission(record, { nodeKey, requestId, allow }) {
+  async function answerPermission(record, { nodeKey, requestId, allow, policyRevision, decision: answerDecision, optionId }) {
     await requirements.identity(record);
     const node = record.nodes.find(item => item.key === nodeKey);
-    if (!node || node.status !== 'running' || record.status === 'cancelled' || typeof allow !== 'boolean') {
+    if (!node || node.status !== 'running' || record.status === 'cancelled') {
       throw new Error('这条权限请求已失效，请使用当前请求');
     }
     const request = (node.pendingPermissions || []).find(item => item.requestId === requestId);
     if (!request || !node.ref) throw new Error('这条权限请求已失效，请使用当前请求');
-    if (allow && request.reviewable === false) throw new Error('这项操作无法完整核对，请拒绝后要求缩小操作范围');
-    const response = { requestId, policyRevision: request.policyRevision, decision: allow ? 'once' : 'deny' };
+    const question = request.action === 'native.question';
+    if (question ? policyRevision !== request.policyRevision || !(answerDecision === 'deny' || answerDecision === 'answer' &&
+      typeof optionId === 'string' && request.options?.some(item => item.optionId === optionId)) : typeof allow !== 'boolean') {
+      throw new Error('这条权限请求已失效，请使用当前请求');
+    }
+    if ((question ? answerDecision === 'answer' : allow) && request.reviewable === false) throw new Error('这项操作无法完整核对，请拒绝后要求缩小操作范围');
+    const response = { requestId, policyRevision: request.policyRevision, decision: question ? answerDecision : allow ? 'once' : 'deny',
+      ...(question && answerDecision === 'answer' ? { optionId } : {}) };
     if (node.ref.startsWith('workflow-pi:')) await directPi.answer(node, response);
     else await rpc('job.permission', { ref: node.ref, ...response });
     node.pendingPermissions = node.pendingPermissions.filter(item => item.requestId !== requestId);

@@ -30,7 +30,7 @@ async function run() {
   await win.loadFile(path.join(__dirname, 'fixtures/session-memory.html'));
   await until('window.ready === true');
   const initial = { ids: [], items: [], scopes: [] };
-  for (const adapter of ['pi', 'codex-harness', 'opencode', 'claude', 'codex', 'qwen', 'dsh']) {
+  for (const adapter of ['pi', 'codex-harness', 'opencode', 'codex', 'qwen', 'dsh', 'kimi']) {
     let receive, snapshot = { status: 'idle', messages: [] };
     const session = { sessionId: 'automatic-e2e-' + adapter, ui: {}, snapshot: () => snapshot,
       on: fn => { receive = fn; return () => {}; } };

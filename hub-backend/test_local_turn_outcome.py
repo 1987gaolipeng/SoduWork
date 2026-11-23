@@ -7,19 +7,32 @@ import threading
 import time
 import tempfile
 import unittest
+import uuid
 from unittest.mock import patch
 
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 _data = tempfile.TemporaryDirectory(prefix="soduwork-test-truncated-")
-os.environ["SODUWORK_DATA_ROOT"] = _data.name
-from app.services import ai_local, local_stream, local_turn_outcome, model_errors
-from app.services.local_base import _RUNS
+with patch.dict(os.environ, {"DATABASE_URL": "sqlite+aiosqlite:///:memory:",
+                             "SODUWORK_DATA_ROOT": _data.name}):
+    from app.services import ai_local, local_base, local_stream, local_turn_outcome, model_errors
+    from app.services.local_base import _RUNS
 
 
 class TurnOutcomeTests(unittest.TestCase):
     def setUp(self):
-        self.ref = "isolated-truncated"
-        self.run = {"state": "running", "cli": "pi", "ws": _data.name,
+        self.temp = tempfile.TemporaryDirectory(prefix="soduwork-turn-outcome-")
+        self.addCleanup(self.temp.cleanup)
+        environment = patch.dict(os.environ, {"DATABASE_URL": "sqlite+aiosqlite:///:memory:",
+                                               "SODUWORK_DATA_ROOT": self.temp.name})
+        environment.start()
+        self.addCleanup(environment.stop)
+        # Archives outlive _RUNS entries. Patch the cached store aliases too,
+        # because another test module may have imported them before this one.
+        for module in (local_base, local_stream, ai_local):
+            store = patch.object(module, "_STORE", os.path.join(self.temp.name, "local-runs"))
+            store.start()
+            self.addCleanup(store.stop)
+        self.ref = "isolated-truncated-" + uuid.uuid4().hex
+        self.run = {"state": "running", "cli": "pi", "ws": self.temp.name,
                     "seq": 0, "lines": [], "cfg": {}, "artifactMode": "files",
                     "expectedOutputPaths": ["product-source.zip"]}
         _RUNS[self.ref] = self.run
@@ -85,8 +98,9 @@ class TurnOutcomeTests(unittest.TestCase):
 
     def test_model_diagnostics_classify_without_publishing_provider_body(self):
         for value, expected in (
-            ('401 {"secret":"private-key"}', "HTTP 401"),
-            ({"error": {"status": 403, "message": "Bearer private-key"}}, "HTTP 403"),
+            ('401 {"secret":"private-key"}', "个人服务请在「我的模型」检查个人 Key，企业服务请联系管理员核对模型授权"),
+            ({"error": {"status": 403, "message": "Bearer private-key"}}, "模型请求被拒绝（HTTP 403）"),
+            ({"error": {"status": 403, "code": "1113", "message": "private-key"}}, "供应商错误码 1113"),
             ('404 status code (no body)', "HTTP 404"),
             ('429 {"error":{"code":"limited","message":"private-key"}}', "HTTP 429"),
             ('502 <html>private-key https://internal.test</html>', "HTTP 502"),
@@ -99,6 +113,19 @@ class TurnOutcomeTests(unittest.TestCase):
                 self.assertIn(expected, public)
                 self.assertNotIn("private-key", public)
                 self.assertNotIn("internal.test", public)
+
+    def test_unclassified_pi_403_projects_only_the_safe_refusal_in_the_runner_receipt(self):
+        terminal = {}
+        message = {"role": "assistant", "content": [], "stopReason": "error",
+                   "errorMessage": '403 {"error":{"message":"Bearer fixture-key https://fixture.invalid fixture-prompt"}}'}
+        for event in ({"type": "message_end", "message": message},
+                      {"type": "turn_end", "message": message},
+                      {"type": "agent_end", "messages": [message]}):
+            local_stream._on_line(self.ref, json.dumps(event), terminal)
+        self.finish(terminal).assert_not_called()
+        page = ai_local.session_sync({}, self.ref)
+        self.assertEqual(page["status"], "failed")
+        self.assertEqual(page["error"], "模型请求被拒绝（HTTP 403）")
 
     def test_pi_error_never_overwrites_an_unrelated_terminal_failure(self):
         terminal = {"isError": True, "result": "execution policy rejected"}
@@ -156,7 +183,7 @@ class TurnOutcomeTests(unittest.TestCase):
         for name, changes, fields, error, expected in cases:
             with self.subTest(name=name):
                 self.run.clear()
-                self.run.update(state="running", cli="pi", ws=_data.name, seq=0, lines=[], cfg={},
+                self.run.update(state="running", cli="pi", ws=self.temp.name, seq=0, lines=[], cfg={},
                                 artifactMode="files", expectedOutputPaths=[], piSettledByWatchdog=True)
                 terminal = self.event("stop")
                 self.run.update(changes)
@@ -257,6 +284,198 @@ class TurnOutcomeTests(unittest.TestCase):
                 self.finish(terminal).assert_not_called()
                 self.assertEqual(self.run["state"], "failed" if failed else "done")
                 self.assertEqual(self.run["error"], text if failed else "")
+
+    def dsh_step(self, terminal, reason, **extra):
+        self.run["cli"] = "dsh"
+        local_stream._on_line(self.ref, json.dumps({"type": "step_finish",
+            "part": {"reason": reason}, **extra}), terminal)
+
+    def test_dsh_exhausted_output_is_incomplete_without_a_second_local_recovery(self):
+        for code in (0, 2):
+            with self.subTest(code=code):
+                self.run.update(state="running", cli="dsh", cliSid="retained-native-session", queue=[])
+                terminal = {}
+                self.dsh_step(terminal, "max_tokens")
+                self.assertTrue(terminal.get("outputTruncated"))
+                self.assertEqual(local_turn_outcome.recovery(self.run, terminal), {},
+                                 "the ACP bridge owns DSH's bounded continuation")
+                with patch.object(local_stream, "_resume") as resume:
+                    local_stream._finish(self.ref, code, terminal, "")
+                resume.assert_not_called()
+                page = ai_local.session_sync({}, self.ref)
+                self.assertEqual(page["status"], "failed")
+                self.assertEqual(page["failureKind"], "execution_incomplete")
+                self.assertEqual(page["error"], local_turn_outcome.TRUNCATED)
+                self.assertEqual(page["cliSid"], "retained-native-session")
+                self.assertEqual(self.run["exit"], code)
+                self.assertEqual(self.run.get("completionRetries", 0), 0)
+                self.assertNotIn("AcpBridgeError", json.dumps(page, ensure_ascii=False))
+
+    def test_kimi_and_qwen_explicit_output_limit_survives_exit_and_preserves_session(self):
+        for cli in ('kimi', 'qwen'):
+            for failed in (False, True):
+                with self.subTest(cli=cli, failed=failed):
+                    self.run.update(state='running', cli=cli, cliSid='retained-native', queue=[])
+                    self.run.pop('failureKind', None)
+                    terminal = {}
+                    local_stream._on_line(self.ref, json.dumps({'type': 'step_finish',
+                        'part': {'reason': 'max_tokens'}}), terminal)
+                    if failed:
+                        local_stream._on_line(self.ref, json.dumps({'error': {
+                            'name': 'AcpBridgeError', 'message': 'synthetic transport failure'}}), terminal)
+                    with patch.object(local_stream, '_resume') as resume:
+                        local_stream._finish(self.ref, 2, terminal, '')
+                    resume.assert_not_called()
+                    self.assertEqual(self.run['state'], 'failed')
+                    self.assertEqual(self.run['cliSid'], 'retained-native')
+                    if failed:
+                        self.assertIn('synthetic transport failure', self.run['error'])
+                        self.assertNotEqual(self.run.get('failureKind'), 'execution_incomplete')
+                    else:
+                        self.assertEqual(self.run['failureKind'], 'execution_incomplete')
+                        self.assertEqual(self.run['error'], local_turn_outcome.TRUNCATED)
+
+    def test_dsh_successful_native_continuation_clears_only_output_truncation(self):
+        terminal = {}
+        self.dsh_step(terminal, "max_tokens")
+        self.dsh_step(terminal, "stop")
+        self.assertNotIn("outputTruncated", terminal)
+        self.assertNotIn("piFinalResponse", terminal)
+        self.finish(terminal).assert_not_called()
+        self.assertEqual(self.run["state"], "done")
+        self.assertEqual(self.run["error"], "")
+
+    def test_dsh_context_watermarks_and_intermediate_steps_do_not_settle_output(self):
+        terminal = {}
+        self.dsh_step(terminal, "max_tokens", contextOnly=True)
+        self.assertNotIn("outputTruncated", terminal)
+        self.dsh_step(terminal, "max_tokens")
+        for reason, extra in (("stop", {"contextOnly": True}), ("tool-calls", {}), (None, {})):
+            self.dsh_step(terminal, reason, **extra)
+            self.assertTrue(terminal.get("outputTruncated"))
+
+    def test_dsh_protocol_failure_overrides_truncation_before_or_after_later_events(self):
+        error = {"error": {"name": "AcpBridgeError", "message": "synthetic ACP transport failure"}}
+        for error_first in (False, True):
+            with self.subTest(error_first=error_first):
+                self.run.update(state="running", cli="dsh", queue=[])
+                terminal = {}
+                if error_first:
+                    local_stream._on_line(self.ref, json.dumps(error), terminal)
+                self.dsh_step(terminal, "max_tokens")
+                if not error_first:
+                    local_stream._on_line(self.ref, json.dumps(error), terminal)
+                else:
+                    self.dsh_step(terminal, "stop")
+                self.assertNotIn("outputTruncated", terminal)
+                self.assertTrue(terminal["isError"])
+                with patch.object(local_stream, "_resume") as resume:
+                    local_stream._finish(self.ref, 2, terminal, "")
+                resume.assert_not_called()
+                self.assertEqual(self.run["state"], "failed")
+                self.assertIn("synthetic ACP transport failure", self.run["error"])
+                self.assertNotEqual(self.run.get("failureKind"), "execution_incomplete")
+
+    def test_dsh_execution_host_failure_overrides_native_output_limit(self):
+        terminal = {}
+        self.dsh_step(terminal, "max_tokens")
+        with patch.object(local_stream, "_resume") as resume:
+            local_stream._finish(self.ref, 2, terminal, "synthetic execution host cleanup failed")
+        resume.assert_not_called()
+        self.assertEqual(self.run["state"], "failed")
+        self.assertIn("synthetic execution host cleanup failed", self.run["error"])
+        self.assertNotEqual(self.run.get("failureKind"), "execution_incomplete")
+
+    def test_pi_and_opencode_protocol_errors_override_earlier_or_later_truncation(self):
+        for cli in ("pi", "opencode"):
+            error = ({"type": "error", "error": {"name": "APIError", "data": {
+                "message": "synthetic transport failure"}}} if cli == "opencode" else {
+                "error": {"name": "SyntheticProtocolError", "message": "synthetic transport failure"}})
+            for error_first in (False, True):
+                with self.subTest(cli=cli, error_first=error_first):
+                    self.run.update(state="running", cli=cli, queue=[], failureKind="")
+                    terminal = {}
+                    def observe(reason):
+                        event = ({"type": "message_end", "message": {
+                            "role": "assistant", "stopReason": reason}}
+                            if cli == "pi" else {"type": "step_finish", "part": {"reason": reason}})
+                        local_stream._on_line(self.ref, json.dumps(event), terminal)
+                    if error_first:
+                        local_stream._on_line(self.ref, json.dumps(error), terminal)
+                    observe("length")
+                    if error_first:
+                        self.assertNotIn("outputTruncated", terminal)
+                        observe("stop")
+                    else:
+                        local_stream._on_line(self.ref, json.dumps(error), terminal)
+                    self.assertNotIn("outputTruncated", terminal)
+                    with patch.object(local_stream, "_resume") as resume:
+                        local_stream._finish(self.ref, 2, terminal, "")
+                    resume.assert_not_called()
+                    self.assertEqual(self.run["state"], "failed")
+                    self.assertIn("synthetic transport failure", self.run["error"])
+                    self.assertNotEqual(self.run.get("failureKind"), "execution_incomplete")
+
+    def test_pi_model_failure_after_length_prevents_local_recovery_but_retry_can_succeed(self):
+        for reason in ("error", "aborted"):
+            with self.subTest(reason=reason):
+                self.run.update(state="running", cli="pi", queue=[], failureKind="")
+                terminal = self.event("length")
+                # Pi settles a truncated call as unexecuted, then can start a
+                # follow-up model round whose real failure must remain visible.
+                for event in ({"type": "tool_execution_start", "toolCallId": "partial-call",
+                               "toolName": "write", "args": {}},
+                              {"type": "tool_execution_end", "toolCallId": "partial-call",
+                               "isError": True, "result": {"content": [{"type": "text",
+                               "text": "Tool call was not executed because output was truncated"}]}}):
+                    local_stream._on_line(self.ref, json.dumps(event), terminal)
+                message = {"role": "assistant", "stopReason": reason,
+                           "errorMessage": "404 status code (no body)"}
+                for event in ({"type": "message_end", "message": message},
+                              {"type": "turn_end", "message": message},
+                              {"type": "agent_end", "messages": [message]}):
+                    local_stream._on_line(self.ref, json.dumps(event), terminal)
+                self.assertNotIn("outputTruncated", terminal)
+                self.finish(terminal).assert_not_called()
+                self.assertEqual(self.run["state"], "failed")
+                self.assertIn("HTTP 404" if reason == "error" else "已中断", self.run["error"])
+                self.assertNotEqual(self.run.get("failureKind"), "execution_incomplete")
+                # The model can recover inside the same native process; only its
+                # own semantic error may be replaced by that successful retry.
+                self.run.update(state="running")
+                local_stream._on_line(self.ref, json.dumps({"type": "message_end", "message": {
+                    "role": "assistant", "stopReason": "stop"}}), terminal)
+                self.finish(terminal).assert_not_called()
+                self.assertEqual(self.run["state"], "done")
+
+    def test_pi_protocol_failure_takes_ownership_from_retryable_model_error(self):
+        terminal = self.event("error")
+        self.assertTrue(terminal["piSemanticError"])
+        local_stream._on_line(self.ref, json.dumps({"error": {
+            "name": "SyntheticProtocolError", "message": "synthetic protocol lost"}}), terminal)
+        for reason in ("length", "stop"):
+            local_stream._on_line(self.ref, json.dumps({"type": "message_end", "message": {
+                "role": "assistant", "stopReason": reason}}), terminal)
+        self.assertNotIn("piSemanticError", terminal)
+        self.assertNotIn("outputTruncated", terminal)
+        self.finish(terminal).assert_not_called()
+        self.assertEqual(self.run["state"], "failed")
+        self.assertIn("synthetic protocol lost", self.run["error"])
+
+    def test_tool_failures_do_not_clear_model_truncation_or_become_protocol_errors(self):
+        events = {
+            "pi": {"type": "tool_execution_end", "toolCallId": "failed-tool", "isError": True,
+                   "result": {"content": [{"type": "text", "text": "synthetic tool failure"}]}},
+            "opencode": {"type": "tool_use", "part": {"type": "tool", "callID": "failed-tool",
+                         "state": {"status": "error", "error": "synthetic tool failure"}}},
+        }
+        for cli, event in events.items():
+            with self.subTest(cli=cli):
+                self.run.update(cli=cli)
+                terminal = {"outputTruncated": True}
+                local_stream._on_line(self.ref, json.dumps(event), terminal)
+                self.assertTrue(terminal["outputTruncated"])
+                self.assertFalse(terminal.get("isError"))
 
 
 if __name__ == "__main__":

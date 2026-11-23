@@ -96,6 +96,18 @@
   function _setupApi() {
     return global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
   }
+  async function _readyDirectoryPreferences() {
+    const view = _composeViewSeq, directory = JSON.stringify([_workspace.direct, _workspace.dir]);
+    const owner = global.SoduWorkAPI?.taskStorageKey?.('ops');
+    const execution = global.ComposeExecution?.revision?.();
+    const selection = global.ComposeDirectoryPreferences?.selectionRevision?.();
+    const adapter = global.ComposeRuntime?.value?.();
+    const ready = await global.ComposeDirectoryPreferences?.ready();
+    return ready !== false && view === _composeViewSeq && directory === JSON.stringify([_workspace.direct, _workspace.dir]) &&
+      (selection === undefined ? adapter === global.ComposeRuntime?.value?.()
+        : selection === global.ComposeDirectoryPreferences?.selectionRevision?.()) &&
+      owner === global.SoduWorkAPI?.taskStorageKey?.('ops') && execution === global.ComposeExecution?.revision?.();
+  }
   /* Synchronize manual directory selection/clearing with recent workspace storage; failure does not invalidate the current choice. */
   function _syncRecentWorkspace(action) {
     const args = Array.prototype.slice.call(arguments, 1);
@@ -110,6 +122,8 @@
     }
   }
   function _bindSetup(p) {
+    global.ComposeDirectoryPreferences?.bind({ workspace: () => _workspace,
+      say: message => global.petSay?.(message) });
     global.ComposeExecution?.bind(p, _paintSetup);
     const open = (buttonId, popId) => {
       const button = p.querySelector('#' + buttonId);
@@ -144,6 +158,7 @@
       if (row.dataset.workspace === 'temp') {
         _setupRevision += 1;
         _workspace = { ..._workspace, dir: '', name: '默认工作区', direct: false, workspaceSource: '' };
+        void global.ComposeDirectoryPreferences?.begin();
         /* Explicitly clearing the inherited directory also clears recent selection so later conversations do not restore it. */
         _syncRecentWorkspace('clear');
         _paintSetup();
@@ -231,6 +246,8 @@
     const api = _setupApi();
     if (!api) return;
     _setupRevision += 1;
+    const revision = _setupRevision, view = _composeViewSeq, owner = global.SoduWorkAPI?.taskStorageKey?.('ops');
+    const current = () => revision === _setupRevision && view === _composeViewSeq && owner === global.SoduWorkAPI?.taskStorageKey?.('ops');
     try {
       const picker = typeof api.pickCwd === 'function' ? api.pickCwd : api.pickWorkdir;
       /* Re-opening the picker starts from the user's previous choice — the current
@@ -242,9 +259,12 @@
           if (recent && recent.ok && recent.dir) startDir = recent.dir;
         } catch (_) { /* root fallback is fine */ }
       }
+      if (!current()) return;
       const result = await picker(startDir ? { defaultPath: startDir } : {});
+      if (!current()) return;
       if (result && result.ok) {
         _workspace = { ..._workspace, dir: result.dir || '', name: result.name || '所选文件夹', direct: true, workspaceSource: '' };
+        void global.ComposeDirectoryPreferences?.begin();
         /* The main process validates and persists manually selected directories for future cold-start conversations. */
         if (result.dir) _syncRecentWorkspace('set', result.dir, _workspace.name);
       }
@@ -279,6 +299,13 @@
     }).catch(() => { /* plugin icons are optional; the Skill list is already usable */ });
   }
   function _loadCapabilities(force, options = {}) {
+    const auth = global.SoduWorkAPI?.clientAuthSnapshot?.();
+    if (auth?.state && auth.state !== 'active') {
+      _capabilityEpoch++; _capabilityRetryKey = '';
+      _capabilities = []; _skills = [];
+      _skillPicker?.setItems([]); _renderCapabilities();
+      return Promise.resolve();
+    }
     const preserveSelection = options === true || options?.preserveSelection === true;
     const api = global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
     if (force === true) { _capabilityEpoch++; _skillIconSeq++; }
@@ -415,6 +442,7 @@
   async function _enterChat(text, chatId, intentOptions) {
     const p = _panel();
     if (chatId) {
+      global.ComposeDirectoryPreferences?.stop();
       _accessConsent?.reset();
       if (global.SessionMemoryEntry) SessionMemoryEntry.clear();
       _composeViewSeq += 1;
@@ -431,6 +459,7 @@
           chatTitle: (intentOptions && intentOptions.chatTitle) || '' }) : false;
     }
     if (_pluginResolveBusy) return false;
+    if (!await _readyDirectoryPreferences()) return false;
     const selectedSkills = [...new Set(_skillPicker?.selected() || [])];
     if (global.ComposeExecution?.value() === 'cloud') {
       const cloudViewSeq = _composeViewSeq;
@@ -448,6 +477,7 @@
         } });
       if (cloudViewSeq !== _composeViewSeq) return false;
       if (accepted) {
+        global.ComposeDirectoryPreferences?.stop();
         p.dataset.stage = 'chat'; _attachments?.clear(); _entryContextPrompts = []; _entryPluginEditId = "";
         _pluginMention?.clear?.();
         _skillPicker?.consume(selectedSkills);
@@ -462,12 +492,14 @@
     const ownerScope = global.SoduWorkAPI?.taskStorageKey?.('ops') || '';
     const adapterId = global.ComposeRuntime?.value?.() || 'pi';
     const executionRevision = global.ComposeExecution?.revision?.();
+    const directory = JSON.stringify([_workspace.direct, _workspace.dir]);
     const currentEntry = () => viewSeq === _composeViewSeq &&
       ownerScope === (global.SoduWorkAPI?.taskStorageKey?.('ops') || '');
     // Preparation can await permission, plugins and models. Changing location
     // or Agent invalidates this send; keep its draft instead of starting the
     // previously selected local runtime under the new visible controls.
     const current = () => currentEntry() && global.ComposeExecution?.value?.() !== 'cloud' &&
+      directory === JSON.stringify([_workspace.direct, _workspace.dir]) &&
       global.ComposeExecution?.revision?.() === executionRevision && (global.ComposeRuntime?.value?.() || 'pi') === adapterId;
     await global.ComposeModelPicker?.ready?.();
     if (!current()) return false;
@@ -477,6 +509,7 @@
     await _pluginSelectTask;
     await global.ComposeRuntime?.ready?.();
     if (!current()) return false;
+    if (global.FirstChatReadiness?.canStart() === false) return false;
     if (intentOptions?.intent === 'goal' && global.ComposeRuntime?.goalSupported?.() === false) {
       if (typeof petSay === 'function') petSay('当前 Agent 暂不支持目标模式，请选择其他 Agent 或取消目标后发送');
       return false;
@@ -525,6 +558,7 @@
     p.dataset.stage = 'chat';
     const modelSelection = global.ComposeModelPicker
       ? ComposeModelPicker.value() : { modelName: _pickedModel, reasoningEffort: '', thinkingLevel: '' };
+    const directoryPreference = global.ComposeDirectoryPreferences?.capture();
     const accepted = global.NativeChat ? await NativeChat.enter(text || '', chatId || '', Object.assign({
       adapterId,
       modelName: modelSelection.modelName,
@@ -547,7 +581,9 @@
       ...(global.SessionMemoryEntry ? SessionMemoryEntry.options() : {}),
     }, intentOptions || {})) : false;
     if (!accepted) return false;
+    global.ComposeDirectoryPreferences?.remember(directoryPreference);
     if (!current()) return false;
+    global.ComposeDirectoryPreferences?.stop();
     // A selected Skill belongs to this first message only.  Keep the
     // composer state clean after a successful new-session send so the next
     // turn does not silently inherit the previous Skill chip.
@@ -566,6 +602,7 @@
     if (global.ComposeExecution?.value?.() === 'cloud') {
       global.petSay?.('云端需求请在需求池安排执行'); return;
     }
+    if (!await _readyDirectoryPreferences()) return;
     const view = _composeViewSeq, owner = global.SoduWorkAPI?.taskStorageKey?.('ops') || '';
     const revision = global.ComposeExecution?.revision?.(), setup = _setupRevision;
     const adapterId = global.ComposeRuntime?.value?.() || 'pi';
@@ -632,6 +669,7 @@
   }
   async function makeDraft() {
     const input = document.getElementById('cpInput');
+    const submittedInput = input?.value;
     const originalText = _attachments?.submissionText?.(input?.value) ?? String(input?.value || '');
     const submittedFiles = _attachments?.files?.().slice() || [];
     const fileIdentity = file => global.ConversationAttachments?.fileIdentity?.(file) ?? file;
@@ -639,6 +677,10 @@
     const typed = global.ComposeSkills?.submission?.(originalText, _skillPicker?.selected())?.text || originalText;
     const hasAttachments = Boolean(_attachments && _attachments.has());
     if (!typed.trim() && !hasAttachments) return;
+    if (!await _readyDirectoryPreferences() || input?.value !== submittedInput || (_attachments?.files && (() => {
+      const current = _attachments.files();
+      return current.length !== submittedIdentities.length || current.some((file, index) => fileIdentity(file) !== submittedIdentities[index]);
+    })())) return;
     _menuSelectionSeq++;
     const text = typed.trim() ? typed : '请查看并处理我附上的文件。';
     const inputPreparation = {
@@ -752,11 +794,18 @@
     /* Starter recommendations refetch on every open (30s throttle): freshly published admin apps and startup-time not-ready fetches self-heal. */
     try { refreshComposeRecommendations(p); } catch (_) { /* recommendations are an enhancement; failure must not affect the panel */ }
     const q = payload || {};
+    // Settings only hides the composer. Reveal the same draft or running task
+    // without opening another session or replaying the original task action.
+    if (q.resumeComposer === true) {
+      setTab();
+      return true;
+    }
     const chatOpenSeq = ++_chatOpenSeq;
     const taskSession = q.taskSession === true || q.taskSession === 1 || q.taskSession === '1';
     if (q.newSession && !q.chatId) {
+      global.ComposeDirectoryPreferences?.stop();
       global.ComposeExecution?.reset();
-      void global.ComposeModelPicker?.resetNewDraft?.();
+      if (!global.ComposeDirectoryPreferences) void global.ComposeModelPicker?.resetNewDraft?.();
       _accessConsent?.reset();
       _rememberComposeDraft();
       /*
@@ -784,6 +833,7 @@
       _mode = global.AccessPreferences?.snapshot?.().mode || 'standard';
       _workspace = { ...global.ComposeSurface.newSessionWorkspace(_workspace, sessionOptions),
         repoId: typeof sessionOptions.repoId === 'string' ? sessionOptions.repoId.trim() : '' };
+      void global.ComposeDirectoryPreferences?.begin({ newSession: true });
       _usedAtts = [];
       if (_intent && q.prefill) _intent.reset();
       _loadSetup();
@@ -815,6 +865,7 @@
     }
     if (global.NativeChat && typeof NativeChat.refreshHistory === 'function') NativeChat.refreshHistory();
     if (q.fileOpen?.file && global.NativeChat) {
+      global.ComposeDirectoryPreferences?.stop();
       p.dataset.stage = 'chat'; setTab();
       const accessMode = global.AccessPreferences?.snapshot?.().mode === 'readonly' ? 'readonly' : 'standard';
       return NativeChat.enter('', '', {
@@ -867,6 +918,7 @@
     }
     const taskSources = new Set(['task-create', 'task-list', 'incoming-task', 'task-open', 'task-retry', 'task-add']);
     if (q.taskId && (taskSession || taskSources.has(String(q.source || '')))) {
+      global.ComposeDirectoryPreferences?.stop();
       if (chatOpenSeq !== _chatOpenSeq) return false;
       _accessConsent?.reset();
       p.dataset.stage = 'chat';
@@ -901,6 +953,7 @@
       });
     }
     if (q.taskMode === 'create' && global.NativeChat && global.WorkEntrySheet) {
+      global.ComposeDirectoryPreferences?.stop();
       _accessConsent?.reset();
       p.dataset.stage = 'chat';
       NativeChat.prepare();
@@ -914,6 +967,7 @@
       });
     }
     if (global.NativeChat && NativeChat.hasSession()) {
+      global.ComposeDirectoryPreferences?.stop();
       p.dataset.stage = 'chat';
       setTab();
       return NativeChat.enter('');

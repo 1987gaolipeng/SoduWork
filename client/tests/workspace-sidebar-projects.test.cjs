@@ -240,6 +240,21 @@ test('older grouped chats retain complete used harnesses across restart and part
   assert.equal(draft.usedHarnesses.length,0,'Explicitly unused history must not fall back to current adapter after reload');
 });
 
+test('grouped work drafts retain the selected runtime without storing model details or claiming execution', () => {
+  const f = fixture(), s = f.create(), project = s.saveProject({ name: '自动化' });
+  s.fileChat(a.id, project, { ...a, workOnly: true, draftAdapterId: 'qwen', usedHarnesses: [],
+    draftSelection: { modelName: 'private-model' } });
+  const row = f.create().view([]).projects[0].items[0];
+  assert.equal(row.workOnly, true);
+  assert.equal(row.draftAdapterId, 'qwen');
+  assert.deepEqual(Array.from(row.usedHarnesses), []);
+  assert.equal(row.draftSelection, undefined);
+  s.remember([{ id: a.id, workOnly: false, draftAdapterId: '', usedHarnesses: ['pi'] }]);
+  const executed = f.create().view([]).projects[0].items[0];
+  assert.equal(executed.workOnly, false);
+  assert.equal(executed.draftAdapterId, '');
+});
+
 test('explicit Hub project link survives edits, archive/restore and account isolation',()=>{
   const f=fixture(),s=f.create(),id=s.saveProject({name:'长期项目',folders:['D:/site'],businessProjectId:'hub-id'});
   assert.notEqual(id,'hub-id');

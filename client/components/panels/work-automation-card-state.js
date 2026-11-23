@@ -23,10 +23,10 @@
         return previous;
       }
       const snapshot = { phase: 'loading', proposal: null, receipt: null, createdId: '', error: '', ...clone(saved), version: 1, cardId };
-      const record = { key, owner, epoch, seed, snapshot, pending: null, operation: 0, listener: null };
+      const record = { key, owner, epoch, seed, snapshot, pending: null, operation: 0, listener: null, waiters:[] };
       // After restart, verify server records before retrying a request whose creation outcome is unknown.
       if (saved?.phase === 'submitting') Object.assign(snapshot, { phase: 'error', uncertain: true,
-        error: '上次创建结果尚未确认，请先到自动化管理中查询，避免重复创建。' });
+        error: '上次保存结果尚未确认，请先到自动化管理中查询，避免重复提交。' });
       if (saved?.phase === 'loading') Object.assign(snapshot, { phase: 'error',
         error: '上次整理未完成；已保留原有内容，请确认后重新整理。' });
       records.set(key, record);
@@ -47,20 +47,30 @@
     function finish(ticket, patch) {
       if (!valid(ticket)) return null;
       ticket.record.pending = null;
-      return publish(ticket.record, patch, ticket.seed, true);
+      const result = publish(ticket.record, patch, ticket.seed, true);
+      ticket.record.waiters.splice(0).forEach(resolve => resolve());
+      return result;
     }
     return { open, capture, current, begin, valid, finish,
+      idle: record => !record.pending || !current(record) ? Promise.resolve() : new Promise(resolve => record.waiters.push(resolve)),
+      cancel(record) {
+        if (!current(record) || record.pending === 'submitting') return false;
+        record.operation++; record.pending = null;
+        record.waiters.splice(0).forEach(resolve => resolve());
+        publish(record, {phase:'cancelled', error:'', uncertain:false, chatEditing:false}, null, true);
+        return true;
+      },
       update: (record, patch, seed) => publish(record, patch, seed, false),
       subscribe(record, listener) { record.listener = listener; return () => { if (record.listener === listener) record.listener = null; }; },
-      reset() { epoch++; records.clear(); },
+      reset() { epoch++; for (const record of records.values()) record.waiters.splice(0).forEach(resolve => resolve()); records.clear(); },
     };
   }
   function defaultModelFor(catalogs, agentId, current) {
     const selected = String(current || '').trim();
     const agent = (catalogs.agents || []).find(item => String(item.id) === String(agentId || ''));
     const runtime = String(agent?.cli || agent?.adapterId || agentId || '').replace(/^local:/, '').replace(/^runner:[^:]+:/, '');
-    const local = agent && !['codex', 'claude'].includes(runtime) && agent.mode !== 'remote' && agent.locationMode !== 'remote';
-    const account = ['codex', 'claude'].includes(runtime) || agent?.modelMode === 'account';
+    const local = agent && !['codex'].includes(runtime) && agent.mode !== 'remote' && agent.locationMode !== 'remote';
+    const account = ['codex'].includes(runtime) || agent?.modelMode === 'account';
     if (!agent?.nativeModelPick && (account || agent?.modelPick === false && !local)) return '';
     const options = (agent?.nativeModelPick ? agent.modelOptions || [] : catalogs.modelOptions || []).filter(item =>
       String(item?.name || item?.id || '').trim() && item?.available !== false && item?.unavailable !== true &&
@@ -189,13 +199,16 @@
       (value.monthDayPolicy === 'last_day' ? ' · ' + tx('缺少日期时使用当月最后一天') : '') + ' · ' + when + range;
     else if (value.every === 'weekly') rhythm = selectedWeekdays.map(day =>
       tx(weekdayLabels[Math.max(0, Number(day) - 1)])).join(', ') + ' ' + when + range;
-    return '<div class="waz-saved"><span class="waz-saved-mark">✓</span><p>' + esc(tx(requirementDraft ? '自动化草稿已保存' : '自动化已创建')) + '</p><h3 data-user-content>' + esc(value.title) + '</h3>' +
+    return '<div class="waz-saved"><span class="waz-saved-mark">✓</span><p>' + esc(tx(requirementDraft ? '自动化草稿已保存' : value.enabled === false ? '自动化已停用' : '自动化已创建')) + '</p><h3 data-user-content>' + esc(value.title) + '</h3>' +
       '<div><span>' + esc(rhythm) + '</span><span>' + esc(agent?.name || value.assigneeId) + '</span>' +
       (method ? '<span>' + esc(method.name) + ' · v' + esc(method.version || '') + '</span>' : '') +
-      '</div>' + (requirementDraft ? '<small data-user-content>' + esc(tx('来源需求')) + '：' + esc(value.sourceRequirement.title || '') +
+      '</div><small>' + esc(value.timeZone || '') + '</small>' + (requirementDraft ? '<small data-user-content>' + esc(tx('来源需求')) + '：' + esc(value.sourceRequirement.title || '') +
         ' · v' + esc(value.sourceRequirement.requirementVersion) + '</small>' : '') +
-      '<small>' + esc(tx(requirementDraft ? '尚未启用，原需求保持不变。可在自动化管理中启用。' :
+      '<small>' + esc(tx(requirementDraft ? '尚未启用，原需求保持不变。可在自动化管理中启用。' : value.enabled === false ? '已停止后续自动触发，可在自动化管理中重新启用。' :
         '以后每次运行都会生成可追踪的任务，并保留结果、异常与重试记录。')) + '</small>' +
+      (value.id ? '<div class="waz-saved-actions"><button type="button" class="waz-button" data-waz-edit>' + esc(tx('修改自动化')) + '</button>' +
+        (value.enabled !== false ? '<button type="button" class="waz-button" data-waz-pause>' + esc(tx('停用自动化')) + '</button>' : '') + '</div>' : '') +
+      '<small>' + esc(tx('可继续发送“修改这个自动化”及具体要求')) + '</small>' +
       '<button type="button" class="waz-button primary" data-waz-open>' + esc(tx('查看自动化')) + '</button></div>';
   }
   global.WorkAutomationCardState = { create, loadOptions, defaultModelFor, savedHtml };

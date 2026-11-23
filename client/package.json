@@ -1,7 +1,7 @@
 {
   "name": "soduwork",
   "productName": "SoduWork",
-  "version": "1.13.15",
+  "version": "1.13.19",
   "description": "SoduWork - \u4f01\u4e1a\u7ea7 AI Native \u5de5\u4f5c\u5e73\u53f0",
   "main": "main.js",
   "scripts": {
@@ -15,6 +15,7 @@
     "check:runtime": "node scripts/verify-runtime.cjs",
     "check:runtime:packaged": "node scripts/verify-runtime.cjs --packaged",
     "test:e2e:user": "node e2e/user-journeys.mjs",
+    "test:e2e:user:isolated": "node e2e/account-five-users.cjs --user-journeys",
     "test:e2e:local": "node e2e/verify-local.cjs",
     "test:e2e:runtime-process": "node e2e/agent-runtime-process.cjs && node e2e/agent-runtime-storage.cjs",
     "test:e2e:local-models": "node e2e/local-model-privacy.cjs && node e2e/local-model-admission.cjs",
@@ -30,11 +31,11 @@
     "prebuild-portable": "npm run prepare:runner && npm run prepare:pi-cache && npm run prepare:pi-retry && npm run prepare:shell-runtime",
     "prebuild:mac": "npm run prepare:pi-cache && npm run prepare:pi-retry && npm run prepare:shell-runtime",
     "prebuild:linux": "npm run prepare:runner && npm run prepare:pi-cache && npm run prepare:pi-retry && npm run prepare:shell-runtime",
-    "build": "electron-builder --win nsis",
-    "build:dir": "electron-builder --win --dir",
-    "build-portable": "electron-builder --win portable",
+    "build": "electron-builder --config scripts/public-build-config.cjs --win nsis",
+    "build:dir": "electron-builder --config scripts/public-build-config.cjs --win --dir",
+    "build-portable": "electron-builder --config scripts/public-build-config.cjs --win portable",
     "build:mac": "node scripts/build-macos.cjs",
-    "build:linux": "electron-builder --linux",
+    "build:linux": "electron-builder --config scripts/public-build-config.cjs --linux",
     "check:licenses": "node ../tools/check-third-party.cjs",
     "test:source": "node --test ../tools/source-manifest.test.cjs"
   },
@@ -57,6 +58,7 @@
     "afterPack": "scripts/prepare-installer.cjs",
     "afterSign": "scripts/prepare-installer.cjs",
     "productName": "SoduWork",
+    "protocols": [{ "name": "SoduWork first chat", "schemes": ["soduwork"] }],
     "directories": {
       "output": "dist"
     },
@@ -96,6 +98,7 @@
     "extraResources": [
       { "from": "node_modules/openai", "to": "node_modules/openai" },
       { "from": "runtime-manifest.json", "to": "runtime-manifest.json" },
+      { "from": "../hub-backend/app/services/generated_image.py", "to": "generated_image.py" },
       { "from": ".runtime/node", "to": "node" },
       { "from": ".runtime/python", "to": "python", "filter": ["**/*", "!Lib/idlelib/help.html", "!**/__pycache__/**", "!**/*.pyc"] },
       {

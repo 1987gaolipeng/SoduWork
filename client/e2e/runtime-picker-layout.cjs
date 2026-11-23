@@ -74,8 +74,8 @@ if (typeof electron === 'string') {
       await win.loadFile(path.join(__dirname, surface === 'chat' ? 'fixtures/conversation-runtime-picker.html' : '../tests/composer-menu.html'));
       const trigger = surface === 'chat' ? '#nchatRuntime' : '#cpRuntime', popup = surface === 'chat' ? '.nchat-runtime-pop' : '#cpRuntimePop';
       await until(`document.querySelector(${JSON.stringify(trigger)})`);
-      await js(`window.layoutRuntimes=[['pi','Pi','2.5.0'],['codex-harness','Codex Harness','2.5.0'],['opencode','OpenCode','1.18.18'],['codex','Codex','0.164.0'],['qwen','Qwen Code','0.26.1'],['dsh','DeepSeek Harness','0.4.40'],['harness2','Google Harness²','0.1.0']].map(([id,displayName,version],i)=>({id,displayName,version,order:i+1,group:i<2?'recommended':'more',modelMode:id==='codex'?'account':'managed',availability:{ok:true,version}}));
-        window.runtimeReply=()=>({ok:true,runtimes:layoutRuntimes,availableRuntimes:layoutRuntimes,missing:[{id:'claude',displayName:'Claude'}]});
+      await js(`window.layoutRuntimes=[['pi','Pi','2.5.0'],['codex-harness','Codex Harness','2.5.0'],['opencode','OpenCode','1.18.18'],['codex','Codex','0.164.0'],['qwen','Qwen Code','0.26.1'],['dsh','DeepSeek Harness','0.4.40'],['kimi','Kimi Code','0.1.0']].map(([id,displayName,version],i)=>({id,displayName,version,order:i+1,group:i<2?'recommended':'more',modelMode:id==='codex'?'account':'managed',availability:{ok:true,version}}));
+        window.runtimeReply=()=>({ok:true,runtimes:layoutRuntimes,availableRuntimes:layoutRuntimes,missing:[{id:'custom-offline',displayName:'Offline runtime'}]});
         soduWorkAPI.conversationSession.runtimes=async()=>runtimeReply();
         soduWorkAPI.conversationSession.conversationRuntimes=async()=>runtimeReply();
         soduWorkAPI.conversationSession.probe=async id=>({ok:true,version:layoutRuntimes.find(r=>r.id===id)?.version});
@@ -100,8 +100,8 @@ if (typeof electron === 'string') {
       await click(trigger);await settle();
       win.setSize(900,700);await sleep(100);await settle();
       check(await geometry(trigger,popup),7);
-      await click(popup+' [data-runtime=harness2]');
-      await until(`document.querySelector(${JSON.stringify(trigger)}).textContent.includes('Google')`);
+      await click(popup+' [data-runtime=kimi]');
+      await until(`document.querySelector(${JSON.stringify(trigger)}).textContent.includes('Kimi')`);
       report.checks.push({surface,case:'resize-open-picker-and-select-last-scrolled-runtime'});
       win.setSize(1600,950);await sleep(80);
       await js('window.layoutRuntimes=layoutRuntimes.slice(0,1);window.dispatchEvent(new Event("agent-runtimes-changed"));void 0');

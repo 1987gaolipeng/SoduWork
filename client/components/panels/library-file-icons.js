@@ -1,4 +1,4 @@
-/* Native file associations: identical to the user's desktop file manager. */
+/* Prefer native file associations; retain an inline icon when the OS has none. */
 (function (global) {
   'use strict';
   const MIME_TYPES = {
@@ -39,9 +39,12 @@
   const valid = value => /^data:image\/png;base64,[a-z0-9+/=]+$/i.test(String(value || ''));
   function markup(item) {
     const type = typeOf(item), saved = cache.get(type);
+    const shape = type === '$folder'
+      ? 'M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2zM4 10h16'
+      : 'M6 3h9l4 4v14H6zM15 3v5h4M9 12h7M9 16h7';
     return '<span class="library-native-file-icon" data-native-file-icon="' + type + '" aria-hidden="true">' +
-      '<img alt="" draggable="false"' + (saved ? ' src="' + saved + '"' : ' hidden') + '>' +
-      '<span class="library-file-extension"' + (saved ? ' hidden' : '') + '>' + (type === '$folder' ? '' : type.toUpperCase()) + '</span></span>';
+      '<img alt="" draggable="false" hidden' + (saved ? ' src="' + saved + '"' : '') + '>' +
+      '<span class="library-file-fallback"><svg viewBox="0 0 24 24" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="' + shape + '"/></svg></span></span>';
   }
   function load(type) {
     if (cache.has(type)) return Promise.resolve(cache.get(type));
@@ -64,11 +67,11 @@
       const type = node.dataset.nativeFileIcon;
       load(type).then(url => {
         if (!url || !node.isConnected || node.dataset.nativeFileIcon !== type) return;
-        const image = node.querySelector('img'), label = node.querySelector('.library-file-extension');
-        image.onload = () => { if (node.isConnected) { image.hidden = false; label.hidden = true; } };
-        image.onerror = () => { image.hidden = true; label.hidden = false; };
+        const image = node.querySelector('img'), fallback = node.querySelector('.library-file-fallback');
+        image.onload = () => { if (node.isConnected) { image.hidden = false; fallback.hidden = true; } };
+        image.onerror = () => { image.hidden = true; fallback.hidden = false; };
         if (image.src !== url) image.src = url;
-        else if (image.complete && image.naturalWidth) { image.hidden = false; label.hidden = true; }
+        else if (image.complete && image.naturalWidth) { image.hidden = false; fallback.hidden = true; }
       });
     });
   }

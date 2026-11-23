@@ -148,9 +148,10 @@ function createHostAuth({ app, identity, identityOf, deviceAuth, fetchImpl = glo
     const method = String(init.method || 'GET').toUpperCase();
     const url = approvedUrl(trusted.hub, value, method);
     const active = await current();
+    const admitted = auth.requestAdmission?.(app, active);
     const controller = new AbortController();
     controllers.add(controller);
-    const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
+    const signal = AbortSignal.any([controller.signal, init.signal, admitted?.signal].filter(Boolean));
     const send = () => {
       const headers = safeHeaders(init.headers);
       if (active.session) headers.set('Authorization', 'Device ' + active.session);

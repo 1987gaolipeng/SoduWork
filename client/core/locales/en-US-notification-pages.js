@@ -73,8 +73,6 @@
     "等待官方登录授权": "Waiting for official sign-in authorization",
     "登录未完成": "Sign-in incomplete",
     "请按下方官方地址与设备码完成登录。此操作不启动模型对话。": "Use the official URL and device code below to sign in. This does not start a model conversation.",
-    "Google Research Harness² 核心随 SoduWork 升级；首次使用点击「准备组件」准备执行组件。「重装 / 升到最新」会准备 SoduWork 支持的执行组件版本；卸载仅停用本底座，保留共享 OpenCode。": "The Google Research Harness² core updates with SoduWork. Click Prepare components before first use. Reinstall / update prepares the supported execution component version. Uninstall disables Harness² and keeps shared OpenCode.",
-    "停用这台机器上的 Harness²，新任务不能再派给它；保留内置核心、共享 OpenCode 和任务记录。点「启用」可重新启用。": "Disable Harness² on this computer so it cannot receive new tasks. Keep its core, shared OpenCode and task history. Click Enable to use it again.",
     "待准备组件": "Components required",
     "已停用": "Disabled",
     "需要修复": "Repair required",

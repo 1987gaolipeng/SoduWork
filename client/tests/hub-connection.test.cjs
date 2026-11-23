@@ -13,6 +13,30 @@ function fixture(seed = {}, bridge = {}, storage, internal = true, clock = { set
 }
 const legacy = 'http://192.0.2.10:8989';
 const unassigned = 'https://unassigned-legacy-hub.invalid';
+for (const isPackaged of [false, true]) test(`${isPackaged ? 'packaged' : 'source'} first requests follow the native default Hub`, async t => {
+  const endpoint = require('../main/hub-endpoint.cjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-default-routing-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const app = { isPackaged, getPath: () => root };
+  endpoint.initialize(app, {});
+  const expected = isPackaged ? 'https://service.soduwork.ai' : 'http://127.0.0.1:18989';
+  const enrollments = [];
+  const f = fixture({ soduwork_work_hub_url: 'https://old.example.test' }, {
+    runtimeForm: () => isPackaged ? 'packaged' : 'local-code',
+    getHubConnection: async () => endpoint.current(app),
+    deviceAuthBootstrap: async payload => { enrollments.push(payload); return { ok: true, stored: true,
+      clientId: 'fixture-device', session: 'fixture-session', user: { id: 'fixture-user' }, expiresIn: 1800 }; },
+  }, undefined, false);
+  await f.api.clientAuthPolicy();
+  await f.api.registerClient();
+  await f.api.myModels();
+  assert.equal(f.api.hubBase(), expected);
+  assert.equal(enrollments.length, 1);
+  assert.equal(enrollments[0].hub, expected);
+  assert.ok(f.requests.length > 0);
+  assert.ok(f.requests.every(row => row.url.startsWith(expected + '/')));
+});
+
 for (const id of ['self-hosted']) test(`${id} renderer uses bundled Hub from its first request and rejects another fixed Hub`, async () => {
   const profile = require('../main/distribution.cjs').getProfile(id);
   const enrollments = [];
@@ -35,7 +59,7 @@ for (const id of ['self-hosted']) test(`${id} renderer uses bundled Hub from its
   assert.equal(invalid.requests.length, 0);
 });
 for (const [name, seed, expected, bridge] of [
-  ['fresh', {}, 'http://127.0.0.1:18989'],
+  ['fresh', {}, 'https://service.soduwork.ai'],
   ['local-code fresh', {}, 'http://127.0.0.1:18989', { runtimeForm: () => 'local-code' }],
   ['production without saved URL', { soduwork_work_hub_environment_v1: 'production' }, unassigned],
   ['production with saved URL', { soduwork_work_hub_environment_v1: 'production', soduwork_work_hub_url: legacy }, legacy],
@@ -113,22 +137,22 @@ test('storage failure rolls back main-process selection and never claims a saved
   const f = fixture({}, { selectHubEnvironment: async hub => { selected.push(hub); return { ok: true }; } },
     { getItem: () => '', setItem() { throw Error('disk full'); } });
   await assert.rejects(f.api.connectHub('production', 'https://team.example.com'), /无法保存/);
-  assert.deepEqual(selected, ['https://team.example.com', 'http://127.0.0.1:18989']);
-  assert.equal(f.api.hubBase(), 'http://127.0.0.1:18989');
+  assert.deepEqual(selected, ['https://team.example.com', 'https://service.soduwork.ai']);
+  assert.equal(f.api.hubBase(), 'https://service.soduwork.ai');
 });
 
 test('invalid service URL and failed main-process selection leave the saved connection untouched', async () => {
   const f = fixture({}, { selectHubEnvironment: async () => ({ ok: false, error: 'selection rejected' }) });
   for (const value of ['https://user:secret@example.com', 'https://example.com/api', 'https://example.com?q=x', 'file:///C:/']) {
     await assert.rejects(f.api.connectHub('production', value));
-    assert.equal(f.api.hubBase(), 'http://127.0.0.1:18989');
+    assert.equal(f.api.hubBase(), 'https://service.soduwork.ai');
   }
   await assert.rejects(f.api.connectHub('production', 'https://team.example.com'), /selection rejected/);
   assert.equal(f.values.has('soduwork_work_hub_connections_v2'), false);
 });
 
 
-const production = 'http://127.0.0.1:18989';
+const production = 'https://service.soduwork.ai';
 test('runtime badge cannot override the fixed production connection', async () => {
   const f = fixture({}, { runtimeForm: () => 'local-code' }, undefined, false);
   await f.api.clientAuthPolicy();
@@ -212,7 +236,33 @@ for (const oldHub of ['http://localhost:18989', '']) test('fixed product isolate
   assert.equal(f.values.get('soduwork_work_task_ops_v1'), '[{"id":"legacy-only"}]');
   assert.ok(!JSON.stringify(f.requests).includes('old-local-key'));
   assert.ok(f.requests.every(row => row.url.startsWith(production + '/')));
-  assert.match(f.api.taskStorageKey('ops'), /http%3A%2F%2F127\.0\.0\.1%3A18989/);
+  assert.ok(f.api.taskStorageKey('ops').includes(encodeURIComponent(production)));
+});
+
+test('offline migration deletes only the exact legacy credential acknowledged by native storage', async () => {
+  const key = 'soduwork_work_device_secret', origin = 'soduwork_work_legacy_auth_hub_v1';
+  for (const scenario of ['stored', 'wrong-origin', 'wrong-device', 'changed-key', 'changed-origin', 'failed', 'unknown','dev-without-address']) {
+    const unknown = ['unknown','dev-without-address'].includes(scenario);
+    const sourceHub = unknown ? '' : legacy;
+    let migrations = 0;
+    const f = fixture({ soduwork_work_hub_url:sourceHub, soduwork_work_hub_environment_v1:scenario === 'dev-without-address' ? 'development' : '', [key]:'old-key' }, {
+      getHubConnection: async () => ({hub:production}),
+      deviceAuthMigrateLegacy: async raw => {
+        migrations++;
+        assert.deepEqual({...raw}, {hub:legacy, clientId:'legacy-user', legacySecret:'old-key'});
+        if (scenario === 'failed') throw Error('store unavailable');
+        if (scenario === 'changed-key') f.values.set(key, 'replacement');
+        if (scenario === 'changed-origin') f.values.set(origin, 'https://other.invalid');
+        return {stored:true, hub:scenario === 'wrong-origin' ? production : legacy,
+          clientId:scenario === 'wrong-device' ? 'other-id' : raw.clientId};
+      },
+    }, undefined, false);
+    await f.api.clientAuthPolicy();
+    assert.equal(migrations, unknown ? 0 : 1, scenario);
+    assert.equal(f.values.get(key), scenario === 'stored' ? undefined : scenario === 'changed-key' ? 'replacement' : 'old-key', scenario);
+    assert.equal(f.api.hubBase(), production);
+    assert.ok(f.requests.every(row => !JSON.stringify(row).includes('old-key')));
+  }
 });
 
 test('only an explicit main-process internal loopback connection overrides the product endpoint', async () => {

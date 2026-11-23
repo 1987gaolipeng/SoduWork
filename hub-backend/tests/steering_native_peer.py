@@ -62,8 +62,6 @@ def prompt(text, sid, emit_text):
 def acp(agent):
     native_outcome = NativeOutcome()
     sid = "native-" + agent
-    if agent == "harness2":
-        sid = "h2_" + "a" * 32
     resumed = False
     for raw in sys.stdin:
         message = json.loads(raw)
@@ -77,14 +75,18 @@ def acp(agent):
             result = {"protocolVersion": 1, "agentCapabilities": caps}
         elif method == "session/new":
             assert not Path("native-session").exists(), "must not create another native session"
+            if agent == "opencode":
+                from opencode_peer_session import create_session
+                create_session(os.environ, sid, params["cwd"])
             Path("native-session").write_text(sid, encoding="utf-8")
             result = {"sessionId": sid}
         elif method in {"session/load", "session/resume"}:
             assert params["sessionId"] == Path("native-session").read_text(encoding="utf-8")
             assert method == ("session/load" if agent == "dsh" else "session/resume")
+            if agent == "opencode":
+                from opencode_peer_session import require_session
+                require_session(os.environ, params["sessionId"], params["cwd"])
             resumed = True
-            result = {}
-        elif method == "session/set_mode" and agent == "harness2":
             result = {}
         elif method == "session/prompt":
             native_outcome.begin(sid)

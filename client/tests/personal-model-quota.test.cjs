@@ -186,12 +186,12 @@ test('model configuration requires signed managed funding and keeps its ticket o
   for (const patch of [{ personalQuotaSupported: false }, { quotaVersion: 1 }, { quotaUsageToken: '' }, { provider: '' }]) {
     assert.equal((await fetchModel(owner, 'personal-model', 1000, fetchImpl({ ...valid, ...patch }))).ok, false);
   }
-  for (const agent of ['qwen', 'opencode', 'codex-harness', 'harness2', 'kimi', 'dsh']) {
+  for (const agent of ['qwen', 'opencode', 'codex-harness', 'kimi', 'dsh']) {
     const managed = await fetchModel(owner, 'personal-model', 1000, fetchImpl(valid), false, agent);
     assert.equal(managed.ok, true, agent);
     assert.equal(managed.model.quotaUsageToken, valid.quotaUsageToken);
   }
-  for (const agent of ['codex', 'claude', 'unknown']) {
+  for (const agent of ['codex', 'unknown']) {
     assert.equal((await fetchModel(owner, 'personal-model', 1000, fetchImpl(valid), false, agent)).ok, false, agent);
   }
 });
@@ -229,7 +229,7 @@ test('versioned legacy monthly quota uses server-derived personal allowance with
 
 
 test('managed Runner turns preserve model-specific admission under signed funding', async () => {
-  for (const agent of ['qwen', 'opencode', 'codex-harness', 'harness2', 'kimi', 'dsh']) {
+  for (const agent of ['qwen', 'opencode', 'codex-harness', 'kimi', 'dsh']) {
     const owner = identity(), calls = [];
     const authorize = create({ identityOf: async () => owner, fetchImpl: async url => {
       calls.push(new URL(url)); return Response.json(admitted());

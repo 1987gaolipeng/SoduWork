@@ -188,6 +188,60 @@ class IMTransportTests(IMFixture, unittest.IsolatedAsyncioTestCase):
         self.live.call.assert_awaited_once()
 
 
+    async def test_wecom_unpaired_observation_before_and_after_pairing(self):
+        identifier, credentials = await self.connection("wecom")
+        path = "/connections/" + identifier
+
+        async def incoming(text, event_id, **options):
+            return await self.enterprise_incoming(identifier, credentials, text, event_id, "wecom", **options)
+
+        async def catalog_entry():
+            catalog = await self.request("GET", "")
+            return next(item for item in catalog.json()["connections"] if item["id"] == identifier)
+
+        self.assertEqual((await incoming("", 1, challenge=True)).text, "challenge-ok")
+        self.assertEqual((await incoming("write report", 2, tamper=True)).status_code, 401)
+        self.assertEqual((await incoming("write report", 2, tenant="wwforeign")).status_code, 401)
+        self.assertEqual((await incoming(" ", 2)).status_code, 413)
+        for invalid in ("/pair invalid", "/pair " + "x" * 24):
+            self.assertEqual((await incoming(invalid, 2)).status_code, 200)
+        initial = await catalog_entry()
+        self.assertNotIn("sawUnpairedMessage", initial)
+        async with self.sessions() as session:
+            config = (await session.get(im.IMConnection, identifier)).config
+        for _ in range(2):
+            self.assertEqual((await incoming("write report", 3)).status_code, 200)
+        await im_worker.run_once(self.sessions)
+        self.assertEqual(await catalog_entry(), {**initial, "sawUnpairedMessage": True})
+        self.assertEqual((await self.request("GET", path + "/messages")).json(), {"messages": [], "sawUnpairedMessage": True})
+        async with self.sessions() as session:
+            stored = (await session.get(im.IMConnection, identifier)).config
+            self.assertEqual(stored, {**config, "saw_unpaired_message": True})
+        self.assertEqual(self.submitted, [])
+        self.assertEqual(self.sent, [])
+
+        headers = {"Authorization": "Device " + device_auth.issue_session(self.other_client)[0]}
+        self.assertEqual((await self.request("GET", "", headers=headers)).json()["connections"], [])
+        self.assertEqual((await self.request("GET", path + "/messages", headers=headers)).status_code, 404)
+        grant = await self.request("POST", path + "/pairings", json={"taskId": self.task.id, "runnerId": self.node.id})
+        self.assertEqual((await incoming(grant.json()["command"], 4)).status_code, 200)
+        self.assertEqual((await incoming("another sender", 5, sender="fixture-other")).status_code, 200)
+        for _ in range(2):
+            self.assertEqual((await incoming("write report", 6)).status_code, 200)
+        await im_worker.run_once(self.sessions)
+        self.assertEqual([entry[1] for entry in self.submitted], ["write report"])
+        await self.complete("fixture final reply")
+        for _ in range(4):
+            await self.ready()
+            await im_worker.run_once(self.sessions)
+        self.assertTrue(all(item["touser"] == "fixture-user" for item in self.sent))
+        self.assertEqual([item["touser"] for item in self.sent if item["text"]["content"] == "fixture final reply"], ["fixture-user"])
+        self.assertTrue((await catalog_entry())["sawUnpairedMessage"])
+        self.assertEqual((await self.request("DELETE", path)).status_code, 200)
+        self.assertGreaterEqual((await incoming("late", 7)).status_code, 400)
+        self.assertNotIn("sawUnpairedMessage", await catalog_entry())
+        self.assertNotIn("sawUnpairedMessage", (await self.request("GET", path + "/messages")).json())
+
     async def test_wecom_encrypted_callback_verification_identity_and_final_reply(self):
         identifier, credentials = await self.connection("wecom")
         verified = await self.enterprise_incoming(identifier, credentials, "", 0, "wecom", challenge=True)

@@ -634,6 +634,7 @@ html[data-window-menu] .library-image-dialog{
 }
 .library-content:not(.is-list) .library-file-card .library-card-copy small,
 .library-content:not(.is-list) .library-folder-card .library-card-copy small{display:none;}
+.library-content:not(.is-list) .library-file-card .library-card-copy .library-filename-hint{display:block;order:1;color:var(--ink-3);white-space:normal;}
 .library-content:not(.is-list) .library-file-card .library-card-preview,
 .library-content:not(.is-list) .library-folder-card .library-card-preview{
   order:2;
@@ -756,8 +757,9 @@ html[data-desk-panel="workspace"] #libraryPanel :is(
 /* Native document icons retain their application colors in every skin. */
 .library-native-file-icon{display:inline-grid;place-items:center;flex:none;width:32px;height:32px;}
 .library-native-file-icon>img{display:block;width:100%;height:100%;object-fit:contain;filter:none;}
-.library-native-file-icon>img[hidden],.library-file-extension[hidden]{display:none!important;}
-.library-file-extension{color:var(--ink-3);font:600 14.5px/1 var(--font-ui);}
+.library-native-file-icon>img[hidden],.library-file-fallback[hidden]{display:none!important;}
+.library-file-fallback{display:grid;place-items:center;width:100%;height:100%;color:var(--ink-3);}
+.library-file-fallback>svg{display:block;width:100%;height:100%;}
 .library-content.is-list .library-native-file-icon{width:28px;height:28px;}
 .library-content.is-list .library-file-card .library-card-preview{border:0;box-shadow:none;background:transparent;}
 .library-card:hover,

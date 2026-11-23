@@ -14,7 +14,7 @@ function statusLabel(quota) {
   return tx('可使用')
 }
 
-export default function QuotaMembers({ config, revision }) {
+export default function QuotaMembers({ config, onConfig, revision }) {
   const locale = useLocale()
   const [q, setQ] = useState(''), [offset, setOffset] = useState(0), [refresh, setRefresh] = useState(0)
   const [page, setPage] = useState({ items: [], total: 0 }), [loading, setLoading] = useState(true), [error, setError] = useState('')
@@ -67,6 +67,6 @@ export default function QuotaMembers({ config, revision }) {
         <span>{Math.floor(offset / PAGE_SIZE) + 1} / {Math.max(1, Math.ceil(page.total / PAGE_SIZE))}</span>
         <button className="btn btn-ghost" aria-label={tx('下一页')} disabled={loading || offset + PAGE_SIZE >= page.total} onClick={() => setOffset(value => value + PAGE_SIZE)}><Icon name="chevron-right" /></button></div>
     </div>
-    {editing && <MemberEditor member={editing} config={config} onClose={() => setEditing(null)} onSaved={() => setRefresh(value => value + 1)} />}
+    {editing && <MemberEditor member={editing} config={config} onConfig={onConfig} onClose={() => setEditing(null)} onSaved={() => setRefresh(value => value + 1)} />}
   </div>
 }

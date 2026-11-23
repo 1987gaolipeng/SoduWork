@@ -61,6 +61,11 @@ function dataFixture() {
  vm.runInNewContext(source,{window,Date:{now:()=>clock}});
  return {api:window.SoduWorkPlatformDirectory,calls,setHandler(fn){handler=fn;},advance(n){clock+=n;},get actions(){return actions;}};
 }
+test('企业微信普通授权说明区分插件访问与手机远程任务', () => {
+ const wecom = dataFixture().api.entries().find(row => row.key === 'wecom');
+ assert.match(wecom.description, /对话和插件/);
+ assert.match(wecom.description.split('。')[0], /手机远程对话.*绑定任务/);
+});
 test('数据目录只读查询并缓存，连续加载单飞且显式重查可用',async()=>{
  const f=dataFixture();let done;const waiting=new Promise(resolve=>done=resolve);
  f.setHandler(async key=>{await waiting;return{ok:true,provider:key,state:'needs_setup'};});

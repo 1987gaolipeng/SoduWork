@@ -22,6 +22,7 @@
   let activeOwner = '';
   let loading = null;
   let enterpriseLoaded = false;
+  let discovery = 'checking';
   let nativeLoaded = '';
   let loadSeq = 0;
   let options = {};
@@ -81,6 +82,7 @@
   }
 
   function currentLabel(row, selected) {
+    if (modelReadiness() === 'empty' && !selected.modelName) return tx('选择模型');
     if (selected.catalogUnavailable) return selected.modelName;
     if (selected.unavailable) return tx(deviceLocal({ name: selected.modelName }) ||
       global.SoduWorkModelChoice?.imageChoice(selected.modelName)?.name.startsWith('local:')
@@ -113,6 +115,9 @@
         selected.catalogUnavailable = true;
         return;
       }
+      // A directory preference is a pair. Keep a missing saved model visible
+      // until the user explicitly chooses a replacement instead of sending with a fallback.
+      if (selected.directoryPreference) { selected.unavailable = true; return; }
       const available = enterpriseModels.map(item => item.name);
       if (!cloud() && row.id === 'pi' && global.SoduWorkModelChoice) {
         available.push(...imageModels.map(item => SoduWorkModelChoice.imageKey(item)));
@@ -168,15 +173,26 @@
     const value = item || {};
     const config = value.config && typeof value.config === 'object' ? value.config : {};
     const mode = String(value.thinkingMode || config.thinkingMode || '').trim().toLowerCase();
-    if (mode === 'none') return { supported: false, canDisable: false };
-    if (mode === 'always') return { supported: true, canDisable: false };
-    if (mode === 'controllable') return { supported: true, canDisable: true };
+    const key = String(value.wireModelId || value.modelName || value.name || value.id || '').toLowerCase();
+    const fixedGlm = /(?:^|\/)glm[-_]?5[._]3(?:[-_]?flash)?$/i.test(key);
     const reasoning = typeof value.reasoning === 'boolean' ? value.reasoning
       : (typeof config.reasoning === 'boolean' ? config.reasoning : null);
-    if (reasoning !== null) return { supported: reasoning, canDisable: reasoning };
-    const key = String(value.name || value.id || '').toLowerCase();
-    const supported = /(?:deepseek|glm|zhipu|qwen|qwq|think|thinking|reason|reasoner|\br1\b|\bo[134]\b|gpt-5)/.test(key);
-    return { supported, canDisable: supported };
+    if (mode === 'none' || fixedGlm && reasoning === false) return { supported: false, canDisable: false };
+    const format = value.thinkingFormat || config.thinkingFormat || value.reasoningFormat || value.format;
+    const hinted = Boolean(format) || /(?:deepseek|glm|zhipu|qwen|qwq|think|thinking|reason|reasoner|\br1\b|\bo[134]\b|gpt-5)/.test(key);
+    const supported = ['always', 'controllable'].includes(mode) || (reasoning === null ? hinted : reasoning);
+    const map = { ...(fixedGlm ? { minimal: null, low: 'low', medium: null, high: 'high', xhigh: null, max: 'max' } : {}),
+      ...(value.thinkingLevelMap || config.thinkingLevelMap || {}) };
+    if (fixedGlm || mode === 'always' || value.thinkingAlwaysOn || config.thinkingAlwaysOn) map.off = null;
+    const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].filter(level => map[level] !== null &&
+      (!['xhigh', 'max'].includes(level) || map[level] !== undefined));
+    return { supported, canDisable: supported && levels.includes('off'), levels,
+      onLevel: levels.includes('medium') ? 'medium' : levels.find(level => level !== 'off') || 'low',
+      unknown: !supported && reasoning === null };
+  }
+
+  function fixedThinkingLevel(info, selected) {
+    return info.levels?.includes(selected) ? selected : info.onLevel;
   }
 
   function managedHtml(selected) {
@@ -202,7 +218,8 @@
         : (thinkingOn ? '\u5df2\u5f00\u542f \u00b7 \u4e2d\u7b49\u5f3a\u5ea6' : '\u5df2\u5173\u95ed \u00b7 \u66f4\u5feb\u54cd\u5e94'));
     const thinkingHint = !canThink ? '\u8bf7\u5207\u6362\u5230\u63a8\u7406\u6a21\u578b\u540e\u4f7f\u7528'
       : (!canDisable ? '\u5f53\u524d\u6a21\u578b\u4e0d\u652f\u6301\u5173\u95ed\u601d\u8003' : '\u53ea\u5bf9\u672c\u6b21\u65b0\u5efa\u7684\u4f1a\u8bdd\u751f\u6548');
-    const thinking = !canThink ? '<div class="cp-model-summary"><span>思考模式</span><span>不支持</span></div>' : '<div class="cp-thinking' + (thinkingOn ? ' on' : '') + '">' +
+    const thinking = !canThink ? '<div class="cp-model-summary"><span>思考模式</span><span>' +
+      (thinkingInfo.unknown ? '由服务决定 · 未确认' : '不支持') + '</span></div>' : '<div class="cp-thinking' + (thinkingOn ? ' on' : '') + '">' +
       '<span class="cp-thinking-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M10 2.5v3m0 9v3M2.5 10h3m9 0h3M4.7 4.7l2.1 2.1m6.4 6.4 2.1 2.1m0-10.6-2.1 2.1m-6.4 6.4-2.1 2.1"/><circle cx="10" cy="10" r="3.2"/></svg></span>' +
       '<span class="cp-thinking-copy"><b>\u601d\u8003\u6a21\u5f0f</b><i>' + thinkingLabel + '</i><small>' + thinkingHint + '</small></span>' +
       '<button type="button" class="cp-thinking-switch" role="switch" aria-checked="' + (thinkingOn ? 'true' : 'false') + '" data-thinking-toggle' + (canThink && canDisable ? '' : ' disabled') + '><span></span><em class="sr-only">\u5207\u6362\u601d\u8003\u6a21\u5f0f</em></button></div>';
@@ -383,9 +400,11 @@
     if (cloud() && row.modelMode === 'account') return render();
     if (row.modelMode === 'managed') {
       if (enterpriseLoaded && !force) { render(); notify(); return; }
+      discovery = 'checking';
+      global.FirstChatReadiness?.paint();
       try {
         const response = global.SoduWorkAPI && SoduWorkAPI.myModels
-          ? await SoduWorkAPI.myModels({ localDefaults: !cloud() }) : null;
+          ? await SoduWorkAPI.myModels({ localDefaults: !cloud(), fresh: true }) : null;
         if (!current()) return;
         if (!response || response.ok === false || !Array.isArray(response.usable)) throw Error('模型目录暂时不可用');
         // Device-owned connections can be paired with any local managed
@@ -400,16 +419,21 @@
           ? response.mediaUsable.image.filter(model => usable(model) && (!deviceLocal(model) || !cloud())) : [];
         clearStaleManagedSelection(row);
         enterpriseLoaded = true;
+        discovery = 'loaded';
       } catch (error) {
         if (!current()) return;
+        discovery = 'unknown';
         // A temporary lookup failure must not discard the known selection.
       }
+      global.FirstChatReadiness?.checked();
       render();
       notify();
       return;
     }
     if (row.id === 'codex') {
       if (nativeLoaded === row.id && !force) return render();
+      discovery = 'checking';
+      global.FirstChatReadiness?.paint();
       try {
         const bridge = api();
         const response = bridge && typeof bridge.runtimeModels === 'function'
@@ -418,22 +442,27 @@
         if (!response?.ok || !Array.isArray(response.models)) throw Error('模型目录暂时不可用');
         nativeModels = response.models;
         const selected = state(row.id);
-        if (nativeModels.length && !modelById(selected.modelName)) {
+        if (nativeModels.length && !modelById(selected.modelName) && !selected.directoryPreference) {
           selected.modelName = (modelById(response.defaultModel) || nativeModels[0]).id;
         }
+        selected.unavailable = Boolean(selected.directoryPreference && !modelById(selected.modelName));
         reconcileEffort(state(row.id));
         nativeReason = String(response && response.reason || '');
         nativeLoaded = row.id;
+        discovery = 'loaded';
       } catch (error) {
         if (!current()) return;
+        discovery = 'unknown';
         nativeReason = tx('本机 Codex 模型目录暂时无法读取，可继续使用默认模型');
       }
+      global.FirstChatReadiness?.checked();
       render();
       notify();
     }
   }
 
   function chooseModel(id) {
+    global.ComposeDirectoryPreferences?.selectionCommitted?.();
     const row = runtime();
     const selected = state(row.id);
     selected.modelChosen = true;
@@ -444,7 +473,7 @@
         (selected.modelName ? null : enterpriseModels[0]);
       const info = thinkingProfile(picked);
       if (!info.supported) selected.thinkingLevel = '';
-      else if (!info.canDisable) selected.thinkingLevel = 'medium';
+      else if (!info.canDisable) selected.thinkingLevel = fixedThinkingLevel(info, selected.thinkingLevel);
     }
     if (row.id === 'codex') { reconcileEffort(selected); nativeView = 'effort'; searchQuery = ''; }
     render();
@@ -455,6 +484,7 @@
     if (runtime().id !== 'codex') return;
     const selected = state(runtime().id);
     if (!effortChoices(modelById(selected.modelName)).includes(value)) return;
+    global.ComposeDirectoryPreferences?.selectionCommitted?.();
     selected.reasoningEffort = value;
     // Keep the native range element alive throughout a pointer drag.
     paintEffort();
@@ -541,7 +571,8 @@
         const picked = enterpriseModels.find(item => item.name === selected.modelName) || (selected.modelName ? null : enterpriseModels[0]);
         const info = thinkingProfile(picked);
         if (info.supported && info.canDisable) {
-          selected.thinkingLevel = selected.thinkingLevel && selected.thinkingLevel !== 'off' ? 'off' : 'medium';
+          global.ComposeDirectoryPreferences?.selectionCommitted?.();
+          selected.thinkingLevel = selected.thinkingLevel && selected.thinkingLevel !== 'off' ? 'off' : info.onLevel;
           render();
           notify();
         }
@@ -620,6 +651,7 @@
       if (activeOwner && activeOwner !== context.owner) states.clear();
       activeOwner = context.owner;
       activeScope = context.key;
+      discovery = 'checking';
       enterpriseModels = [];
       enterpriseDefaultErrors = {}; managedCatalogUnavailable = false; imageModels = []; enterpriseLoaded = false;
       nativeModels = []; nativeReason = ''; nativeLoaded = '';
@@ -670,18 +702,66 @@
     if (row.modelMode === 'managed') {
       const picked = enterpriseModels.find(item => item.name === selected.modelName) || (selected.modelName ? null : enterpriseModels[0]);
       const info = thinkingProfile(picked);
-      return { modelName: selected.modelName, reasoningEffort: '', thinkingLevel: info.supported && !info.canDisable ? 'medium' : (selected.thinkingLevel || '') };
+      return { modelName: selected.modelName, reasoningEffort: '', thinkingLevel: info.supported && !info.canDisable
+        ? fixedThinkingLevel(info, selected.thinkingLevel) : (selected.thinkingLevel || '') };
     }
     return { modelName: '', reasoningEffort: '' };
   }
 
-  function resetNewDraft() {
-    states.clear(); activeScope = ''; activeRuntime = '';
-    // Starting another conversation must supersede a lookup from the previous draft.
+  function resetSelection(localOnly) {
+    if (localOnly) {
+      for (const key of states.keys()) if (key.startsWith('local:')) states.delete(key);
+    } else states.clear();
+    activeScope = ''; activeRuntime = '';
+    // Directory changes supersede local lookups without discarding this draft's cloud choice.
     return refresh(true);
   }
+  const resetNewDraft = () => resetSelection(false);
+  const resetDirectory = () => resetSelection(true);
 
-  global.ComposeModelPicker = { bind, close, refresh, ready, value, resetNewDraft,
+  async function restoreSelection(saved, isCurrent = () => true) {
+    const row = runtime(), context = loadContext().key;
+    if (row.id !== saved.adapterId || !isCurrent()) return false;
+    await refresh();
+    if (!isCurrent() || context !== loadContext().key) return false;
+    const selected = state(row.id);
+    selected.modelName = String(saved.modelName || '');
+    selected.reasoningEffort = String(saved.reasoningEffort || '');
+    selected.thinkingLevel = String(saved.thinkingLevel || '');
+    selected.directoryPreference = true;
+    selected.modelChosen = false;
+    if (row.modelMode === 'managed') {
+      if (!enterpriseLoaded) { selected.unavailable = true; render(); notify(); return false; }
+      clearStaleManagedSelection(row);
+    } else if (row.id === 'codex' && !cloud()) {
+      selected.unavailable = nativeLoaded !== row.id || !modelById(selected.modelName);
+      if (!selected.unavailable) reconcileEffort(selected);
+    } else selected.unavailable = Boolean(selected.modelName);
+    render(); notify();
+    return !selected.unavailable && !selected.catalogUnavailable;
+  }
+
+  function releasePreference() {
+    for (const selected of states.values()) delete selected.directoryPreference;
+  }
+
+  function modelReadiness() {
+    const row = runtime();
+    if (activeScope !== loadContext(row).key) return 'checking';
+    const selected = state(row.id);
+    if (row.modelMode === 'account') {
+      if (cloud() || row.id !== 'codex') return 'native';
+      if (discovery === 'loaded' && selected.unavailable) return 'choose';
+      return discovery === 'loaded' && modelById(selected.modelName) ? 'ready' : 'native';
+    }
+    if (discovery !== 'loaded') return discovery;
+    if (selected.catalogUnavailable) return 'unknown';
+    if (!selected.unavailable && selected.modelName) return 'ready';
+    if (managedCatalogUnavailable) return 'unknown';
+    return enterpriseModels.length || (!cloud() && row.id === 'pi' && imageModels.length) ? 'choose' : 'empty';
+  }
+
+  global.ComposeModelPicker = { bind, close, refresh, ready, value, modelReadiness, resetNewDraft, resetDirectory, restoreSelection, releasePreference,
     nativeEffort: { html: effortCard, paint: paintEffortCard, levels: effortChoices, defaultLevel: defaultEffort },
     label: () => currentLabel(runtime(), state(runtime().id)) };
   const scopeChanged = () => {
@@ -692,7 +772,11 @@
   // Hubs without model-change push still converge while the composer is visible.
   const refreshVisibleModels = () => {
     const button = document.getElementById('cpModelBtn');
-    if (button?.isConnected && button.getClientRects().length && document.visibilityState !== 'hidden' && !loading) void refresh(true);
+    const visible = button?.getClientRects?.().length || document.getElementById('cpInput')?.getClientRects?.().length;
+    if (visible && document.visibilityState !== 'hidden' && !loading) {
+      void global.ComposeRuntime?.refreshAccess?.();
+      void refresh(true);
+    }
   };
   global.addEventListener?.('focus', refreshVisibleModels);
   global.setInterval?.(refreshVisibleModels, 60000);

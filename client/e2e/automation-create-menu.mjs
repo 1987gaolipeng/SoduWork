@@ -13,7 +13,7 @@ async function key(key,code=key,modifiers=0){await page.call('Input.dispatchKeyE
 async function fill(s,text){await click(s);await page.run(s=>document.querySelector(s).select(),s);await page.call('Input.insertText',{text})}
 async function shot(name){await delay(160);const r=await page.call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(out,name),Buffer.from(r.data,'base64'))}
 async function back(){await page.run(()=>WorkspaceHost.open('schedules'));await delay(100)}
-const managedRuntimes=['pi','qwen','opencode','dsh','kimi','harness2','codex-harness'];
+const managedRuntimes=['pi','qwen','opencode','dsh','kimi','codex-harness'];
 const localModel='local:model-0123456789abcdef0123456789abcdef';
 async function modelMatrix(agentSelector,modelSelector){
  for(const runtime of managedRuntimes){
@@ -26,7 +26,7 @@ async function modelMatrix(agentSelector,modelSelector){
    check(runtime+' accepts '+(model===localModel?'device':'Hub')+' model independently',await page.run(({modelSelector,model})=>document.querySelector(modelSelector).value===model,{modelSelector,model}));
   }
  }
- for(const runtime of ['codex','claude']){
+ for(const runtime of ['codex']){
   const agent='local:'+runtime;
   check(runtime+' account runtime is present',await page.run(({agentSelector,agent})=>[...document.querySelector(agentSelector).options].some(row=>row.value===agent),{agentSelector,agent}));
   await page.run(({agentSelector,agent})=>{const select=document.querySelector(agentSelector);select.value=agent;select.dispatchEvent(new Event('change',{bubbles:true}))},{agentSelector,agent});

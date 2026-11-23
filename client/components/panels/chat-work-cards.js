@@ -23,7 +23,7 @@
     const current = record => owned(record) && record.sessionId === String(ctx._sessionId || '');
     const tell = message => global.petSay?.(message);
     const isRequirement = record => record.actionId === 'work.requirement.create';
-    const isInline = record => isRequirement(record) || (record.actionId==='work.automation.create' && record.seed.source==='web-app');
+    const isInline = record => isRequirement(record) || record.actionId === 'work.automation.create';
     const messageOwner = (index) => ctx._snap?.history?.messageIndices?.[index] ??
       ((Number(ctx._snap?.history?.messageStart) || 0) + index);
     function transcriptAnchor() {
@@ -248,7 +248,7 @@
         if (typeof bridge[name] === 'function') bridge[name] = (...args) => { if (isView()) return originalBridge[name](...args); };
       }
       const seed = {...record.seed, ...options, bridge, cardId: record.id,
-        ...(isRequirement(record) ? { cardHost: () => {
+        ...(isInline(record) ? { cardHost: () => {
           const host = cardHost(record);
           host?.replaceChildren();
           return host;
@@ -327,14 +327,14 @@
       let record = options.cardRecord;
       if (!record) {
         const seed = {};
-        for (const name of ['source', 'attachmentContext', 'bindingContext', 'proposal', 'saveOnly', 'triageStage', 'projectId', 'visibility']) {
+        for (const name of ['source', 'attachmentContext', 'bindingContext', 'proposal', 'saveOnly', 'triageStage', 'projectId', 'visibility', 'requestedAt']) {
           if (options[name] !== undefined) seed[name] = json(options[name]);
         }
         if (options.conversationContext) {
           const {files, ...context} = options.conversationContext; seed.conversationContext = json(context);
         }
         seed.parseText = command.parseText || command.text || '';
-        if (id === 'work.requirement.create' || (id==='work.automation.create' && options.source==='web-app')) seed.transcriptAnchor = transcriptAnchor();
+        if (id === 'work.requirement.create' || id === 'work.automation.create') seed.transcriptAnchor = transcriptAnchor();
         seed.model = typeof options.model === 'function' ? options.model() : options.model || ctx._workModel?.() || '';
         record = {id: 'card-' + crypto.randomUUID(), owner, scopeEpoch, sessionId, actionId: id, prompt: command.text || '',
           seed, state: {phase: 'loading'}, files: [], closed: false, version: 0, revision: 0};
@@ -374,7 +374,7 @@
     }
     async function activate(record) {
       if (!current(record)) return false;
-      if (isRequirement(record) && ctx._mount?.()?.querySelector('#nchatList') && !cardHost(record)) return false;
+      if (isInline(record) && ctx._mount?.()?.querySelector('#nchatList') && !cardHost(record)) return false;
       capture();
       global.WorkEntrySheet?.close?.(false, true);
       return ctx._openWorkAction({id: record.actionId, text: record.prompt, parseText: record.seed.parseText},
@@ -513,9 +513,9 @@
         prompt.textContent = (record.actionId === 'work.automation.create' ? '【自动化】：' : '【需求】：') + record.prompt;
         const title = document.createElement('strong'); title.textContent = record.state.receipt?.title || record.state.draft?.title || record.state.proposal?.title || record.prompt || '工作记录';
         const status = document.createElement('span');
-        status.textContent = record.seed.source==='web-app' && record.state.phase==='loading'?'正在整理计划…':({succeeded:'已创建', submitting:'正在保存', loading:'待完善', error:'需要处理'})[record.state.phase] || '草稿 · 尚未创建';
+        status.textContent = record.seed.source==='web-app' && record.state.phase==='loading'?'正在整理计划…':({succeeded:record.state.receipt?.enabled === false ? '已停用' : '已创建', cancelled:'已取消', submitting:'正在保存', loading:'待完善', error:'需要处理'})[record.state.phase] || '草稿 · 尚未创建';
         const open = document.createElement('button'); open.type = 'button'; open.className = 'cp-ghost';
-        open.textContent = record.state.phase === 'succeeded' ? '查看创建结果' : '继续编辑';
+        open.textContent = record.state.phase === 'succeeded' ? '查看创建结果' : record.state.phase === 'cancelled' ? '查看记录' : '继续编辑';
         open.onclick = () => { void activate(record).catch(error => tell(error.message)); };
         row.append(prompt, status, title, open); destination.appendChild(row);
       }

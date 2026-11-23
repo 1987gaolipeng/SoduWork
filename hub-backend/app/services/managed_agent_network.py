@@ -10,6 +10,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from .runtime_tls import https_handler
+
 
 def _proxies(*, include_macos_system: bool = False) -> dict[str, str]:
     system_reader = {
@@ -104,12 +106,13 @@ class _DownloadRouteHandler(urllib.request.BaseHandler):
 
 def open_download(request: urllib.request.Request, *, timeout: int):
     # A resident Runner must see proxy changes between installation attempts.
-    # Keep default TLS verification and stdlib NO_PROXY bypass handling.
+    # Keep strict TLS verification and stdlib NO_PROXY bypass handling.
     routes: list[dict] = []
     opener = urllib.request.build_opener(
         _DownloadProxyHandler(_proxies(include_macos_system=True), str(os.environ.get("SODUWORK_HUB_HTTP_BASE") or "")),
         _DownloadRouteHandler(routes),
-        _DownloadRedirectHandler())
+        _DownloadRedirectHandler(),
+        https_handler())
     try:
         response = opener.open(request, timeout=timeout)
     except Exception as exc:

@@ -73,6 +73,16 @@
     const copy=text('span','cap-template-copy');copy.append(text('b','connector-row-name',model.name),text('span','connector-row-description',short(model.description)||'连接你的工作工具'),text('em','connector-state'));
     row.append(mark(model.item),copy,manage);
     const ops=text('div','connector-row-actions');row.append(ops);
+    if (model.key === 'native:wecom' && global.SoduWorkIMRemote && ctx.editorContext().api.im) {
+      const more = menu(model.name+'的更多操作');
+      const settings = button('机器人聊天设置', () => {
+        more.el.open = false;
+        if (latest()) row.closest('.cap-connections-view')?.querySelector('.im-remote')?.focus();
+      });
+      settings.dataset.wecomChatSettings = '';
+      more.body.append(settings);
+      ops.append(more.el);
+    }
     if(model.kind!=='native'){
       const more=menu(model.name+'的更多操作');ops.append(more.el);
       const action=(label,fn)=>{const b=button(label,()=>{more.el.open=false;const now=latest();if(now)fn(now);},'');more.body.append(b);return b;};
@@ -85,7 +95,7 @@
     }
     return row;
   }
-  function reconcile(root,ctx,actions) {
+  function reconcile(root,ctx,actions,imAvailable) {
     const list=root.querySelector('[data-my-connections]');if(!list)return;
     const all=models(ctx.getMcp()),needle=String(ctx.query||'').trim().toLowerCase();
     const shown=all.filter(x=>[x.name,x.description,x.item.templateKey,x.item.key,x.source].some(v=>String(v||'').toLowerCase().includes(needle)));
@@ -98,7 +108,10 @@
       if(!row){row=makeRow(model,ctx,actions);list.append(row);}
       const state=status(model),badge=row.querySelector('.connector-state');badge.textContent=state.label;badge.className='connector-state '+state.tone;
       row.querySelector('.connector-row-name').textContent=model.name;
-      row.querySelector('.connector-row-description').textContent=short(model.description)||'连接你的工作工具';
+      row.querySelector('.connector-row-description').textContent =
+        model.key === 'native:wecom' && model.item.connected && imAvailable === false
+          ? '尚未启用机器人聊天，请联系管理员开启手机远程对话。'
+          : short(model.description)||'连接你的工作工具';
       const toggle=row.querySelector('[data-toggle-mcp]');if(toggle)toggle.textContent=model.item.enabled?'停用':'启用';
       row.querySelector('.connector-manage').setAttribute('aria-label',(model.kind==='native'&&!model.item.connected?'重新连接':'管理')+model.name);
     });
@@ -119,7 +132,8 @@
     content.querySelector('[data-connection-empty-add]').onclick=()=>openLibrary(ctx);
     const actions=global.SoduWorkMcpManagement.enhance(content,{...ctx.editorContext(),compactConnections:true});
     const bar=content.querySelector('.cap-mcp-manage-bar');content.querySelector('[data-connection-tools]').append(bar);
-    content._connectorActions=actions;content._connectorUpdate=()=>reconcile(content,ctx,actions);
+    let imAvailable;
+    content._connectorActions=actions;content._connectorUpdate=()=>reconcile(content,ctx,actions,imAvailable);
     mountLibrary(content,ctx);
     content._connectorUpdate();sync(content,ctx.getMcp(),ctx.state());
     const off=platform()?.subscribe?.(()=>{if(!content.isConnected||!content.querySelector('[data-my-connections]'))return;content._connectorUpdate();content._connectorLibrarySync?.();ctx.onPlatformChanged?.();});
@@ -130,7 +144,9 @@
       const next=event.relatedTarget;
       queueMicrotask(()=>{content.querySelectorAll('details[open]').forEach(el=>{if(!el.contains(next||document.activeElement))el.open=false;});});
     },{signal:menuEvents.signal});
-    const disposeIM=global.SoduWorkIMRemote?.mount(content,ctx);
+    const disposeIM=global.SoduWorkIMRemote?.mount(content,ctx,available=>{
+      imAvailable=available;content._connectorUpdate();
+    });
     cleanup=()=>{disposeIM?.();menuEvents.abort();off?.();delete content._connectorContext;delete content._connectorUpdate;delete content._connectorActions;delete content._connectorLibrarySync;};
     platform()?.load?.().catch(()=>{});
   }

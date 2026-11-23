@@ -1,5 +1,5 @@
 'use strict';
-// Real Electron fixed-Hub login/settings, storage and IPC. Only explicit loopback fixtures can make HTTP calls.
+// Real Electron source-Hub login/settings, storage and IPC. Only explicit loopback fixtures can make HTTP calls.
 const electron = require('electron');
 if (typeof electron === 'string') {
   const env = { ...process.env };
@@ -110,7 +110,7 @@ async function open(surface = 'legacy') {
     preload: path.join(client, 'preload.js'), contextIsolation: true, nodeIntegration: false, offscreen: true, backgroundThrottling: false } });
   win.webContents.on('preload-error', (_event, _path, error) => { report.preloadError = String(error); });
   win.webContents.on('console-message', event => { if (event.level === 'error') process.stderr.write('Renderer: ' + event.message + '\n'); });
-  await win.loadFile(path.join(root, surface + '-connection.html'));
+  await win.loadFile(path.join(client, 'desk.html'), {query:{fixture:surface}});
   // Offscreen fixtures have no OS focus. Emulate Chromium focus so native
   // keyboard events exercise the focused input without stealing a user window.
   win.webContents.debugger.attach('1.3');
@@ -123,6 +123,7 @@ app.whenReady().then(async () => {
   const a = await service('alice'), b = await service('bob');
   const endpoint = require('../main/hub-endpoint.cjs');
   endpoint.initialize(app, {});
+  const sourceHub = 'http://127.0.0.1:18989';
   ipcMain.handle('hub-connection-info', () => endpoint.current(app));
   ipcMain.on('runtime-form', event => { event.returnValue = 'local-code'; });
   const allowed = new Set([a.url, b.url]);
@@ -152,7 +153,6 @@ app.whenReady().then(async () => {
   fs.copyFileSync(path.join(client, 'icon.png'), path.join(root, 'icon.png'));
   for (const surface of ['legacy', 'email']) fs.writeFileSync(path.join(root, surface + '-connection.html'), `<!doctype html><html><meta charset="utf-8">
     <link rel="stylesheet" href="${url('theme/variables.css')}">
-    <link rel="stylesheet" href="${url('components/panels/panels-detail.css')}">
     <link rel="stylesheet" href="${url('components/settings/settings.css')}">
     <link rel="stylesheet" href="${url('components/client-auth/client-auth.css')}">
     ${surface === 'email' ? '<link rel="stylesheet" href="' + url('components/client-auth/account-center.css') + '">' : ''}
@@ -163,7 +163,7 @@ app.whenReady().then(async () => {
       addEventListener('unhandledrejection',event=>fixtureErrors.push(String(event.reason)));
       if (!localStorage.getItem('fixture-history')) {
         localStorage.setItem('soduwork_work_hub_environment_v1', 'development');
-        localStorage.setItem('soduwork_work_hub_url', 'http://127.0.0.1:18989');
+        localStorage.setItem('soduwork_work_hub_url', ${JSON.stringify(b.url)});
         localStorage.setItem('soduwork_work_device_secret', 'fixture-old-local-key');
         localStorage.setItem('fixture-history', 'preserved');
       }
@@ -172,9 +172,16 @@ app.whenReady().then(async () => {
     <script src="${url('components/settings/settings.js')}"></script>
     ${surface === 'email' ? ['account-ui.js', 'email-auth.js'].map(file => '<script src="' + url('components/client-auth/' + file) + '"></script>').join('') : ''}
     <script src="${url('components/client-auth/client-auth.js')}"></script></body></html>`);
+  session.defaultSession.protocol.handle('file', request => {
+    const url = new URL(request.url), surface = url.searchParams.get('fixture');
+    if (url.pathname === new URL(pathToFileURL(path.join(client, 'desk.html'))).pathname && ['legacy','email'].includes(surface)) {
+      return new Response(fs.readFileSync(path.join(root, surface + '-connection.html')), {headers:{'Content-Type':'text/html; charset=utf-8'}});
+    }
+    return electron.net.fetch(request.url, {bypassCustomProtocolHandlers:true});
+  });
   await open();
   await until('document.querySelector(".soduwork-auth-retry") && !document.querySelector(".soduwork-auth-retry").hidden');
-  assert.equal(await run('SoduWorkAPI.hubBase()'), endpoint.PRODUCTION_HUB);
+  assert.equal(await run('SoduWorkAPI.hubBase()'), sourceHub);
   assert.equal(await run('SoduWorkAPI.hubConfig().editable'), true);
   assert.equal(await run('document.querySelector(".soduwork-auth-form-badge").hidden'), false);
   assert.equal(await run('document.querySelector(".soduwork-auth-form-badge").textContent'), '本地代码启动');
@@ -185,21 +192,22 @@ app.whenReady().then(async () => {
     'a connectivity failure auto-expands the address panel for repointing');
   await click('.soduwork-auth-connection summary');
   assert.equal(await run('document.querySelector(".soduwork-auth-connection").open'), false);
-  await assertConnectionLabel(endpoint.PRODUCTION_HUB);
+  await assertConnectionLabel(sourceHub);
   await click('.soduwork-auth-connection summary');
   assert.equal(await run('document.querySelector(".soduwork-auth-connection").open'), true,
     'local-code legacy login opens the address editor through its own summary');
   assert.equal(requests.length, 0, 'offline product verification never reaches a backend');
   assert.equal(await run('localStorage.getItem("soduwork_work_device_secret")'), null,
     'retired plaintext device keys are removed from renderer storage even while offline');
+  assert.equal(fs.readFileSync(path.join(root,'profile/device-auth.json'),'utf8').includes('fixture-old-local-key'), false);
   await click('.soduwork-auth-retry');
   await until('!document.querySelector(".soduwork-auth-retry").disabled');
-  assert.equal(await run('SoduWorkAPI.hubBase()'), endpoint.PRODUCTION_HUB);
-  fs.writeFileSync(path.join(out, 'fixed-production-login.png'), (await win.webContents.capturePage()).toPNG());
+  assert.equal(await run('SoduWorkAPI.hubBase()'), sourceHub);
+  fs.writeFileSync(path.join(out, 'source-local-login.png'), (await win.webContents.capturePage()).toPNG());
   win.setSize(420, 760); await sleep(180);
   assert.equal(await run('document.querySelector(".soduwork-auth-submit").getBoundingClientRect().right <= innerWidth'), true);
-  fs.writeFileSync(path.join(out, 'fixed-production-login-narrow.png'), (await win.webContents.capturePage()).toPNG());
-  report.cases.push('local-code defaults resolve to production and auto-expand the address panel on failure; retry retains production offline');
+  fs.writeFileSync(path.join(out, 'source-local-login-narrow.png'), (await win.webContents.capturePage()).toPNG());
+  report.cases.push('local-code defaults resolve to the local Hub and auto-expand the address panel on failure; retry retains the local Hub offline');
 
   /* Test login-gate address changes: reject invalid URLs inline and reload after saving valid ones. */
   win.destroy(); await open();
@@ -208,7 +216,7 @@ app.whenReady().then(async () => {
   await fill('#soduWorkAuthHub', 'https://example.com/api');
   await click('.soduwork-auth-connect');
   await until('document.querySelector(".soduwork-auth-status").textContent.includes("后台地址")');
-  assert.equal(await run('SoduWorkAPI.hubBase()'), endpoint.PRODUCTION_HUB);
+  assert.equal(await run('SoduWorkAPI.hubBase()'), sourceHub);
   await fill('#soduWorkAuthHub', a.url);
   await click('.soduwork-auth-connect');
   await until('SoduWorkAPI.hubBase() === ' + JSON.stringify(a.url));
@@ -365,6 +373,8 @@ app.whenReady().then(async () => {
   await until('document.querySelector("#soduWorkClientAuthGate").hidden && SoduWorkAPI.clientAuthSnapshot().user?.id === "bob"');
   assert.equal(await run('document.querySelector("#soduWorkAuthPassword").value'), '');
   assert.equal(auth.identity(app).hub, b.url);
+  assert.equal(b.secrets.get('fixture-renderer'), 'fixture-old-local-key');
+  assert.ok(requests.filter(row => row.key === 'fixture-old-local-key').every(row => row.label === 'bob'));
   assert.deepEqual(await run('fixtureErrors'), []);
   report.cases.push('fixed EmailAuth login and registration show only a plain host footer with no editor at normal and narrow widths; secure account/password login and foreign IPC rejection still work');
   report.requests = { fixture: requests.length, aliceFixture: requests.filter(row => row.label === 'alice').length,

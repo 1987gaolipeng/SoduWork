@@ -17,6 +17,7 @@ from ..deps import current_client
 from ..models import Client, Task
 from ..services import (device_auth, device_connections, environment_service,
                         execution_host_policy, pty_term, runner_hub, task_access)
+from ..services.opencode_session_migration import OpenCodeSessionMigrationError
 
 router = APIRouter()
 settings = get_settings()
@@ -150,7 +151,7 @@ async def _workdir_of(tid: str) -> str:
         return (info or {}).get("workDirAbs") or ""
 
 
-async def _env_for_term(cli: str = "") -> dict:
+async def _env_for_term(cli: str = "", *, task: str = "", ref: str = "", mode: str = "shell") -> dict:
     """Build the terminal environment for the task's actual CLI. Pi configuration and
     OPENCODE_CONFIG_CONTENT use different credential setup paths.
     """
@@ -158,7 +159,21 @@ async def _env_for_term(cli: str = "") -> dict:
     async with SessionLocal() as s:
         cfg = await ai_local.load(s)
     prof = ai_local._PROFILES.get(cli) or ai_local._PROFILES["opencode"]
-    return ai_local._env_for(prof, cfg)
+    env = ai_local._env_for(prof, cfg)
+    if cli == "opencode" and mode == "session":
+        from ..services import local_base
+        from ..services.terminal_environment import prepare_opencode_environment
+        with ai_local._LOCK:
+            missing = ref not in ai_local._RUNS
+        if missing and ref:
+            await asyncio.to_thread(local_base.rehydrate, ref)
+        with ai_local._LOCK:
+            run = dict(ai_local._RUNS.get(ref) or {})
+        if (not run or str(run.get("taskId") or "") != task
+                or run.get("cli") != "opencode"):
+            raise ValueError("终端会话不属于这条需求")
+        await asyncio.to_thread(prepare_opencode_environment, env, run, prof, mode)
+    return env
 
 
 async def _cli_sid_of(tid: str) -> tuple[str, str]:
@@ -303,9 +318,13 @@ async def _serve_terminal(websocket: WebSocket, task: str, cols: int, rows: int,
             return
     else:
         try:
-            env = await _env_for_term(cli)
+            env = await _env_for_term(cli, task=task, ref=execution_ref, mode=mode)
             term = await asyncio.to_thread(
                 pty_term.open_term, task, ws_dir, cols, rows, env, mode, sid, cli)
+        except OpenCodeSessionMigrationError as exc:
+            await websocket.send_json({"t": "err", "d": str(exc)})
+            await websocket.close()
+            return
         except Exception as exc:  # noqa: BLE001
             await websocket.send_json({"t": "err", "d": "终端起不来（%s）" % type(exc).__name__})
             await websocket.close()

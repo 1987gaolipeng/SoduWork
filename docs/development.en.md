@@ -60,9 +60,14 @@ Run backend checks in its dedicated environment:
 ```sh
 cd hub-backend
 python3 -m pip install -r requirements-test.txt
+python3 -m ruff check app
+python3 scripts/check_changed_lint.py origin/main
+python3 -m mypy app
 python3 quality_gate.py --list
 python3 quality_gate.py --profile release --scope backend
 ```
+
+Use the target branch or base commit available in your Git checkout for the lint comparison. CI blocks on application-wide Ruff checks and on new Pyflakes, import-order and style findings in pull requests. The mypy step reports the application's current type errors and allows the backend tests to run.
 
 The full offline gate takes time. Start with the registered checks relevant to your change. `live` checks connect to real services or models and require your own isolated environment; they are outside default offline validation.
 
@@ -78,7 +83,7 @@ npm ci
 npm start
 ```
 
-The independently started client keeps its own connection settings and profile, separate from the dedicated profile used by the root launcher's `--desktop` mode. Change the Hub URL on the login screen if needed. Quit and restart the application after main-process changes. Reopen the client after UI script changes to verify loading order and interactions.
+An independently started source client defaults to `http://127.0.0.1:18989` when no Hub URL is saved, matching a local Hub or Docker self-hosted service on its default port. Saved addresses remain in effect; change the Hub URL on the login screen for other ports. Its profile is separate from the root launcher's `--desktop` profile, which automatically connects to the Hub started in that session and follows `--port`. Packaged and official clients still default to `https://service.soduwork.ai` when no address is saved. Quit and restart the application after main-process changes. Reopen the client after UI script changes to verify loading order and interactions.
 
 Run `npm test` and `npm run check:layout` in `client/`. Electron end-to-end checks live in `e2e/`; inspect each script's environment requirements. `dist/`, `.runtime/`, and generated `runner/` files are build outputs. Do not commit them or substitute old release binaries for current source.
 
@@ -118,3 +123,7 @@ Use the relative language links at the top of each page on GitHub. The same path
 - Keep commands, prerequisites, data handling, and permission guidance synchronized in both languages. Preserve reciprocal language links and a navigation link at the top.
 - Use an explicit suffix for another language, such as `.ja.md`, and register completed pages in the overview and index. Label untranslated references with their actual language; do not add empty translations or label Chinese destinations as English.
 - Use relative documentation links without hardcoded GitHub repository addresses or private development branch names so forks and source archives remain usable.
+
+## Automation template catalog concurrency
+
+GET `/api/admin/automation-templates` returns `items` and an opaque `revision`. PUT must send both fields. Missing revisions return 428; stale revisions return 409 without replacing the catalog. Deploy the management UI with the backend and refresh old browser tabs. On conflict, retain the draft, load the latest catalog, review concurrent changes, and explicitly save again. Deleted templates are not silently recreated. Internal maintenance callers must read the current catalog before modifying it.

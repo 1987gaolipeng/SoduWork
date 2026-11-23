@@ -49,7 +49,7 @@ class LocalProcessTests(unittest.TestCase):
         with local_process._LOCK:
             local_process._RUNS[ref] = run
         try:
-            def kill_tree(target):
+            def kill_tree(target, **_expected):
                 self.assertEqual(target, ref)
                 killed.set()
                 return True

@@ -51,7 +51,9 @@
         out[field] = normalise(field, task[field]);
       }
     }
-    out.title = String(out.title || '未命名').slice(0, 200);
+    // PUT also replays historical tasks and undo snapshots. Preserve the saved
+    // text, including complete Unicode characters; new edits are validated by Hub.
+    out.title = String(out.title || '未命名');
     out.source = String(out.source || '');
     out.note = String(out.note || '');
     out.status = out.status || 'todo';
@@ -69,6 +71,25 @@
       if (!same(prev, next)) patch[field] = next;
     }
     return patch;
+  }
+
+  function recoverTaskTextOperation(operation) {
+    if (!operation || operation.kind !== 'put' || !operation.blocked || operation.textCompatibilityRetried) return null;
+    // Older outboxes retained only the flattened Pydantic message. Do not
+    // broaden this to arbitrary validation, authorization or transport errors.
+    if (operation.blockedStatus != null && Number(operation.blockedStatus) !== 422) return null;
+    const limits = { title: 200, source: 120 };
+    const expected = Object.entries(limits).filter(([field, limit]) =>
+      typeof operation.data?.[field] === 'string' && [...operation.data[field]].length > limit
+    ).map(([, limit]) => `String should have at most ${limit} characters`);
+    const messages = String(operation.blocked).split('；');
+    if (!messages.length || !messages.every(message => expected.includes(message))) return null;
+    const recovered = clone(operation);
+    recovered.textCompatibilityRetried = true;
+    delete recovered.blocked;
+    delete recovered.blockedStatus;
+    delete recovered.sentAt;
+    return recovered;
   }
 
   function mergeOperation(previous, next) {
@@ -202,6 +223,7 @@
     CREATE_FIELDS,
     UPDATE_FIELDS,
     taskPayload,
+    recoverTaskTextOperation,
     diffTask,
     mergeOperation,
     reconcileOperation,

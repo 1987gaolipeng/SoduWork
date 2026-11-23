@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     # Independently provisioned PostgreSQL database, never the Hub business DB.
     # Empty disables cloud app storage without affecting standalone apps.
     jiyong_database_url: str = ""
+    # Cloud app assets use an S3-compatible object store such as Tencent COS.
+    # Credentials stay server-side and are never exposed to app pages.
+    jiyong_object_endpoint: str = ""
+    jiyong_object_access_key: str = ""
+    jiyong_object_secret_key: str = ""
+    jiyong_object_bucket: str = ""
+    jiyong_object_region: str = ""
+    jiyong_object_secure: bool = True
+    jiyong_object_prefix: str = "soduwork/jiyong"
     jiyong_asset_dir: str = ""
     jiyong_max_spaces_per_user: int = Field(default=100, ge=1, le=10000)
     jiyong_max_records_per_space: int = Field(default=100000, ge=1)

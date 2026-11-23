@@ -49,7 +49,7 @@ if (typeof electron === 'string') {
       await js(`new Promise((resolve,reject)=>{const e=document.createElement('script');e.src=${JSON.stringify(pathToFileURL(path.join(client,file)).href)};e.onload=()=>resolve(true);e.onerror=()=>reject(Error('Script failed'));document.body.appendChild(e)})`);
     const agents = [
       {key:'opencode',name:'OpenCode',state:'missing',setupState:'missing',installed:false,present:false},
-      {key:'harness2',name:'Google Harness²',state:'missing',setupState:'setup',installed:false,present:true,bundled:true,version:'0.1.0',why:'内置核心已就绪，需要准备 OpenCode 执行组件。'},
+      {key:'kimi',name:'Kimi Code',state:'missing',setupState:'missing',installed:false,present:false},
       {key:'qwen',name:'Qwen Code',state:'missing',setupState:'broken',installed:false,present:true,version:'0.25.0',runtimeIssue:'执行组件启动自检失败，请修复安装。'},
       {key:'codex',name:'Codex',state:'unauthed',auth:'unauthed',setupState:'unauthed',installed:true,present:true,version:'0.164.0',loginAvailable:true,loginFlowVersion:1},
       {key:'codex-harness',name:'Codex Harness',state:'ready',setupState:'ready',installed:true,present:true,version:'2.2.2'},
@@ -67,21 +67,21 @@ if (typeof electron === 'string') {
       assert.equal(await js("document.querySelectorAll('.ag-section').length"), 1);
       assert.equal(await js("!!document.querySelector('[data-ak^=\"fixture-cloud~\"]')"), false);
       assert.equal(await js("document.querySelector('.rn-section-head h3').scrollWidth<=document.querySelector('.rn-section-head h3').clientWidth"),true);
-      assert.equal(cards.find(c=>c.state==='setup').action,'准备组件');
+      assert.equal(cards.find(c=>c.state==='missing').action,'装上');
       assert.equal(cards.find(c=>c.state==='broken').action,'修复安装');
       fs.writeFileSync(path.join(out,`cards-${width}.png`),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
       report.cases.push({width,cards});
-      await js(`document.querySelector('[data-atoggle="fixture-runner~harness2"]').click()`); await delay(100);
-      assert.equal(await js(`document.querySelector('.ag-drawer .cfg-state').textContent`),'待准备组件');
+      await js(`document.querySelector('[data-atoggle="fixture-runner~kimi"]').click()`); await delay(100);
+      assert.equal(await js(`document.querySelector('.ag-drawer .cfg-state').textContent`),'没装');
       assert.equal(await js(`document.querySelector('.ag-drawer').scrollWidth>document.querySelector('.ag-drawer').clientWidth+1`),false);
       fs.writeFileSync(path.join(out,`drawer-${width}.png`),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
       await js(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))`);
       assert.equal(await js(`!!document.getElementById('agDrawerWrap')`),false);
     }
-    await js(`document.querySelector('[data-ainstall="fixture-runner~harness2"]').click()`);
-    assert.deepEqual(await js('requests'),[{key:'harness2',action:'install',runner:'fixture-runner'}]);
+    await js(`document.querySelector('[data-ainstall="fixture-runner~kimi"]').click()`);
+    assert.deepEqual(await js('requests'),[{key:'kimi',action:'install',runner:'fixture-runner'}]);
     await js('closeAgentsPanel();openAgentsPanel();void 0;'); await delay(1100);
-    assert.equal(await js(`_agJobs['fixture-runner~harness2'].state`),'done');
+    assert.equal(await js(`_agJobs['fixture-runner~kimi'].state`),'done');
     await js(`dispatchEvent(new Event('soduwork-data-scope-changed'));void 0;`);
     assert.equal(await js('Object.keys(_agJobs).length'),0);
     await js(`openAgentsPanel();void 0;`); await delay(180);
@@ -115,7 +115,7 @@ if (typeof electron === 'string') {
     fs.writeFileSync(path.join(out,'cloud-only-empty-600.png'),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
     report.cases.push({cloudExcluded:true,noLegacyFallback:true,hiddenTargetBlocked:true});
 
-    const managed = ['pi','qwen','opencode','dsh','kimi','harness2','codex-harness'];
+    const managed = ['pi','qwen','opencode','dsh','kimi','codex-harness'];
     const localRef = 'local:model-0123456789abcdef0123456789abcdef';
     const remainingRef = 'local:model-fedcba9876543210fedcba9876543210';
     await js(`closeAgentsPanel();window.hubCalls=[];window.localWrites=[];window.defaultSelections={};window.defaultRevision=0;
@@ -123,7 +123,7 @@ if (typeof electron === 'string') {
       window.localRows=[{name:localRef,label:'Private model',providerId:'private',localOnly:true,modality:'chat'}];
       window.localRunner={runnerId:'fixture-local',label:'Local-only model device',scope:'current-instance',owned:true,
         online:true,accepting:true,mode:'accepting',agents:managedKeys.map(key=>({key,name:key,state:'ready'}))};
-      window.hubAgents=[...managedKeys,'codex','claude'].map(key=>({key,name:key,installed:true,present:true,
+      window.hubAgents=[...managedKeys,'codex'].map(key=>({key,name:key,installed:true,present:true,
         state:'ready',setupState:'ready',modelPick:managedKeys.includes(key)}));
       window.User={id:'fixture-device',name:'Fixture'};window.__SODUWORK_TEST_HUB_CONFIG__={allowSwitch:true};
       localStorage.setItem('soduwork_work_hub_url','http://fixture-hub.invalid:8989');
@@ -144,9 +144,9 @@ if (typeof electron === 'string') {
       await js(fs.readFileSync(path.join(client, file), 'utf8') + '\nvoid 0;');
     await js('SoduWorkAPI.registerClient()');
     await js('openAgentsPanel();void 0;');
-    await waitDOM(`document.querySelectorAll('.ag-row').length===9&&_agData.localModelCount===1`);
+    await waitDOM(`document.querySelectorAll('.ag-row').length===7&&_agData.localModelCount===1`);
     assert.equal(await js('_agData.modelCount'),1);
-    assert.equal(await js(`document.querySelectorAll('.ag-row[data-agstate="ready"]').length`),9);
+    assert.equal(await js(`document.querySelectorAll('.ag-row[data-agstate="ready"]').length`),7);
     for (const key of managed) {
       await js(`document.querySelector('[data-atoggle="fixture-local~${key}"]').click();void 0;`);
       await waitDOM(`document.querySelector('.ag-drawer [data-amodel="${key}"]')`);
@@ -159,7 +159,7 @@ if (typeof electron === 'string') {
       report.cases.push({localOnlyAgent:key,ready:true,defaultSavedLocally:true});
       await js(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}));void 0;`);
     }
-    for (const key of ['codex','claude']) {
+    for (const key of ['codex']) {
       await js(`document.querySelector('[data-atoggle="fixture-local~${key}"]').click();void 0;`);
       assert.equal(await js(`document.querySelectorAll('.ag-drawer [data-amodel]').length`),0);
       assert.match(await js(`document.querySelector('.ag-drawer .ag-model').textContent`),/自己的账号与模型/);
@@ -168,13 +168,13 @@ if (typeof electron === 'string') {
     }
     await js(`for(const agent of hubAgents.filter(a=>a.modelPick))Object.assign(agent,{state:'nollm',setupState:'nollm',displayState:'nollm'});
       _agLoad(true);void 0;`);
-    await waitDOM(`_agData.agents.filter(a=>a.localModelDefault&&a.setupState==='ready').length===7`);
-    assert.equal(await js(`document.querySelectorAll('.ag-row[data-agstate="ready"]').length`),9);
-    report.cases.push({availableLocalDefaults:7,staleHubModelStatusCorrected:true});
+    await waitDOM(`_agData.agents.filter(a=>a.localModelDefault&&a.setupState==='ready').length===6`);
+    assert.equal(await js(`document.querySelectorAll('.ag-row[data-agstate="ready"]').length`),7);
+    report.cases.push({availableLocalDefaults:managed.length,staleHubModelStatusCorrected:true});
     await js(`for(const agent of hubAgents.filter(a=>a.modelPick))Object.assign(agent,{state:'ready',setupState:'ready',displayState:'ready'});
       localRows=[{name:remainingRef,label:'Other private model',providerId:'private',localOnly:true,modality:'chat'}];
       for(const value of Object.values(defaultSelections))value.unavailable=true;defaultRevision++;_agLoad(true);void 0;`);
-    await waitDOM(`_agData.agents.filter(a=>a.localModelDefault&&a.modelGone).length===7`);
+    await waitDOM(`_agData.agents.filter(a=>a.localModelDefault&&a.modelGone).length===6`);
     for (const key of managed) {
       await js(`document.querySelector('[data-atoggle="fixture-local~${key}"]').click();void 0;`);
       assert.equal(await js(`document.querySelector('.ag-drawer [data-amodel]').value`),localRef);
@@ -183,20 +183,20 @@ if (typeof electron === 'string') {
       assert.equal(await js(`document.querySelector('[data-ak="fixture-local~${key}"]').dataset.agstate`),'nollm');
       await js(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}));void 0;`);
     }
-    assert.equal(await js('localWrites.length'),7);
-    report.cases.push({deletedDefaults:7,preservedOriginalReference:true,availableAlternativeNotSelected:true});
+    assert.equal(await js('localWrites.length'),6);
+    report.cases.push({deletedDefaults:managed.length,preservedOriginalReference:true,availableAlternativeNotSelected:true});
     await js(`document.querySelector('[data-agtab="runners"]').click();void 0;`);
     await waitDOM(`document.querySelector('#rn-card-fixture-local')`);
     assert.match(await js(`document.querySelector('#agBody').textContent`),/1 个节点在线，1 个可接单/);
-    assert.equal(await js('_agData.runners[0].agents.length'),7);
+    assert.equal(await js('_agData.runners[0].agents.length'),6);
     assert.equal(await js(`document.querySelector('#rn-card-fixture-local .rn-state').textContent`),'可接任务');
-    assert.equal(await js(`document.querySelector('#rn-card-fixture-local .rn-chips em').textContent`),'+2');
+    assert.equal(await js(`document.querySelector('#rn-card-fixture-local .rn-chips em').textContent`),'+'+(managed.length-5));
     fs.writeFileSync(path.join(out,'local-only-runner.png'),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
     const hubCalls = await js('hubCalls');
     assert(hubCalls.every(call=>call.method==='GET'));
     assert.doesNotMatch(JSON.stringify(hubCalls),/local:model-|private|fixture-scope/);
     assert.deepEqual(report.networkRequests,[]);
-    report.cases.push({localOnlyRunnerReady:true,managedAgentCount:7,hubWrites:0,localDefaultWrites:7});
+    report.cases.push({localOnlyRunnerReady:true,managedAgentCount:managed.length,hubWrites:0,localDefaultWrites:await js('localWrites.length')});
     report.errors = await js('errors'); assert.deepEqual(report.errors,[]);
     report.ok = true;
   }).catch(async e=>{report.errors.push(String(e.stack||e));process.exitCode=1;

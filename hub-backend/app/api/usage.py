@@ -1,15 +1,44 @@
 """Read-only usage APIs for Runner load, tokens, duration, and task accounting. Administrators
 follow visibility scope; clients see only their own tasks.
 """
-from fastapi import APIRouter, Body, Depends, HTTPException
+from datetime import datetime, timezone
+from typing import Annotated, Literal
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..deps import authenticated_client, current_client, require_perm
 from ..models import Client, Task, User
-from ..services import client_access, device_connections, rbac, task_access, usage_analytics, usage_ledger, usage_stats
+from ..services import (
+    client_access,
+    quota_usage,
+    rbac,
+    task_access,
+    usage_analytics,
+    usage_ledger,
+    usage_stats,
+)
+from ..services import (
+    device_connections as device_connections,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["usage"])
+
+
+def _validate_event_time(event: dict) -> dict:
+    if "occurredAt" not in event:
+        return event
+    try:
+        instant = datetime.fromisoformat(event["occurredAt"])
+        if instant.tzinfo is None:
+            instant = instant.replace(tzinfo=timezone.utc)
+        instant = instant.astimezone(timezone.utc)
+        # Both the stored instant and the ledger's calendar day must be representable.
+        instant.astimezone(quota_usage.CHINA_TZ)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise HTTPException(422, "occurredAt must be a valid ISO 8601 timestamp") from exc
+    return {**event, "occurredAt": instant}
 
 
 @router.post("/usage/events")
@@ -22,6 +51,7 @@ async def report_usage(
     incoming = body.get("events") if isinstance(body.get("events"), list) else [body]
     if not incoming or len(incoming) > 100 or any(not isinstance(item, dict) for item in incoming):
         raise HTTPException(status_code=400, detail="没有可上报的用量")
+    incoming = [_validate_event_time(item) for item in incoming]
     rows = []
     try:
         for item in incoming:
@@ -40,7 +70,7 @@ async def report_usage(
 
 @router.get("/usage/me")
 async def my_usage(
-    days: int = 30,
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
     client: Client = Depends(current_client),
     session: AsyncSession = Depends(get_session),
 ):
@@ -51,10 +81,13 @@ async def my_usage(
 
 @router.get("/admin/usage/overview")
 async def admin_usage_overview(
-    days: int = 30,
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
     user_id: str = "",
     source: str = "",
     agent: str = "",
+    detail: Literal["all", "anomalous", "unpriced"] = "all",
+    page: Annotated[int, Query(ge=1)] = 1,
+    exclude_anomalies: bool = False,
     user: User = Depends(require_perm("client.view")),
     session: AsyncSession = Depends(get_session),
 ):
@@ -64,7 +97,8 @@ async def admin_usage_overview(
         raise HTTPException(status_code=404, detail="用户不在可见范围")
     return await usage_analytics.consistent_overview(
         session, days=days, user_ids=visible_users, user_id=user_id,
-        source_type=str(source or ""), agent_key=str(agent or ""))
+        source_type=str(source or ""), agent_key=str(agent or ""), detail=detail,
+        page=page, exclude_anomalies=exclude_anomalies)
 
 
 @router.get("/admin/usage/runners")
@@ -76,8 +110,8 @@ async def admin_runner_usage(
     """Return per-Runner availability, active sessions, and windowed session, token, and duration
     totals by CLI.
     """
-    from .admin import _visible_client_ids
     from ..services import runner_admin_scope
+    from .admin import _visible_client_ids
     return {"days": max(1, min(365, int(days or 30))),
             "runners": await usage_stats.runner_usage(
                 session, days=days,

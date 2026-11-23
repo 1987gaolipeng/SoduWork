@@ -641,6 +641,9 @@
       "</b><p" + (manifest.description ? ' data-user-content' : '') + '>' + h(manifest.description || '没有说明') + '</p><em>v' + h(manifest.version) +
       ' · ' + (application ? '即用' : hasWorkflow ? flow.length + ' 个步骤' : '直接能力包') + '</em></div></div>' +
       '<div class="cap-local-checks"><span>结构检查通过</span><span>仅保存到本机</span></div>' +
+      (application ? '<div class="cap-local-verification" role="note"><b>' + systemCopy('验证范围') + '</b><p>' +
+        systemCopy('安装检查仅验证包结构与声明，不代表真实 AI 或业务功能已验证。') + '</p><p>' +
+        systemCopy('请查看交付总结中的未测项，在实际使用前确认关键功能。') + '</p></div>' : '') +
       '<div class="cap-local-access"><b>使用时需要</b><span>' + [
         cap.network ? '网络访问' : '无需网络访问',
         ...(cap.runtime || []).filter(x => x !== 'files').map(x => x === 'terminal' ? '运行命令' : x === 'browser' ? '浏览器' : x),

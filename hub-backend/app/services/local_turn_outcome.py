@@ -8,10 +8,19 @@ RECOVERY_NOTE = "（SoduWork 自动恢复）模型输出被截断，正从同一
 
 
 def observe(cli: str, event: dict, terminal: dict) -> None:
-    if cli == "opencode" and event.get("type") == "step_finish" and not event.get("contextOnly"):
+    if cli in {"pi", "opencode", "dsh", "kimi", "qwen"} and event.get("error"):
+        # A protocol/runtime failure after an attempted continuation is stronger
+        # evidence than the earlier output limit. _on_line retains its diagnosis.
+        terminal.pop("outputTruncated", None)
+        # A transport error takes ownership from an earlier retryable Pi model
+        # error; a later native message must not clear the transport diagnosis.
+        if terminal.pop("piSemanticError", False):
+            terminal.pop("result", None)
+        return
+    if cli in {"opencode", "dsh", "kimi", "qwen"} and event.get("type") == "step_finish" and not event.get("contextOnly"):
         part = event.get("part")
         reason = part.get("reason") if isinstance(part, dict) else None
-        if reason in {"length", "max_tokens"}:
+        if reason in {"length", "max_tokens"} and not terminal.get("isError"):
             terminal["outputTruncated"] = True
         elif reason == "stop":
             terminal.pop("outputTruncated", None)
@@ -30,7 +39,7 @@ def observe(cli: str, event: dict, terminal: dict) -> None:
     if reason in {"stop", "toolUse", "length", "max_tokens"} and terminal.pop("piSemanticError", False):
         terminal.pop("isError", None)
         terminal.pop("result", None)
-    if reason in {"length", "max_tokens"}:
+    if reason in {"length", "max_tokens"} and not terminal.get("isError"):
         terminal["outputTruncated"] = True
     elif reason == "stop":
         terminal.pop("outputTruncated", None)
@@ -40,6 +49,7 @@ def observe(cli: str, event: dict, terminal: dict) -> None:
         if event.get("type") == "message_end":
             terminal["piFinalResponse"] = True
     elif reason in {"error", "aborted"}:
+        terminal.pop("outputTruncated", None)
         if terminal.get("isError") and not terminal.get("piSemanticError"):
             return
         if not terminal.get("isError"):

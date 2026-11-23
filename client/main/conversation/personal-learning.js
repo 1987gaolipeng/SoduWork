@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { redact } = require('./import-redaction');
+const { hasRuntimeIdentity } = require('./memory-runtime-policy.cjs');
 const STATE = '.personal-learning.json';
 const MAX_RECENT = 50;
 const MAX_STATE_BYTES = 4 * 1024 * 1024;
@@ -95,6 +96,16 @@ function reconcile({ root, write, digest, key, backfill = false }) {
   const file = path.join(root, 'personal.md');
   let content = safeRead(file, 16 * 1024 * 1024);
   const before = content;
+  // Retire only unedited automatic identity summaries from older versions.
+  // Session evidence and user-authored/corrected notes remain intact.
+  for (const [id, prior] of Object.entries(state.sources)) {
+    if (prior.ignored || prior.pruned) continue;
+    const block = sourceBlock(content, id);
+    if (block && hash(block.text) === prior.hash && hasRuntimeIdentity(block.text)) {
+      content = content.slice(0, block.start) + content.slice(block.finish);
+      state.sources[id] = { ...prior, pruned: true };
+    }
+  }
   const excluded = importedSources(root);
   for (const id of excluded) {
     const prior = state.sources[id], block = sourceBlock(content, id);
@@ -118,6 +129,7 @@ function reconcile({ root, write, digest, key, backfill = false }) {
     const { id, at } = candidate;
     if (excluded.has(id)) continue;
     const block = blockFor(candidate.digest, id);
+    if (hasRuntimeIdentity(block)) continue;
     const signature = hash(block);
     const prior = state.sources[id];
     const existing = sourceBlock(content, id);

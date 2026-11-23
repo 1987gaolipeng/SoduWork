@@ -11,9 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_session
 from ..deps import require_perm
 from ..models import Task, User
-from ..schemas import task_to_api
-from ..services import audit, rbac
+from ..schemas import task_to_api, validate_name_characters
+from ..services import audit, catalog_names, rbac
 from ..services import tasks as svc
+from ..services.repository_catalog import lock_mapping_project
 
 router = APIRouter()
 
@@ -87,16 +88,42 @@ async def _project_owner(session: AsyncSession, actor: User, owner_id: str) -> U
     return owner
 
 
+def _project_name(value):
+    if value is None:
+        value = ""
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail="Project name must be a string")
+    try:
+        name = validate_name_characters(value.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not name:
+        raise HTTPException(status_code=400, detail="请填工程名")
+    return name
+
+
+async def _available_project_name(session, name, org_id, exclude_id=None):
+    from ..models import Project
+    try:
+        await catalog_names.require_available(
+            session, Project, name, "同名项目已经存在", Project.org_id == org_id, exclude_id=exclude_id)
+    except catalog_names.DuplicateName as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/projects")
 async def create_project(body: dict = Body(default_factory=dict),
                          user: User = Depends(require_perm("task.dispatch")),
                          session: AsyncSession = Depends(get_session)):
     from ..models import Project
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="请填工程名")
+    unknown = sorted(set(body) - {"name", "desc", "group", "repoUrl", "ownerUserId"})
+    if unknown:
+        raise HTTPException(status_code=422, detail="未知字段：" + ", ".join(unknown))
+    name = _project_name(body.get("name"))
     owner = await _project_owner(session, user, str(body.get("ownerUserId") or ""))
-    p = Project(name=name, desc=body.get("desc") or "", org_id=owner.org_id or user.org_id,
+    org_id = owner.org_id or user.org_id
+    await _available_project_name(session, name, org_id)
+    p = Project(name=name, desc=body.get("desc") or "", org_id=org_id,
                 owner_user_id=owner.id, created_by=user.id,
                 group=(body.get("group") or "").strip(), repo_url=(body.get("repoUrl") or "").strip())
     session.add(p); await session.commit(); await session.refresh(p)
@@ -141,6 +168,13 @@ async def update_project(pid: str, body: dict = Body(default_factory=dict),
     owner = None
     if "ownerUserId" in body:
         owner = await _project_owner(session, user, str(body.get("ownerUserId") or ""))
+    next_org = old_org or (owner.org_id if owner else None)
+    name = _project_name(body["name"]) if "name" in body else p.name
+    if name != p.name or next_org != old_org:
+        if not name:
+            raise HTTPException(status_code=400, detail="请填工程名")
+        await _available_project_name(session, name, next_org, p.id)
+    if owner is not None:
         p.owner_user_id = owner.id
         if not p.org_id:
             p.org_id = owner.org_id
@@ -151,7 +185,8 @@ async def update_project(pid: str, body: dict = Body(default_factory=dict),
                 for repo in legacy_repos:
                     repo.org_id = p.org_id
                 migrated_repos = len(legacy_repos)
-    for k, f in (("name", "name"), ("desc", "desc"), ("group", "group"),
+    p.name = name
+    for k, f in (("desc", "desc"), ("group", "group"),
                  ("repoUrl", "repo_url"), ("extProjectId", "ext_project_id")):
         if k in body:
             setattr(p, f, str(body.get(k) or "").strip())
@@ -160,8 +195,12 @@ async def update_project(pid: str, body: dict = Body(default_factory=dict),
     rerouted = {"requests": 0, "assignments": 0, "skipped": 0}
     if owner is not None and owner.id != old_owner:
         from ..services import approval_routing
-        rerouted = await approval_routing.reroute_pending_for_project(
-            session, p.id, user.display_name or user.username)
+        try:
+            rerouted = await approval_routing.reroute_pending_for_project(
+                session, p.id, user.display_name or user.username)
+        except approval_routing.ApprovalRerouteConflict as exc:
+            await session.rollback()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
     await session.refresh(p)
     await audit.log(session, user, "project.update", "project", p.id, p.name,
@@ -226,8 +265,8 @@ async def add_repo(pid: str, body: dict = Body(default_factory=dict),
     """Add a repository using local_dir relative to the device's configured workspace; resolve
     machine-specific absolute paths at dispatch.
     """
-    from ..models import Project, Repo
-    p = await session.get(Project, pid)
+    from ..models import Repo
+    p = await lock_mapping_project(session, pid)
     if p is None:
         raise HTTPException(status_code=404, detail="工程所属项目不存在")
     name = (body.get("name") or "").strip()
@@ -236,13 +275,20 @@ async def add_repo(pid: str, body: dict = Body(default_factory=dict),
     kind = (body.get("kind") or "other").strip().lower()
     if kind not in ("backend", "frontend", "mobile", "infra", "other"):
         kind = "other"
-    local = (body.get("localDir") or "").strip().replace("\\", "/").strip("/")
-    if ".." in local.split("/"):
-        raise HTTPException(status_code=400, detail="子目录名不能带 ..")
+    from ..services.workdirs import validate_repo_local_dir
+    try:
+        local = validate_repo_local_dir(body.get("localDir"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from ..services.repo_urls import validate_git_url
+    try:
+        git_url = validate_git_url(body.get("gitUrl"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     r = Repo(project_id=pid, name=name, kind=kind,
-             git_url=(body.get("gitUrl") or "").strip(),
+             git_url=git_url,
              default_branch=(body.get("branch") or "main").strip() or "main",
-             local_dir=local or name, note=(body.get("note") or "").strip()[:2000],
+             local_dir=local, note=(body.get("note") or "").strip()[:2000],
              # Accept automatic merge and dispatch settings during creation as well as updates.
              server_dir=(body.get("serverDir") or "").strip()[:400],
              merge_branch=(body.get("mergeBranch") or "").strip()[:120],
@@ -282,11 +328,17 @@ async def update_repo(rid: str, body: dict = Body(default_factory=dict),
         if scm not in ("git", "gitlab"):
             raise HTTPException(status_code=400, detail=scm_support.GERRIT_RETIRED if scm == "gerrit" else "scm 只能是 git 或 gitlab")
         r.scm = "git"
-    for k, f in (("name", "name"), ("gitUrl", "git_url"), ("branch", "default_branch"),
+    from ..services.repo_urls import validate_git_url
+    for k, f in (("name", "name"), ("branch", "default_branch"),
                  ("note", "note"), ("serverDir", "server_dir"), ("mergeBranch", "merge_branch"),
                  ("aiWorkDir", "ai_work_dir")):
         if k in body:
             setattr(r, f, str(body.get(k) or "").strip())
+    if "gitUrl" in body:
+        try:
+            r.git_url = validate_git_url(body.get("gitUrl"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if "routeKeywords" in body:
         kws = body.get("routeKeywords")
         if not isinstance(kws, list):
@@ -329,10 +381,11 @@ async def update_repo(rid: str, body: dict = Body(default_factory=dict),
         v = str(body.get("kind") or "other").lower()
         r.kind = v if v in ("backend", "frontend", "mobile", "infra", "other") else "other"
     if "localDir" in body:
-        local = str(body.get("localDir") or "").strip().replace("\\", "/").strip("/")
-        if ".." in local.split("/"):
-            raise HTTPException(status_code=400, detail="子目录名不能带 ..")
-        r.local_dir = local
+        from ..services.workdirs import validate_repo_local_dir
+        try:
+            r.local_dir = validate_repo_local_dir(body.get("localDir"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not r.default_branch:
         r.default_branch = "main"
     await session.commit()
@@ -344,10 +397,13 @@ async def update_repo(rid: str, body: dict = Body(default_factory=dict),
 @router.delete("/repos/{rid}")
 async def delete_repo(rid: str, user: User = Depends(require_perm("task.dispatch")),
                       session: AsyncSession = Depends(get_session)):
-    from ..models import Repo
-    r = await session.get(Repo, rid)
+    from ..automation_models import DeploymentTarget
+    from ..services.repository_catalog import lock_deployment_repository
+    r = await lock_deployment_repository(session, rid)
     if r is None:
         return {"ok": True}
+    if await session.scalar(select(DeploymentTarget.id).where(DeploymentTarget.repo_id == rid).limit(1)):
+        raise HTTPException(status_code=409, detail="该仓库仍有关联的部署目标，请先改绑或移除部署目标。")
     name = r.name
     await session.delete(r)
     await session.commit()
@@ -422,14 +478,22 @@ async def delete_project(pid: str, user: User = Depends(require_perm("task.dispa
     """Delete the project while retaining its tasks and clearing their project_id association."""
     from .admin import _assert_org_in_scope
 
-    from ..models import Project
-    p = await session.get(Project, pid)
+    from ..models import Repo
+    p = await lock_mapping_project(session, pid)
     if p is None:
         return {"ok": True}
     await _assert_org_in_scope(session, user, p.org_id)
+    repo_count = await session.scalar(select(func.count()).select_from(Repo).where(Repo.project_id == pid))
+    if repo_count:
+        raise HTTPException(status_code=409, detail=f"该项目仍关联 {repo_count} 个仓库，请先移除仓库配置后再删除项目。")
     ts = (await session.execute(select(Task).where(Task.project_id == pid))).scalars().all()
     for t in ts:
         t.project_id = None
+    # Clear project reference on sub-repos to avoid dangling links.
+    from ..models import Repo
+    repos = (await session.execute(select(Repo).where(Repo.project_id == pid))).scalars().all()
+    for r in repos:
+        r.project_id = None
     name = p.name
     await session.delete(p); await session.commit()
     await audit.log(session, user, "project.delete", "project", pid, name, {})

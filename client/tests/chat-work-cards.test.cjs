@@ -50,6 +50,26 @@ function boot(shared = new Map()) {
 }
 const command = {id: 'work.requirement.create', text: '写一篇400字作文'};
 
+test('conversation automation stays in the transcript after closing and restoring its edited draft', async () => {
+  const h = boot();
+  const seed = await h.cards.prepare({id:'work.automation.create', text:'9点提醒我一次'});
+  assert.equal(typeof seed.cardHost, 'function', 'automation uses a stable transcript host');
+  assert.equal(h.cards.timeline([])[0]?.id, seed.cardId);
+  seed.onCardState({phase:'draft', proposal:{title:'修改后的提醒', note:'保留手动编辑', every:'once', onceAt:'2026-12-01T09:00:00+08:00'}});
+  seed.onCardClose();
+  await h.cards.flush();
+  const fresh = boot(h.shared);
+  await fresh.cards.restore(h.ctx._sessionId);
+  assert.equal(fresh.calls.opened.length, 0, 'a collapsed draft stays collapsed');
+  assert.equal(fresh.cards.timeline([])[0]?.id, seed.cardId, 'continue-editing card remains visible in transcript');
+  const record = h.shared.get('alice' + h.ctx._sessionId).get(seed.cardId);
+  const reopened = await fresh.cards.prepare({id:'work.automation.create', text:record.prompt},
+    {cardRecord:{...record, sessionId:h.ctx._sessionId, owner:'alice', scopeEpoch:0}});
+  assert.equal(reopened.cardState.proposal.title, '修改后的提醒');
+  assert.equal(reopened.cardState.proposal.onceAt, '2026-12-01T09:00:00+08:00');
+  assert.equal(reopened.cardState.phase, 'draft');
+});
+
 test('stalled card recovery terminates and late replies cannot replace a newer conversation', async () => {
   const h = boot(); h.ctx.OPEN_TIMEOUT_MS = 20;
   let release;

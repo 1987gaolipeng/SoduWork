@@ -54,9 +54,13 @@ class NodeResolutionTests(unittest.TestCase):
             self.assertFalse(N.node_env('qwen')['ok'])
             self.assertFalse(N.node_env('dsh')['ok'])
             self.assertTrue(N.node_env('codex')['ok'])
-            self.assertTrue(N.node_env('qwen', engine='>=20.0.0')['ok'])
+            self.assertFalse(N.node_env('qwen', engine='>=20.0.0')['ok'])
+        with patch.object(N, 'resolve', return_value={'nodePath': '/node', 'node': 'v22.14.0', 'npm': '10'}):
+            for key in ('qwen', 'dsh', 'kimi'):
+                self.assertFalse(N.node_env(key, engine='>=20.0.0')['ok'])
         with patch.object(N, 'resolve', return_value={'nodePath': '/node', 'node': 'v22.15.0', 'npm': '10'}):
             self.assertTrue(N.node_env('dsh')['ok'])
+            self.assertTrue(N.node_env('qwen', engine='>=20.0.0')['ok'])
             self.assertFalse(N.node_env('pi')['ok'])
 
     def test_install_environment_is_private_and_does_not_change_parent(self):
@@ -178,7 +182,9 @@ class NodeResolutionTests(unittest.TestCase):
 class InstallationTests(unittest.TestCase):
     pair = {'ok': True, 'nodePath': '/native/node', 'npmPath': '/native/npm-cli.js', 'npm': '10'}
 
-    def install(self, *, code=0, binary='/private/qwen', version='0.25.1', starts='0.25.1'):
+    def install(self, *, code=0, binary='/private/qwen', version=None, starts='0.27.4'):
+        if version is None:
+            version = A._SPECS['qwen']['version']
         jid = A._new_job('qwen', 'install')
         with patch.object(A, 'node_env', return_value=dict(self.pair)), \
                 patch.object(A, '_stream', return_value=(code, 'fixture')) as stream, \

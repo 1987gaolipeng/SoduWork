@@ -19,8 +19,8 @@ window.__deskPanel='workspace';window.workRoot=()=>'';let eventSink=null,seq=0;
 window.SoduworkLocalizedText={pickLocale:()=>'',currentLocale:()=> 'zh-CN',resolve:(item,field)=>String(item?.[field]||'')};
 window.calls={routes:[],sent:[],created:[],parsed:[],closed:[]};window.createFail=false;window.blocked=false;
 window.execution={substrates:[
- ...['pi','qwen','opencode','dsh','kimi','harness2','codex-harness'].map(cli=>({key:'local:'+cli,cli,name:cli,modelMode:'managed',modelPick:true,available:true,onlineSeats:1})),
- ...['codex','claude'].map(cli=>({key:'local:'+cli,cli,name:cli,modelMode:'account',modelPick:false,nativeModelPick:cli==='codex',available:true,onlineSeats:1})),
+ ...['pi','qwen','opencode','dsh','kimi','codex-harness'].map(cli=>({key:'local:'+cli,cli,name:cli,modelMode:'managed',modelPick:true,available:true,onlineSeats:1})),
+ ...['codex'].map(cli=>({key:'local:'+cli,cli,name:cli,modelMode:'account',modelPick:false,nativeModelPick:cli==='codex',available:true,onlineSeats:1})),
 ],modelOptions:[{name:'managed-model',label:'托管模型'}],defaultModel:'managed-model',repos:[]};
 window.esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 window.petSay=s=>document.getElementById('fixtureNotice').textContent=s;

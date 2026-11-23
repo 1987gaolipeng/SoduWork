@@ -86,6 +86,7 @@ if (typeof electron === 'string') {
     win.webContents.sendInputEvent({ type: 'keyUp', keyCode }); await delay(180);
   }
   const visibleTexts = () => js(`Array.from(document.querySelectorAll('#nchatList .ntext')).filter(visible).map(e=>e.textContent.trim())`);
+  const visibleSummaryText = selector => js(`Array.from(document.querySelectorAll(${JSON.stringify(selector)})).filter(visible).map(e=>e.innerText.trim())`);
   async function closed(finals, heads = 1) {
     assert.deepEqual(await visibleTexts(), finals, 'only final reply prose remains visible');
     assert.equal(await js('Array.from(document.querySelectorAll("#nchatList .nthink,#nchatList .ntool")).filter(visible).length'), 0, 'thinking/tools stay mounted but folded');
@@ -100,6 +101,13 @@ if (typeof electron === 'string') {
     win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_, done) => done({ cancel: true }));
     await win.loadFile(fixture); await until('window.fixtureReady===true'); win.webContents.debugger.attach('1.3'); await viewport(1100);
     assert.deepEqual(await js('window.errors'), []);
+    const repeated = snapshot([user('Summarize'), answer([text('First summary')]), user('Summarize again')], [], {
+      status: 'failed', execution: { running: false, reason: 'Working directory is unavailable' },
+    });
+    await publish(repeated, true);
+    assert.deepEqual(await visibleSummaryText('[data-chat-node="runtime-error"] .nbad-copy'), [repeated.execution.reason]);
+    assert.deepEqual(await visibleSummaryText('[data-chat-node="turn-metrics"] [data-thinking-label]'), ['执行失败']);
+    report.results.push('A failed repeat submission shows its own diagnostic and failure label after an earlier successful answer');
     const complete = doneState(), live = structuredClone(complete);
     live.status = 'streaming'; live.execution.running = true; live.messages[2].done = false;
     live.messages[2].blocks.forEach(block => block.done = false);
@@ -134,11 +142,22 @@ if (typeof electron === 'string') {
     const unknownTiming = snapshot([{ role: 'user', text: 'Legacy request' },
       { role: 'assistant', done: true, blocks: [text('Legacy answer')] }], [], { execution: { running: false, elapsedMs: 0 } });
     await publish(unknownTiming, true);
-    assert.match(await js('document.querySelector(".nturn-summary").innerText'), /用时\s*—/);
+    assert.match(await js('document.querySelector(".nturn-summary").innerText'), /用时\s*未记录/);
+    assert.deepEqual(await visibleSummaryText('[data-turn-label]'), ['展开过程']);
+    assert.deepEqual(await visibleSummaryText('[data-turn-empty]'), []);
+    await click('[data-turn-toggle]');
+    assert.deepEqual(await visibleSummaryText('[data-turn-label]'), ['收起过程']);
+    assert.deepEqual(await visibleSummaryText('[data-turn-empty]'), ['本轮没有可显示的过程记录。']);
+    assert.deepEqual(await visibleTexts(), ['Legacy answer']);
+    await key('[data-turn-toggle]', 'Enter');
+    assert.deepEqual(await visibleSummaryText('[data-turn-label]'), ['展开过程']);
+    assert.deepEqual(await visibleSummaryText('[data-turn-empty]'), []);
+    report.results.push('A final-answer-only turn visibly names its disclosure, explains the empty expanded state, and keeps the answer on screen');
     await publish(complete, true);
     await js(`window.processNode=document.querySelector('[data-chat-node="message:1"]');window.finalNode=document.querySelector('[data-chat-node="message:2"]')`);
-    report.results.push('Completed duration stays 23s when an idle counter advances, across conversation switches and remount; another turn keeps 7s and unknown historical timing stays —');
+    report.results.push('Completed duration stays 23s when an idle counter advances, across conversation switches and remount; another turn keeps 7s and unknown historical timing is marked as unrecorded');
     await click('[data-turn-toggle]'); assert.equal(await js('document.querySelector("[data-turn-toggle]").getAttribute("aria-expanded")'), 'true');
+    assert.deepEqual(await visibleSummaryText('[data-turn-empty]'), []);
     assert.equal(await js('Array.from(document.querySelectorAll(".nthink,.ntool")).filter(visible).length'), 3); assert.deepEqual(await visibleTexts(), [preface, finalText]);
     await click('[data-chat-node="message:1"] .nthink-head'); assert.equal(await js(`visible(document.querySelector('[data-chat-node="message:1"] .nthink-body'))`), true);
     await publish(complete); assert.equal(await js('document.querySelector("[data-turn-toggle]").getAttribute("aria-expanded")'), 'true');
@@ -148,17 +167,17 @@ if (typeof electron === 'string') {
     await js("ctx._ref='another-completed-session'"); await publish(complete); await closed([finalText]);
     await js("ctx._ref='completed-summary'"); await publish(complete); await closed([finalText]);
     report.results.push('Mouse and Enter/Space expand/collapse; expanded state and message DOM survive rerender and reset on session change');
-    complete.tools[0].sourceAgent = source('claude', 'run-tool'); complete.messages[2].sourceAgent = source('codex', 'run-final');
+    complete.tools[0].sourceAgent = source('qwen', 'run-tool'); complete.messages[2].sourceAgent = source('codex', 'run-final');
     complete.messages[2].blocks[1].text = finalText + '成果见 [核对报告](report.pdf)。';
     await js("ctx._outs=[{artifactId:'summary-report',path:'report.pdf',relative:'report.pdf',name:'核对报告.pdf',kind:'document',primary:true,changedInTurn:true,at:1,size:2048}]");
     await publish(complete);
     assert.equal(await js('document.querySelectorAll(".nchat-agent-source").length'), 1);
-    assert.deepEqual(await js('Array.from(document.querySelectorAll(".nchat-agent-source .agent-brand"),e=>Array.from(e.classList).find(c=>c.startsWith("agent-brand-")).slice(12)).sort()'), ['claude', 'codex', 'pi']);
+    assert.deepEqual(await js('Array.from(document.querySelectorAll(".nchat-agent-source .agent-brand"),e=>Array.from(e.classList).find(c=>c.startsWith("agent-brand-")).slice(12)).sort()'), ['codex', 'pi', 'qwen']);
     assert.equal(await js('Array.from(document.querySelectorAll(".ndelivery")).filter(visible).length'), 1);
     assert.equal(await js('document.querySelector(".ndelivery").closest(".nmsg").dataset.messageOwner'), '2');
     await js('window.savedDelivery=document.querySelector(".ndelivery")'); await click('[data-turn-toggle]'); await click('[data-turn-toggle]');
     assert.equal(await js('document.querySelector(".ndelivery")===window.savedDelivery&&visible(window.savedDelivery)'), true);
-    report.results.push('Pi/Claude/Codex share one visible stack; production delivery card stays with final owner and preserves identity through both fold directions');
+    report.results.push('Pi/Qwen/Codex share one visible stack; production delivery card stays with final owner and preserves identity through both fold directions');
     for (const width of [1100, 360]) {
       await viewport(width);
       const layout = await js(`(()=>{const elements=[document.documentElement,document.body,document.querySelector('#nchatScroll'),document.querySelector('#nchatList'),
@@ -222,7 +241,15 @@ if (typeof electron === 'string') {
     assert.doesNotMatch(summaries[0].text, /111|222|tokens/);
     assert.match(summaries[0].text, /23s/); assert.match(summaries[1].text, /4s/);
     assert.doesNotMatch(summaries[1].text, /23s/);
-    assert.doesNotMatch(summaries[1].text, /222|tokens/); await click('[data-turn-toggle="reply:49"]');
+    assert.doesNotMatch(summaries[1].text, /222|tokens/);
+    history.messages[4].blocks.unshift(thought(' \n '));
+    await publish(history); await click('[data-turn-toggle="reply:58"]');
+    assert.deepEqual(await visibleSummaryText('[data-turn-label]'), ['展开过程', '收起过程']);
+    assert.deepEqual(await visibleSummaryText('[data-turn-empty]'), ['本轮没有可显示的过程记录。']);
+    assert.equal(await js('Array.from(document.querySelectorAll(".nthink,.ntool")).filter(visible).length'), 0,
+      'Blank provider content is not a process record, and the previous turn stays folded');
+    await click('[data-turn-toggle="reply:58"]'); await click('[data-turn-toggle="reply:49"]');
+    assert.deepEqual(await visibleSummaryText('[data-turn-empty]'), []);
     const sliding = structuredClone(history); sliding.messages.shift(); sliding.tools[0].after = 0; sliding.history.messageStart = 43; sliding.history.messageIndices.shift();
     await publish(sliding); assert.equal(await js(`document.querySelector('[data-turn-toggle="reply:49"]').getAttribute('aria-expanded')`), 'true');
     assert.equal(await js(`document.querySelector('[data-turn-toggle="reply:58"]').getAttribute('aria-expanded')`), 'false');
@@ -232,8 +259,8 @@ if (typeof electron === 'string') {
     assert.doesNotMatch(await js(`document.querySelector('[data-turn-toggle="reply:49"]').innerText`), /40|222|tokens/);
     report.results.push('Raw owner IDs preserve independent expansion and metrics across history remapping; legacy snapshots recover their own per-message output usage without borrowing the latest count');
     const nativeMissing = snapshot([user('First native turn'), answer([thought('先确认'), text('完成')],
-      { usage: null, sourceAgent: source('harness2') }), user('Second native turn', at + 60000),
-      answer([text('第二轮完成。')], { usage: { output: 19 }, sourceAgent: source('harness2'), completedAt: at + 64000 })], [],
+      { usage: null, sourceAgent: source('kimi') }), user('Second native turn', at + 60000),
+      answer([text('第二轮完成。')], { usage: { output: 19 }, sourceAgent: source('kimi'), completedAt: at + 64000 })], [],
       { usage: { output: 999999 }, contextUsage: { input: 80000 } });
     await publish(nativeMissing, true);
     const nativeValues = () => js('Array.from(document.querySelectorAll(".nturn-summary"),node=>node.innerText)');
@@ -243,12 +270,17 @@ if (typeof electron === 'string') {
     await js("ctx._ref='another-conversation'"); await publish(doneState(), true);
     await js("ctx._ref='native-missing-reopened'"); await publish(JSON.parse(JSON.stringify(nativeMissing)), true);
     assert.deepEqual(await nativeValues(), beforeSwitch, 'reopening estimates exactly the same retained output');
+    await click('[data-turn-toggle="reply:1"]');
+    assert.deepEqual(await visibleSummaryText('[data-turn-empty]'), [], 'A retained display block counts without any tool calls');
+    await click('[data-chat-node="message:1"] .nthink-head');
+    assert.deepEqual(await visibleSummaryText('.nthink-body'), ['先确认']);
+    await click('[data-turn-toggle="reply:1"]');
     nativeMissing.turnMetrics = [{ fromMessage: 0, toMessage: 1, tokens: 7, elapsedMs: 23000 },
       { fromMessage: 2, toMessage: 3, tokens: 19, elapsedMs: 4000 }];
     await publish(nativeMissing);
     assert.doesNotMatch((await nativeValues())[0], /7|≈|—|tokens/);
     await screenshot('native-usage-reconciled');
-    report.results.push('Google Harness2 missing native usage shows a marked thinking/text estimate per round, remains stable after switching/reopening and reconciles a late authoritative receipt without using context/session totals');
+    report.results.push('Kimi missing native usage shows a marked thinking/text estimate per round, remains stable after switching/reopening and reconciles a late authoritative receipt without using context/session totals');
     const merged = snapshot([user('继续并整理最终回复'), answer([thought('先核对上下文。'), text('这是工具前的过程说明。'), call('merged-tool', 2),
       thought('核对已完成。', 3), text('这是最终结论。', 4)])], [tool('merged-tool', 1)]);
     await publish(merged, true); await closed(['这是最终结论。']);

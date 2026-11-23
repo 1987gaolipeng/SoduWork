@@ -204,7 +204,7 @@ function create({ request, task, spec, scope, interval = 1500, wait = ms => new 
         const error = status === 'failed' ? modelErrors.describe(latest.error) : null;
         let reason = error ? modelErrors.forDisplay(latest.error) || '需求执行失败，请检查当前步骤' : '';
         if (error?.status === 404) reason += '；请切换可用模型，或联系管理员核对服务地址与模型名称。';
-        else if (error?.status === 401 || error?.status === 403) reason += '；请检查模型授权或切换有权限的模型。';
+        else if (error?.status === 401) reason += '；请检查模型授权或切换有权限的模型。';
         else if (error?.status === 429) reason += '；请稍后重试或检查模型额度。';
         // A result receipt must never replace the executor's actual answer.
         if (![...outputs.values()].some(output => output.answers())) handle.appendTaskMessage('assistant', status === 'completed'

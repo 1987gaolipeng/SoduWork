@@ -13,4 +13,10 @@ function isolateProfile(app, name) {
   app.setPath('sessionData', sessionData);
   return { root, userData, sessionData };
 }
-module.exports = { isolateProfile };
+// The Node launcher owns cleanup so Chromium has closed all profile handles.
+function withTemporaryRoot(prefix, run) {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  try { return run(root); }
+  finally { fs.rmSync(root, {recursive:true, force:true, maxRetries:5, retryDelay:150}); }
+}
+module.exports = { isolateProfile, withTemporaryRoot };

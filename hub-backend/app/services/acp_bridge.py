@@ -26,27 +26,33 @@ try:
     from .acp_process import close_process, ProcessCleanupError, OwnedProcessGroup
     from . import runtime_images
     from . import opencode_runtime_config
+    from . import opencode_session_migration
     from . import opencode_turn_outcome
     from . import qwen_runtime
     from . import opencode_model_selection
+    from . import codex_acp_outcome
 except ImportError:  # direct script entry used by source Runner
     from acp_access import BridgeAccess, AccessError
     from acp_transition import Transition
     from acp_process import close_process, ProcessCleanupError, OwnedProcessGroup
     import runtime_images
     import opencode_runtime_config
+    import opencode_session_migration
     import opencode_turn_outcome
     import qwen_runtime
     import opencode_model_selection
+    import codex_acp_outcome
 
 _PROTOCOL = 1
 _MAX_FILE_BYTES = 4 * 1024 * 1024
 _MAX_TERMINALS = 8
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SECRET_MARKERS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
+_TASK_OUTPUT_RECOVERY_ENV = "SODUWORK_TASK_OUTPUT_RECOVERY_OWNED"
 _DSH_OUTPUT_CONTINUATION = (
     "上一段模型输出达到单次上限。请沿用当前会话，从最后一个已确认的工具结果继续完成原请求。"
     "已经完成的写入、命令、发送或其他操作不要重复。结果不确定时先只读核对。"
+    "被截断且未执行的工具调用请拆成更小的完整调用，分步写入和验证，避免再次生成过长参数。"
     "如果交付物已经完成，请直接给出结果和已完成的验证。"
 )
 
@@ -214,6 +220,7 @@ class AcpBridge:
         self.message_stream_emitted = False
         self.message_count = 0
         self.tools: dict[str, str] = {}
+        self.codex_tool_output = codex_acp_outcome.ToolOutput(agent_name)
         self.terminals: dict[str, _Terminal] = {}
         self.stderr_head: list[str] = []
         self.stderr_tail: list[str] = []
@@ -221,19 +228,30 @@ class AcpBridge:
         self.outcome = None
         self.dsh_can_compact = False
         self.dsh_compact_reply: list[str] | None = None
+        # The Runner owns this flag. A managed task must not receive a fresh
+        # pair of bridge retries every time its persisted controller resumes it.
+        self.task_output_recovery_owned = os.environ.get(_TASK_OUTPUT_RECOVERY_ENV) == "1"
 
     def start(self) -> None:
         flags = ({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
                  if os.name == "nt" else {"start_new_session": True})
         agent_env = self.access.agent_environment(self.agent_name, os.environ.copy())
         agent_env.pop(runtime_images.ENV_KEY, None)
+        # This is host control, not provider configuration or a tool environment.
+        agent_env.pop(_TASK_OUTPUT_RECOVERY_ENV, None)
         if self.agent_name == "opencode":
             # Reapply in the child entry for already-running source Runners.
-            # Guard/model config and native session/database paths stay intact.
+            # Keep guard/model config, but never open the personal database.
             try:
                 opencode_runtime_config.prepare_environment(agent_env)
+                if self.session_id:
+                    opencode_session_migration.migrate_session(
+                        agent_env, self.session_id, self.cwd, self.argv[0])
+            except (opencode_session_migration.OpenCodeSessionMigrationError,
+                    opencode_runtime_config.OpenCodeEnvironmentError) as exc:
+                raise BridgeError(str(exc)) from exc
             except OSError as exc:
-                raise BridgeError("OpenCode 受管配置目录无法创建，请检查 Runner 数据目录权限。") from exc
+                raise BridgeError("OpenCode 受管数据目录无法创建，请检查 Runner 数据目录权限。") from exc
             self.outcome = opencode_turn_outcome.Observer()
             agent_env = self.outcome.environment(agent_env)
         try:
@@ -343,19 +361,26 @@ class AcpBridge:
             raise BridgeError("Requested file does not exist")
         if os.path.getsize(path) > _MAX_FILE_BYTES:
             raise BridgeError("A single file read cannot exceed 4 MB")
-        try:
-            first = max(1, int(params.get("line") or 1))
-            limit = min(2000, max(1, int(params.get("limit") or 2000)))
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise BridgeError("Invalid file line range") from exc
-        selected: list[str] = []
-        with open(path, "r", encoding="utf-8", errors="replace") as handle:
-            for number, line in enumerate(handle, 1):
-                if number >= first:
-                    selected.append(line)
-                if len(selected) >= limit:
-                    break
-        return {"content": "".join(selected)}
+        first = params.get("line")
+        first = 1 if first is None else first
+        limit = params.get("limit")
+        if (type(first) is not int or first < 1
+                or (limit is not None and (type(limit) is not int or limit < 1))):
+            raise BridgeError("Invalid file line range")
+        # An omitted ACP limit means the complete file, including for an
+        # Agent's read/modify/write operation. Never present a truncated prefix
+        # as the whole file. Bound the actual read as well as the size probe so
+        # a file growing between those operations cannot bypass the byte cap.
+        with open(path, "rb") as handle:
+            raw = handle.read(_MAX_FILE_BYTES + 1)
+        if len(raw) > _MAX_FILE_BYTES:
+            raise BridgeError("A single file read cannot exceed 4 MB")
+        content = raw.decode("utf-8", errors="replace")
+        if first == 1 and limit is None:
+            return {"content": content}
+        lines = content.splitlines(keepends=True)
+        end = None if limit is None else first - 1 + limit
+        return {"content": "".join(lines[first - 1:end])}
 
     def _write_text_file(self, params: dict) -> dict:
         if self.permission != "workspace":
@@ -475,6 +500,29 @@ class AcpBridge:
             "message": "Unsupported SoduWork Runner client method: " + method}})
 
     def _permission_result(self, params: dict) -> dict:
+        call = params.get("toolCall") or {}
+        raw_options = params.get("options") or []
+        kimi_approval = {"approve_once": "allow_once", "approve_always": "allow_always",
+                         "reject": "reject_once"}
+        # Kimi can also request permission to *run* AskUserQuestion. Its
+        # canonical approval options must remain on the ordinary grant path.
+        canonical_approval = (isinstance(raw_options, list) and len(raw_options) == len(kimi_approval)
+                              and all(isinstance(item, dict) and isinstance(item.get("optionId"), str)
+                                      and kimi_approval.get(item["optionId"]) == item.get("kind")
+                                      and item["optionId"] in kimi_approval for item in raw_options)
+                              and len({item["optionId"] for item in raw_options}) == len(kimi_approval))
+        if self.agent_name == "kimi" and call.get("title") == "AskUserQuestion" and not canonical_approval:
+            # This reviewed Kimi fallback asks for an answer, not permission.
+            # Full access and legacy workspace mode must never choose for users.
+            choice = None
+            if not self.transition.permission_blocked(params):
+                choice = self.access.native_question(params)
+            if choice is None:
+                self.transition.next_poll = 0
+                self.transition.tick("permission")
+                self.transition.permission_blocked(params)
+                return {"outcome": {"outcome": "cancelled"}}
+            return {"outcome": {"outcome": "selected", "optionId": choice}}
         options = [item for item in (params.get("options") or [])
                    if isinstance(item, dict) and item.get("optionId")]
         approved = self.permission != "readonly"
@@ -537,9 +585,16 @@ class AcpBridge:
             return
         if self.loading:
             return
-        self.transition.update(update)
+        if self.transition.update(update) is False:
+            return
+        self.codex_tool_output.consume(update)
         self.access.observe_tool(update)
         if kind == "agent_thought_chunk":
+            text = _text(update.get("content"))
+            # Some adapters forward empty reasoning deltas alongside text.
+            # They carry no content and must not end the active message.
+            if not text:
+                return
             # Late reasoning may interleave with one explicitly identified
             # message (DSH); only a tool, new message or turn ends that stream.
             if self.message_parts and not self.message_has_native_id:
@@ -547,10 +602,8 @@ class AcpBridge:
             if not getattr(self, "thought_stream", ""):
                 self.thought_count = getattr(self, "thought_count", 0) + 1
                 self.thought_stream = "acp:thought:%s" % self.thought_count
-            text = _text(update.get("content"))
-            if text:
-                _emit({"type": "reasoning", "part": {"streamId": self.thought_stream,
-                       "delta": text, "done": False}})
+            _emit({"type": "reasoning", "part": {"streamId": self.thought_stream,
+                   "delta": text, "done": False}})
             return
         if kind == "agent_message_chunk":
             self._flush_thought()
@@ -609,6 +662,7 @@ class AcpBridge:
         if kind == "tool_call_update":
             text = _text(update.get("content"))
             if update.get("status") in ("completed", "failed"):
+                text = self.codex_tool_output.finish(update, text)
                 _emit({"type": "tool_execution_end",
                        "toolName": self.tools.get(
                            str(update.get("toolCallId") or ""), "Tool"),
@@ -628,8 +682,21 @@ class AcpBridge:
             _emit({"type": "step_finish", "contextOnly": True, "part": {
                 "contextWindow": update.get("size"), "tokens": tokens}})
 
+    def _output_limited(self, result: dict) -> bool:
+        if result.get("stopReason") != "max_tokens":
+            return False
+        if self.agent_name in {"dsh", "opencode", "kimi"}:
+            return True
+        # Qwen also uses max_tokens for its input/session budget. Only the
+        # reviewed host projection identifies an exhausted output recovery.
+        meta = result.get("_meta")
+        owned = meta.get("soduwork") if isinstance(meta, dict) else None
+        return (self.agent_name == "qwen" and isinstance(owned, dict)
+                and owned.get("outputLimit") is True)
+
     def _client_capabilities(self) -> dict:
         return {
+            **codex_acp_outcome.capabilities(self.agent_name),
             # codex-acp only advertises its custom enterprise gateway when the
             # ACP client explicitly opts in. Other ACP agents safely ignore it.
             "auth": {"_meta": {"gateway": True}},
@@ -672,12 +739,6 @@ class AcpBridge:
         self.transition.resumable = bool(capabilities.get("loadSession") or
             (capabilities.get("sessionCapabilities") or {}).get("resume") is not None)
         session_params = {"cwd": self.cwd, "mcpServers": []}
-        if self.agent_name == "claude":
-            # The dispatch already supplies approved skills and MCP credentials.
-            # Personal/project hooks and permissive settings cannot override it.
-            session_params["_meta"] = {"claudeCode": {"options": {
-                "settingSources": [], "strictMcpConfig": True,
-            }}}
         session_config = {}
         if self.session_id:
             session_caps = capabilities.get("sessionCapabilities") or {}
@@ -723,6 +784,14 @@ class AcpBridge:
                 "prompt": content,
             })
             self._flush_message()
+            failure = codex_acp_outcome.failure(self.agent_name, result)
+            if failure:
+                raise BridgeError(failure)
+            if self.agent_name in {"dsh", "kimi", "qwen"} or self._output_limited(result):
+                reason = str(result.get("stopReason") or "")
+                if reason in {"", "end_turn"} or self._output_limited(result):
+                    _emit({"type": "step_finish", "part": {
+                        "reason": "max_tokens" if reason == "max_tokens" else "stop"}})
             if self.outcome and result.get("stopReason") in (None, "", "end_turn"):
                 native_reason = self.outcome.finish()
                 _emit({"type": "step_finish", "part": {"reason": native_reason}})
@@ -730,6 +799,7 @@ class AcpBridge:
                     result = {**result, "stopReason": "max_tokens"}
             if not self.transition.complete(result):
                 if (self.agent_name == "dsh" and result.get("stopReason") == "max_tokens"
+                        and not self.task_output_recovery_owned
                         and not self.transition.requested
                         and not self.transition.cancel_sent and not self.transition.busy()):
                     if continued_output:
@@ -757,8 +827,8 @@ class AcpBridge:
         reason = str(result.get("stopReason") or "")
         if reason in ("", "end_turn"):
             return 0
-        if self.agent_name == "dsh" and reason == "max_tokens":
-            raise BridgeError("模型输出达到上限。已有文件和工具结果已保留，请继续当前会话完成剩余工作。")
+        if self._output_limited(result):
+            return 2
         raise BridgeError("Agent stopped this turn: " + reason)
 
     def close(self) -> None:

@@ -26,7 +26,7 @@ RESERVATION_LEASE_SECONDS = 300
 # Agent catalog used by the client and Runner.  The editor persists a portable
 # ``local:<agent>`` kind, while the desktop opens the matching runtime id.  A
 # hand-maintained allowlist here silently made newly catalogued bases (Qwen,
-# DSH, Harness²) look selectable but impossible to dispatch.
+# DSH, Kimi) look selectable but impossible to dispatch.
 ADAPTERS = {
     key: key for key, spec in AGENTS.items()
     if spec.get('transport') in {'direct', 'runner'}

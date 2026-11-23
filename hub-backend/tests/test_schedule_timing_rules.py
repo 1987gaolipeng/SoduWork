@@ -117,7 +117,54 @@ class ScheduleTimingRuleTests(unittest.TestCase):
           self.assertTrue(schedules.due(schedule, utc("2030-01-31T15:59:00Z")))
           self.assertFalse(schedules.due(schedule, utc("2030-01-31T16:00:00Z")))
           schedule.next_retry_at = utc("2030-02-01T00:00:00Z")
+          self.assertFalse(schedules.due(schedule, schedule.next_retry_at))
+
+  def test_retries_require_both_pending_and_dispatch_dates_inside_the_window(self):
+      for mode in ("hourly", "daily", "weekly", "monthly"):
+          schedule = plan(every=mode, start_date="2030-01-31", end_date="2030-01-31")
+          for pending, current, expected in (
+              ("2030-01-30T15:59:00Z", "2030-01-30T16:00:00Z", False),
+              ("2030-01-30T16:00:00Z", "2030-01-30T16:00:00Z", True),
+              ("2030-01-31T15:59:00Z", "2030-01-31T15:59:59Z", True),
+              ("2030-01-31T15:59:00Z", "2030-01-31T16:00:00Z", False),
+              ("2030-01-31T16:00:00Z", "2030-02-01T01:00:00Z", False),
+          ):
+              with self.subTest(mode=mode, pending=pending, current=current):
+                  schedule.next_retry_at = utc(pending)
+                  self.assertEqual(schedules.due(schedule, utc(current)), expected)
+          schedule.time_zone = "UTC"
+          schedule.next_retry_at = utc("2030-01-31T16:00:00Z")
           self.assertTrue(schedules.due(schedule, schedule.next_retry_at))
+          schedule.start_date = schedule.end_date = None
+          self.assertTrue(schedules.due(schedule, utc("2030-02-02T00:00:00Z")))
+
+  def test_settlement_does_not_queue_retry_beyond_the_last_local_day(self):
+      from app.services.schedule_run_contracts import apply_outcome
+      for current, expected in (("2030-01-31T15:54:00Z", True), ("2030-01-31T15:56:00Z", False)):
+          schedule = plan(end_date="2030-01-31", retry_count=0, retry_limit=2, retry_delay_minutes=5)
+          run = SimpleNamespace(trigger="timer", receipt={"timing": schedule_timing.snapshot(schedule)})
+          result = schedule_timing.settle(schedule, run, {"ok": False, "error": "fixture failure"},
+              outcome_of=lambda s, out: apply_outcome(s, out, now=utc(current)))
+          self.assertEqual(result["retrying"], expected)
+          self.assertEqual(bool(schedule.next_retry_at), expected)
+          self.assertEqual(schedule.retry_count, 1 if expected else 0)
+          self.assertEqual(schedule.last_error, "fixture failure")
+
+  def test_once_and_custom_retry_semantics_remain_unchanged(self):
+      for mode in ("once", "custom"):
+          schedule = plan(every=mode, end_date="2030-01-01")
+          self.assertTrue(schedule_timing.retry_within_dates(schedule, utc("2030-02-01T00:00:00Z")))
+
+  def test_expired_retry_is_not_advertised_as_pending_in_payload(self):
+      from app import models
+      from app.api.schedule_contract import schedule_payload
+      schedule = models.AiSchedule(id="expired", title="Expired retry", every="daily", time_zone="UTC",
+          at_hour=9, at_minute=0, end_date="2000-01-01", next_retry_at=utc("2000-01-01T12:00:00Z"))
+      payload = schedule_payload(schedule, timestamp=lambda value: value)
+      self.assertIsNone(payload["nextRunAt"])
+      self.assertIsNone(payload["nextRetryAt"])
+      self.assertFalse(payload["retrying"])
+      self.assertIsNotNone(schedule.next_retry_at, "serialization must not mutate stored history")
 
   def test_final_minute_occurrence_survives_one_scheduler_poll_after_midnight(self):
       for mode in ("hourly", "daily", "weekly", "monthly"):

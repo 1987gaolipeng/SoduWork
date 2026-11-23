@@ -16,6 +16,8 @@ class Transition:
         self.requested = ""
         self.cancel_sent = False
         self.tools = {}
+        self.started_tools = set()
+        self.discarded_tools = set()
         self.blocked = set()
         self.failed_after_cancel = set()
         self.next_poll = 0.0
@@ -30,15 +32,37 @@ class Transition:
         if not tool_id:
             return
         status = str(update.get("status") or ("pending" if kind == "tool_call" else ""))
+        meta = update.get("_meta")
+        outcome = meta.get("soduwork") if isinstance(meta, dict) else None
+        discarded = (isinstance(outcome, dict) and outcome.get("toolOutcome") == "not-executed"
+                     and outcome.get("reason") == "output-limit")
+        if self.bridge.agent_name == "dsh" and status == "failed" and discarded:
+            # The reviewed host adapter identifies previews dropped by DSH before
+            # execution. Never release a tool that has actually started, even if
+            # a later argument delta changed its displayed status to pending.
+            if self.tools.get(tool_id) != "pending" or tool_id in self.started_tools:
+                return False
+            self.discarded_tools.add(tool_id)
+        else:
+            # A later native result or execution update supersedes the preview
+            # cancellation; its failure must never inherit the neutral outcome.
+            self.discarded_tools.discard(tool_id)
+            if kind == "tool_call" and self.tools.get(tool_id) in {"completed", "failed"}:
+                self.started_tools.discard(tool_id)
+        if status == "in_progress":
+            self.started_tools.add(tool_id)
         if status:
             self.tools[tool_id] = status
-            if self.cancel_sent and status == "failed" and tool_id not in self.blocked:
+            if (self.cancel_sent and status == "failed" and tool_id not in self.blocked
+                    and tool_id not in self.discarded_tools):
                 self.failed_after_cancel.add(tool_id)
 
     def result_fields(self, update):
         # Only an approval withdrawn by this trusted transition proves the tool
         # never received permission. A running tool failure remains a failure.
         tool_id = str(update.get("toolCallId") or "")
+        if update.get("status") == "failed" and tool_id in self.discarded_tools:
+            return {"state": "cancelled", "cancelReason": "output-limit", "isError": False}
         if update.get("status") == "failed" and tool_id in self.blocked:
             return {"state": "cancelled", "cancelReason": "access-change", "isError": False}
         return {"isError": update.get("status") == "failed"}
@@ -125,6 +149,8 @@ class Transition:
         self.requested = ""
         self.cancel_sent = False
         self.tools.clear()
+        self.started_tools.clear()
+        self.discarded_tools.clear()
         self.blocked.clear()
         self.failed_after_cancel.clear()
         self.reconfiguration = None

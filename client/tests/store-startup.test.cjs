@@ -8,6 +8,18 @@ const TaskSync = require('../core/task-sync.js');
 const source = fs.readFileSync(path.join(__dirname, '../core/store-lifecycle.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, '..', 'core', 'store.js'), 'utf8');
 
+test('fresh and partial configurations hide desktop widgets without rewriting explicit choices', () => {
+  for (const saved of [undefined, { theme: 'saved' }, { dockVisible: true, petVisible: true },
+    { dockVisible: false, petVisible: true }, { dockVisible: true, petVisible: false }]) {
+    const seed = saved ? { soduwork_work_cfg_v5: JSON.stringify(saved) } : {};
+    const f = fixture({}, seed);
+    assert.equal(f.Store.cfg.dockVisible, saved?.dockVisible ?? false);
+    assert.equal(f.Store.cfg.petVisible, saved?.petVisible ?? false);
+    assert.equal(f.values.get('soduwork_work_cfg_v5'), seed.soduwork_work_cfg_v5);
+    assert.equal(f.Store._cfgRevision, 0);
+  }
+});
+
 test('a remote skin patch wins over an older config fetch and refreshes the originating window', async () => {
   const config = deferred(), calls = [];
   const f = fixture({ online: true, getConfig: () => config.promise,
@@ -69,6 +81,25 @@ function fixture(api, seed, options) {
     initData: vm.runInContext('initData', context),
   };
 }
+
+test('pending before initialization stays idle and login immediately hydrates and subscribes once', async () => {
+  let state = 'pending', reads = 0, connections = 0, registrations = 0;
+  const f = fixture({
+    online: true, clientAuthSnapshot: () => ({ state }),
+    registerClient: async () => { registrations++; return { ok: true, authState: state, activationRequired: state !== 'active' }; },
+    getTasksSnapshot: async () => { reads++; return { online: true, items: [] }; },
+    getConfig: async () => ({}),
+    connectWS: () => { connections++; return () => {}; },
+  });
+  await f.initData();
+  assert.equal(registrations, 0); assert.equal(reads, 0); assert.equal(f.Store._startupPromise, null);
+  assert.equal(f.timers.filter(row => row.interval).length, 0);
+  state = 'active'; f.context.dispatchEvent({ type: 'soduwork-device-auth' }); await settle();
+  assert.equal(reads, 1); assert.equal(connections, 1); assert.equal(f.Store.taskState, 'ready');
+  f.context.dispatchEvent({ type: 'soduwork-device-auth' }); await settle();
+  assert.equal(reads, 1); assert.equal(connections, 1);
+  assert.equal(f.timers.filter(row => row.interval).length, 1);
+});
 
 test('有本地缓存时首屏也不展示缓存，后台校准后就地填入同一任务数组', async () => {
   let releaseRegistration;
@@ -167,6 +198,56 @@ test('saveCfg 发起即置待同步标记，后台确认送达后才摘除', asy
   await new Promise(r => setImmediate(r));
   assert.equal(putCount >= 1, true, '防抖结束后应向后台推送');
   assert.equal(f.values.get('soduwork_work_cfg_v5_sync_pending'), undefined, '送达后摘除标记');
+});
+
+test('a pending preferences save belongs to the account that edited it', async () => {
+  let user = 'alice';
+  const sent = [];
+  const f = fixture({
+    online: true, registerClient: async () => null, connectWS: () => () => {},
+    taskStorageKey: kind => user + ':' + kind,
+    getTasksSnapshot: async () => ({online: true, items: []}),
+    getConfig: async () => ({theme: user + '-theme'}),
+    syncConfig: async cfg => { sent.push([user, cfg.theme]); return true; }
+  });
+  await f.initData();
+  await f.Store._startupPromise;
+  f.Store.cfg.theme = 'alice-draft';
+  f.Store.saveCfg();
+  user = 'bob';
+  f.Store.beginEnvironmentSwitch();
+  for (const t of f.timers.filter(t => !t.interval)) t.fn();
+  await f.Store.hydrate(true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(sent, []);
+  assert.equal(f.Store.cfg.theme, 'bob-theme');
+  user = 'alice';
+  f.Store.beginEnvironmentSwitch();
+  await f.Store.hydrate(true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(sent, [['alice', 'alice-draft']]);
+});
+
+test('an older acknowledgment keeps a newer same-account draft pending', async () => {
+  let acknowledge;
+  const f = fixture({
+    online: true, taskStorageKey: kind => 'alice:' + kind, registerClient: async () => null,
+    getTasksSnapshot: async () => ({online: true, items: []}), getConfig: async () => ({}),
+    connectWS: () => () => {}, syncConfig: () => new Promise(resolve => { acknowledge = resolve; })
+  });
+  await f.initData();
+  await f.Store._startupPromise;
+  f.Store.cfg.theme = 'blue';
+  f.Store.saveCfg();
+  f.Store._syncCfgToHub();
+  const pending = 'soduwork_work_cfg_v5_sync_pending';
+  const draftKey = pending + '@alice:ops';
+  const later = JSON.stringify({...JSON.parse(f.values.get(draftKey)), mute: true});
+  f.values.set(draftKey, later);
+  acknowledge(true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.values.get(draftKey), later);
+  assert.equal(f.values.get(pending), '1');
 });
 
 test('有待同步修改时 hydrate 绝不用后台旧值回灌，并补推本地值', async () => {

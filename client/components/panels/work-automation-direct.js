@@ -18,16 +18,16 @@
       throw Error(tx('当前支持每天、每周、每月、每小时或指定日期执行一次，请将执行时间写为支持的方式'));
     }
     if (!explicitRule && global.ScheduleTiming.clock?.(text)?.invalid) throw Error(tx('执行时间无效，请填写0至23点、0至59分'));
-    const version = epoch, scope = api.taskStorageKey?.('ops');
+    const version = epoch, scope = api.taskStorageKey?.('ops'), requestedAt = Date.now();
     const current = () => { if (version !== epoch || scope !== api.taskStorageKey?.('ops')) throw Error('SoduWork 账号已变化，请重新提交'); };
     const execution = await global.WorkAutomationCardState.loadOptions({ text }); current();
     const methods = typeof global._schmLoad === 'function' ? await global._schmLoad() : [];
     current();
-    const catalogs = { ...execution, methods, seed: {} };
+    const catalogs = { ...execution, methods, seed: {}, requestedAt };
     const parseOptions = global.WorkAutomationBindings.candidates(catalogs, text);
     const parsed = await api.parseTaskText('/自动化 ' + text, '', [], parseOptions); current();
     if (parsed?._parseError) throw Error(parsed._parseError);
-    const prior = { every: 'daily', atHour: 18, atMinute: 0, timeZone: 'Asia/Shanghai' };
+    const prior = { timeZone: 'Asia/Shanghai' };
     const value = sheet.draft(parsed, text, prior, catalogs);
     if (context.pluginId) {
       const method = methods.find(item => item.pluginId === context.pluginId && (item.sourceKey || item.key) === context.pluginKey && item.version === context.pluginVersion && item.checksum === context.pluginChecksum);

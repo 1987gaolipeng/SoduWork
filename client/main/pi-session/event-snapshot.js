@@ -136,7 +136,7 @@ function snapshot(state, options, { SCOPES, deriveStatus, statusText }) {
         ...(m.taskId ? { taskId: String(m.taskId) } : {}),
         ...(m.taskOutputKey ? { taskOutputKey: String(m.taskOutputKey) } : {}),
         ...(m.role === 'user' && m.submissionId ? { submissionId: String(m.submissionId).slice(0, 128) } : {}),
-        errorMessage: modelErrors.forDisplay(m.errorMessage || '', 200), text: m.text || '', attachments: m.attachments || [], plugins: m.plugins || [], blocks,
+        errorMessage: modelErrors.forDisplay(m.errorMessage || '', 200, m.afterToolResult), text: m.text || '', attachments: m.attachments || [], plugins: m.plugins || [], blocks,
         scope: scope || SCOPES.NORMAL,
       };
       if (m.done === true) cache.messages.set(m, visible);
@@ -208,9 +208,10 @@ function snapshot(state, options, { SCOPES, deriveStatus, statusText }) {
     completion: {
       reason: state.lastStopReason,
       rawReason: state.rawStopReason,
+      ...(state.lastModelFailure && state.lastStopReason === 'error' ? { modelFailure: state.lastModelFailure } : {}),
       incomplete: deriveStatus(state) === 'incomplete',
       incompleteReason: state.incompleteReason || (state.lastStopReason === 'length' ? 'length' : ''),
-      error: modelErrors.forDisplay(state.lastAssistantError, 200),
+      error: modelErrors.forDisplay(state.lastAssistantError, 200, state.lastErrorAfterToolResult),
       // Recovery must not parse localized display text (network errors have no HTTP code).
       retryable: state.lastStopReason === 'error' && modelErrors.describe(state.lastAssistantError).retryable,
       authExpired: state.lastStopReason === 'error' && modelErrors.describe(state.lastAssistantError).authExpired,

@@ -114,7 +114,8 @@ async function prompt(session, accumulator, value, options, hooks = {}) {
   finally { unsubscribe?.(); }
   const failure = caught?.message || (state.lastStopReason === 'error' ? state.lastAssistantError : '');
   const silentInput = silentOverflow(accumulator, session);
-  if (stopped() || (!OVERFLOW.test(String(failure || '')) && !silentInput)) {
+  const outputLimit = require('./model-errors').describe(failure).code === 'output_token_limit_exceeded';
+  if (stopped() || outputLimit || (!OVERFLOW.test(String(failure || '')) && !silentInput)) {
     if (caught) throw caught;
     return;
   }

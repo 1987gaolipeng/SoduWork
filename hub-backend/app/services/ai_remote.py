@@ -521,11 +521,18 @@ async def runner_of_ref_async(ref: str):
     return None
 
 
-def status_sync(cfg: dict, ref: str) -> dict:
-    r = _runner_of_ref(ref)
+def status_sync(cfg: dict, ref: str, *, runner_id: str = "") -> dict:
+    r = runner_hub.get(runner_id) if runner_id else _runner_of_ref(ref)
     if r is None:
         return {"ok": False, "error": "这条活所在的执行机不在线"}
     res = runner_hub.call_sync(r, "job.status", {"ref": ref}, timeout=60)
+    if runner_id and res.get("ok"):
+        snapshot = res.get("data") or {}
+        if not snapshot.get("ok") and not snapshot.get("done"):
+            # job.has can reclaim an archived ref missing from the Runner's live map.
+            found = runner_hub.call_sync(r, "job.has", {"ref": ref}, timeout=15)
+            if found.get("ok") and (found.get("data") or {}).get("has"):
+                res = runner_hub.call_sync(r, "job.status", {"ref": ref}, timeout=60)
     if not res.get("ok"):
         return {"ok": False, "error": res.get("error") or "问不到状态"}
     d = dict(res.get("data") or {})
@@ -588,6 +595,37 @@ def runner_info_sync(cfg: dict, ref: str) -> dict:
     if d:
         d["device"] = r.host
     return d
+
+
+async def read_session(ref: str, since: int = 0, limit: int = 400, *, runner_id: str = "") -> dict:
+    """Read only the authorized execution endpoint; keep all RPCs cancellable."""
+    runner = runner_hub.get(runner_id) if runner_id else await runner_of_ref_async(ref)
+    if runner is None:
+        return {"ok": False, "items": [], "error": "这条活所在的执行机不在线"}
+    packet = {
+        "ref": ref, "since": max(0, int(since or 0)),
+        "limit": min(1000, max(1, int(limit or 400))),
+    }
+    # A durable owner is authoritative. Only legacy records without one retain
+    # rolling-upgrade discovery when an old Runner lacks job.session support.
+    candidates = [runner] if runner_id else [runner] + [r for r in runner_hub.online() if r.id != runner.id]
+    error = "远程会话拿不到"
+    for index, candidate in enumerate(candidates):
+        if index:
+            found = await candidate.call("job.has", {"ref": ref}, timeout=15)
+            owner = found.get("data") or {}
+            if not found.get("ok") or not (owner.get("has") or owner.get("found")):
+                continue
+        result = await candidate.call("job.session", packet, timeout=30)
+        if not result.get("ok"):
+            error = result.get("error") or error
+            continue
+        data = dict(result.get("data") or {})
+        data.setdefault("ok", True)
+        data.update(runnerId=candidate.id, host=candidate.host)
+        remember(ref, candidate.id)
+        return data
+    return {"ok": False, "items": [], "error": error}
 
 
 def session_sync(cfg: dict, ref: str, since: int = 0, limit: int = 400) -> dict:
@@ -675,11 +713,11 @@ def _download(r, ref: str, att_id: str) -> bytes | None:
             return None
 
 
-def fetch_attachment_for_sync(cfg: dict, ref: str, att_id: str) -> bytes | None:
+def fetch_attachment_for_sync(cfg: dict, ref: str, att_id: str, *, runner_id: str = "") -> bytes | None:
     """Fetch an artifact from its execution's Runner and workspace. The execution ref prevents
     collisions between identical relative paths in different tasks.
     """
-    r = _runner_of_ref(ref)
+    r = runner_hub.get(runner_id) if runner_id else _runner_of_ref(ref)
     if r is None:
         return None
     return _download(r, ref, att_id)
@@ -696,8 +734,8 @@ def fetch_attachment_sync(cfg: dict, att_id: str) -> bytes | None:
     return None
 
 
-def stop_sync(cfg: dict, ref: str) -> dict:
-    r = _runner_of_ref(ref)
+def stop_sync(cfg: dict, ref: str, *, runner_id: str = "") -> dict:
+    r = runner_hub.get(runner_id) if runner_id else _runner_of_ref(ref)
     if r is None:
         return {"ok": False, "error": "这条活所在的执行机不在线"}
     res = runner_hub.call_sync(r, "job.stop", {"ref": ref}, timeout=60)

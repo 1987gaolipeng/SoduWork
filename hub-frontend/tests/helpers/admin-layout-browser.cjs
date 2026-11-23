@@ -191,6 +191,8 @@ async function checkAdminLayout({ win, js, waitFor, sleep, screenshot, changeLoc
   await js(`sessionStorage.removeItem('soduwork-execution-tab')`)
 
   await navigate('models', '.model-runtime-live .model-load-card strong')
+  await js('document.querySelector(".model-runtime-overview-toggle").click()')
+  await waitFor('!document.querySelector(".model-runtime-overview-body").hidden', 'overview expanded')
   for (const locale of ['zh-CN', 'en-US']) {
     await changeLocale(locale)
     for (const size of [[1920,1080], [1280,720], [390,844]]) {

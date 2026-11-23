@@ -8,14 +8,32 @@ function appAt(profile, packaged = false, appData = path.dirname(profile)) {
   return { isPackaged: packaged, getPath: name => name === 'userData' ? profile : appData };
 }
 
-test('packaged and source clients default to a local Hub and allow explicit configuration', () => {
+test('source clients default to the local Hub while packaged clients retain the hosted Hub', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-hub-default-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.equal(production, 'https://service.soduwork.ai');
   for (const packaged of [false, true]) {
-    const app = appAt(path.resolve('fixture-profile'), packaged);
-    assert.deepEqual(endpoint.initialize(app, { SODUWORK_HUB_URL: 'http://localhost:9080' }), { hub: production, internalTest: false, editable: true });
+    const app = appAt(root, packaged);
+    const hub = packaged ? production : 'http://127.0.0.1:18989';
+    assert.deepEqual(endpoint.initialize(app, { SODUWORK_HUB_URL: 'http://localhost:9080' }), { hub, internalTest: false, editable: true });
     assert.equal(endpoint.accepts(app, 'http://localhost:9080'), false);
   }
-  const app = appAt(path.resolve('fixture-profile'), true);
+  const app = appAt(root, true);
   assert.equal(endpoint.initialize(app, { SODUWORK_TEST_HUB_URL: 'http://localhost:9080', SODUWORK_USER_DATA: app.getPath('userData') }).hub, production);
+});
+
+test('saved service choices and launcher ports take precedence over source and packaged defaults', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-hub-saved-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'hub-endpoint.json');
+  for (const packaged of [false, true]) {
+    for (const hub of [production, 'http://127.0.0.1:18990', 'https://team.example.test']) {
+      const saved = JSON.stringify({ hub });
+      fs.writeFileSync(file, saved);
+      assert.deepEqual(endpoint.initialize(appAt(root, packaged), {}), { hub, internalTest: false, editable: true });
+      assert.equal(fs.readFileSync(file, 'utf8'), saved);
+    }
+  }
 });
 
 test('internal loopback override requires unpackaged execution and a separate profile', () => {

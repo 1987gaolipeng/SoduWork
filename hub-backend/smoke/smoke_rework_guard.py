@@ -120,7 +120,7 @@ async def main():
         # Prepare a repository without deployment targets.
         s.add(models.Client(id="c-rg", name="测试机"))
         s.add(models.Repo(id="r-rg", project_id="prj", name="仓库", git_url="http://x/y.git"))
-        for tid in ("t-start", "t-poll", "t-contract", "t-q", "t-q-runner", "t-q-old"):
+        for tid in ("t-start", "t-poll", "t-contract", "t-q", "t-q-runner", "t-q-old", "t-q-legacy"):
             s.add(models.Task(id=tid, title=tid, status="doing",
                               owner_client_id="c-rg", repo_id="r-rg"))
         await s.commit()
@@ -307,6 +307,21 @@ async def main():
             old_run.state == "running"
             and bool((retried.input or {}).get("manualRetry", {}).get(
                 "recoveredDependencies")), (old_run.state, retried.input))
+
+        # Immutable plugin snapshots may still hold the old string policy.
+        legacy_nodes = [QNODES[0], {**QNODES[1], "config": {"onFailure": "implement"}}]
+        legacy_run, failed_gate = await make_run(
+            s, "r-q-legacy", "t-q-legacy", legacy_nodes, "quality", "failed",
+            {"error": "quality assertion failed"})
+        await workflow_engine._poll_node(s, legacy_run, failed_gate)
+        await s.commit()
+        await workflow_engine._schedule(s, legacy_run)
+        attempts = await rows_of(s, legacy_run.id, "implement")
+        chk("pinned legacy policy queues a second implementation attempt",
+            [(row.attempt, row.state) for row in attempts] == [(1, "rework"), (2, "queued")])
+        chk("legacy continuation retains the original gate failure",
+            workflow_runs._continuation_rework_feedback(
+                legacy_nodes, {"quality": failed_gate}, "implement") == "quality assertion failed")
 
     print("\nrework guard smoke: %d passed, %d failed" % (ok, fail))
     return 1 if fail else 0

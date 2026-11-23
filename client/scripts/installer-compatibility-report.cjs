@@ -9,7 +9,7 @@ const REQUIRED_CHECKS = Object.freeze([
 const BUILD_INPUTS = Object.freeze([
   'build/installer.nsh', 'build/installer-language.nsh', 'build/install-versioned.nsh', 'build/package-check.nsh',
   'build/soduwork-install-identity.nsh', 'build/file-open.nsh',
-  'build/launcher.nsi', 'build/launcher-progress.nsh', 'build/verify-payload.cjs', 'build/prune-versions.cjs',
+  'build/launcher.nsi', 'build/launcher-progress.nsh', 'build/install-context.nsh', 'build/verify-payload.cjs', 'build/prune-versions.cjs',
   'scripts/native-payload.cjs', 'scripts/payload-sources.cjs', 'scripts/prepare-installer.cjs',
   'scripts/client-build-version.cjs',
   'scripts/prepare-html-resources.cjs', 'scripts/prepare-runner.cjs',

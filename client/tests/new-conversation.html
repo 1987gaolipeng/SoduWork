@@ -135,25 +135,32 @@ window.WorkspaceHost={open:(view,payload={})=>{
   const historyDraft=document.getElementById('nchatInput');
   historyDraft.value='历史会话里尚未发送的内容';
   historyDraft.dispatchEvent(new Event('input',{bubbles:true}));
+  const accountReturn = () => {
+    document.getElementById('wsRailMine').click();
+    document.getElementById('wsBack').click();
+  };
+  accountReturn();
+  chk('个人信息返回原会话并保留草稿', WorkspaceShell.active==='create' &&
+    NativeChat.sessionInfo().sessionId==='saved-7' &&
+    document.getElementById('nchatInput')?.value==='历史会话里尚未发送的内容');
   document.querySelector('.ws-nav-item[data-view="create"]').click();
   const freshDraft=document.getElementById('cpInput');
   freshDraft.value='新会话里尚未发送的内容';
   freshDraft.dispatchEvent(new Event('input',{bubbles:true}));
+  accountReturn();
+  chk('个人信息返回未发送的新对话草稿', document.getElementById('composePanel').dataset.stage==='compose' &&
+    document.getElementById('cpInput').value==='新会话里尚未发送的内容');
   document.querySelector('[data-chat-id="saved-7"]').click();
   chk('切回历史会话恢复未发送内容',await waitFor(()=>document.getElementById('nchatInput')?.value==='历史会话里尚未发送的内容'));
   document.querySelector('.ws-nav-item[data-view="create"]').click();
   chk('切回新会话恢复起手式草稿',document.getElementById('cpInput')?.value==='新会话里尚未发送的内容');
 
-  // fb2004f23 restores workspace continuity; conversation identity and cloud
-  // replay directories must remain isolated across the actual browser routes.
   WorkspaceShell.setActiveChat('saved-7');
   openPiChatEntry();
-  /* Main commit fb2004f2 restores directory continuation; conversation and
-     project identity still require an explicit entry and must not leak. */
-  chk('普通新会话沿用当前本地会话工作目录并标明来源',
-    routes.at(-1).payload.cwd==='C:\\workdir'&&routes.at(-1).payload.workspaceSource==='last-session');
-  chk('新会话输入框展示沿用的工作目录',await waitFor(()=>
-    document.getElementById('cpWorkspaceName').textContent==='workdir（沿用上一会话）'));
+  chk('普通新会话不继承当前历史会话的目录',
+    !routes.at(-1).payload.cwd&&!routes.at(-1).payload.workspaceSource);
+  chk('新会话输入框展示默认工作区',await waitFor(()=>
+    document.getElementById('cpWorkspaceName').textContent==='默认工作区'));
   chk('桌宠新对话入口也明确新建',routes.at(-1).payload.newSession===true&&!routes.at(-1).payload.chatId);
   openPiChatEntry('saved-8');
   chk('桌宠历史入口仍只续接指定会话',routes.at(-1).payload.chatId==='saved-8'&&!routes.at(-1).payload.newSession);
@@ -161,8 +168,8 @@ window.WorkspaceHost={open:(view,payload={})=>{
   await waitFor(()=>opened.some(x=>x.chatId==='saved-8'));
   WorkspaceShell.setActiveChat('saved-7');
   openCreateEntry({tab:'task'});
-  chk('普通新建需求入口沿用当前本地会话工作目录并标明来源',
-    routes.at(-1).payload.cwd==='C:\\workdir'&&routes.at(-1).payload.workspaceSource==='last-session');
+  chk('普通新建需求使用独立工作目录',
+    !routes.at(-1).payload.cwd&&!routes.at(-1).payload.workspaceSource);
   chk('统一新建入口不会恢复上一条会话',routes.at(-1).payload.newSession===true&&!routes.at(-1).payload.chatId);
 
   openCreateEntry({tab:'task',cwd:'C:\\explicit-work'});

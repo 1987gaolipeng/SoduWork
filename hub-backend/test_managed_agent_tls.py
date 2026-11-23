@@ -18,6 +18,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
+import truststore
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -26,7 +27,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from app.services import managed_agent_network as network, managed_agents
 
 
-def make_certificates(directory):
+def make_certificates(directory, *, hostname="localhost", expired=False):
     now = datetime.now(timezone.utc)
     ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "SoduWork loopback fixture CA")])
@@ -39,15 +40,16 @@ def make_certificates(directory):
           .sign(ca_key, hashes.SHA256()))
     leaf_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     leaf = (x509.CertificateBuilder()
-            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")]))
+            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostname)]))
             .issuer_name(ca_name).public_key(leaf_key.public_key())
-            .serial_number(x509.random_serial_number()).not_valid_before(now - timedelta(days=1))
-            .not_valid_after(now + timedelta(days=7))
+            .serial_number(x509.random_serial_number()).not_valid_before(now - timedelta(days=2))
+            .not_valid_after(now + timedelta(days=-1 if expired else 7))
             .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
             .add_extension(x509.KeyUsage(True, False, True, False, False, False, False, False, False), critical=True)
             .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
-            .add_extension(x509.SubjectAlternativeName([
-                x509.DNSName("localhost"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]), critical=False)
+            .add_extension(x509.SubjectAlternativeName(
+                [x509.DNSName(hostname)] + ([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]
+                                           if hostname == "localhost" else [])), critical=False)
             .add_extension(x509.SubjectKeyIdentifier.from_public_key(leaf_key.public_key()), critical=False)
             .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
             .sign(ca_key, hashes.SHA256()))
@@ -68,7 +70,9 @@ class ManagedAgentTLSTest(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         self.ca, leaf, key = make_certificates(self.root / "certificates")
+        # Native crypto providers need SystemRoot on a cold Windows process.
         self.stack.enter_context(patch.dict(os.environ, {
+            **{name: os.environ[name] for name in ("SYSTEMROOT",) if name in os.environ},
             "SSL_CERT_FILE": str(self.ca), "HTTP_PROXY": "", "HTTPS_PROXY": "",
             "NO_PROXY": "", "no_proxy": ""}, clear=True))
         self.stack.enter_context(patch.object(managed_agents.time, "sleep"))
@@ -164,6 +168,19 @@ class ManagedAgentTLSTest(unittest.TestCase):
         routes = self.verified_download()
         self.assertEqual(routes, [{"origin": "https://127.0.0.1:%d" % self.origin.server_port,
                                    "route": "direct"}])
+        self.assertEqual(len(self.origin_headers), 1)
+
+    def test_native_trust_completes_download_when_openssl_defaults_have_no_roots(self):
+        # Frozen Python can retain build-machine CA paths that do not exist
+        # on the user's computer. Reproduce its empty default trust store.
+        native = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        native.load_verify_locations(cafile=str(self.ca))
+        with (patch.dict(os.environ, {"SSL_CERT_FILE": "", "SSL_CERT_DIR": ""}),
+              patch.object(ssl.SSLContext, "load_default_certs", return_value=None),
+              patch.object(truststore, "SSLContext", return_value=native) as factory):
+            self.assertEqual(ssl.create_default_context().cert_store_stats()["x509_ca"], 0)
+            self.verified_download()
+        factory.assert_called_once_with(ssl.PROTOCOL_TLS_CLIENT)
         self.assertEqual(len(self.origin_headers), 1)
 
     def test_real_authenticated_connect_preserves_tls_and_does_not_leak_proxy_credentials(self):

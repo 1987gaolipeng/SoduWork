@@ -36,19 +36,6 @@
     "displayColor": "#000000",
     "colorNote": "Simple Icons brand color applied to the unchanged path geometry."
   },
-  "claude": {
-    "file": "claude.svg",
-    "product": "Claude",
-    "source": "https://claude.ai",
-    "guidelines": "https://www.anthropic.com/legal/trademarks",
-    "collection": "simple-icons@16.37.0",
-    "collectionLicense": "CC0-1.0",
-    "artworkOrigin": "simple-icons-official-source",
-    "rightsNote": "The artwork is distributed through Simple Icons under CC0. Claude and Anthropic branding remain owned by Anthropic; no endorsement is implied.",
-    "sha256": "5119ef950a0d648b3fd62865791e73f07f32e18ddab84e4f21160f8c641c0f5f",
-    "displayColor": "#D97757",
-    "colorNote": "Simple Icons brand color applied to the unchanged path geometry."
-  },
   "dsh": {
     "file": "deepseek.svg",
     "product": "DeepSeek",
@@ -87,16 +74,6 @@
     "sha256": "e050b0cd0c29cdd91c049d1fe77d0296ee80b316f781d50a0323e2eb1b7c09a1",
     "displayColor": "#000000",
     "colorNote": "Simple Icons brand color applied to the unchanged path geometry."
-  },
-  "harness2": {
-    "file": "google.svg",
-    "product": "Google Research Harness²",
-    "source": "https://fonts.gstatic.com/s/i/productlogos/googleg/v6/24px.svg",
-    "guidelines": "https://about.google/brand-resource-center/brand-elements/",
-    "collection": "official-google-product-logo",
-    "artworkOrigin": "official-source",
-    "rightsNote": "The Google G is kept unchanged and identifies the Google Research Harness² integration; this is not a Google product endorsement.",
-    "sha256": "ed9087d76cdc6d1c53698f6068f79872e77e87c8d012c0cfdad13b05b6ccb37c"
   },
   "codex": {
     "file": "codex.svg",

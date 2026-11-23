@@ -70,9 +70,37 @@
     return ['intake', 'clarifying', 'ready'].includes(task.triageStage) ? task.triageStage : 'ready';
   }
   function column(task) { const value = stage(task); return value === 'clarifying' ? 'intake' : value; }
-  function blocked(task) {
+  const deliveryGuidance = {
+    capture_pending:'正在整理本轮成果，请等待同步完成。',
+    sync_pending:'成果尚未同步完成，请恢复连接后重试同步。',
+    capture_failed:'成果整理失败，请查看执行记录，修正文件后重试交付。',
+    review_unassigned:'请恢复需求创建人账号后重试验收；创建人归属缺失时，请联系管理员核实。',
+  };
+  // Presentation only: a finished model turn is not an accepted delivery.
+  function deliveryProgress(task, context) {
+    const phase = stage(task), routing = task.workRouting || {}, turn = routing.conversationTurn || {};
+    if (task.canViewExecution === false || task.reviewedAt || ['closed', 'delivered'].includes(phase)) return null;
+    const issue = turn.deliveryIssue?.code === 'review_unassigned' && phase === 'delivering' &&
+      task.reviewSubmission?.ok ? null : turn.deliveryIssue;
+    const gate = approval(task, context);
+    const restoredReview = task.canReview === true && gate?.action === 'review' && gate.status === 'pending' &&
+      Boolean(issue?.artifactVersionId) && String(gate.artifactVersionId || gate.artifact?.id || '') === String(issue.artifactVersionId);
+    if (issue?.code === 'review_unassigned' && !restoredReview) return {text:'验收受阻', className:'is-stalled',
+      guidance:task.reviewSubmission?.reason || deliveryGuidance.review_unassigned,
+      reason:task.reviewSubmission?.reason ? '' : String(issue.reason || ''), blocked:true};
+    if (phase === 'reviewing' || approval(task, context)?.action === 'review' || waitingOn(task, context).length) return null;
+    if (issue?.code) {
+      const pending = ['capture_pending', 'sync_pending'].includes(issue.code);
+      return {text:pending ? '成果待同步' : '交付受阻', className:pending ? 'is-idle' : 'is-stalled',
+        guidance:deliveryGuidance[issue.code] || '', reason:String(issue.reason || ''), blocked:!pending};
+    }
+    if (turn.state !== 'completed') return null;
+    return {text:routing.executionSubmissionMode === 'manual' ? '待提交验收' : '交付待处理',
+      className:'is-idle', reason:'', blocked:false};
+  }
+  function blocked(task, context) {
     return !['closed', 'delivered'].includes(stage(task)) &&
-      (task.status === 'paused' || task.ai?.state === 'failed' || task.ai?.attentionRaised === true);
+      (deliveryProgress(task, context)?.blocked === true || task.status === 'paused' || task.ai?.state === 'failed' || task.ai?.attentionRaised === true);
   }
   function day(value) {
     if (!value) return '';
@@ -125,9 +153,7 @@
   }
   function roles(task) { return Array.isArray(task.myRoles) ? task.myRoles : []; }
   function approval(task, context) { return stage(task) === 'closed' ? undefined : context?.approvals?.get(String(task.id)); }
-  // Delivery review is a creator-owned decision.  Keep this presentation
-  // predicate aligned with Hub's authoritative approval routing so stale
-  // inbox snapshots cannot make the executor's card actionable again.
+  // The Hub resolves the assigned reviewer. Older payloads used the creator role.
   function canReview(task) {
     return Boolean(task && task.canReview !== false &&
       (task.canReview === true || roles(task).includes('creator')));
@@ -178,7 +204,7 @@
       (!f.project || String(task.projectId || '__none') === f.project) &&
       (!f.owner || String(task.assigneeUserId || '__none') === f.owner) && dueMatches(task, f.due, context?.now) &&
       (!f.tag || (Array.isArray(task.tags) && task.tags.some(tag => String(tag || '').trim() === String(f.tag).trim()))) &&
-      (!f.attention || (f.attention === 'blocked' ? blocked(task) : f.attention === 'clarifying' ?
+      (!f.attention || (f.attention === 'blocked' ? blocked(task, context) : f.attention === 'clarifying' ?
         stage(task) === 'clarifying' : Boolean(approval(task, context)))) &&
       (!q || [content(task).title, content(task).note, task.source, task.projectName, task.assigneeName, task.ai?.name].some(value =>
         String(value || '').toLowerCase().includes(q)))).slice().sort((a, b) =>
@@ -202,8 +228,11 @@
     if (task.canClaim === true) return {text: ['github', 'github_issue'].includes(String(task.repositoryIssue?.provider || task.origin || '').toLowerCase()) ?
       '当前团队成员可认领，认领后自动移到待开始，可安排执行' : '仓库成员可认领，认领后自动移到待开始，可安排执行',
       action: '查看并认领', icon: 'confirm', attention: true};
+    const delivery = deliveryProgress(task, context);
+    if (delivery?.blocked || (delivery && !pending && !canResumeRework(task) && !canSubmitReview(task)))
+      return {text:delivery.guidance || delivery.reason || delivery.text, action:'查看详情', icon:delivery.blocked ? 'attention' : 'confirm', attention:delivery.blocked};
     if (pending?.action === 'review' && !canReview(task)) {
-      return { text: '等待需求创建人确认交付', action: '查看详情', icon: 'progress' };
+      return { text: '已提交验收，等待验收人处理', action: '查看详情', icon: 'progress' };
     }
     if (pending) {
       const labels = { baseline: '确认需求与完成标准', review: '核对成果并确认交付', merge: '确认代码合并',
@@ -213,7 +242,9 @@
     if (phase === 'delivered') return { text: '查看成果与验收记录', action: '查看交付', icon: 'complete' };
     if (phase === 'reviewing') return { text: '已提交验收，等待验收人处理', action: '查看交付', icon: 'confirm' };
     if (canResumeRework(task)) return { text: '按验收意见继续修改', action: '继续修正', icon: 'edit', attention: true };
-    if (canSubmitReview(task)) return { text: '本轮执行已结束，可提交验收', action: '查看并提交', icon: 'confirm', attention: true };
+    if (canSubmitReview(task)) return task.reviewSubmission?.ok === false
+      ? {text:'请先确定验收人', action:'查看详情', icon:'attention', attention:true}
+      : { text: '本轮执行已结束，可提交验收', action: '查看并提交', icon: 'confirm', attention: true };
     if (task.ai?.state === 'failed') return { text: '执行未完成，查看原因', action: '查看执行情况', icon: 'attention', attention: actionable(task, context) };
     if (task.ai?.state === 'dispatching') return { text: task.ai.attentionRaised ? '派发待确认，查看执行情况' : '正在安排 AI 执行',
       action: '查看执行情况', icon: task.ai.attentionRaised ? 'attention' : 'progress', attention: actionable(task, context) };
@@ -339,7 +370,7 @@
     return { action, patch };
   }
   return { lanes, columns, priorities, sorts, defaults, viewSettings, kinds, scopes, scopeDescriptions, scopeOptions, normalizeScope, content, displayNote, stage, column,
-    day, timeInfo, dateTimestamp, overdue, blocked, roles, approval, canReview, approvalActionable, waitingOn, actionable, inScope, isRequirement, select, owner, nextStep,
+    day, timeInfo, dateTimestamp, overdue, blocked, deliveryProgress, roles, approval, canReview, approvalActionable, waitingOn, actionable, inScope, isRequirement, select, owner, nextStep,
     canEdit, canEditProject, canManageMaterials, canSubmitReview, canManageAutomation, canTriage, executing, maintenance,
     canArchive, canDelete, canOpenConversation, editPatch, stagePatch, resolveStageMove };
 });

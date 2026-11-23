@@ -309,9 +309,9 @@ class NpmRecoveryJobTests(unittest.TestCase):
              patch.object(setup, "_stream", side_effect=stream), \
              patch.object(setup.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout=registry)), \
              patch.object(setup, "_runtime_issue", return_value=""), \
-             patch.object(setup, "_pkg_version", return_value="0.25.1"), \
+             patch.object(setup, "_pkg_version", return_value=setup._SPECS["qwen"]["version"]), \
              patch.object(setup, "_bin_of", return_value="fixture-agent"), \
-             patch.object(setup, "_short", return_value="0.25.1"):
+             patch.object(setup, "_short", return_value=setup._SPECS["qwen"]["version"]):
             jid = setup._new_job("qwen", "install")
             setup._run_npm(jid, "qwen", "install")
         return setup.job(jid), commands

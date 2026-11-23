@@ -7,6 +7,7 @@ import hashlib
 from io import BytesIO
 import os
 from pathlib import Path
+import secrets
 import sqlite3
 import subprocess
 import sys
@@ -18,14 +19,18 @@ STRICT = "--staged" not in sys.argv
 _tmp = tempfile.TemporaryDirectory(prefix="soduwork-device-security-")
 _root = Path(_tmp.name)
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///" + (_root / ".smoke-device.db").as_posix()
+os.environ["SODUWORK_DATA_ROOT"] = str(_root / "data")
 os.environ["AUTH_SECRET"] = "device-security-smoke-secret-with-enough-entropy"
+os.environ["ADMIN_PASS"] = secrets.token_urlsafe(24)
+os.environ["CLUSTER_REDIS_URL"] = ""
+os.environ["SODUWORK_ENV"] = "development"
 os.environ["DEVICE_AUTH_COMPAT"] = "false" if STRICT else "true"
 
 import httpx  # noqa: E402
-from sqlalchemy import event  # noqa: E402
+from sqlalchemy import event, select  # noqa: E402
 
 from app import automation_models, models  # noqa: E402,F401
-from app.auth import sign_token  # noqa: E402
+from app.auth import hash_password, sign_token  # noqa: E402
 from app.db import Base, SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.realtime import Hub, hub as realtime_hub  # noqa: E402
@@ -358,35 +363,125 @@ async def api_contract() -> None:
         stale = await client.get("/api/v1/admin/me", headers=admin_headers)
         ok(stale.status_code == 401, "stale administrator session survived auth-version change")
 
-        async with SessionLocal() as session:
-            member = models.User(
-                id="security-member", username="security-member", display_name="Security Member",
-                password_hash="unused", is_super=False, is_active=True, auth_version=1,
-            )
-            member_device = models.Client(
-                id="security-member-device", user_ref=member.id,
-                secret_hash=device_auth.hash_secret("m" * 48), auth_state="active",
-                auth_version=1,
-            )
-            session.add_all([member, member_device])
-            await session.commit()
-            member_session, _ = device_auth.issue_session(member_device)
+        await account_disable_contract(
+            client, {"Authorization": "Bearer " + sign_token("security-admin", 2)})
 
-        disabled = await client.patch(
-            "/api/v1/admin/users/security-member",
-            headers={"Authorization": "Bearer " + sign_token("security-admin", 2)},
-            json={"isActive": False},
-        )
-        ok(disabled.status_code == 200, "administrator could not deactivate a user")
-        disabled_device = await client.get(
-            "/api/v1/config", headers={"Authorization": "Device " + member_session},
-        )
-        ok(disabled_device.status_code in (401, 403),
-           "deactivating a user left the user's device session usable")
-        async with SessionLocal() as session:
-            member_device = await session.get(models.Client, "security-member-device")
-            ok(member_device.auth_state == "revoked" and member_device.auth_version > 1,
-               "deactivating a user did not revoke bound device authorization")
+
+async def account_disable_contract(client, admin_headers):
+    """Account suspension ends sessions without imposing an administrator device ban."""
+    password = secrets.token_urlsafe(24)
+    device_id, device_key = "security-member-device", "m" * 48
+    banned_id = "security-banned-device"
+    async with SessionLocal() as session:
+        for uid in ("security-member", "security-other"):
+            session.add(models.User(id=uid, username=uid + "@example.test",
+                password_hash=hash_password(password), is_active=True, auth_version=1))
+        session.add(models.Client(id=device_id, secret_hash=device_auth.hash_secret(device_key),
+            auth_state="pending", auth_version=1, platform="win32", config={"fixture": "preserved"}))
+        session.add(models.Client(id=banned_id, user_ref="security-member",
+            secret_hash=device_auth.hash_secret("b" * 48), auth_state="active", auth_version=1))
+        await session.commit()
+
+    async def login(uid, *, device=device_id, key=device_key, route="/login/password"):
+        return await client.post("/api/v1/client-auth" + route, headers={"X-Device-Key": key},
+            json={"device": device, "email" if route.endswith("password") else "account": uid + "@example.test",
+                  "password": password, "platform": "win32"})
+
+    async def toggle(active):
+        response = await client.patch("/api/v1/admin/users/security-member",
+            headers=admin_headers, json={"isActive": active})
+        ok(response.status_code == 200, "account status update failed")
+
+    async def pending_enrollment():
+        response = await client.post("/api/v1/clients/enroll", headers={"X-Device-Key": device_key},
+                                     json={"device": device_id})
+        ok(response.status_code == 200 and response.json().get("activationRequired")
+           and not response.json().get("session"), "reopening must allow login without restoring the old session")
+
+    banned = await client.post(f"/api/v1/admin/clients/{banned_id}/revoke", headers=admin_headers)
+    ok(banned.status_code == 200, "administrator device ban failed")
+    first = await login("security-member")
+    ok(first.status_code == 200, "initial account login failed")
+    old_session = first.json()["session"]
+    async with SessionLocal() as session:
+        device = await session.get(models.Client, device_id)
+        original_version = device.auth_version
+        proxy_ticket, _ = device_auth.issue_proxy_ticket(device)
+        mcp_ticket, _ = device_auth.issue_mcp_ticket(device)
+        banned_at = (await session.get(models.Client, banned_id)).revoked_at
+
+    async def old_credentials_rejected():
+        response = await client.get("/api/v1/config", headers={"Authorization": "Device " + old_session})
+        ok(response.status_code in (401, 403), "old session became usable after an account status change")
+        for reader, token in ((device_auth.client_from_proxy_ticket, proxy_ticket),
+                              (device_auth.principal_from_mcp_ticket, mcp_ticket)):
+            async with SessionLocal() as session:
+                try:
+                    await reader(session, token)
+                except device_auth.DeviceAuthError:
+                    continue
+                ok(False, "an old AI/tool ticket survived account suspension")
+
+    event_socket, runner_socket, terminal_socket = _FakeSocket(), _FakeSocket(), _FakeSocket()
+    ok(await realtime_hub.connect(device_id, event_socket), "account event fixture failed")
+    runner_hub.add(runner_socket, {"runnerId": "member-runner", "clientId": device_id,
+                                 "host": "fixture", "agents": []})
+    await device_connections.register_terminal(device_id, terminal_socket)
+    commits = []
+
+    def capture_commit(connection):
+        commits.append(connection.execute(select(models.User.is_active, models.Client.auth_state)
+            .join(models.Client, models.Client.user_ref == models.User.id)
+            .where(models.User.id == "security-member", models.Client.id == device_id)).one())
+
+    event.listen(engine.sync_engine, "commit", capture_commit)
+    try:
+        await toggle(False)
+    finally:
+        event.remove(engine.sync_engine, "commit", capture_commit)
+    ok(all(not active and state == "pending" for active, state in commits) and bool(commits),
+       "account suspension and session invalidation must commit together: " + str(commits))
+    ok(event_socket.closed == [4403] and runner_socket.closed == [4403]
+       and terminal_socket.closed == [4403] and runner_hub.get("member-runner") is None,
+       "account suspension did not close event, Runner and terminal channels")
+    async with SessionLocal() as session:
+        device = await session.get(models.Client, device_id)
+        ok(device.auth_state == "pending" and device.auth_version > original_version
+           and device.user_ref == "security-member" and device.secret_hash == device_auth.hash_secret(device_key)
+           and device.config == {"fixture": "preserved"} and device.activated_at is None and device.revoked_at is None,
+           "account suspension must preserve identity and history while invalidating its sessions")
+    await old_credentials_rejected()
+    await pending_enrollment()
+    for route in ("/login", "/login/password"):
+        denied = await login("security-member", route=route)
+        ok(denied.status_code == 403 and denied.json()["detail"]["code"] == "ACCOUNT_DISABLED",
+           "a suspended account must be rejected with an account error")
+
+    await toggle(True)
+    await old_credentials_rejected()
+    await pending_enrollment()
+    for route in ("/login", "/login/password"):
+        ok((await login("security-member", route=route)).status_code == 200,
+           "the re-enabled account cannot log in again")
+    await old_credentials_rejected()
+    await toggle(False)
+    for route in ("/login", "/login/password"):
+        switched = await login("security-other", route=route)
+        ok(switched.status_code == 200 and switched.json()["user"]["id"] == "security-other",
+           "another active account cannot log in on the same device while the old owner is disabled")
+    other_session = switched.json()["session"]
+    await toggle(True)
+    ok((await client.get("/api/v1/config", headers={"Authorization": "Device " + other_session})).status_code == 200,
+       "re-enabling the former owner invalidated the current account")
+    await old_credentials_rejected()
+    async with SessionLocal() as session:
+        device = await session.get(models.Client, banned_id)
+        ok(device.auth_state == "revoked" and device.revoked_at == banned_at and device.auth_version == 2,
+           "account toggles changed an explicit administrator device ban")
+    for uid in ("security-member", "security-other"):
+        denied = await login(uid, device=banned_id, key="b" * 48)
+        ok(denied.status_code == 403 and denied.json()["detail"]["code"] == "DEVICE_REVOKED",
+           "an explicitly banned device accepted an account login")
 
 
 def migration_contract() -> None:

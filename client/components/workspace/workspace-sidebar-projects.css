@@ -28,6 +28,11 @@
 .ws-project-empty{appearance:none;border:0;background:transparent;color:var(--ink-4);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 12px);
   text-align:left;padding:7px 10px 10px;border-radius:8px}
 .ws-project-empty:hover{color:var(--ink-2);background:var(--bg-2)}
+.ws-project-more{appearance:none;display:block;width:100%;min-height:32px;padding:5px 12px 5px 29px;
+  border:0;border-radius:8px;background:transparent;color:var(--ink-4);font:inherit;text-align:left;cursor:pointer}
+.ws-project-more[hidden]{display:none}
+.ws-project-more:hover{color:var(--ink-2);background:var(--bg-2)}
+.ws-project-more:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .ws-sidebar-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .workspace-shell.is-chat-dragging #wsPinnedBox[hidden]{display:flex}
 .workspace-shell.is-chat-dragging #wsPinnedBox.is-empty .ws-list-body:empty::after{content:"拖到这里置顶";

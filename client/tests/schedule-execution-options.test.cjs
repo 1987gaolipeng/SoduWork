@@ -7,7 +7,7 @@ const path = require('node:path');
 function context(api, bridge) {
   const ctx = vm.createContext({ SoduWorkAPI: api, window: { addEventListener() {}, soduWorkAPI: bridge },
     esc: value => String(value), Intl, Event, document: { getElementById: () => null } });
-  for (const file of ['panels-schedules-methods.js', 'panels-schedules.js', 'panels-schedules-editor.js']) {
+  for (const file of ['work-automation-view.js', 'panels-schedules-methods.js', 'panels-schedules.js', 'panels-schedules-editor.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../components/panels', file), 'utf8'), ctx);
   }
   return ctx;
@@ -117,7 +117,9 @@ test('automation editor expands a substrate into stable remote target choices', 
     'local:pi', 'runner:desk-1:pi', 'runner:cloud-1:pi',
   ]);
   assert.equal(run(ctx, '_schDefaultAgentId()'), 'local:pi');
-  assert.match(run(ctx, '_schAgentOptionsHtml("runner:desk-1:pi")'), /runner:desk-1:pi/);
+  const options = run(ctx, '_schAgentOptionsHtml("runner:desk-1:pi")');
+  assert.match(options, /value="runner:desk-1:pi" selected aria-label="Pi · 工作电脑 · 北京 · 1 个在线席位"/);
+  assert.match(options, /class="automation-runtime-name">Pi<\/span>/);
   assert.match(run(ctx, '_schAgentOptionsHtml("runner:cloud-1:pi")'), /云端 Runner/);
 });
 
@@ -179,7 +181,7 @@ test('automation editor keeps model selection independent from the chosen Agent'
 
 test('managed automation shares the model catalog, excludes image models and keeps device models off remote seats', async () => {
   const localRef = 'local:model-' + 'b'.repeat(32), imageRef = 'local:model-' + 'd'.repeat(32);
-  for (const runtime of ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'harness2', 'codex-harness']) {
+  for (const runtime of ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'codex-harness']) {
     const ctx = context({ taskExecutionOptions: async () => ({
       substrates: [{ key: 'local:' + runtime, cli: runtime, available: true, modelPick: true,
         locations: [{ assigneeId: 'local:' + runtime, mode: 'local', label: 'Local device' },
@@ -329,13 +331,12 @@ test('automation model selector translates labels generated after the editor ope
 
   const enabled = run(ctx, '_schModelFieldHtml("", "local:pi")');
   assert.match(enabled, /value="soduwork-prd-large" selected/);
-  assert.match(enabled, /The model is saved independently from the runtime/);
+  assert.match(enabled, /<label[^>]*>Model<\/label>/);
   assert.doesNotMatch(enabled, /请选择模型|模型与执行底座独立保存/);
 
   run(ctx, '_schAgents[1].nativeModelPick = false');
   const managed = run(ctx, '_schModelFieldHtml("", "local:codex")');
   assert.match(managed, /Managed by this runtime/);
-  assert.match(managed, /This runtime does not accept an automation-specific model/);
   assert.doesNotMatch(managed, /由底座自身管理模型|当前底座不接受自动化单独指定模型/);
 });
 

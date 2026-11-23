@@ -90,14 +90,14 @@ function fakeSession(acc, reasons) {
   const thinkingOnly = await continuation.complete(
     thinkingOnlySession, thinkingOnlyAcc, '制作一个网页游戏', {}, { maxContinuations: 2 });
   assert.deepEqual(thinkingOnly, {
-    continuations: 0, incomplete: true, incompleteReason: 'reasoning-limit',
+    continuations: 1, incomplete: true, incompleteReason: 'reasoning-limit',
   });
   thinkingOnlyAcc.markIncomplete(thinkingOnly.incompleteReason);
   assert.equal(thinkingOnlyAcc.snapshot().status, 'incomplete');
   assert.match(thinkingOnlyAcc.snapshot().statusText, /单次输出上限.*检查模型管理中的最大输出量/);
   assert.match(thinkingOnlyAcc.snapshot().statusText, /部分模型不支持关闭思考/);
-  assert.equal(thinkingOnlySession.calls, 1,
-    'thinking-only length stops must not re-enter an automatic continuation loop');
+  assert.equal(thinkingOnlySession.calls, 2,
+    'repeated thinking-only length stops must end after one bounded recovery');
 
   const terminalThinkingAcc = stream.create();
   const terminalThinkingSession = {
@@ -116,10 +116,10 @@ function fakeSession(acc, reasons) {
   const terminalThinking = await continuation.complete(
     terminalThinkingSession, terminalThinkingAcc, '制作一个网页游戏', {}, { maxContinuations: 2 });
   assert.deepEqual(terminalThinking, {
-    continuations: 0, incomplete: true, incompleteReason: 'reasoning-limit',
+    continuations: 1, incomplete: true, incompleteReason: 'reasoning-limit',
   });
-  assert.equal(terminalThinkingSession.calls, 1,
-    '完整内容只在 message_end 到达时也必须阻止重复续写');
+  assert.equal(terminalThinkingSession.calls, 2,
+    'reasoning reported only at message_end also gets at most one recovery');
   const semanticAcc = stream.create();
   const semanticCalls = [];
   const semanticSession = {

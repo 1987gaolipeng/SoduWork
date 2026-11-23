@@ -108,7 +108,11 @@ async function cleanResources(requestedRoot, executable = process.execPath, ioRo
   await inspectTree(root);
   // The optional target comes only from the confirmed native wizard. The
   // current-account check never follows a custom SODUWORK_USER_DATA location.
-  const removedUserData = userData ? await cleanUserData(userData.appData, userData.productName) : null;
+  const removedUserData = userData ? await cleanUserData(userData.appData, userData.productName).catch(error => {
+    // Tell the native wizard to offer an administrator retry only for local data.
+    if (error.code === 'EACCES' || error.code === 'EPERM') error.exitCode = 5;
+    throw error;
+  }) : null;
   // Keep the verified native short alias for I/O. Expanding it back to the
   // canonical spelling can hit path limits in Windows filesystem filters even
   // though the same long Unicode resource is accessible through its alias.
@@ -124,4 +128,4 @@ async function cleanResources(requestedRoot, executable = process.execPath, ioRo
 module.exports = { cleanResources, cleanUserData };
 if (require.main === module) cleanResources(process.argv[2], process.execPath, process.argv[3] || process.argv[2],
   process.argv[4] ? { appData: process.argv[4], productName: process.argv[5] } : undefined).then(result => console.log(JSON.stringify(result)))
-  .catch(error => { console.error(error.message); process.exitCode = 2; });
+  .catch(error => { console.error(error.message); process.exitCode = error.exitCode || 2; });

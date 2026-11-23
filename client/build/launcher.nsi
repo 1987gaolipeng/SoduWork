@@ -11,7 +11,7 @@ SetFont "Segoe UI" 9
   !define SODUWORK_EXECUTABLE_NAME "SoduWork.exe"
 !endif
 Name "SoduWork"
-Caption "SoduWork 正在更新"
+Caption "SoduWork"
 OutFile "${SODUWORK_LAUNCHER_OUT}"
 Icon "${SODUWORK_ICON}"
 !include "LogicLib.nsh"
@@ -33,6 +33,7 @@ Var updateRoot
 Var updatePhase
 Var updateBusy
 Var updateMutex
+!include "install-context.nsh"
 !include "launcher-progress.nsh"
 Function CheckUpdateLock
   StrCpy $updateBusy 0
@@ -87,6 +88,8 @@ Function .onInit
   ; updateRoot is final here; both the observer window and the failure
   ; message box below pick their strings from this single decision.
   Call ReadUpdateLocale
+  StrCpy $installContextRoot "$updateRoot"
+  Call ReadInstallContext
 FunctionEnd
 Section
   StrCpy $count 0

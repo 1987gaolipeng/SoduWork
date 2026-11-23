@@ -89,9 +89,9 @@ if (typeof electron === 'string') {
       const popup = chat ? '.nchat-runtime-pop' : '#cpRuntimePop';
       const footer = chat ? '#nchatRuntimeMissing' : '#cpRuntimeMissing';
       await until(`document.querySelector(${JSON.stringify(trigger)})`);
-      await js(`window.brandRuntimes=['pi','harness2','qwen','private-agent'].map((id,index)=>({id,displayName:AgentBrand.LABELS[id]||'Private runtime',
+      await js(`window.brandRuntimes=['pi','codex-harness','qwen','private-agent'].map((id,index)=>({id,displayName:AgentBrand.LABELS[id]||'Private runtime',
         version:'1.0.0',order:index+1,group:index?'more':'recommended',modelMode:'managed',availability:{ok:true}}));
-        window.brandMissing=['codex','opencode','claude','kimi','dsh','private-agent'].map(id=>({id,displayName:AgentBrand.LABELS[id]||'Private runtime'}));
+        window.brandMissing=['codex','opencode','kimi','dsh','private-agent'].map(id=>({id,displayName:AgentBrand.LABELS[id]||'Private runtime'}));
         window.brandReply=()=>({ok:true,runtimes:brandRuntimes,availableRuntimes:brandRuntimes,missing:brandMissing});
         soduWorkAPI.conversationSession.runtimes=async()=>brandReply();
         soduWorkAPI.conversationSession.conversationRuntimes=async()=>brandReply();
@@ -102,8 +102,8 @@ if (typeof electron === 'string') {
         win.setSize(width, 950); win.webContents.setZoomFactor(zoom); await sleep(120);
         await click(trigger);
         await until(`document.querySelector(${JSON.stringify(popup)})?.checkVisibility() && document.querySelector(${JSON.stringify(popup)}).querySelectorAll('[data-runtime]').length===4`);
-        for (const id of ['pi', 'harness2', 'qwen', 'private-agent']) await inspect(surface + ':' + width, popup + ' [data-runtime="' + id + '"]', id);
-        for (const id of ['codex', 'opencode', 'claude', 'kimi', 'dsh', 'private-agent']) await inspect(surface + ':footer:' + width,
+        for (const id of ['pi', 'codex-harness', 'qwen', 'private-agent']) await inspect(surface + ':' + width, popup + ' [data-runtime="' + id + '"]', id);
+        for (const id of ['codex', 'opencode', 'kimi', 'dsh', 'private-agent']) await inspect(surface + ':footer:' + width,
           footer + ' [data-runtime-missing="' + id + '"]', id);
         await screenshot(surface + '-' + width);
         await click(trigger);
@@ -115,7 +115,9 @@ if (typeof electron === 'string') {
     assert.deepEqual(report.failures, [], 'Runtime identity or clipping differs across surfaces');
     report.ok = true;
   }).catch(error => { report.error = String(error.stack || error); }).finally(() => {
-    win?.destroy(); fs.rmSync(profile, { recursive: true, force: true });
+    win?.destroy();
+    try { fs.rmSync(profile, { recursive: true, force: true }); }
+    catch (error) { report.cleanupError = error.code || error.message; }
     fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify({ ok: report.ok, checks: report.checks.length, failures: report.failures.length, output, error: report.error }));
     app.exit(report.ok ? 0 : 1);

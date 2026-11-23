@@ -22,12 +22,6 @@ CATALOG: dict[str, dict] = acp_specs()
 def find_bin(key: str) -> str | None:
     """Find an installed ACP agent without mistaking SoduWork itself for one."""
     spec = CATALOG.get(key) or {}
-    if key == "claude":
-        from .agent_native_install import active_binary
-        from .local_base import _data_root
-        if not active_binary(_data_root()):
-            return None
-        return agent_npm_runtime.private_bin(spec.get("bins") or ()) or None
     override = os.environ.get("SODUWORK_AGENT_%s_BIN" % key.upper().replace("-", "_"))
     if override:
         path = os.path.abspath(os.path.expanduser(override))
@@ -37,10 +31,27 @@ def find_bin(key: str) -> str | None:
         return private
     if spec.get("launch") == "node":
         return None
+    from .agent_installation import path_directories
+    directories = path_directories(windows=sys.platform == 'win32')
     for name in spec.get("bins") or ():
-        found = shutil.which(name)
+        found = (shutil.which(name, path=os.pathsep.join(directories))
+                 if sys.platform == 'win32' else shutil.which(name))
+        if not found:
+            found = next((hit for directory in directories
+                          if (hit := shutil.which(name, path=directory))), None)
         if found:
             return found
+    from .local_base import _npm_roots
+    from .agent_installation import selected_manifest
+    for root in _npm_roots():
+        directory = Path(root).parent if sys.platform == 'win32' else Path(root).parent.parent / 'bin'
+        for name in spec.get('bins') or ():
+            if sys.platform == 'win32' and not name.lower().endswith(('.cmd', '.exe')):
+                continue
+            candidate = directory / name
+            if (candidate.is_file() and (sys.platform == 'win32' or os.access(candidate, os.X_OK))
+                    and selected_manifest(spec.get('pkg', ''), str(candidate))):
+                return str(candidate)
     return None
 
 
@@ -83,6 +94,19 @@ def _agent_args(key: str, cfg: dict) -> list[str]:
     return args
 
 
+def executable_command(key: str, executable: str) -> list[str]:
+    """Use one validated Node/entry pair for npm probes and actual ACP launches."""
+    from .agent_installation import selected_node_entry
+    spec = CATALOG.get(key) or {}
+    entry, engine = selected_node_entry(spec.get('pkg', ''), executable)
+    if not entry:
+        return [executable]
+    node = agent_npm_runtime.node_env(key, engine=engine)
+    if not node.get('ok'):
+        raise RuntimeError(node.get('why') or 'Agent Node runtime is unavailable')
+    return [node['nodePath'], entry]
+
+
 def command_argv(key: str, exe: str, args: list[str], ws: str,
                  cfg: dict | None = None) -> list[str]:
     """Wrap one installed ACP agent in SoduWork's normalized JSON event bridge."""
@@ -100,24 +124,12 @@ def command_argv(key: str, exe: str, args: list[str], ws: str,
         bridge.append("--terminal")
     if session:
         bridge += ["--session", session]
-    command = [exe]
-    spec = CATALOG.get(key) or {}
-    if spec.get("launch") == "node":
-        command_name = str((spec.get("bins") or [""])[0]).removesuffix(".cmd")
-        entry = agent_npm_runtime.package_entry(spec.get("pkg", ""), command_name)
-        node = agent_npm_runtime.node_env(key)
-        if not entry or not node.get("ok"):
-            raise RuntimeError(node.get("why") or "Agent adapter entry is unavailable; reinstall this Agent")
-        command = [node["nodePath"], entry]
+    command = executable_command(key, exe)
     return [*bridge, "--", *command, *_agent_args(key, cfg or {})]
 
 
 def runtime_issue(key: str, *, probe: bool = False) -> str:
     """Return a human-readable runtime defect before a task is created."""
-    if key == "claude":
-        from .claude_runtime import runtime_issue as claude_issue
-        from .local_base import _data_root
-        return claude_issue(_data_root())
     if key != "dsh":
         return ""
     exe = find_bin(key) or ""
@@ -126,7 +138,7 @@ def runtime_issue(key: str, *, probe: bool = False) -> str:
     expected = dsh_runtime.adapter_expected_version(exe)
     if probe:
         return dsh_runtime.boot_issue(exe, expected_version=expected)
-    return dsh_runtime.runtime_issue(expected_version=expected)
+    return dsh_runtime.runtime_issue(expected_version=expected, executable=exe)
 
 
 def home_env(key: str, env: dict, work_root: str, *, installation_root: str | None = None) -> None:
@@ -137,12 +149,6 @@ def home_env(key: str, env: dict, work_root: str, *, installation_root: str | No
     Private probes relocate writable state, not the installed runtime code.
     """
     declaration = (CATALOG.get(key) or {}).get("home") or {}
-    if key == "claude":
-        from .claude_runtime import environment
-        env.update(environment(work_root, env))
-        for name in ("NODE_OPTIONS", "ELECTRON_RUN_AS_NODE", "CLAUDECODE"):
-            env.pop(name, None)
-        return
     if not declaration or not work_root:
         return
     folder = declaration["folder"]
@@ -160,6 +166,12 @@ def home_env(key: str, env: dict, work_root: str, *, installation_root: str | No
     agent_shell.apply(env, key)
     if key == "dsh":
         dsh_runtime.apply_env(env, installation_root or work_root)
+    elif key == "kimi":
+        from . import kimi_runtime
+        kimi_runtime.apply_env(env)
+    elif key == "qwen":
+        from . import qwen_runtime
+        qwen_runtime.apply_env(env)
 
 
 def inject_llm_env(key: str, env: dict, llm: dict, *, mode: str = "work") -> None:
@@ -171,14 +183,30 @@ def inject_llm_env(key: str, env: dict, llm: dict, *, mode: str = "work") -> Non
     if not (base and model and (secret or local_only)):
         return
     if key == "kimi":
+        from . import context_window, runtime_images
         # Kimi's plain KIMI_API_KEY is a config-file key, not a shell override.
         # Its temporary provider contract is the KIMI_MODEL_* environment family.
         for name in list(env):
             if name.startswith("KIMI_MODEL_"):
                 env.pop(name, None)
+        # Native compaction otherwise assumes 262144 tokens even for a smaller
+        # managed model. Keep its threshold aligned with the Runner's window.
+        window = context_window.resolve(llm)["contextWindow"]
+        env["KIMI_MODEL_MAX_CONTEXT_SIZE"] = str(window)
+        output = runtime_images.model_fields(llm).get("maxOutputTokens")
+        if output is not None:
+            # The native model limit also sizes compaction requests; the explicit
+            # per-call override prevents an old native setting from winning.
+            env["KIMI_MODEL_MAX_OUTPUT_SIZE"] = str(min(output, window))
+            env["KIMI_MODEL_MAX_COMPLETION_TOKENS"] = str(min(output, window))
         env["KIMI_MODEL_PROVIDER_TYPE"] = "anthropic" if llm.get("kind") == "anthropic" else "openai"
         env["KIMI_CODE_NO_AUTO_UPDATE"] = "1"
         env["KIMI_DISABLE_TELEMETRY"] = "1"
+        # Kimi requires a non-empty API key even when the selected local model
+        # is anonymous. Satisfy its client-side validation without borrowing
+        # personal credentials or modifying the saved model configuration.
+        if local_only and not secret.strip():
+            secret = "soduwork-anonymous-local"
     # Generic ACP Agents can describe standard environment-based model routing.
     # Custom authentication/bootstrap protocols remain explicit adapters below.
     fields = {"base": base, "key": secret, "model": model}
@@ -212,6 +240,8 @@ def inject_llm_env(key: str, env: dict, llm: dict, *, mode: str = "work") -> Non
         from . import dsh_gateway
         dsh_gateway.inject_env(env, llm)
     elif key == "codex-harness":
+        from . import context_window
+        context_limit = context_window.resolve(llm)["contextWindow"]
         # The managed adapter resolves its own compatible native dependency.
         # Host overrides and debug logging must not route it to a personal CLI
         # or persist the per-turn enterprise gateway credential.
@@ -240,6 +270,10 @@ def inject_llm_env(key: str, env: dict, llm: dict, *, mode: str = "work") -> Non
             CODEX_CONFIG=json.dumps({
                 "model": model,
                 "model_provider": "custom-gateway",
+                # Unknown gateway model names must not inherit the native
+                # default model's larger window and postpone compaction.
+                "model_context_window": context_limit,
+                "model_auto_compact_token_limit": context_limit * 4 // 5,
                 # SoduWork owns the durable event archive; do not ask an enterprise
                 # gateway to retain remote Responses state as well.
                 "disable_response_storage": True,

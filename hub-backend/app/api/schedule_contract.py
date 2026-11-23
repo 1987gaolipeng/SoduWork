@@ -6,6 +6,8 @@ provided by the caller to preserve the existing tolerant personal view.
 from fastapi import HTTPException
 import re
 
+from .input_validation import parse_integer
+
 
 def schedule_payload(s, *, timestamp, administrative=False) -> dict:
     from datetime import datetime, timezone
@@ -22,6 +24,8 @@ def schedule_payload(s, *, timestamp, administrative=False) -> dict:
     next_at = sch.next_run_instant(s, origin)
     end_date = str(getattr(s, "end_date", None) or "")
     current = datetime.now(timezone.utc)
+    # Historical retries remain recorded, but expired work is no longer pending.
+    retry_at = s.next_retry_at if sch.schedule_timing.retry_within_dates(s, s.next_retry_at, current) else None
     if s.every not in ("once", "custom") and end_date and current.astimezone(sch.schedule_zone(s)).date().isoformat() > end_date:
         pending = sch.next_run_instant(s, s.last_run_at or s.created_at)
         next_at = pending if sch.calendar_window_allows(s, current, pending) else None
@@ -69,8 +73,8 @@ def schedule_payload(s, *, timestamp, administrative=False) -> dict:
             "retryLimit": int(s.retry_limit or 0),
             "retryDelayMinutes": int(s.retry_delay_minutes or 5),
             "retryCount": int(s.retry_count or 0),
-            "nextRetryAt": timestamp(s.next_retry_at),
-            "retrying": bool(s.next_retry_at),
+            "nextRetryAt": timestamp(retry_at),
+            "retrying": bool(retry_at),
             "lastRunAt": timestamp(s.last_run_at), "lastTaskId": "",
             "lastError": s.last_error,
             "nextRunAt": timestamp(next_at),
@@ -87,6 +91,30 @@ def schedule_payload(s, *, timestamp, administrative=False) -> dict:
 def apply_schedule_update(s, body: dict) -> None:
     """Apply only supplied schedule fields after validating their shape and length."""
     from ..services import schedules as sch, schedule_timing
+    # Validate request numbers before touching even an attached ORM instance.
+    # Existing clients may send decimal strings, nulls and empty strings; only
+    # those documented empty values use defaults, never booleans or containers.
+    body = dict(body)
+    numbers = {}
+    for key, default in (("atHour", 0), ("atMinute", 0), ("weekday", 1),
+                         ("retryLimit", 0), ("retryDelayMinutes", 5)):
+        if key in body:
+            raw = body[key]
+            value = parse_integer(raw, field=key, default=default)
+            # Preserve the previous numeric-zero default for this field. A
+            # string "0" remains an explicit value and is clamped to one below.
+            if key == "retryDelayMinutes" and type(raw) is int and raw == 0:
+                value = default
+            numbers[key] = value
+    for key in ("weekdays", "monthDays"):
+        if key in body and body[key] is not None and body[key] != "":
+            values = body[key] if isinstance(body[key], list) else [body[key]]
+            body[key] = [parse_integer(value, field=key) for value in values]
+    if "timeZone" in body:
+        try:
+            body["timeZone"] = sch.validate_time_zone(body["timeZone"])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
     once_edit = getattr(s, "every", "") == "once" or body.get("every") == "once"
     before_execution = schedule_timing.execution_snapshot(s) if once_edit else None
     before_timing = schedule_timing.snapshot(s)
@@ -96,13 +124,13 @@ def apply_schedule_update(s, body: dict) -> None:
         from ..services.conversation_turns import execution_instruction
         s.note = execution_instruction(body.get("note"))
     if "atHour" in body:
-        s.at_hour = max(0, min(23, int(body.get("atHour") or 0)))
+        s.at_hour = max(0, min(23, numbers["atHour"]))
     if "atMinute" in body:
-        s.at_minute = max(0, min(59, int(body.get("atMinute") or 0)))
+        s.at_minute = max(0, min(59, numbers["atMinute"]))
     if "weekday" in body:
-        s.weekday = max(1, min(7, int(body.get("weekday") or 1)))
+        s.weekday = max(1, min(7, numbers["weekday"]))
     if "timeZone" in body:
-        s.time_zone = sch.clean_time_zone(body.get("timeZone"))
+        s.time_zone = body["timeZone"]
     for k, f in (("assigneeId", "assignee_id"), ("assigneeType", "assignee_type"),
                  ("repoId", "repo_id"), ("ownerClientId", "owner_client_id")):
         if k in body:
@@ -219,10 +247,10 @@ def apply_schedule_update(s, body: dict) -> None:
         s.required_capabilities = sch.clean_required_capabilities(
             body.get("requiredCapabilities"))
     if "retryLimit" in body:
-        s.retry_limit = max(0, min(10, int(body.get("retryLimit") or 0)))
+        s.retry_limit = max(0, min(10, numbers["retryLimit"]))
     if "retryDelayMinutes" in body:
         s.retry_delay_minutes = max(
-            1, min(1440, int(body.get("retryDelayMinutes") or 5)))
+            1, min(1440, numbers["retryDelayMinutes"]))
     if any(key in body for key in ("assigneeId", "modelName", "modelSource", "requiredCapabilities",
                                    "personalPluginKey", "personalPluginVersionPolicy",
                                    "personalPluginVersion", "personalPluginChecksum")) and (

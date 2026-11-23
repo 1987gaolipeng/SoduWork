@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Model catalog tests for seeded definitions, organization and personal credentials, custom
-models, and dispatch resolution. Never expose plaintext keys; personal credentials take
-precedence. Isolate test records and remove them afterward.
+"""Model catalog tests for read-only organization services, separate personal services,
+and dispatch resolution. Never expose plaintext keys. Isolate test records and remove them afterward.
 """
 import asyncio
 import io
@@ -140,51 +139,47 @@ async def main():
         [(m["name"], m.get("keyFrom")) for m in mine["usable"]][:8])
     chk("★个人密钥也不回显", all("apiKey" not in p for p in mine["providers"]))
 
-    # Use personal credentials when configured.
+    # Client writes cannot override a managed service's credentials.
     st, r = call("PUT", "/my-models", body={"keys": {PID: "my-own-key-abcdef"}}, device=CID)
-    chk("存个人密钥通", st == 200, st)
-    chk("★配了个人 key → keyFrom 变成 mine（走自己的额度）",
-        any(m["name"] == "smoke-model-a" and m["keyFrom"] == "mine" for m in r["usable"]),
-        [(m["name"], m.get("keyFrom")) for m in r["usable"]][:8])
+    chk("客户端不能覆盖组织密钥", st == 403, st)
     st, mine2 = call("GET", "/my-models", device=CID)
     p2 = next(p for p in mine2["providers"] if p["id"] == PID)
-    chk("★回的是「配了几位」而不是密钥本身",
-        p2["myKeySet"] and p2["myKeyLen"] == len("my-own-key-abcdef") and "apiKey" not in p2, p2)
+    chk("组织服务不发布个人密钥覆盖", not p2["myKeySet"] and "apiKey" not in p2, p2)
 
     # Verify which credentials dispatch resolves.
     async with SessionLocal() as s:
         c = await s.get(models.Client, CID)
         got = await mc.resolve(s, c, "smoke-model-a")
-    chk("★resolve 拿到的是**个人**那把 key", got.get("key") == "my-own-key-abcdef",
+    chk("★resolve 使用组织凭据", got.get("key") == "org-key-123456",
         {k: v for k, v in got.items() if k != "key"})
     chk("resolve 带上了地址与模型名",
         got.get("base") == "https://smoke.example.com/v1" and got.get("model") == "smoke-model-a", got)
 
-    # Explicit null removes the personal key and restores organization fallback.
+    # Null cannot delete or reset a managed service's credential.
     st, r = call("PUT", "/my-models", body={"keys": {PID: None}}, device=CID)
+    chk("客户端不能删除组织密钥", st == 403, st)
     async with SessionLocal() as s:
         c = await s.get(models.Client, CID)
         got2 = await mc.resolve(s, c, "smoke-model-a")
-    chk("★删掉个人 key → 回落到组织那把", got2.get("key") == "org-key-123456",
+    chk("★被拒绝的写入不影响组织凭据", got2.get("key") == "org-key-123456",
         {k: v for k, v in got2.items() if k != "key"})
 
-    # Create a personal custom model.
+    # Personal aliases cannot extend a managed service's catalog.
     st, r = call("PUT", "/my-models",
                  body={"models": [{"providerId": PID, "name": "my-private-model", "label": "我自己的"}]},
                  device=CID)
-    chk("★个人自定义模型能用（组织清单里没有它）",
-        any(m["name"] == "my-private-model" and m["own"] for m in r["usable"]),
-        [(m["name"], m.get("own")) for m in r["usable"]][:8])
+    chk("客户端不能添加组织服务的模型", st == 403, st)
 
-    # Override a provider endpoint and add a personal local unauthenticated service.
+    st, _ = call("PUT", "/my-models", body={"providers": [
+        {"id": PID, "baseUrl": "https://mine.example.com/v1", "personal": True}]}, device=CID)
+    chk("客户端不能伪造个人归属覆盖组织地址", st == 403, st)
+    # Separate personal services retain their own protocols and credentials.
     st, r = call("PUT", "/my-models", body={
         "providers": [
-            {"id": PID, "baseUrl": "https://mine.example.com/v1"},
             {"id": CPID, "name": "我的 Ollama", "kind": "openai-compat",
              "baseUrl": "http://127.0.0.1:11434/v1", "authMode": "none", "personal": True},
         ],
         "models": [
-            {"providerId": PID, "name": "my-private-model", "label": "我自己的"},
             {"providerId": CPID, "name": "qwen-local", "label": "本地通义"},
         ],
     }, device=CID)
@@ -200,11 +195,16 @@ async def main():
         overridden = await mc.resolve(s, c, "smoke-model-a")
     chk("★本地免密模型可解析给执行器", local.get("base") == "http://127.0.0.1:11434/v1"
         and local.get("keyFrom") == "none", {k: v for k, v in local.items() if k != "key"})
-    chk("★覆盖组织地址后不把组织密钥发往个人网关", overridden == {}, overridden)
-    st, _ = call("PUT", "/my-models", body={"keys": {"anthropic": "smoke-anthropic-key"}}, device=CID)
+    chk("★个人服务保存不改变组织地址", overridden.get("base") == "https://smoke.example.com/v1",
+        {k: v for k, v in overridden.items() if k != "key"})
+    st, _ = call("PUT", "/my-models", body={
+        "providers": [{"id": CPID, "name": "Personal Anthropic", "kind": "anthropic",
+                       "baseUrl": "https://anthropic.example.com/v1"}],
+        "models": [{"providerId": CPID, "name": "personal-anthropic"}],
+        "keys": {CPID: "smoke-anthropic-key"}}, device=CID)
     async with SessionLocal() as s:
         c = await s.get(models.Client, CID)
-        native = await mc.resolve(s, c, "claude-sonnet-4-5")
+        native = await mc.resolve(s, c, "personal-anthropic")
     chk("★Anthropic 原生协议随模型解析到执行器", st == 200 and native.get("kind") == "anthropic",
         {k: v for k, v in native.items() if k != "key"})
 

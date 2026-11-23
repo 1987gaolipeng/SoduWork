@@ -13,6 +13,7 @@ From the root, run `sh start.sh --desktop` on macOS/Linux, `.\start.cmd --deskto
 
 ## Changes and checks
 
+- **Mandatory Git naming rule:** Do not prepend `Codex/` or `codex/` to feature branch names or pull request titles. Use the feature or fix name directly, such as `media-cards-20261116` or `fix: ...`.
 - Preserve existing user changes and data. Add Alembic migrations for database schema changes.
 - Run checks for the component you change. In `client/`, run `npm test`. In `hub-frontend/`, run `npm run build` and `node --test tests/*.test.mjs`. For backend checks, inspect `python3 quality_gate.py --help` in `hub-backend/`. For launcher changes, run `python3 -m unittest tools.dev.test_start_local` at the root. On Windows, use `py` for standalone Python commands, or `python` inside the activated environment.
 - At the root, run `node tools/check-public-source.cjs`, `node tools/check-third-party.cjs`, `node tools/check-docs.cjs` and `python3 tools/security/scan_secrets.py --download`.

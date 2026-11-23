@@ -15,12 +15,12 @@ const msg = (role, agentId, runId) => ({ role, sourceAgent: role === 'assistant'
   const crews = crew.crewsOf(
     [msg('user', '', ''), msg('assistant', 'pi', 'r1'), msg('assistant', 'pi', 'r1'),
      msg('assistant', 'codex', 'r1'), msg('assistant', 'pi', '')],
-    [tool('pi', 'r1', 'done'), tool('claude', 'r1', 'running'), tool('qwen', '', 'running')],
+    [tool('pi', 'r1', 'done'), tool('kimi', 'r1', 'running'), tool('qwen', '', 'running')],
     '');
   assert.equal(crews.size, 1, 'tools and messages without a runId stay out of the crew');
   const r1 = crews.get('r1');
-  assert.deepEqual(r1.agents.map((a) => a.id), ['pi', 'codex', 'claude'], 'deduped within one run, kept in appearance order');
-  assert.equal(r1.agents.find((a) => a.id === 'claude').running, true, 'running tool event lights up the agent');
+  assert.deepEqual(r1.agents.map((a) => a.id), ['pi', 'codex', 'kimi'], 'deduped within one run, kept in appearance order');
+  assert.equal(r1.agents.find((a) => a.id === 'kimi').running, true, 'running tool event lights up the agent');
   assert.equal(r1.running, true, 'run is active when any agent inside is running');
 
   const streamed = crew.crewsOf([msg('assistant', 'pi', 'r9')], [], 'r9');
@@ -30,11 +30,11 @@ const msg = (role, agentId, runId) => ({ role, sourceAgent: role === 'assistant'
 {
   const crews = crew.crewsOf(
     [msg('assistant', 'pi', 'r1'), msg('assistant', 'codex', 'r1'),
-     msg('assistant', 'opencode', 'r1'), msg('assistant', 'claude', 'r1')],
-    [tool('claude', 'r1', 'running'), tool('codex', 'r1', 'done')], 'r1');
+     msg('assistant', 'opencode', 'r1'), msg('assistant', 'kimi', 'r1')],
+    [tool('kimi', 'r1', 'running'), tool('codex', 'r1', 'done')], 'r1');
   const stack = crew.stackHtml(src('pi', 'r1', 'm0'), crews);
   assert.ok(stack.html.includes('crew-avatar'), 'primary bead present');
-  assert.ok(stack.html.includes('agent-brand-claude crew-sub is-on'), 'running engine surfaces inline with is-on');
+  assert.ok(stack.html.includes('agent-brand-kimi crew-sub is-on'), 'running engine surfaces inline with is-on');
   assert.ok(stack.html.includes('agent-brand-codex'), 'other participants ordered running-first');
   assert.ok(!stack.html.includes('agent-brand-opencode'), 'beyond the inline limit no sub bead is drawn');
   assert.ok(stack.html.includes('crew-count">+1'), 'extra folded into the trailing count bead');
@@ -129,9 +129,9 @@ const msg = (role, agentId, runId) => ({ role, sourceAgent: role === 'assistant'
 }
 /* ---- popover details: executor fallback chain and state mapping (no DOM) */
 {
-  assert.equal(crew._agentKindOf({ resolved: { agentKind: 'local:claude' } }), 'claude');
+  assert.equal(crew._agentKindOf({ resolved: { agentKind: 'local:kimi' } }), 'kimi');
   assert.equal(crew._agentKindOf({ requested: { agentKind: 'qwen' }, assignee: '某执行机' }), 'qwen');
-  assert.equal(crew._agentKindOf({ assignee: 'Claude Code', provider: '' }), 'claude');
+  assert.equal(crew._agentKindOf({ assignee: 'Kimi Code', provider: '' }), 'kimi');
   assert.equal(crew._agentKindOf({}), 'custom');
   assert.equal(crew._modelOf({ resolved: { model: 'claude-opus-4' } }), 'claude-opus-4');
   const rows = crew._rowsHtml({ nodes: [
@@ -163,7 +163,7 @@ console.log('chat-crew.test: all assertions passed');
     node('plan', '方案设计', 'succeeded', 'codex', 'gpt-5'),
     node('impl', '代码实现', 'succeeded', 'pi', 'pi-main'),
     node('review', '代码复核', 'succeeded', 'opencode', 'qwen3-coder'),
-    node('scan', '安全扫描', 'running', 'claude', 'claude-sonnet'),
+    node('scan', '安全扫描', 'running', 'kimi', 'claude-sonnet'),
     node('notes', '发布说明', 'pending', '', ''),
     node('audit', '产出审阅', 'pending', 'pi', 'pi-main'),   // second appearance of the same engine → deduped
   ] }] };
@@ -172,9 +172,9 @@ console.log('chat-crew.test: all assertions passed');
     _collabTasks: new Map([['T9', { taskId: 'T9', title: '门户首屏性能优化', task: { title: '门户首屏性能优化' } }]]) };
   const info = crew._headInfo(ctx);
   assert.ok(info, 'yields bar data when a trace and dispatched engines exist');
-  assert.deepEqual(info.beads.map((b) => b.id), ['codex', 'pi', 'opencode', 'claude'],
+  assert.deepEqual(info.beads.map((b) => b.id), ['codex', 'pi', 'opencode', 'kimi'],
     'engines deduped in workflow node order (first appearance); declared-only nodes stay out');
-  assert.equal(info.beads.find((b) => b.id === 'claude').running, true, 'running engine lit');
+  assert.equal(info.beads.find((b) => b.id === 'kimi').running, true, 'running engine lit');
   assert.equal(info.beads.find((b) => b.id === 'codex').running, false, 'completed engine not lit');
   assert.equal(info.running, true, 'run with a doing node → running');
   assert.equal(info.headline, '执行中', 'summary headline');
@@ -185,7 +185,7 @@ console.log('chat-crew.test: all assertions passed');
 
   const html = crew._headHtml(info);
   assert.ok(html.includes('agent-brand-codex crew-sub'), 'the first workflow node\'s engine leads');
-  assert.ok(html.includes('agent-brand-claude crew-sub is-on is-run'), 'running bead carries is-run');
+  assert.ok(html.includes('agent-brand-kimi crew-sub is-on is-run'), 'running bead carries is-run');
   assert.ok(html.includes('crew-dot'), 'running bead carries the state dot');
   assert.ok(html.includes('<b>执行中</b>'), 'summary headline bold');
   assert.ok(html.includes('节点 4/6'), 'summary text carries node progress');
@@ -215,7 +215,7 @@ console.log('chat-crew.test: all assertions passed');
   /* multiple runs: the active run (with doing) wins, else the last run */
   const multi = { runs: [
     { id: 'old', nodes: [node('a', 'A', 'succeeded', 'codex', '')] },
-    { id: 'now', nodes: [node('b', 'B', 'running', 'claude', '')] }] };
+    { id: 'now', nodes: [node('b', 'B', 'running', 'kimi', '')] }] };
   assert.equal(crew._headInfo({ _activeCollabTaskId: 'T9', _collaborationTrace: multi }).runId, 'now',
     'picks the run still having running nodes');
 }

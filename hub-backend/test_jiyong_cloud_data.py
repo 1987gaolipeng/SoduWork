@@ -81,13 +81,15 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(data.request('data.batch', {'collection': 'notes', 'operations': [
             {'id': 'x', 'expectedRevision': 2, 'delete': True}]}, schema)['operations'][0]['expectedRevision'], 2)
 
-    def test_db_must_be_independent_postgres(self):
+    def test_db_accepts_same_postgres_database_for_jiyong_tables(self):
         config = SimpleNamespace(database_url='postgresql+asyncpg://hub@localhost/hub', jiyong_database_url='')
         with patch.object(database, 'get_settings', return_value=config):
-            for url in ['', 'sqlite+aiosqlite:///:memory:', 'postgresql+asyncpg://other@localhost/hub']:
+            for url in ['', 'sqlite+aiosqlite:///:memory:']:
                 config.jiyong_database_url = url
                 with self.assertRaises(database.CloudError):
                     database.database_url()
+            config.jiyong_database_url = 'postgresql+asyncpg://other@localhost/hub'
+            self.assertEqual(database.database_url(), config.jiyong_database_url)
 
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):

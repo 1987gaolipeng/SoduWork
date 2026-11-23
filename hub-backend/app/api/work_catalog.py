@@ -90,6 +90,7 @@ async def admin_catalog(
     catalog.update({
         "targetOrgId": target,
         "workflows": [{
+            "id": row["id"],
             "key": row.get("key") or "",
             "name": row.get("name") or row.get("key") or "",
             "description": row.get("description") or "",
@@ -168,6 +169,8 @@ async def create_scenario(
     target = await _target_org(session, user, body.get("orgId"))
     try:
         row = await work_catalog.save_scenario(session, body, target)
+    except work_catalog.ScenarioKeyConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
         raise _value_error(error) from error
     result = work_catalog.scenario_api(row)

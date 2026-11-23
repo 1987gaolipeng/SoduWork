@@ -1,5 +1,5 @@
 """Organization-scoped automation administration and template catalog."""
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,7 +7,10 @@ from ..db import get_session
 from ..deps import require_perm
 from ..models import User
 from ..services import audit, rbac
-from .schedule_contract import apply_schedule_update as _sch_apply, schedule_payload
+from .schedule_contract import apply_schedule_update, schedule_payload
+
+# Re-exported by admin for existing schedule handlers.
+_sch_apply = apply_schedule_update
 
 router = APIRouter()
 template_router = APIRouter()
@@ -25,7 +28,21 @@ async def list_automation_templates(
 ):
     """Return administrator-maintained automation templates without user devices or credentials."""
     from ..services import automation_templates
-    return {"items": await automation_templates.load(session)}
+    from ..services import template_catalog_revision
+    # Read the raw catalog first so the version and items share one snapshot.
+    raw = await template_catalog_revision.read(session, automation_templates.SETTING_KEY)
+    import json
+    try:
+        values = json.loads(raw) if raw else []
+    except (ValueError, TypeError):
+        values = []
+    items = []
+    for value in (values if isinstance(values, list) else [])[:automation_templates.MAX_ITEMS]:
+        try:
+            items.append(automation_templates.normalize(value, require_name=False))
+        except ValueError:
+            continue
+    return {"items": items, "revision": template_catalog_revision.revision(raw)}
 
 
 @template_router.put("/automation-templates")
@@ -35,14 +52,21 @@ async def save_automation_templates(
     session: AsyncSession = Depends(get_session),
 ):
     from ..services import automation_templates
+    from ..services import template_catalog_revision
+    if not isinstance(body.get("revision"), str) or not body["revision"]:
+        raise HTTPException(status_code=428, detail="Reload the template catalog before saving; a revision is required.")
     try:
-        items = await automation_templates.save(session, body.get("items", []))
+        items = await automation_templates.save(session, body.get("items", []), expected_revision=body["revision"])
+    except template_catalog_revision.CatalogConflict as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
     await audit.log(session, user, "automation.templates.update", "setting",
                     automation_templates.SETTING_KEY, "自动化模板", {"count": len(items)})
-    return {"items": items}
+    import json
+    return {"items": items, "revision": template_catalog_revision.revision(json.dumps(items, ensure_ascii=False, separators=(",", ":")))}
 
 
 async def _scoped_ai_schedule(session: AsyncSession, sid: str, user: User, *, lock: bool = False):
@@ -149,17 +173,14 @@ async def delete_ai_schedule(sid: str, user: User = Depends(require_perm("task.d
 
 
 @router.get("/ai-schedules/{sid}/runs")
-async def list_ai_schedule_runs(sid: str, limit: int = 20,
+async def list_ai_schedule_runs(sid: str, limit: int = Query(20, ge=1, le=200),
                                 user: User = Depends(require_perm("task.dispatch")),
                                 session: AsyncSession = Depends(get_session)):
-    from .admin import _sch_api, _sch_apply, _scoped_ai_schedule
-
-    from ..models import AiSchedule
     from ..services import schedules as sch
-    s = await _scoped_ai_schedule(session, sid, user)
-    items = await sch.list_runs(session, sid, limit=limit)
-    await session.commit()
-    return {"items": items}
+    from .admin import _scoped_ai_schedule
+
+    await _scoped_ai_schedule(session, sid, user)
+    return {"items": await sch.list_runs(session, sid, limit=limit, max_limit=200)}
 
 
 @router.post("/ai-schedules/{sid}/run")
@@ -171,6 +192,8 @@ async def run_ai_schedule(sid: str, user: User = Depends(require_perm("task.disp
     from ..models import AiSchedule
     from ..services import schedules as sch
     s = await _scoped_ai_schedule(session, sid, user)
+    if not s.enabled:
+        raise HTTPException(status_code=400, detail="任务已停用，无法运行")
     out = await sch.execute_one(
         session, s, trigger="manual",
         who=(user.display_name or user.username or "管理员"))

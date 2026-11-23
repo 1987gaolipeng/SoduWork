@@ -50,15 +50,45 @@ class ProviderCacheTests(IsolatedDatabase):
             self.assertIsNot(current, first)
             self.assertFalse(current["fixture"]["enabled"])
 
-    async def test_client_override_changes_never_reuse_organization_key(self):
+    async def test_legacy_client_overrides_cannot_change_organization_route_or_key(self):
         async with self.sessions() as session:
             client = await session.get(Client, "fixture-client")
             first = await model_catalog.effective_provider_map(session, client)
             self.assertEqual(first["fixture"]["apiKey"], "fixture-only-key")
             client.config = {"modelProviders": [{"id": "fixture", "baseUrl": "https://personal.invalid/v1"}]}
+            client.model_keys = {"fixture": "retired-personal-fixture-key"}
             current = await model_catalog.effective_provider_map(session, client)
-            self.assertEqual(current["fixture"]["baseUrl"], "https://personal.invalid/v1")
-            self.assertEqual(current["fixture"]["apiKey"], "")
+            self.assertIsNot(current, first)
+            self.assertEqual(current["fixture"]["baseUrl"], "https://fixture.invalid/v1")
+            self.assertEqual(current["fixture"]["apiKey"], "fixture-only-key")
+            self.assertEqual(model_catalog.provider_key(current["fixture"], client), ("fixture-only-key", "org"))
+            self.assertEqual(client.config["modelProviders"][0]["baseUrl"], "https://personal.invalid/v1")
+            self.assertEqual(client.model_keys["fixture"], "retired-personal-fixture-key")
+
+    async def test_personal_provider_changes_refresh_without_organization_credentials(self):
+        async with self.sessions() as session:
+            client = await session.get(Client, "fixture-client")
+            personal = {"id": "custom-fixture", "name": "Personal fixture", "personal": True,
+                        "baseUrl": "https://personal.invalid/v1"}
+            client.config = {"modelProviders": [personal]}
+            client.model_keys = {"custom-fixture": "personal-fixture-key"}
+            await session.commit()
+            first = await model_catalog.effective_provider_map(session, client)
+            self.assertIs(await model_catalog.effective_provider_map(session, client), first)
+            self.assertEqual(model_catalog.provider_key(first["custom-fixture"], client),
+                             ("personal-fixture-key", "mine"))
+            client.config = {"modelProviders": [{**personal, "baseUrl": "https://replacement.invalid/v1"}]}
+            client.model_keys = {"custom-fixture": "replacement-personal-fixture-key"}
+            current = await model_catalog.effective_provider_map(session, client)
+            self.assertIsNot(current, first)
+            self.assertEqual(current["custom-fixture"]["baseUrl"], "https://replacement.invalid/v1")
+            self.assertEqual(current["custom-fixture"]["apiKey"], "")
+            self.assertEqual(model_catalog.provider_key(current["custom-fixture"], client),
+                             ("replacement-personal-fixture-key", "mine"))
+            client.model_keys = {}
+            revoked = await model_catalog.effective_provider_map(session, client)
+            self.assertEqual(model_catalog.provider_key(revoked["custom-fixture"], client), ("", ""))
+            self.assertEqual(model_catalog.provider_key(revoked["fixture"], client), ("fixture-only-key", "org"))
 
     async def test_next_transaction_refreshes_an_entity_changed_by_another_session(self):
         async with self.sessions() as reader:

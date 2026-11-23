@@ -9,16 +9,19 @@ if (typeof electron === 'string') {
     'CHROME_CRASHPAD_PIPE_HANDLE', 'ELECTRON_NO_ATTACH_CONSOLE']) delete env[key];
   const args = [__filename, '--no-sandbox', '--disable-gpu'];
   if (process.platform === 'linux' && !env.DISPLAY) args.push('--ozone-platform=headless');
-  const result = require('node:child_process').spawnSync(electron, args, { env, stdio: 'inherit', timeout: 180000 });
-  process.exit(result.status ?? 1);
+  const status = require('./lib/isolated-profile.cjs').withTemporaryRoot('soduwork-local-admission-e2e-', root => {
+    env.SODUWORK_ADMISSION_TEST_ROOT = root;
+    return require('node:child_process').spawnSync(electron, args, { env, stdio: 'inherit', timeout: 180000 }).status;
+  });
+  process.exit(status ?? 1);
 }
 
 const { app, BrowserWindow, ipcMain, safeStorage, net } = electron;
-const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
+const fs = require('node:fs'), path = require('node:path');
 const http = require('node:http'), crypto = require('node:crypto'), assert = require('node:assert/strict');
 const { pathToFileURL } = require('node:url');
 const client = path.resolve(__dirname, '..');
-const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-local-admission-e2e-')));
+const root = process.env.SODUWORK_ADMISSION_TEST_ROOT;
 const profile = path.join(root, 'profile'), cwd = path.join(root, 'workspace');
 fs.mkdirSync(profile); fs.mkdirSync(cwd);
 app.setAppPath(client); app.setPath('userData', profile); app.disableHardwareAcceleration();
@@ -65,7 +68,9 @@ app.whenReady().then(async () => {
           assert.equal(body.model, 'private-image-wire');
           assert.equal(req.headers.authorization, 'Bearer ' + providerKey);
           imageRequests++;
-          return reply(res, { data: [{ b64_json: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z8WQAAAAASUVORK5CYII=' }] });
+          const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mPw01oLAAHvASadyK5SAAAAAElFTkSuQmCC', 'base64');
+          if (body.prompt === 'Generate an incomplete image.') png[42] ^= 1;
+          return reply(res, { data: [{ b64_json: png.toString('base64') }] });
         }
         assert.equal(req.url, '/private-admission/v1/chat/completions');
         const body = JSON.parse(raw);
@@ -215,6 +220,17 @@ app.whenReady().then(async () => {
   await bridge.sync();
   mark('Production local image turn reaches only its provider, writes a local artifact and bypasses Hub quota');
 
+  const outputDir = path.join(cwd, 'outputs');
+  const priorNames = fs.readdirSync(outputDir).sort(), indexFile = path.join(outputDir, '.soduwork-media-index.json');
+  const priorIndex = fs.readFileSync(indexFile);
+  const invalid = await invoke('pi-session-send', imageOpened.ref, 'Generate an incomplete image.', [], { submissionId: 'invalid-image-turn' });
+  assert.equal(invalid.ok, true, invalid.reason);
+  await until(() => js('admissionEvents.some(row=>row.kind==="error" && row.submissionId==="invalid-image-turn" && /图片文件无效/.test(row.reason))'), 'invalid image error');
+  assert.equal(imageRequests, 2);
+  assert.deepEqual(fs.readdirSync(outputDir).sort(), priorNames);
+  assert.deepEqual(fs.readFileSync(indexFile), priorIndex);
+  mark('Corrupt pixels produce an error over renderer IPC and leave the existing output and index intact');
+
   assert.equal((await invoke('pi-session-select-model', opened.ref, localRef)).ok, true);
   store.save({ models: [] });
   const gone = await invoke('local-agent-models-get', { agentId: 'pi' });
@@ -255,6 +271,5 @@ app.whenReady().then(async () => {
     const closed = new Promise(resolve => server.close(resolve)); server.closeAllConnections(); await closed;
   }
   console.log(JSON.stringify(report, null, 2));
-  fs.rmSync(root, { recursive: true, force: true });
   app.exit(report.ok ? 0 : 1);
 });

@@ -36,7 +36,7 @@ if (typeof electron === 'string') {
     await until('window.fixtureReady');
     // An old session has an empty preference but already knows its real model.
     await js("state.selection={name:'',model:{id:'vision',label:'GLM 5.3 Flash'}};controls.render();document.querySelector('#nchatInput').value='keep this draft';document.querySelector('#nchatInput').dispatchEvent(new Event('input',{bubbles:true}));");
-    for (const adapter of ['pi', 'opencode', 'qwen', 'codex-harness', 'dsh', 'codex', 'claude']) {
+    for (const adapter of ['pi', 'opencode', 'qwen', 'codex-harness', 'dsh', 'codex']) {
       await js(`state.adapterId=${JSON.stringify(adapter)};soduWorkAPI.conversationSession.runtimeModels=async()=>({models:models.map(m=>({id:m.name,label:m.label}))});controls.render();void 0;`);
       await click('.nmodel-button');
       if (adapter === 'codex') {
@@ -54,7 +54,7 @@ if (typeof electron === 'string') {
     await click('[data-model-name=short]');
     assert.deepEqual(await js('selected'), [{ ref: 'isolated-chat', name: 'short' }]);
     assert.equal(await js('sent.length'), 0);
-    report.cases.push('Seven runtime menus: resolved historical model checked; no empty choice; explicit switching and drafts preserved');
+    report.cases.push('Six runtime menus: resolved historical model checked; no empty choice; explicit switching and drafts preserved');
 
     await js(`window.originalModels=models;window.originalMyModels=SoduWorkAPI.myModels;
       models=[{name:'hub-first',label:'Hub 模型'},{name:'local:first',label:'本机优先模型',localOnly:true},
@@ -94,7 +94,7 @@ if (typeof electron === 'string') {
       window.adapter='pi';window.catalog={usable:models,defaultModel:'long-model',defaultModels:{pi:'vision',opencode:'short',qwen:'',dsh:'long-model','codex-harness':'short'},defaultModelErrors:{qwen:'Unavailable'},mediaUsable:{image:[{providerId:'image-service',name:'image-one',label:'Image One'}]}};
       window.changes=[];window.offline=false;window.slow=false;
       SoduWorkAPI.myModels=async()=>{if(offline)throw Error('Offline');if(slow)return new Promise(resolve=>window.finishCatalog=()=>resolve(structuredClone(catalog)));return structuredClone(catalog)};
-      window.ComposeRuntime={value:()=>adapter,catalog:()=>[{id:adapter,modelMode:['codex','claude'].includes(adapter)?'account':'managed'}]};
+      window.ComposeRuntime={value:()=>adapter,catalog:()=>[{id:adapter,modelMode:['codex'].includes(adapter)?'account':'managed'}]};
       void 0;
     `);
     await js(fs.readFileSync(path.join(__dirname, '../core/model-choice.js'), 'utf8'));

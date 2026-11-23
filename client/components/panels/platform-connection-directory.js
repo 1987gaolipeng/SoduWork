@@ -2,7 +2,7 @@
 (function(global) {
   'use strict';
   const providers = [
-    {key:'wecom', label:'企业微信', description:'连接企业微信账号，供对话和插件按需使用。'},
+    {key:'wecom', label:'企业微信', description:'授权对话和插件使用企业微信，远程发送任务指令请在「手机远程对话」中连接机器人并绑定任务'},
     {key:'dingtalk', label:'钉钉', description:'连接钉钉账号，复用已有的组织与应用授权。'},
     {key:'feishu', label:'飞书', description:'连接飞书账号，按已授予的权限使用工作数据。'},
   ];

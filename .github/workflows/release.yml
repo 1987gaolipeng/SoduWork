@@ -10,7 +10,7 @@ on:
         default: all
         required: true
       version:
-        description: Unified version X.Y.Z matching the protected release/X.Y.Z branch
+        description: Unified version X.Y.Z from the protected release/X.Y.x maintenance branch
         type: string
         required: true
 
@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: draft-release-${{ inputs.version }}
+  group: draft-release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -46,6 +46,44 @@ jobs:
       - run: python tools/github/release.py preflight
         env:
           GH_TOKEN: ${{ github.token }}
+
+  release-notes:
+    needs: preflight
+    if: inputs.component == 'client' || inputs.component == 'all'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      artifact-id: ${{ steps.notes.outputs.artifact-id || steps.generate.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Generate and validate user-facing release notes once
+        id: generate
+        run: python tools/github/release_notes.py generate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES_API_KEY: ${{ secrets[vars.RELEASE_NOTES_API_KEY_SECRET || 'RELEASE_NOTES_API_KEY'] }}
+          RELEASE_NOTES_API_KEY_SECRET: ${{ vars.RELEASE_NOTES_API_KEY_SECRET }}
+          RELEASE_NOTES_API_URL: ${{ vars.RELEASE_NOTES_API_URL }}
+          RELEASE_NOTES_MODEL: ${{ vars.RELEASE_NOTES_MODEL }}
+          RELEASE_NOTES_TIMEOUT_SECONDS: ${{ vars.RELEASE_NOTES_TIMEOUT_SECONDS }}
+          RELEASE_NOTES_MAX_TOKENS: ${{ vars.RELEASE_NOTES_MAX_TOKENS }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: notes
+        if: steps.generate.outputs.artifact-id == ''
+        with:
+          name: release-notes
+          path: release-evidence/release-notes.json
+          if-no-files-found: error
+          retention-days: 30
 
   quality:
     needs: preflight
@@ -78,7 +116,7 @@ jobs:
           compression-level: 0
 
   client:
-    needs: [quality, security]
+    needs: [quality, security, release-notes]
     if: inputs.component == 'client' || inputs.component == 'all'
     strategy:
       fail-fast: false
@@ -111,7 +149,16 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-15 rpm libarchive-tools
+          sudo apt-get install -y clang-15 rpm gnupg libarchive-tools
+      - name: Use TCP for Apple ticket downloads on Intel macOS
+        if: matrix.shard == 'macos-x64'
+        shell: bash
+        run: |
+          # GitHub-hosted Intel runners can drop Apple's HTTP/3 connections.
+          # https://github.com/actions/runner-images/issues/14924
+          # Apply the runner workaround before both stapling and validation.
+          printf '%s\n' 'block return out quick proto udp from any to any port 443' | sudo pfctl -f -
+          sudo pfctl -E
       - name: Prepare macOS signing and notarization
         if: startsWith(matrix.shard, 'macos-')
         run: bash tools/ci/prepare-macos-signing.sh
@@ -124,10 +171,18 @@ jobs:
           SODUWORK_MAC_NOTARY_ISSUER: ${{ secrets.SODUWORK_MAC_NOTARY_ISSUER }}
           SODUWORK_MAC_NOTARY_PRIVATE_KEY_B64: ${{ secrets.SODUWORK_MAC_NOTARY_PRIVATE_KEY_B64 }}
           SODUWORK_MAC_NOTARY_PROFILE: ${{ secrets.SODUWORK_MAC_NOTARY_PROFILE }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.release-notes.outputs.artifact-id }}
+          path: release-evidence
+          merge-multiple: true
       - name: Build once and run native installation acceptance
         run: python tools/github/build.py ${{ matrix.shard }} --output release-out/${{ matrix.shard }}
         env:
           SODUWORK_MAC_SIGN_IDENTITY: ${{ startsWith(matrix.shard, 'macos-') && secrets.SODUWORK_MAC_SIGN_IDENTITY || '' }}
+          SODUWORK_LINUX_SIGNING_KEY_B64: ${{ matrix.shard == 'linux' && secrets.SODUWORK_LINUX_SIGNING_KEY_B64 || '' }}
+          SODUWORK_LINUX_SIGNING_PASSPHRASE: ${{ matrix.shard == 'linux' && secrets.SODUWORK_LINUX_SIGNING_PASSPHRASE || '' }}
+          SODUWORK_LINUX_SIGNING_FINGERPRINT: ${{ matrix.shard == 'linux' && vars.SODUWORK_LINUX_SIGNING_FINGERPRINT || '' }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: accepted-${{ matrix.shard }}
@@ -172,7 +227,7 @@ jobs:
           compression-level: 0
 
   candidate:
-    needs: [source, client, hub]
+    needs: [source, client, hub, release-notes]
     if: >-
       always() && !cancelled() &&
       (needs.source.result == 'success' || needs.client.result == 'success' || needs.hub.result == 'success') &&
@@ -191,6 +246,12 @@ jobs:
           pattern: accepted-*
           merge-multiple: true
           path: release-out/candidate
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.component == 'client' || inputs.component == 'all'
+        with:
+          artifact-ids: ${{ needs.release-notes.outputs.artifact-id }}
+          path: release-out/candidate
+          merge-multiple: true
       - run: python tools/github/release.py candidate --folder release-out/candidate
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         id: candidate

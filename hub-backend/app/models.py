@@ -154,8 +154,12 @@ class Task(Base):
     # Execution authority belongs to the account that received this task, not
     # whichever account next signs in on the same physical device.
     owner_user_id: Mapped[str | None] = mapped_column(String(36), index=True, default=None)
-    title: Mapped[str] = mapped_column(String(200), default="未命名")
-    source: Mapped[str] = mapped_column(String(120), default="")
+    # Storage also receives historical desktop snapshots through the sync API.
+    # New-entry limits belong to request validation, not lossy storage coercion.
+    # SQLite does not enforce VARCHAR lengths; retain its historical declarations
+    # so ORM metadata matches the migration without rebuilding referenced tables.
+    title: Mapped[str] = mapped_column(Text().with_variant(String(200), "sqlite"), default="未命名")
+    source: Mapped[str] = mapped_column(Text().with_variant(String(120), "sqlite"), default="")
     note: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(16), default="todo")  # todo|doing|done|cancel
     urgent: Mapped[bool | None] = mapped_column(Boolean, default=None)
@@ -182,6 +186,7 @@ class Task(Base):
     tags: Mapped[list] = mapped_column(JSON, default=list)
     created_by: Mapped[str | None] = mapped_column(String(36), default=None)        # Creator user ID.
     created_by_name: Mapped[str] = mapped_column(String(64), default="")            # Creator display-name snapshot.
+    review_recipient_user_id: Mapped[str | None] = mapped_column(String(36), default=None)
     assignee_user_id: Mapped[str | None] = mapped_column(String(36), default=None)  # Assigned or responsible user.
     # Requester identity used to send completion receipts to the person who raised the work.
     # Internal requesters use requester_user_id and receive direct client notifications.
@@ -906,6 +911,7 @@ class User(Base):
     role_id: Mapped[str | None] = mapped_column(String(36), default=None)
     is_super: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_test_account: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     auth_version: Mapped[int] = mapped_column(Integer, default=1)
     # Professional positions are independent of permissions; multiple positions support workflow routing.
     positions: Mapped[list] = mapped_column(JSON, default=list)   # List of Position IDs.

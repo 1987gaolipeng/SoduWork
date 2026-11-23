@@ -15,6 +15,7 @@ from .local_base import (_CTX_WINDOW_DEFAULT, _LOCK, _MEM_LINES, _PROFILES, _RUN
                          _WIN, _ANSI, _opencode_bin, _COMPACT_AT, _STORE, _friendly,
                          ctx_pct)
 from .local_base import _append_events, _append_raw, _record_event, _record_terminal, _save_meta
+from .local_base import _LAUNCH_TREE_UNCONFIRMED, _LAUNCH_TREE_UNCONFIRMED_ERROR
 from . import conversation_plugins, local_turn_outcome, local_context_policy
 
 log = logging.getLogger("uvicorn.error")
@@ -24,6 +25,7 @@ _CODEX_TRANSPORT_NOISE = re.compile(
     re.I)
 
 _STALL_RETRY_LIMIT = max(0, int(os.environ.get("SODUWORK_LOCAL_STALL_RETRIES") or 1))
+_LAUNCH_STOP_TIMEOUT_S = 3.0
 _STALL_RECOVERY_PROMPT = (
     "SoduWork 检测到上一轮长时间没有任何新输出，已经中断那一轮并自动续跑。\n"
     "不要重复已经完成的工作；先检查当前工作区、进程和服务的实际状态，从最后一步继续。"
@@ -42,7 +44,8 @@ def _pid_alive(pid: int) -> bool:
             # Compare the PID column in CSV output, not substrings that may match memory values.
             result = subprocess.run(
                 ["tasklist", "/FI", "PID eq %d" % int(pid), "/NH", "/FO", "CSV"],
-                capture_output=True, timeout=10)
+                capture_output=True, timeout=10,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             if result.returncode != 0:
                 return True  # A failed process query cannot confirm that execution stopped.
             out = result.stdout.decode("utf-8", "replace")
@@ -107,10 +110,17 @@ def _kill_pid_tree(pid: int, proc=None) -> bool:
     return False
 
 
-def _kill_tree(ref: str) -> bool:
+def _kill_tree(ref: str, *, expected_pid=None, expected_proc=None, skip_host_cleanup=False) -> bool:
     with _LOCK:
         run = _RUNS.get(ref) or {}
         proc, pid = run.get("proc"), run.get("pid")
+        if skip_host_cleanup and run.get('_hostCleanup'):
+            return False
+        if ((expected_pid is not None and pid != expected_pid)
+                or (expected_proc is not None and proc is not expected_proc)):
+            return False
+    # Resolve identity once; slow platform termination must not hold the global
+    # session lock or look up a replacement execution by ref after yielding.
     return _kill_pid_tree(pid, proc)
 
 
@@ -128,26 +138,58 @@ def stop_sync(cfg: dict, ref: str) -> dict:
         run = _RUNS.get(ref)
         if not run:
             return {"ok": False, "error": "这个本地会话不在了"}
+        if run.get('failureKind') == _LAUNCH_TREE_UNCONFIRMED:
+            return {"ok": False, "error": _LAUNCH_TREE_UNCONFIRMED_ERROR}
+        from . import local_task_goal
+        goal_controlled = bool(run.get("goalContract")) and run.get("cli") != "pi"
+        if goal_controlled:
+            action = str((cfg or {}).get("taskGoalControl") or "pause")
+            if action not in {"pause", "disable"}:
+                return {"ok": False, "error": "无效的任务控制操作"}
+            local_task_goal.control(run, action)
+            run.pop("goalUserPending", None)
+            _save_meta(ref)
+        goal_receipt = {"taskGoal": local_task_goal.snapshot(run)} if goal_controlled else {}
         from . import access_transition
         if access_transition.cancel(run):
             _save_meta(ref)
-            return {"ok": True, "stopped": True}
+            return {"ok": True, "stopped": True, **goal_receipt}
         if run.get("state") != "running":
+            if goal_controlled:
+                if run.get("state") == "recovering":
+                    run.update(state="stopped", stopping=True)
+                    _save_meta(ref)
+                return {"ok": True, "stopped": True, **goal_receipt}
             return {"ok": False, "error": "它这会儿没在跑"}
         run["stopping"] = True
         run["queue"] = []          # Clear queued follow-ups when stopping so execution does not immediately restart.
+        launch_pending = run.get('_launchPending')
+        owner = run.get('_workerIdentity')
+        pid, proc = int(run.get('pid') or 0), run.get('proc')
     from . import access_broker
     access_broker.close(ref)
+    if launch_pending:
+        # The worker must observe any process returned by an in-flight Popen and
+        # confirm its exit. An accepted cancellation is not a stop receipt.
+        launch_pending['retry'].set()
+        if not launch_pending['done'].wait(_LAUNCH_STOP_TIMEOUT_S):
+            return {"ok": False, "error": launch_pending.get('error') or "启动仍在取消清理中，尚未确认进程退出", **goal_receipt}
+        with _LOCK:
+            current = _RUNS.get(ref)
+            if current is not run or current.get('_workerIdentity') is not owner:
+                return {"ok": False, "error": "会话执行已变更，未停止新的执行", **goal_receipt}
+        return {"ok": bool(launch_pending['stopped']),
+                "stopped": bool(launch_pending['stopped']), **goal_receipt}
     if run.get("contextCompacting"):
-        return {"ok": True, "stopped": True}
-    ok = _kill_tree(ref)
+        return {"ok": True, "stopped": True, **goal_receipt}
+    ok = _kill_tree(ref, expected_pid=pid, expected_proc=proc)
     if not ok:
         with _LOCK:
             r = _RUNS.get(ref)
-            if r:
+            if r is run and r.get('_workerIdentity') is owner:
                 r["stopping"] = False
         return {"ok": False, "error": "没能确认它停下来（进程可能还在收尾，稍后可再点一次）"}
-    return {"ok": True, "stopped": True}
+    return {"ok": True, "stopped": True, **goal_receipt}
 
 
 def forget_sync(cfg: dict, ref: str) -> dict:
@@ -660,9 +702,12 @@ def _llm_gate_check(prof: dict, cfg: dict) -> str:
     import urllib.error
     import urllib.request
     from urllib.parse import urlparse
+    from .runtime_tls import https_handler
     host = urlparse(base).hostname or base
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            https_handler())
         opener.open(urllib.request.Request(
             base.rstrip("/") + "/models", headers={"User-Agent": "SoduWork-Gate/1"}),
             timeout=5).close()
@@ -770,7 +815,7 @@ def _on_line(ref: str, raw: str, term: dict, stream: str = "out",
                 term["isError"] = True
                 term.setdefault("result", txt[:600])
                 nm = str((err or {}).get("name") or "") if isinstance(err, dict) else ""
-                if _OVERFLOW_PAT.search(txt) or "overflow" in nm.lower():
+                if not term.get("nonPiContextBlocked") and (_OVERFLOW_PAT.search(txt) or "overflow" in nm.lower()):
                     term["overflow"] = True
                     with _LOCK:
                         _learn_window(run, txt)
@@ -806,7 +851,8 @@ def _on_line(ref: str, raw: str, term: dict, stream: str = "out",
         # Retain non-JSON CLI diagnostics rather than discarding them.
         # Only suppress explicitly recognized expected noise from activity display.
         # The raw diagnostic record still retains that noise.
-        if _OVERFLOW_PAT.search(ln) and (stream == "err" or re.search(r"error|failed|错误|超限", ln, re.I)):
+        if (not term.get("nonPiContextBlocked") and _OVERFLOW_PAT.search(ln)
+                and (stream == "err" or re.search(r"error|failed|错误|超限", ln, re.I))):
             term["overflow"] = True
             with _LOCK:
                 _learn_window(run, ln)
@@ -818,6 +864,11 @@ def _on_line(ref: str, raw: str, term: dict, stream: str = "out",
     from . import execution_event_policy
     execution_event_policy.tag_source_ids(m, new)
     if not new:
+        from . import local_task_goal
+        with _LOCK:
+            current = _RUNS.get(ref)
+            if current:
+                local_task_goal.observe(current, [], native_event=m)
         return
     at = _now_iso()
     with _LOCK:
@@ -848,6 +899,17 @@ def _on_line(ref: str, raw: str, term: dict, stream: str = "out",
             stamped[-1]["_terminal"] = dict(term)
         run["seq"] = seq
         run["lines"] = (run.get("lines") or []) + stamped
+        from . import local_task_goal
+        local_task_goal.observe(run, stamped, native_event=m)
+        if local_task_goal.active(run) and run["goalState"]["status"] == "reviewing":
+            for row in stamped:
+                if row.get("kind") == "say":
+                    # The machine review receipt is retained in private goal
+                    # state. Show its verified summary at settlement, not nonce
+                    # JSON or provisional model claims in the conversation.
+                    row.update(kind="sys", text="正在核对任务交付与验证结果…")
+                    for field in ("full", "streamId", "delta", "done"):
+                        row.pop(field, None)
         del run["lines"][:-_MEM_LINES]
         due = time.time() - float(run.get("metaAt") or 0) > 3
         if due:
@@ -908,8 +970,76 @@ def _scrub_runtime_config(ref: str) -> None:
             run.pop("_activeModelConfig", None)
 
 
+def _finish_task_goal(ref: str, term: dict) -> bool:
+    """Own one non-Pi automatic boundary, after authoritative host settlement."""
+    from . import local_task_goal
+    with _LOCK:
+        run = _RUNS.get(ref)
+        if (not run or run.get("state") != "running" or not local_task_goal.active(run)
+                or run.get("queue") or run.get("goalUserPending") or run.get("stopping")
+                or run.get("permissionWaiting") or run.get("pendingPermissions")
+                or run.get("permissionDenied") or run.get("executionPolicyViolation")
+                or run.get("_accessTransition") or run.get("_hostCleanup")):
+            return False
+        decision = local_task_goal.assess(run, term)
+        action = decision.get("action")
+        if action == "complete":
+            from .local_ctx import _note
+            _note(ref, str(decision.get("summary") or decision.get("reason") or "目标已通过交付复核"))
+            return False
+        if not action:
+            return False
+        reason = str(decision.get("reason") or "任务尚未完成，已有进度已保留")
+        if action in {"pause", "blocked"}:
+            run.update(state="stopped", error=reason, failureKind="task_goal")
+            _record_terminal(ref, run)
+            _save_meta(ref)
+            _scrub_runtime_config(ref)
+            return True
+        if action != "continue" or not decision.get("prompt"):
+            return False
+        run.update(state="recovering", error="")
+        run["contextRequest"] = decision["prompt"]
+        cfg = dict(run.get("cfg") or {})
+        _save_meta(ref)
+    from .local_ctx import _note, prepare_resume
+    _note(ref, "（SoduWork 任务续跑）" + reason)
+    if authorization_required_sync(ref):
+        with _LOCK:
+            run = _RUNS.get(ref)
+            if run is not None and run.get("state") == "recovering":
+                local_task_goal.control(run, "pause")
+                message = "模型临时授权尚未恢复，目标已暂停；请在当前会话发送“继续”以重新授权，已有进度已保留。"
+                run["goalState"]["reason"] = message
+                run.update(state="stopped", failureKind="model_reauthorization", error=message)
+                _save_meta(ref)
+        _scrub_runtime_config(ref)
+        return True
+    # recovery=True preserves admission identity, denials and context counters.
+    # prepare_resume rechecks a concurrent stop or queued human message.
+    resumed = prepare_resume(ref, decision["prompt"], cfg, recovery=True)
+    if not resumed.get("ok"):
+        with _LOCK:
+            run = _RUNS.get(ref)
+            if run is not None and run.get("state") == "recovering":
+                if run.get("goalUserPending") or run.get("queue"):
+                    run.update(state="done", error="")
+                else:
+                    local_task_goal.control(run, "pause")
+                    run.update(state="stopped", failureKind="task_goal",
+                               error="保留进度后续跑没有启动：" + str(resumed.get("error") or "未知原因"))
+                    run["goalState"]["reason"] = run["error"]
+                _save_meta(ref)
+            elif run is not None and run.get("state") == "failed" and local_task_goal.active(run):
+                local_task_goal.control(run, "pause")
+                run["goalState"]["reason"] = run.get("error") or "任务恢复未能启动，已有进度已保留"
+                _save_meta(ref)
+        _scrub_runtime_config(ref)
+    return True
+
+
 def _finish(ref: str, code: int, term: dict, hard_err: str) -> None:
-    from . import access_transition, local_dialogue_outcome
+    from . import access_transition, local_dialogue_outcome, local_task_goal
     if access_transition.finish(ref, code, hard_err):
         return
     nxt = None
@@ -944,11 +1074,14 @@ def _finish(ref: str, code: int, term: dict, hard_err: str) -> None:
                       and not (timed or stopping or overflow or term.get("outputTruncated")
                                or run.get("permissionDenied") or run.get("executionPolicyViolation")))
         bad = (code != 0 and not pi_settled) or term.get("isError") or hard_err
-    if stopping and not timed:
+        goal_owned = local_task_goal.active(run)
+        goal_configured = local_task_goal.enabled(run)
+    if stopping and not timed and not hard_err:
         with _LOCK:
             violation = dict(run.get("executionPolicyViolation") or {})
             run["state"] = "failed" if violation else "stopped"
-            run["error"] = str(violation.get("reason") or "你把它叫停了")
+            run["error"] = str(violation.get("reason") or
+                (run.get("goalState", {}).get("reason") if goal_owned else "") or "你把它叫停了")
             if violation:
                 run["failureKind"] = "execution_policy"
             run["stopping"] = False
@@ -956,11 +1089,43 @@ def _finish(ref: str, code: int, term: dict, hard_err: str) -> None:
         _scrub_runtime_config(ref)
         return
     # On context exhaustion, try compaction before handoff; neither transition is an execution failure.
-    if overflow and not stopping and not run.get("permissionDenied"):
+    # Recovery can launch a replacement, so require a settled execution host.
+    if (overflow and not hard_err and not stopping and not run.get("permissionDenied")
+            and not (goal_owned and (run.get("goalUserPending") or
+                                    local_task_goal.budget_reason(run)))):
         from .local_ctx import _recover_overflow     # Defer the import because stream and context modules depend on each other.
         if _recover_overflow(ref):
             return
-    if not timed and not stopping and not bad and not run.get("permissionDenied"):
+    # A typed output-limit receipt may have bridge exit 2. Every other nonzero
+    # exit or terminal failure remains authoritative and cannot trigger a goal retry.
+    typed_limit = (term.get("outputTruncated") and code in (0, 2)
+                   and not term.get("isError") and not overflow)
+    if (goal_owned and not timed and not stopping and not hard_err and not bad
+            and (run.get("permissionDenied") or run.get("permissionWaiting") or run.get("pendingPermissions"))):
+        with _LOCK:
+            local_task_goal.control(run, "pause")
+            reason = "当前操作需要用户处理权限或授权，目标已暂停，已有进度已保留。"
+            run["goalState"]["reason"] = reason
+            run.update(state="stopped", error=reason, failureKind="task_goal")
+            _record_terminal(ref, run)
+            _save_meta(ref)
+        _scrub_runtime_config(ref)
+        return
+    if (goal_owned and not timed and not stopping and not hard_err and not overflow
+            and (not bad or typed_limit) and _finish_task_goal(ref, term)):
+        return
+    with _LOCK:
+        # A user stop/disable can arrive while the native host is settling.
+        # Do not overwrite that control with a successful native end_turn.
+        if (goal_configured and not hard_err and not timed and
+                (run.get("stopping") or run.get("state") == "stopped" or
+                 run.get("goalTurnOwned") and run["goalState"]["status"] in {"paused", "disabled"})):
+            run.update(state="stopped", stopping=False,
+                       error=str(run.get("goalState", {}).get("reason") or "你把它叫停了"))
+            _save_meta(ref)
+            _scrub_runtime_config(ref)
+            return
+    if not goal_configured and not timed and not stopping and not bad and not run.get("permissionDenied"):
         from . import local_completion
         completion_recovery = local_turn_outcome.recovery(run, term)
         if not term.get("outputTruncated"):
@@ -971,9 +1136,17 @@ def _finish(ref: str, code: int, term: dict, hard_err: str) -> None:
     if dialogue_failure:
         completion_recovery = {}
     with _LOCK:
-        if timed:
+        if hard_err:
+            run["state"] = "failed"
+            run["error"] = _friendly(hard_err)
+            # Keep authoritative cleanup evidence, clearing unrelated diagnoses.
+            if run.get("failureKind") != "execution_host_cleanup":
+                run.pop("failureKind", None)
+            run.pop("failurePath", None)
+        elif timed:
             retried = int(run.get("stallRetries") or 0)
-            retry_stall = not stopping and not run.get("permissionDenied") and retried < _STALL_RETRY_LIMIT
+            retry_stall = (not stopping and not run.get("permissionDenied") and retried < _STALL_RETRY_LIMIT
+                           and not (goal_configured and not local_task_goal.active(run)))
             run["failureKind"] = "execution_stalled"
             if retry_stall:
                 run["stallRetries"] = retried + 1
@@ -1012,7 +1185,7 @@ def _finish(ref: str, code: int, term: dict, hard_err: str) -> None:
             run["completionRetries"] = int(run.get("completionRetries") or 0) + 1
             run["queue"] = [str(completion_recovery.get("prompt") or "")]
             completion_retried = True
-        elif (run["state"] == "done" and not run.get("queue")
+        elif (not goal_configured and run["state"] == "done" and not run.get("queue")
                 and not local_dialogue_outcome.interactive(run)
                 and not run.get("permissionDenied")
                 and not run.get("autoAnswered") and _ends_with_question(run)
@@ -1026,6 +1199,9 @@ def _finish(ref: str, code: int, term: dict, hard_err: str) -> None:
             # Pollers must not observe "done" between two segments of one node.
             run["state"] = "recovering"
         cfg = run.get("cfg") or {}
+        if goal_owned and run["state"] == "failed" and local_task_goal.active(run):
+            local_task_goal.control(run, "pause")
+            run["goalState"]["reason"] = run.get("error") or "执行未完成，已有进度已保留"
         _record_terminal(ref, run)
         # Commit terminal state before pollers can observe it and restart the Runner.
         # Slow delivery inspection below must not leave a completed turn running on disk.
@@ -1045,6 +1221,9 @@ def _finish(ref: str, code: int, term: dict, hard_err: str) -> None:
                         "执行机在本轮中途重启，模型临时授权未能及时恢复。"
                         "工作区和已经完成的进度均已保留；请在当前会话中发送“继续”，"
                         "SoduWork 会重新授权并从现有进度接上。")
+                    if goal_owned:
+                        local_task_goal.control(pending, "pause")
+                        pending["goalState"]["reason"] = pending["error"]
             _save_meta(ref)
             _scrub_runtime_config(ref)
             return
@@ -1052,7 +1231,11 @@ def _finish(ref: str, code: int, term: dict, hard_err: str) -> None:
         _note(ref, "（SoduWork 自动恢复）本轮长时间没有新输出，已安全收掉并从同一会话继续；"
                    "只自动重试这一次，避免无限循环。")
         _save_meta(ref)
-        resumed = _resume(ref, _STALL_RECOVERY_PROMPT, cfg)
+        if goal_owned:
+            from .local_ctx import prepare_resume
+            resumed = prepare_resume(ref, _STALL_RECOVERY_PROMPT, cfg, recovery=True)
+        else:
+            resumed = _resume(ref, _STALL_RECOVERY_PROMPT, cfg)
         if resumed.get("ok"):
             log.warning("本地会话 %s 静默超时，已自动续跑（第 %s 次）", ref[:8],
                         (_RUNS.get(ref) or {}).get("stallRetries"))
@@ -1063,6 +1246,9 @@ def _finish(ref: str, code: int, term: dict, hard_err: str) -> None:
                 failed["state"] = "failed"
                 failed["failureKind"] = "execution_stalled"
                 failed["error"] = "静默超时后自动续跑没有启动：" + str(resumed.get("error") or "未知原因")
+                if goal_owned:
+                    local_task_goal.control(failed, "pause")
+                    failed["goalState"]["reason"] = failed["error"]
         _save_meta(ref)
         _scrub_runtime_config(ref)
         return

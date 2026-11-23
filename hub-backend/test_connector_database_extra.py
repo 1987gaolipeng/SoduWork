@@ -205,8 +205,10 @@ class DatabaseExtraTests(unittest.TestCase):
         with redis_server(value=b"x" * (extra.MAX_VALUE_BYTES + 1)) as (port, _):
             with self.assertRaisesRegex(ValueError, "1 MiB"):
                 result(spec("redis", REDIS_HOST="127.0.0.1", REDIS_PORT=str(port), REDIS_TLS="false"), "get_value", {"key": "large"})
-        with self.assertRaisesRegex(ValueError, "TLS"):
-            db.config(spec("redis", REDIS_HOST="redis.example.com", REDIS_TLS="false"))
+        _, values = db.config(spec("redis", REDIS_HOST="redis.example.com", REDIS_TLS="false"))
+        with patch("redis.Redis") as constructor:
+            extra._redis_connection(values, 3)
+        self.assertFalse(constructor.call_args.kwargs.get("ssl", False))
         _, values = db.config(spec("redis", REDIS_HOST="redis.example.com"))
         with patch("redis.Redis") as constructor:
             extra._redis_connection(values, 3)
@@ -272,7 +274,13 @@ class DatabaseExtraTests(unittest.TestCase):
                 result(spec("elasticsearch", ES_URL=url), "get_document", {"index": "events", "id": "missing"})
 
     def test_configuration_rejects_unsafe_endpoints_and_mixed_auth(self):
-        for url in ("http://remote.example.com", "https://user:pass@example.com", "https://example.com/path", "https://example.com?token=x"):
+        for kind, field in (("clickhouse", "CH_URL"), ("elasticsearch", "ES_URL")):
+            env = {field: "http://remote.example.com"}
+            if kind == "clickhouse":
+                env["CH_DATABASE"] = "fixture"
+            _, values = db.config(spec(kind, **env))
+            self.assertEqual(extra._url(values[field]).scheme, "http")
+        for url in ("ftp://remote.example.com", "https://user:pass@example.com", "http://example.com/path", "https://example.com?token=x"):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 db.config(spec("elasticsearch", ES_URL=url))
         with self.assertRaises(ValueError):

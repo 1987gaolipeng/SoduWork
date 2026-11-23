@@ -3,6 +3,7 @@
 // Only device credentials: no renderer access and no additional persistent key store.
 function create({ safeStorage, app, platform = process.platform }) {
   const cache = new Map();
+  const failedRows = new Map();
   let blocked = false;
   const message = platform === 'linux'
     ? '无法访问 Linux 系统密钥环。请在当前桌面会话中解锁密码管理器，然后完全退出并重新打开 SoduWork；原设备凭据已保留，请勿删除或重置密钥环'
@@ -13,6 +14,7 @@ function create({ safeStorage, app, platform = process.platform }) {
   function block() {
     blocked = true;
     cache.clear();
+    failedRows.clear();
     return accessError();
   }
   function available() {
@@ -32,10 +34,21 @@ function create({ safeStorage, app, platform = process.platform }) {
     if (!ready && platform === 'darwin') block();
     return ready;
   }
+  function rowFailure(file, row) {
+    // A bad ciphertext does not imply that the native Keychain is unavailable.
+    // Keep rejecting this identity without blocking other explicitly selected Hubs.
+    if (!available()) return accessError();
+    let failures = failedRows.get(file);
+    if (!failures) failedRows.set(file, failures = new Map());
+    failures.set(row?.hub, { clientId: row?.clientId, cipher: row?.cipher });
+    return accessError();
+  }
   function decrypt(file, row) {
     if (blocked) throw accessError();
+    const failed = failedRows.get(file)?.get(row?.hub);
+    if (failed && failed.clientId === row?.clientId && failed.cipher === row?.cipher) throw accessError();
     if (!row?.cipher) {
-      if (platform === 'darwin') throw block();
+      if (platform === 'darwin') throw rowFailure(file, row);
       if (platform === 'linux') throw accessError();
       return '';
     }
@@ -60,11 +73,12 @@ function create({ safeStorage, app, platform = process.platform }) {
       const secret = safeStorage.decryptString(Buffer.from(row.cipher, 'base64'));
       if (!secret) throw new Error('Empty device credential');
       cache.set(file, { hub: row.hub, clientId: row.clientId, cipher: row.cipher, secret });
+      failedRows.get(file)?.delete(row.hub);
       return secret;
     } catch (_) {
       // Electron's synchronous error does not distinguish denied/locked Keychain
       // from damaged ciphertext. Never infer permission to replace an identity.
-      if (platform === 'darwin') throw block();
+      if (platform === 'darwin') throw rowFailure(file, row);
       if (platform === 'linux') throw accessError();
       return '';
     }

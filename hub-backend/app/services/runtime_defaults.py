@@ -9,7 +9,7 @@ model service makes every non-Pi runtime fail before it can accept a job.
 from __future__ import annotations
 
 
-# Leave enough room for reasoning-capable coding models to reach a tool call or
-# final answer.  An administrator supplied maxOutputTokens remains authoritative.
-DEFAULT_OUTPUT = 65536
+# A fallback, not a discovered provider limit. Configure a larger budget explicitly
+# for reasoning models when supported by the service. Keep the desktop default in sync.
+DEFAULT_OUTPUT = 16384
 

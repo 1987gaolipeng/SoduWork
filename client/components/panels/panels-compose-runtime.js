@@ -18,8 +18,6 @@
       modelMode: 'managed', goalMode: 'native', group: 'more', order: 60 },
     { id: 'dsh', displayName: 'DeepSeek Harness', summary: '通过 ACP 接入的 DeepSeek 执行底座',
       modelMode: 'managed', goalMode: 'native', group: 'more', order: 70 },
-    { id: 'harness2', displayName: 'Google Harness²', summary: 'Harness² 文本推演后独立执行工具，增加耗时与模型用量',
-      modelMode: 'managed', goalMode: 'native', group: 'more', order: 80 },
   ]);
   // Until the main process returns a health-checked projection, Pi is the only
   // safe local choice. Rendering the full declaration catalog here would let a
@@ -57,6 +55,7 @@
     const owner = ownerScope();
     if (owner === activeOwner) return false;
     activeOwner = owner; probeGeneration++; selectionGeneration++;
+    current = 'pi'; selectedByLocation.local = 'pi'; selectedByLocation.cloud = 'pi';
     catalogGeneration++; catalogLoaded = false; loadPromise = null;
     for (const key of Object.keys(probes)) delete probes[key];
     pendingProbes.clear(); accessProbePromise = null; cloudSelectionPromise = null;
@@ -302,12 +301,16 @@
   async function loadCatalog(options, force = false) {
     syncOwner();
     if (loadPromise) return loadPromise;
-    if (force) { catalogGeneration++; catalogLoaded = false; }
+    if (force) catalogLoaded = false;
     if (catalogLoaded) return catalog;
     const api = options.api();
     if (!api || typeof api.runtimes !== 'function') return catalog;
-    const generation = catalogGeneration;
-    const job = Promise.resolve().then(() => bounded(api.runtimes(force ? { force: true } : undefined))).then((reply) => {
+    const generation = ++catalogGeneration;
+    const observedProbes = new Map(Object.entries(probes));
+    // The UI deadline releases waiting controls, but the main process may
+    // still return healthy runtimes after one adapter reaches its own timeout.
+    // Apply that reply unless a newer read or account has superseded it.
+    const request = Promise.resolve().then(() => api.runtimes(force ? { force: true } : undefined)).then((reply) => {
       syncOwner();
       if (generation !== catalogGeneration) return catalog;
       const declared = normalize(reply && reply.runtimes);
@@ -333,7 +336,11 @@
         : declared.filter((row) => row.id !== 'pi');
       catalog = loaded; missingCatalog = normalize(declaredMissing.filter((row) => row.id !== 'pi')); catalogLoaded = true;
       if (location === 'local') for (const row of loaded) {
-        if (row.availability) probes[probeKey(row.id)] = row.availability;
+        const key = probeKey(row.id);
+        // A late inventory must not undo a newer individual health/policy check.
+        if (row.availability && probes[key] === observedProbes.get(key) && !pendingProbes.has(key)) {
+          probes[key] = row.availability;
+        }
       }
       const preferred = selectedByLocation[location];
       const fallback = catalog.find((row) => row.id === 'pi') || catalog[0];
@@ -342,8 +349,10 @@
       }
       renderRows(options.root);
       paint(options.root);
+      options.refresh();
       return catalog;
-    }).catch(() => {
+    });
+    const job = bounded(request).catch(() => {
       if (generation === catalogGeneration) {
         catalog = FALLBACK.filter((row) => row.id === 'pi');
         missingCatalog = fallbackMissing();
@@ -381,7 +390,7 @@
     const valid = () => generation === probeGeneration && owner === ownerScope();
     const task = probeOnce(adapterId, options, announce, key, valid).finally(() => {
       if (pendingProbes.get(key) === task) pendingProbes.delete(key);
-      if (valid()) options.refresh();
+      if (valid()) { options.refresh(); global.FirstChatReadiness?.checked(); }
     });
     pendingProbes.set(key, task);
     options.refresh();
@@ -444,6 +453,7 @@
         const nodes = (reply?.diagnostics?.nodes || []).filter(node => node.code !== 'current_device');
         const detail = nodes.length && nodes.every(node => node.code === nodes[0].code) ? nodes[0].message : '';
         const result = { ok: reply?.ok !== false && Array.isArray(reply?.targets) && reply.targets.length > 0,
+          unverified: reply?.ok === false || !Array.isArray(reply?.targets),
           reason: reply?.reason || detail || reply?.diagnostics?.summary || '没有可用的云端执行机，请配置云端环境' };
         probes[key] = result;
         if (!result.ok && announce) options.say(result.reason);
@@ -452,19 +462,19 @@
         if (!valid()) return false;
         const reason = /No handler registered for ['"]conversation-cloud-targets['"]/i.test(String(error.message || ''))
           ? '云端会话功能尚未加载，请完全退出并重启客户端后重试' : error.message;
-        probes[key] = { ok: false, reason };
+        probes[key] = { ok: false, reason, unverified: true };
         if (announce) options.say(reason);
         return false;
       }
     }
     if (!api || typeof api.probe !== 'function') {
-      probes[key] = { ok: adapterId === 'pi' };
+      probes[key] = { ok: adapterId === 'pi', unverified: true };
       return adapterId === 'pi';
     }
     try {
       const result = await bounded(api.probe(adapterId));
       if (!valid()) return false;
-      probes[key] = result || { ok: false };
+      probes[key] = result || { ok: false, unverified: true };
       paint(options.root);
       if (!result || !result.ok) {
         demoteUnavailableLocal(adapterId, result, options.root);
@@ -475,7 +485,7 @@
       return true;
     } catch (error) {
       if (!valid()) return false;
-      probes[key] = { ok: false, reason: String(error && error.message || error) };
+      probes[key] = { ok: false, reason: String(error && error.message || error), unverified: true };
       paint(options.root);
       if (announce) options.say('执行底座检测没有成功');
       return false;
@@ -515,6 +525,7 @@
       const row = event.target.closest('[data-runtime]');
       if (!row || row.classList.contains('checking')) return;
       const adapterId = row.dataset.runtime || 'pi';
+      global.ComposeDirectoryPreferences?.selectionStarted?.();
       syncOwner();
       const selection = ++selectionGeneration;
       row.classList.add('checking');
@@ -526,6 +537,7 @@
       paint(root);
       if (!available || selection !== selectionGeneration) return;
       selectCurrent(adapterId);
+      global.ComposeDirectoryPreferences?.selectionCommitted?.();
       changed();
       opts.refresh();
       paint(root);
@@ -548,6 +560,28 @@
     // restart; treating every local adapter as ready would open a chat that
     // cannot execute and leave the user with a dead first turn.
     return Boolean(probes[key]?.ok);
+  }
+
+  async function restoreSelection(adapterId, isCurrent = () => true) {
+    if (!boundOptions) return false;
+    const owner = ownerScope(), selectedLocation = location, selection = ++selectionGeneration;
+    const valid = () => isCurrent() && owner === ownerScope() && selectedLocation === location && selection === selectionGeneration;
+    await loadCatalog(boundOptions);
+    if (!valid() || !catalog.some(row => row.id === adapterId)) return false;
+    const available = await probe(adapterId, boundOptions, false);
+    if (!valid() || !available) return false;
+    selectCurrent(adapterId); changed();
+    boundOptions.refresh(); paint(boundOptions.root);
+    return true;
+  }
+
+  function resetNewDraft() {
+    const selection = ++selectionGeneration;
+    locationGeneration++; cloudSelectionPromise = null;
+    selectedByLocation[location] = 'pi'; selectCurrent('pi'); changed();
+    if (!boundOptions) return Promise.resolve(false);
+    boundOptions.refresh();
+    return loadCatalog(boundOptions).then(() => selection === selectionGeneration ? refreshAccess() : false);
   }
 
   function accessState() {
@@ -580,7 +614,7 @@
   }
 
   global.ComposeRuntime = {
-    bind, controls, paint, accessSupported, accessState, refreshAccess, goalSupported, ready, value: () => current,
+    bind, controls, paint, accessSupported, accessState, refreshAccess, goalSupported, ready, restoreSelection, resetNewDraft, value: () => current,
     brandIcon,
     location: () => location,
     availability: () => ({ checking: pendingProbes.has(probeKey(current)), ...(probes[probeKey(current)] || {}) }),
@@ -596,6 +630,7 @@
         void refreshAccess();
         boundOptions.refresh();
       }
+      void global.ComposeDirectoryPreferences?.sync?.();
     },
     catalog: () => catalog.map((row) => ({ ...row })),
   };

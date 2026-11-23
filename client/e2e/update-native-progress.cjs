@@ -1,6 +1,6 @@
 'use strict';
 
-// Real NSIS observer window, with only a disposable directory and a held lock.
+// Real NSIS observer and display-context writer, in disposable locked directories.
 // Does not run an installer, touch registry, or interact with a SoduWork process.
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
@@ -25,19 +25,39 @@ async function main() {
       env: { ...process.env, ...compiler.env }, timeout: 30000 });
     assert.equal(compile.status, 0, compile.stdout + compile.stderr);
     report.compiled = true;
+    const contextWriter = path.join(root, 'context-writer.exe');
+    if (!baseline) {
+      const writerSource = path.join(root, 'context-writer.nsi');
+      await fs.writeFile(writerSource, [
+        'Unicode true', 'Name "Isolated installation context writer"',
+        'RequestExecutionLevel user', 'SilentInstall silent',
+        `OutFile "${contextWriter}"`, '!include "LogicLib.nsh"',
+        '!define APP_EXECUTABLE_FILENAME "SoduWork.exe"', '!define VERSION "1.0.1"',
+        '!define SODUWORK_INSTALL_CONTEXT_WRITER',
+        `!include "${path.join(client, 'build/install-context.nsh')}"`,
+        'Section', 'ReadEnvStr $installContextRoot "SODUWORK_CONTEXT_FIXTURE_ROOT"',
+        '${If} $installContextRoot == ""', 'SetErrorLevel 2', 'Quit', '${EndIf}',
+        'Call WriteInstallContext', 'SetErrorLevel 0', 'SectionEnd', '',
+      ].join('\n'));
+      const writer = spawnSync(compiler.path, ['/V2', '/INPUTCHARSET', 'UTF8', writerSource],
+        { encoding: 'utf8', windowsHide: true, env: { ...process.env, ...compiler.env }, timeout: 30000 });
+      assert.equal(writer.status, 0, writer.stdout + writer.stderr);
+      report.contextWriterCompiled = true;
+    }
     const stub = path.join(root, 'payload.nsi');
     await fs.mkdir(path.join(root, '.soduwork-versions/test'), { recursive: true });
     await fs.writeFile(stub, `Unicode true\nName "Isolated payload"\nRequestExecutionLevel user\nSilentInstall silent\nOutFile "${path.join(root, '.soduwork-versions/test/SoduWork.exe')}"\nSection\nFileOpen $0 "$EXEDIR\\opened" w\nFileWrite $0 "opened"\nFileClose $0\nSectionEnd\n`);
     const payload = spawnSync(compiler.path, ['/V2', stub], { encoding: 'utf8', windowsHide: true, env: { ...process.env, ...compiler.env } });
     assert.equal(payload.status, 0, payload.stdout + payload.stderr);
     await fs.writeFile(path.join(root, '.soduwork-active'), 'test');
-    await fs.writeFile(path.join(root, '.soduwork-versions/test/.soduwork-release'), 'fixture');
+    await fs.writeFile(path.join(root, '.soduwork-versions/test/.soduwork-release'), '1.0.0');
     const script = path.join(root, 'native.ps1');
     // Windows PowerShell 5 requires a BOM to interpret Chinese UTF-8 literals.
     await fs.writeFile(script, '\uFEFF' + await fs.readFile(path.join(__dirname, 'update-native-progress.ps1'), 'utf8'));
     const runUi = (extraArgs = [], outputSuffix = '') => spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass',
-      '-File', script, '-FixtureRoot', root, '-Observer', executable, '-Screenshot', output + outputSuffix + '.png', ...(baseline ? ['-Baseline'] : []), ...extraArgs],
-    { encoding: 'utf8', windowsHide: true, timeout: 60000 });
+      '-File', script, '-FixtureRoot', root, '-Observer', executable, '-Screenshot', output + outputSuffix + '.png',
+      ...(baseline ? ['-Baseline'] : ['-ContextWriter', contextWriter]), ...extraArgs],
+    { encoding: 'utf8', windowsHide: true, timeout: 120000 });
     const result = runUi();
     report.exitCode = result.status;
     report.stdout = result.stdout;

@@ -47,7 +47,7 @@ async function mountEditor(t, { user = null, component = 'UserEditor', extraProp
     exportName: component, privateExports: ['UserEditor', 'DomainManager'], props,
     dependencies: {
       '../api.js': { api }, '../FilterControls.jsx': {}, '../viewport-height.js': {},
-      '../ui.jsx': { Modal: 'Modal', Confirm: 'Confirm', SelectMenu: 'SelectMenu', toast: inert },
+      '../ui.jsx': { Modal: 'Modal', Confirm: 'Confirm', SelectMenu: 'SelectMenu', Icon: 'Icon', toast: inert },
       './admin-access-pages.css': {},
     },
   })
@@ -68,6 +68,10 @@ test('login labels identify stable, unique account and password fields in render
     await page.flush()
     const account = labelledControl(page, tx('账号'))
     const password = labelledControl(page, tx('密码'))
+    assert.equal(account.props.name, 'username')
+    assert.equal(account.props.autoComplete, 'username')
+    assert.equal(password.props.name, 'password')
+    assert.equal(password.props.autoComplete, 'current-password')
     ids.push(account.props.id, password.props.id)
     const accountInput = { value: 'admin' }
     page.act(() => account.props.onChange({ target: accountInput, currentTarget: accountInput }))
@@ -77,6 +81,47 @@ test('login labels identify stable, unique account and password fields in render
     assert.ok(html.includes(`id="${password.props.id}"`))
   }
   assert.equal(new Set(ids).size, ids.length, 'multiple instances must not share field IDs')
+})
+
+test('managed user credentials identify new passwords rather than a saved login', async (t) => {
+  for (const user of [null, { id: 'u1', username: 'alice', displayName: 'Alice', orgId: 'engineering', roleId: 'member', isActive: true }]) {
+    await t.test(user ? 'edit user' : 'new user', async (caseTest) => {
+      const { page } = await mountEditor(caseTest, { user })
+      const account = labelledControl(page, tx('账号'))
+      const name = labelledControl(page, tx('姓名'))
+      const password = labelledControl(page, tx(user ? '重置密码（留空不改）' : '初始密码'))
+      assert.equal(account.props.value, user?.username || '')
+      assert.equal(password.props.value, '')
+      assert.equal(password.props.type, 'password')
+      assert.match(renderToStaticMarkup(password), /autocomplete="new-password"/i)
+      for (const input of [account, name]) {
+        assert.match(renderToStaticMarkup(input), /autocomplete="off"/i)
+      }
+      const names = [account, name, password].map((input) => input.props.name)
+      assert.ok(names.every((value) => typeof value === 'string' && value.trim()))
+      assert.equal(new Set(names).size, names.length)
+      assert.ok(names.every((value) => !['username', 'password'].includes(value)), 'managed fields have names separate from the login form')
+    })
+  }
+})
+
+test('opening a new user editor after canceling starts with empty credentials', async (t) => {
+  let closed = 0
+  await t.test('cancel the populated editor', async (caseTest) => {
+    const { page, calls } = await mountEditor(caseTest, { extraProps: { onClose: () => closed++ } })
+    for (const [label, value] of [['账号', 'draft-user'], ['姓名', 'Draft user'], ['初始密码', 'fixture-password']]) {
+      page.act(() => labelledControl(page, tx(label)).props.onChange({ target: { value } }))
+    }
+    const cancel = React.Children.toArray(page.render().props.foot.props.children).find((node) => textOf(node) === tx('取消'))
+    cancel.props.onClick()
+    assert.equal(closed, 1)
+    assert.deepEqual(calls, [], 'cancel does not create or update an account')
+  })
+  // The parent closes the dialog by unmounting it; reopen as a fresh instance.
+  const { page } = await mountEditor(t)
+  for (const label of ['账号', '姓名', '初始密码']) {
+    assert.equal(labelledControl(page, tx(label)).props.value, '')
+  }
 })
 
 test('new and existing user fields retain visible label associations through input and locale changes', async (t) => {
@@ -120,7 +165,7 @@ test('user choice groups expose keyboard buttons and persist the selected values
   assert.deepEqual(calls, [['update', 'u1', { displayName: 'Alice', orgId: 'engineering', roleId: 'member', isActive: false, positions: ['engineer'], domains: ['payments'] }]])
 })
 
-test('editing a user profile cannot overwrite an existing personal allowance', async (t) => {
+test('editing a user preserves the allowance and only submits a nonempty reset password', async (t) => {
   const user = { id: 'u1', username: 'alice', displayName: 'Alice', orgId: 'engineering',
     roleId: 'member', isActive: true, tokenQuota: { mode: 'limited', limit: 12345 } }
   const { page, calls } = await mountEditor(t, { user })
@@ -129,8 +174,17 @@ test('editing a user profile cannot overwrite an existing personal allowance', a
   page.act(() => labelledControl(page, tx('姓名')).props.onChange({ target: { value: 'New name' } }))
   await save(); page.render()
   assert.equal(calls[0][2].displayName, 'New name')
+  assert.equal('password' in calls[0][2], false)
   assert.equal('tokenQuota' in calls[0][2], false)
   assert.deepEqual(user.tokenQuota, { mode: 'limited', limit: 12345 })
+  const password = () => labelledControl(page, tx('重置密码（留空不改）'))
+  page.act(() => password().props.onChange({ target: { value: 'fixture-new-password' } }))
+  await save(); page.render()
+  assert.equal(calls[1][2].password, 'fixture-new-password')
+  assert.equal('tokenQuota' in calls[1][2], false)
+  page.act(() => password().props.onChange({ target: { value: '' } }))
+  await save(); page.render()
+  assert.equal('password' in calls[2][2], false, 'clearing the reset field retains the current password')
 })
 
 test('user creation leaves trial and quota assignment to the dedicated allowance policy', async (t) => {
@@ -142,6 +196,7 @@ test('user creation leaves trial and quota assignment to the dedicated allowance
   await save(); page.render()
   assert.equal(calls[0][0], 'create')
   assert.equal(calls[0][1].username, 'alice')
+  assert.equal(calls[0][1].password, 'fixture-password')
   assert.equal('tokenQuota' in calls[0][1], false)
 })
 

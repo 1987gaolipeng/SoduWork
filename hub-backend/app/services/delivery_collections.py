@@ -67,9 +67,11 @@ def validation_limits():
 def safe_path(value):
     if not isinstance(value, str) or not value or len(value) > 500:
         raise HTTPException(400, "成果文件路径无效")
-    name = unicodedata.normalize("NFC", value)
+    # Keep the original spelling so archive names and embedded links agree.
+    # Canonically equivalent spellings remain collisions at validation below.
+    name = value
     parts = name.split("/")
-    if (name != value or any(not part or part in {".", ".."} or part != part.strip()
+    if (any(not part or part in {".", ".."} or part != part.strip()
             or part.endswith(".") or len(part) > 200 for part in parts)
             or re.search(r'[\\:*?"<>|\x00-\x1f\x7f]', name)
             or any(re.fullmatch(r"(?i)(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", part)
@@ -132,9 +134,9 @@ def clean_manifest(raw, *, limits=None):
         if not isinstance(row, dict) or set(row) - {"path", "size", "sha256", "contentType", "role"}:
             raise HTTPException(400, "成果文件清单不正确")
         name = safe_path(row.get("path"))
-        if name.casefold() in names:
+        if unicodedata.normalize("NFC", name).casefold() in names:
             raise HTTPException(400, "成果清单含重复或仅大小写不同的路径")
-        names.add(name.casefold())
+        names.add(unicodedata.normalize("NFC", name).casefold())
         size = row.get("size")
         if type(size) is not int or size < 0 or size > limits.file_bytes:
             raise HTTPException(413, "成果文件超过大小限制")
@@ -197,9 +199,9 @@ def validate_payload(manifest, data, *, limits=None):
                 if info.orig_filename != info.filename:
                     raise HTTPException(400, "成果包包含被截断的文件路径")
                 name = safe_path(info.filename[:-1] if info.is_dir() else info.filename)
-                if name.casefold() in names:
+                if unicodedata.normalize("NFC", name).casefold() in names:
                     raise HTTPException(400, "成果包包含重名路径")
-                names.add(name.casefold())
+                names.add(unicodedata.normalize("NFC", name).casefold())
                 mode = (info.external_attr >> 16) & 0o170000
                 if (mode not in (0, stat.S_IFREG, stat.S_IFDIR)
                         or stat.S_ISLNK(info.external_attr >> 16) or info.flag_bits & 1):

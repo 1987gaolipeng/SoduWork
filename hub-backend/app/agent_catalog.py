@@ -80,16 +80,10 @@ def validate_catalog(data: dict) -> dict[str, dict]:
             ):
                 raise ValueError(f'{key}: modelEnv may only map environment names to base/key/model')
         install = row.get('install')
-        if not isinstance(install, dict) or install.get('installer') not in {'npm', 'managed', 'manual', 'bundled', 'native'}:
+        if not isinstance(install, dict) or install.get('installer') not in {'npm', 'managed', 'manual'}:
             raise ValueError(f'{key}: unsupported installer')
-        if install['installer'] == 'bundled' and key != 'harness2':
-            raise ValueError(f'{key}: no reviewed bundled installer is registered')
         if install['installer'] == 'managed' and key != 'opencode':
             raise ValueError(f'{key}: no reviewed managed installer is registered')
-        if install['installer'] == 'native' and key != 'claude':
-            raise ValueError(f'{key}: no reviewed native installer is registered')
-        if install['installer'] == 'native' and not str(install.get('source') or '').startswith('https://'):
-            raise ValueError(f'{key}: native installer source must be HTTPS')
         if install['installer'] == 'npm' and not re.fullmatch(r'(?:@[a-z0-9._-]+/)?[a-z0-9._-]+', str(install.get('pkg') or '')):
             raise ValueError(f'{key}: invalid npm package name')
         if 'version' in install and (not isinstance(install['version'], str) or

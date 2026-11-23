@@ -182,10 +182,12 @@ def augment(m, run, rows):
 
 
 def cancel_fields(item):
-    # This reason is emitted only for an unexecuted approval withdrawn by the
-    # trusted host. Never neutralize a true failure with contradictory metadata.
-    if item.get("state") == "cancelled" and item.get("cancelReason") == "access-change" and item.get("isError") is False:
-        return {"state": "cancelled", "cancelReason": "access-change"}
+    # The trusted host identifies an unexecuted approval or truncated preview.
+    # Never neutralize a true failure with contradictory metadata.
+    reason = item.get("cancelReason")
+    if (item.get("state") == "cancelled" and reason in ("access-change", "output-limit")
+            and item.get("isError") is False):
+        return {"state": "cancelled", "cancelReason": reason}
     return {}
 
 

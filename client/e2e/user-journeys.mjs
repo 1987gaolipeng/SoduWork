@@ -30,6 +30,11 @@ let requirementTaskId = '';
 let addTarget = null;
 let detailTarget = null;
 let journeyStep = '';
+// Reopening verifies a previously started task. The assignment picker uses the
+// confirmed conversation requirement. Include those setup journeys in focused runs.
+const selected = options.only ? new Set(options.only.split(',')) : null;
+if (selected?.has('UJ-09') || selected?.has('DATA')) selected.add('UJ-04');
+if (selected?.has('UJ-05')) selected.add('UJ-03');
 
 function assert(condition, message, evidence) {
   if (condition) return;
@@ -38,7 +43,7 @@ function assert(condition, message, evidence) {
 }
 
 async function journey(id, name, action) {
-  if (options.only && !options.only.split(',').includes(id)) return;
+  if (selected && !selected.has(id)) return;
   journeyStep = id;
   const begin = Date.now();
   if (main) main.takeRuntimeErrors();
@@ -47,9 +52,11 @@ async function journey(id, name, action) {
     const runtimeErrors = main ? main.takeRuntimeErrors() : [];
     assert(runtimeErrors.length === 0, '页面产生运行异常', runtimeErrors);
     passed += 1;
+    process.send?.({ id, name, ok: true, durationMs: Date.now() - begin });
     console.log('  PASS  ' + id + ' ' + name + ' (' + (Date.now() - begin) + 'ms)');
   } catch (error) {
     failed += 1;
+    process.send?.({ id, name, ok: false, durationMs: Date.now() - begin, error: String(error?.message || error) });
     console.error('  FAIL  ' + id + ' ' + name + ' (' + (Date.now() - begin) + 'ms)');
     console.error('        ' + String(error && error.message || error) + (journeyStep ? '；阶段：' + journeyStep : ''));
   }
@@ -74,7 +81,7 @@ async function navigate(view, timeoutMs = 3000) {
       return true;
     });
     if (returned) {
-      await main.waitFor(() => document.querySelector('.ws-nav-item[data-view="aidesk"], .ws-nav-item[data-view="create"]'), null, timeoutMs);
+      await main.waitFor(() => document.querySelector('.ws-nav-item[data-view="history"]'), null, timeoutMs);
       clicked = await main.run((key) => {
         const button = document.querySelector('.ws-nav-item[data-view="' + key + '"]');
         if (!button) return false;
@@ -100,7 +107,6 @@ async function openRequirementJourney(id, title) {
     const scope = document.querySelector('[data-rq-scope="all"]');
     if (scope?.getClientRects().length) scope.click();
     else { const select = document.querySelector('#rqScope'); select.value = 'all'; select.dispatchEvent(new Event('change', { bubbles: true })); }
-    const kind = document.querySelector('#rqKind'); kind.value = ''; kind.dispatchEvent(new Event('change', { bubbles: true }));
     const input = document.querySelector('#hbSearch'); input.value = query; input.dispatchEvent(new Event('input', { bubbles: true }));
   }, title);
   await main.waitFor((wanted) => {
@@ -113,18 +119,15 @@ async function openRequirementJourney(id, title) {
   }, id, 5000);
   await main.run((wanted) => document.querySelector(
     '.rq-card[data-hbid="' + wanted + '"] [data-rq-open]').click(), id);
-  const summary = await main.waitFor(() => {
-    const root = document.querySelector('.rq-detail');
-    const title = root?.querySelector('[name="title"]')?.value ||
-      root?.querySelector('h3[data-user-content]')?.textContent.trim();
-    if (!title) return false;
-    const action = root.querySelector('[data-rq-journey]');
-    return { title, canOpen: !!action && !action.disabled && !!action.getClientRects().length };
-  }, null, 6000);
-  assert(summary.title === title, '需求详情没有打开所选的工作记录', summary);
-  assert(summary.canOpen, '当前账号没有可用的执行详情入口', summary);
-  await main.run(() => document.querySelector('.rq-detail [data-rq-journey]').click());
-  await main.waitFor(() => !document.querySelector('.rq-detail-backdrop'), null, 3000);
+  await main.waitFor(({id,title}) => {
+    const content = document.querySelector('.rq-detail-content');
+    return content?.dataset.taskId === id && content.querySelector('.rq-detail-title')?.textContent === title;
+  }, { id, title }, 6000);
+}
+
+async function openAssignment() {
+  await main.run(() => document.querySelector('.rq-detail [data-rq-assign]').click());
+  await main.waitFor(() => document.querySelector('#fwdAgentSelect') && !_fwdLoading.ai && !_fwdLocalLoading, null, 15000);
 }
 
 async function closeTarget(target) {
@@ -239,6 +242,20 @@ async function cleanupNamedTask(id, title) {
 }
 
 async function cleanupTask() {
+  if (taskId) {
+    // A started requirement must complete acceptance before it can be removed.
+    await main.waitFor(async id => {
+      const task = await SoduWorkAPI.getTask(id);
+      return task.status === 'todo' || task.requirementStage === 'reviewing' || task.canSubmitReview || task.reviewedAt;
+    }, taskId, 25000);
+    await main.run(async id => {
+      const task = await SoduWorkAPI.getTask(id);
+      if (task.status === 'todo' || task.reviewedAt) return;
+      if (task.requirementStage !== 'reviewing') await SoduWorkAPI.submitTaskReview(id, 'E2E 完成验收准备');
+      await SoduWorkAPI.reviewTask(id, 'E2E 确认完成');
+      await Store.hydrate(true);
+    }, taskId);
+  }
   await cleanupNamedTask(taskId, taskTitle);
   taskId = '';
 }
@@ -300,12 +317,13 @@ async function run() {
         errorVisible: visible(errorBox) && !!errorBox.textContent.trim(),
       };
     });
-    const expected = ['新对话', '自动化', '插件', '资料库', '通知', '需求池', 'AI 团队'];
+    const expected = ['新对话', '自动化', '插件', '资料库', '通知', '需求池'];
     assert(state.title.startsWith('SoduWork'), '窗口品牌不正确', state);
     assert(state.blankHidden && state.shellVisible, '主界面仍停在加载底板', state);
     assert(state.hub.includes('已连接'), '用户看不到明确的服务连接状态', state);
     assert(JSON.stringify(state.nav.slice(0, expected.length)) === JSON.stringify(expected),
       '常用菜单顺序或命名不符合产品约定', state.nav);
+    assert(!state.nav.includes('AI 团队'), 'AI team must remain hidden from navigation', state.nav);
     assert(!state.horizontalOverflow, '主窗口出现了横向溢出', state);
     assert(!state.errorVisible, '客户端错误框可见', state);
   });
@@ -335,18 +353,23 @@ async function run() {
 
   await journey('UJ-03', '会话可以按需沉淀为一条任务', async () => {
     const before = await main.run(async () => (await SoduWorkAPI.getTasks()).length);
-    await navigate('create');
+    await navigate('history');
+    await main.run(() => {
+      document.querySelector('#hbAddMenuToggle').click();
+      document.querySelector('[data-rq-create-chat="intake"]').click();
+    });
+    await main.waitFor(() => document.querySelector('#cpInput')?.checkVisibility());
     const sent = await main.run((description) => {
       const input = document.querySelector('#cpInput');
       const send = document.querySelector('#cpGo');
       if (!input || !send) return false;
-      input.value = '/任务 ' + description;
+      input.value = '/需求 ' + description;
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
       send.click();
       return true;
     }, '整理本周客户反馈，形成一项可以跟踪、可以验收的改进任务。');
-    assert(sent, '新建入口无法发送 /任务 工作动作');
+    assert(sent, '新建入口无法发送 /需求 工作动作');
 
     const proposal = await main.waitFor(() => {
       const layer = document.querySelector('#workEntryLayer.show');
@@ -365,9 +388,9 @@ async function run() {
       };
     }, null, 70000, 200);
     assert(proposal.inline, '任务表单没有作为插件 UI 出现在对话区域', proposal);
-    assert(proposal.heading === '创建任务' && proposal.editable,
+    assert(proposal.heading === '新建需求' && proposal.editable,
       '会话沉淀任务没有进入可编辑确认态', proposal);
-    assert(proposal.prompt.includes('/任务'), '用户原始输入没有留在任务表单上方', proposal);
+    assert(proposal.prompt.includes('/需求'), '用户原始输入没有留在任务表单上方', proposal);
 
     const filled = await main.run((payload) => {
       const host = document.querySelector('#wesTaskDraft');
@@ -410,7 +433,7 @@ async function run() {
       '会话任务确认表单无法完整编辑', filled);
     assert(filled.checks.includes('至少归纳三类客户问题') &&
       filled.checks.includes('形成可复核的处理结论'), '验收标准没有进入任务确认表单', filled);
-    assert(filled.who.includes('我自己'), '验收任务没有明确留给当前用户', filled);
+    assert(filled.who.includes('自己'), '验收任务没有明确留给当前用户', filled);
 
     await main.run(() => {
       const button = document.querySelector('#wesTaskDraft #cpCreate');
@@ -420,11 +443,12 @@ async function run() {
     });
     const created = await findTaskOnServer(conversationTaskTitle);
     conversationTaskId = created.id;
-    await main.waitFor((id) => {
-      const state = window.NativeChat && NativeChat.sessionInfo();
-      return state && state.collaboration && state.taskIds.includes(id) &&
-        document.querySelector('#nchatCollab [data-task-id="' + id + '"]');
-    }, conversationTaskId, 20000, 160);
+    await main.waitFor(() => document.querySelector('#wesTaskDraft .cp-ok #cpOpen'), null, 20000);
+    await main.run(() => document.querySelector('#wesTaskDraft #cpOpen').click());
+    await main.waitFor(id => document.querySelector('.rq-detail-content')?.dataset.taskId === id, conversationTaskId);
+    await main.run(() => document.querySelector('[data-rq-ready]')?.click());
+    await main.waitFor(() => document.querySelector('[data-rq-assign]'));
+    await main.run(() => document.querySelector('[data-rq-dismiss]').click());
     const truth = await main.run(async (wanted) => {
       const rows = await SoduWorkAPI.getTasks();
       const matches = rows.filter((item) => item.title === wanted);
@@ -432,9 +456,9 @@ async function run() {
     }, conversationTaskTitle);
     assert(truth.count === before + 1 && truth.matches === 1,
       '会话确认后没有且仅生成一条任务', { before, truth });
-    assert(truth.task.status === 'todo' && truth.task.note.includes('至少归纳三类客户问题') &&
-      truth.task.note.includes('形成可复核的处理结论'), '任务没有保存状态、说明或验收标准', truth.task);
-    await cleanupConversationTask();
+    assert(truth.task.status === 'todo' && truth.task.note === filled.note &&
+      JSON.stringify(truth.task.acceptanceCriteria) === JSON.stringify(filled.checks),
+      '任务没有保存状态、说明或验收标准', truth.task);
   });
 
   await journey('UJ-04', '从需求池创建、打开并开始任务', async () => {
@@ -497,111 +521,64 @@ async function run() {
     }
     const task = await findTaskOnServer(taskTitle);
     taskId = task.id;
-    await main.waitFor((id) => {
-      const state = window.NativeChat?.sessionInfo?.();
-      return state?.taskIds?.includes(id) && !document.querySelector('#workEntryLayer.show');
-    }, taskId, 8000);
-    assert(task.matches === 1, '连续点击提交生成了重复任务', task);
-    assert(task.status === 'todo', '新任务的初始状态不正确', task);
-
-    await navigate('history');
-    await openRequirementJourney(taskId, taskTitle);
-    const detail = main;
-    try {
-      const detailState = await detail.waitFor((title) => {
-        const heading = document.querySelector('#dTitle');
-        const flow = document.querySelector('.tfd-shell');
-        if (!heading || heading.textContent.trim() !== title || !flow) return false;
-        return {
-          title: heading.textContent.trim(),
-          phases: document.querySelectorAll('.tfd-loop-list li').length,
-          flowEmpty: flow.classList.contains('tfd-empty'),
-          status: document.querySelector('[data-chip="st"]') &&
-            document.querySelector('[data-chip="st"]').textContent.trim(),
-        };
-      }, taskTitle, 7000);
-      assert(detailState.phases === 0, '普通人工任务不应伪造 AI 自动执行阶段', detailState);
-      assert(!detailState.flowEmpty, '任务全链路加载失败', detailState);
-      assert(detailState.status === '待办', '任务详情状态不正确', detailState);
-
-      await detail.run(() => {
-        document.querySelector('[data-chip="st"]').click();
-        document.querySelector('#pickSt [data-st="doing"]').click();
-        return true;
-      });
-      const doing = await main.waitFor(async (id) => {
-        const rows = await SoduWorkAPI.getTasks();
-        const task = rows.find((item) => item.id === id);
-        return task && task.status === 'doing' ? {
-          status: task.status,
-          actualStart: task.actualStart || 0,
-        } : false;
-      }, taskId, 6000, 180);
-      assert(doing.actualStart > 0, '任务开始后没有记录实际开始时间', doing);
-      await navigate('history');
-      await main.waitFor((id) => !!document.querySelector(
-        '.rq-lane[data-rq-lane="delivering"] .rq-card[data-hbid="' + id + '"]'), taskId, 4000);
-      const detailErrors = detail.takeRuntimeErrors();
-      assert(detailErrors.length === 0, '任务详情产生页面异常', detailErrors);
-    } finally {
-      await detail.run(() => { if (typeof closeDetail === 'function') closeDetail(); return true; }).catch(() => {});
-    }
+    assert(task.matches === 1 && task.status === 'todo', '新需求没有以唯一的待办记录保存', task);
+    await main.waitFor(() => document.querySelector('.wes-result-dialog.is-success[open] .wes-result-secondary'));
+    await main.run(() => document.querySelector('.wes-result-secondary').click());
+    await main.waitFor(id => document.querySelector('.rq-detail-content')?.dataset.taskId === id, taskId);
+    await main.run(() => document.querySelector('[data-rq-ready]')?.click());
+    await main.waitFor(() => document.querySelector('.rq-detail [data-rq-assign]'));
+    await openAssignment();
+    await main.waitFor(() => document.querySelector('#fwdAgentSelect option[value="local:pi"]:not([disabled])'));
+    await main.run(() => {
+      const select = document.querySelector('#fwdAgentSelect');
+      select.value = 'local:pi'; select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await main.waitFor(() => document.querySelector('#fwdConfirm:not([disabled])'));
+    await main.run(() => document.querySelector('#fwdConfirm').click());
+    await main.waitFor(async id => {
+      const item = await SoduWorkAPI.getTask(id);
+      const archive = await soduWorkAPI.conversationSession.history();
+      const linked = archive.chats?.find(chat => [chat.taskId, ...(chat.taskIds || []),
+        ...(chat.taskBindings || []).map(binding => binding.taskId)].includes(id));
+      return item.status === 'doing' && item.actualStart > 0 && linked?.adapterId === 'pi';
+    }, taskId, 20000);
+    // Assignment closes the drawer, refreshes the board, then opens the
+    // linked chat asynchronously. Wait for that navigation and its real turn
+    // before starting another journey in the workspace.
+    await main.waitFor(id => {
+      const chat = NativeChat.sessionInfo();
+      return chat.adapterId === 'pi' && chat.taskIds.includes(id) &&
+        [...document.querySelectorAll('#nchatList .nmsg.ai[data-streaming="false"]')]
+          .some(row => row.checkVisibility() && row.innerText.trim());
+    }, taskId, 30000);
   });
 
   await journey('UJ-05', '人与 AI 转派入口只提供当前环境真实可用对象', async () => {
     await navigate('history');
-    await openRequirementJourney(taskId, taskTitle);
+    await openRequirementJourney(conversationTaskId, conversationTaskTitle);
     const detail = main;
     try {
-      await detail.waitFor((title) => {
-        const heading = document.querySelector('#dTitle');
-        return heading && heading.textContent.trim() === title &&
-          document.querySelector('#detailFwd');
-      }, taskTitle, 6000);
-      await detail.run(() => {
-        document.querySelector('#detailFwd').click();
-        return true;
-      });
-      const ai = await detail.waitFor(async (id) => {
-        const pop = document.querySelector('#fwdPop');
-        const list = document.querySelector('#fwdList');
-        const rows = Array.from(document.querySelectorAll('.fwd-item[data-fwd-choice="direct"]'));
-        const options = await SoduWorkAPI.taskExecutionOptions({ taskId: id });
-        const substrates = (options && options.substrates || []).filter((item) => item && item.key);
-        const workflowRequired = !!(options && options.recommendation &&
-          options.recommendation.workflowRequired);
-        if (!pop || !list || getComputedStyle(pop).display === 'none' ||
-            list.querySelector('.fwd-loading') ||
-            (!workflowRequired && rows.length < substrates.length)) {
-          return false;
-        }
+      await openAssignment();
+      const ai = await detail.run(async id => {
+        const select = document.querySelector('#fwdAgentSelect');
+        const reported = await SoduWorkAPI.taskExecutionOptions({taskId:id});
+        const local = await RequirementSessionChoice.localAgents(await SoduWorkAPI.getTask(id), reported);
+        const expected = new Map(TaskExecutionClient.targets(reported).map(row => [row.key, row.available !== false]));
+        for (const agent of local.agents) if (!expected.has(agent.key)) expected.set(agent.key, true);
         return {
-          tabs: Array.from(document.querySelectorAll('.fwd-tab')).map((node) => node.textContent.trim()),
-          workflowRequired,
-          availableIds: substrates.filter((item) => item.available !== false)
-            .map((item) => item.key).sort(),
-          unavailableIds: substrates.filter((item) => item.available === false)
-            .map((item) => item.key).sort(),
-          shownIds: rows.filter((node) => !node.disabled)
-            .map((node) => node.dataset.aid).sort(),
-          disabledIds: rows.filter((node) => node.disabled)
-            .map((node) => node.dataset.aid).sort(),
-          listText: list.textContent.trim(),
+          shown: [...select.options].filter(option => option.value && option.value !== '__unselected__')
+            .map(option => [option.value, !option.disabled]).sort(),
+          allowed: [...expected].sort(),
+          workflowRequired: reported.recommendation?.workflowRequired === true,
+          tabs: [...document.querySelectorAll('.fwd-tab')].map(node => node.dataset.fwdtab),
         };
-      }, taskId, 12000);
-      assert(ai.tabs.some((label) => label.includes('交给 AI')) &&
-        ai.tabs.some((label) => label.includes('转给同事')),
-      '转派入口没有把 AI 与同事放在同一个用户动作中', ai);
+      }, conversationTaskId);
+      assert(ai.tabs.includes('ai') && ai.tabs.includes('mate'), '需要同时提供 AI 和同事的分派入口', ai);
       if (ai.workflowRequired) {
-        assert(ai.shownIds.length === 0,
-          '必须走企业工作流的任务仍展示了可绕过流程的直接 Agent', ai);
+        assert(!ai.shown.some(([,enabled]) => enabled), '强制工作流不能直接选择 Agent', ai);
       } else {
-        assert(JSON.stringify(ai.shownIds) === JSON.stringify(ai.availableIds),
-          '当前设备可用 Agent 没有被准确列为可派活对象', ai);
-        assert(ai.unavailableIds.every((id) => ai.disabledIds.includes(id)),
-          '能力不满足或离线的 Agent 仍可被点击派活', ai);
+        assert(JSON.stringify(ai.shown) === JSON.stringify(ai.allowed), '选择器中的 Agent 或可用状态与 Hub、本机探测不一致', ai);
       }
-
       await detail.run(() => {
         document.querySelector('.fwd-tab[data-fwdtab="mate"]').click();
         return true;
@@ -645,25 +622,29 @@ async function run() {
           unavailableIds: expected.filter((item) => item.canReceive === false ||
             (item.canReceive === undefined && !item.hasBox))
             .map((item) => item.id).sort(),
+          availableIds: expected.filter((item) => item.canReceive === true ||
+            (item.canReceive === undefined && item.hasBox)).map(item => item.id).sort(),
+          enabledIds: rows.filter(node => !node.disabled).map(node => node.dataset.aid).sort(),
           disabledIds: rows.filter((node) => node.disabled)
             .map((node) => node.dataset.aid).sort(),
         };
       }, null, 6000);
-      assert(allMates.unavailableIds.every((id) => allMates.disabledIds.includes(id)),
+      assert(JSON.stringify(allMates.unavailableIds) === JSON.stringify(allMates.disabledIds) &&
+        JSON.stringify(allMates.availableIds) === JSON.stringify(allMates.enabledIds),
         '切换全部成员后不可接收的同事没有保持禁用', allMates);
       const task = await detail.run(async (id) => {
         const rows = await SoduWorkAPI.getTasks();
         const matches = rows.filter((item) => item.id === id);
         return { matches: matches.length, status: matches[0] && matches[0].status };
-      }, taskId);
-      assert(task.matches === 1 && task.status === 'doing',
+      }, conversationTaskId);
+      assert(task.matches === 1 && task.status === 'todo',
         '只查看转派对象就意外改写了任务', task);
       const detailErrors = detail.takeRuntimeErrors();
       assert(detailErrors.length === 0, '转派入口产生页面异常', detailErrors);
     } finally {
       await detail.run(() => {
-        const button = document.querySelector('#detailFwd');
-        if (button && document.querySelector('#fwdPop')?.style.display !== 'none') button.click();
+        document.querySelector('[data-act="fwd-close"]')?.click();
+        document.querySelector('[data-rq-dismiss]')?.click();
         return true;
       }).catch(() => {});
     }
@@ -678,10 +659,7 @@ async function run() {
     const windows = await reopenWorkspace('history');
     assert(windows.previousId !== windows.currentId, '主工作窗没有真正重建', windows);
     await navigate('history');
-    await main.waitFor((id) => {
-      const card = document.querySelector('.rq-lane[data-rq-lane="delivering"] .rq-card[data-hbid="' + id + '"]');
-      return card && card.querySelector('.rq-card-title').textContent.trim();
-    }, taskId, 5000);
+    await main.waitFor(() => Store._remoteReady === true && Store._taskState === 'ready', null, 25000);
     const after = await findTaskOnServer(taskTitle);
     assert(after.matches === 1, '重开窗口后产生了重复任务或重复派活记录', after);
     assert(after.id === before.id && after.status === before.status &&
@@ -689,27 +667,14 @@ async function run() {
     '重开窗口后任务身份、状态或开始时间发生倒退', { before, after });
 
     await openRequirementJourney(taskId, taskTitle);
-    const detail = main;
-    try {
-      const restored = await detail.waitFor((title) => {
-        const heading = document.querySelector('#dTitle');
-        const flow = document.querySelector('.tfd-shell');
-        const chip = document.querySelector('[data-chip="st"]');
-        if (!heading || heading.textContent.trim() !== title || !flow || !chip) return false;
-        if (flow.classList.contains('is-loading') || flow.textContent.includes('正在加载')) return false;
-        return {
-          title: heading.textContent.trim(),
-          status: chip.textContent.trim(),
-          flowEmpty: flow.classList.contains('tfd-empty'),
-        };
-      }, taskTitle, 7000);
-      assert(restored.status === '进行中' && !restored.flowEmpty,
-        '恢复后的任务详情没有回到真实阶段', restored);
-      const detailErrors = detail.takeRuntimeErrors();
-      assert(detailErrors.length === 0, '恢复后的任务详情产生页面异常', detailErrors);
-    } finally {
-      await detail.run(() => { if (typeof closeDetail === 'function') closeDetail(); return true; }).catch(() => {});
-    }
+    const restored = await main.run(id => ({
+      title: document.querySelector('.rq-detail-title')?.textContent,
+      execution: !!document.querySelector('[data-rq-execution]'),
+      lane: document.querySelector('.rq-card[data-hbid="' + id + '"]')?.closest('.rq-lane')?.dataset.rqLane,
+    }), taskId);
+    assert(restored.title === taskTitle && restored.execution && restored.lane === 'delivering',
+      '重开后需求详情或需求池未保留执行进度', restored);
+    await main.run(() => document.querySelector('[data-rq-dismiss]').click());
   });
 
   await requirementsJourney(journeyContext);
@@ -721,7 +686,9 @@ async function run() {
   });
 
   await journey('UJ-06', 'AI 办公区展示真实执行入口和状态', async () => {
-    await navigate('aidesk');
+    assert(!(await main.run(() => !!document.querySelector('.ws-nav-item[data-view="aidesk"]'))),
+      'AI team must remain hidden from navigation');
+    await main.run(() => WorkspaceHost.open('aidesk'));
     const office = await main.waitFor(() => {
       const panel = document.querySelector('#aiDeskPanel');
       if (!panel || !panel.classList.contains('show')) return false;

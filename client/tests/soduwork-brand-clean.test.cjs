@@ -73,7 +73,7 @@ test('the canonical renderer API uses one bridge and preserves current storage',
     pluginId: 'local:existing', version: '1.0.0',
   });
   assert.match(window.SoduWorkAPI.taskStorageKey('tasks'), /^soduwork_work_tasks_v5@.*@existing-device@unbound$/);
-  assert.equal(window.SoduWorkAPI.hubBase(), 'http://127.0.0.1:18989');
+  assert.equal(window.SoduWorkAPI.hubBase(), 'https://service.soduwork.ai');
   assert.equal(values.get('soduwork_work_cfg_v5'), '{"theme":"dark"}');
   assert.equal(values.get('soduwork_work_root'), 'C:/existing-work');
 });

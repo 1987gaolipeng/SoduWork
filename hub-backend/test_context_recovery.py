@@ -9,30 +9,7 @@ from app.services import local_base as base, local_ctx as ctx, local_stream as s
 from app.services import local_context_policy as policy
 
 class ContextRecoveryTests(unittest.TestCase):
-    def test_legacy_harness_session_migrates_through_the_existing_history_relay(self):
-        self.row.update(cli="harness2", cliSid="ses_legacy_executor", state="done", tokens={})
-        self.mock_profile("harness2", dict(base._PROFILES["harness2"], bin=lambda: "fixture",
-            start=lambda *_: ["new-native"], resume=lambda sid, *_: ["resume-native", sid]))
-        result = ctx.prepare_resume(self.ref, "Continue without repeating completed work", {})
-        self.assertTrue(result["ok"], result)
-        self.assertEqual(self.spawn.call_args.args[1], ["new-native"])
-        self.assertIn("仅允许分析", self.spawn.call_args.args[2])
-        self.assertIn("Continue without repeating completed work", self.spawn.call_args.args[2])
-        self.assertEqual(self.row["contextSegments"][0]["sid"], "ses_legacy_executor")
-        self.assertEqual(self.row["taskId"], "keep-task")
-        self.assertEqual(self.row["mode"], "plan")
-        self.assertEqual(self.row["segment"], 2)
 
-    def test_independent_harness_session_resumes_without_relaying_or_losing_identity(self):
-        sid = "h2_" + "a" * 32
-        self.row.update(cli="harness2", cliSid=sid, state="done", tokens={})
-        self.mock_profile("harness2", dict(base._PROFILES["harness2"], bin=lambda: "fixture",
-            start=lambda *_: ["new-native"], resume=lambda value, *_: ["resume-native", value]))
-        with patch.object(ctx, "_relay", side_effect=AssertionError("Native session was replaced")):
-            self.assertTrue(ctx.prepare_resume(self.ref, "Continue", {})["ok"])
-        self.assertEqual(self.spawn.call_args.args[1], ["resume-native", sid])
-        self.assertEqual(self.row["cliSid"], sid)
-        self.assertEqual(self.row["segment"], 1)
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -141,11 +118,147 @@ class ContextRecoveryTests(unittest.TestCase):
                 assert not term.get("overflow") and not term.get("isError")
 
 
+    def test_context_overflow_can_recover_after_a_confirmed_nonzero_exit(self):
+        ref, row, _ = self.runtime
+        terminal = {}
+        policy.observe(row, {"type": "error", "message": "context length exceeded"}, terminal)
+
+        with patch.object(ctx, "_recover_overflow", return_value=True) as recover:
+            stream._finish(ref, 1, terminal, "")
+
+        recover.assert_called_once_with(ref)
+
+    def test_context_overflow_does_not_restart_after_host_cleanup_failure(self):
+        ref, row, spawn = self.runtime
+        terminal = {}
+        policy.observe(row, {"type": "error", "message": "context length exceeded"}, terminal)
+        error = "Permission-controlled execution host exited abnormally"
+
+        with patch.object(ctx, "_recover_overflow", return_value=True) as recover:
+            stream._finish(ref, 1, terminal, error)
+
+        recover.assert_not_called()
+        spawn.assert_not_called()
+        self.assertEqual(row["state"], "failed")
+        self.assertEqual(row["error"], error)
+
     def test_normal_conversation_does_not_trigger_recovery(self):
         term = {}
         policy.observe({}, {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop", "content": "context window exceeded 是一个错误"}}, term)
         assert not term
         assert not policy.OVERFLOW.search("Context window is 128000 tokens")
+
+    def test_nonpi_context_recovery_cannot_erase_a_protocol_failure(self):
+        overflow = {'error': {'name': 'ContextOverflowError', 'message': 'context length exceeded'}}
+        transport = {'error': {'name': 'AcpBridgeError', 'message': 'synthetic transport failure'}}
+        success = {'type': 'step_finish', 'part': {'reason': 'stop'}}
+        for cli in ('dsh', 'kimi', 'qwen', 'opencode', 'codex', 'codex-harness'):
+            for events in ((overflow, transport, success), (transport, overflow, success)):
+                with self.subTest(cli=cli, events=events):
+                    terminal = {}
+                    self.row.update(cli=cli, state='running')
+                    for event in events:
+                        stream._on_line(self.ref, json.dumps(event), terminal)
+                    self.assertFalse(terminal.get('overflow'))
+                    self.assertTrue(terminal.get('isError'))
+                    self.assertIn('synthetic transport failure', terminal['result'])
+                    with patch.object(ctx, '_recover_overflow', return_value=True) as recover:
+                        stream._finish(self.ref, 2, terminal, '')
+                    recover.assert_not_called()
+                    self.assertEqual(self.row['state'], 'failed')
+                    self.assertIn('synthetic transport failure', self.row['error'])
+
+    def test_native_codex_progress_diagnostics_do_not_poison_completion(self):
+        notices = (
+            'Reconnecting... 1/5 (stream disconnected before completion)',
+            'Falling back from WebSockets to HTTPS transport',
+            'Unexpected status 503; retrying request',
+            'Reconnecting... 1/5 (context length exceeded)',
+        )
+        for notice in notices:
+            with self.subTest(notice=notice):
+                self.row.update(cli='codex', state='running')
+                terminal = {}
+                stream._on_line(self.ref, json.dumps({'type': 'error', 'message': notice}), terminal)
+                self.assertEqual(terminal, {})
+                stream._on_line(self.ref, json.dumps({'type': 'turn.completed'}), terminal)
+                with patch.object(ctx, '_recover_overflow', return_value=True) as recover:
+                    stream._finish(self.ref, 0, terminal, '')
+                recover.assert_not_called()
+                self.assertEqual(self.row['state'], 'done')
+
+    def test_native_codex_diagnostic_does_not_block_owned_context_recovery(self):
+        self.row['cli'] = 'codex'
+        terminal = {}
+        for event in (
+            {'error': {'name': 'ContextOverflowError', 'message': 'context length exceeded'}},
+            {'type': 'error', 'message': 'Reconnecting... 1/5 (stream disconnected)'},
+            {'type': 'turn.completed'},
+        ):
+            stream._on_line(self.ref, json.dumps(event), terminal)
+        self.assertFalse(terminal.get('isError'))
+        self.assertFalse(terminal.get('overflow'))
+        self.assertFalse(terminal.get('nonPiContextBlocked'))
+
+    def test_native_codex_authoritative_failure_is_not_a_reconnect_notice(self):
+        self.row['cli'] = 'codex'
+        terminal = {}
+        failure = 'Reconnecting... 5/5 (native turn failed after retries)'
+        for event in (
+            {'type': 'error', 'message': 'Reconnecting... 4/5'},
+            {'type': 'turn.failed', 'error': {'message': failure}},
+            {'type': 'turn.completed'},
+        ):
+            stream._on_line(self.ref, json.dumps(event), terminal)
+        self.assertTrue(terminal.get('isError'))
+        self.assertTrue(terminal.get('nonPiContextBlocked'))
+        self.assertIn(failure, terminal['result'])
+        with patch.object(ctx, '_recover_overflow', return_value=True) as recover:
+            stream._finish(self.ref, 1, terminal, '')
+        recover.assert_not_called()
+        self.assertEqual(self.row['state'], 'failed')
+
+    def test_native_codex_progress_exception_does_not_suppress_other_agent_errors(self):
+        for cli in ('dsh', 'kimi', 'qwen', 'opencode', 'codex-harness'):
+            with self.subTest(cli=cli):
+                terminal = {}
+                policy.observe({'cli': cli}, {'type': 'error', 'message': 'Reconnecting... 1/5'}, terminal)
+                self.assertTrue(terminal.get('isError'))
+                self.assertTrue(terminal.get('nonPiContextBlocked'))
+
+    def test_nonpi_success_only_clears_the_context_error_it_owns(self):
+        for cli in ('dsh', 'kimi', 'qwen', 'opencode', 'codex', 'codex-harness'):
+            with self.subTest(cli=cli):
+                row, terminal = {'cli': cli}, {}
+                policy.observe(row, {'error': {'name': 'ContextOverflowError'}}, terminal)
+                self.assertTrue(terminal.get('overflow'))
+                policy.observe(row, {'type': 'step_finish', 'part': {'reason': 'stop'}}, terminal)
+                self.assertEqual(terminal, {})
+                # A legacy/foreign diagnosis has no owned-recovery receipt.
+                terminal = {'overflow': True, 'isError': True, 'result': 'unowned failure'}
+                policy.observe(row, {'type': 'step_finish', 'part': {'reason': 'stop'}}, terminal)
+                self.assertEqual(terminal['result'], 'unowned failure')
+                self.assertTrue(terminal['isError'])
+
+    def test_nonpi_stderr_overflow_cannot_replace_a_protocol_failure(self):
+        self.row['cli'] = 'dsh'
+        terminal = {}
+        stream._on_line(self.ref, json.dumps({'error': {'name': 'AcpBridgeError',
+                         'message': 'synthetic transport failure'}}), terminal)
+        stream._on_line(self.ref, 'context window exceeded', terminal, stream='err')
+        self.assertFalse(terminal.get('overflow'))
+        self.assertIn('synthetic transport failure', terminal['result'])
+        with patch.object(ctx, '_recover_overflow', return_value=True) as recover:
+            stream._finish(self.ref, 2, terminal, '')
+        recover.assert_not_called()
+        self.assertEqual(self.row['state'], 'failed')
+
+    def test_pi_context_observer_keeps_existing_behavior_and_no_new_state(self):
+        terminal = {}
+        policy.observe({'cli': 'pi'}, {'error': {'name': 'ContextOverflowError'}}, terminal)
+        self.assertEqual(set(terminal), {'overflow', 'isError', 'result'})
+        policy.observe({'cli': 'pi'}, {'type': 'turn.completed'}, terminal)
+        self.assertEqual(terminal, {})
 
 
     def test_windows_and_cached_input(self):
@@ -161,6 +274,10 @@ class ContextRecoveryTests(unittest.TestCase):
     def test_opencode_cleanup_does_not_override_success(self):
         ref, row, _ = self.runtime
         import urllib.request
+        from app.services import opencode_session_migration
+        # This test isolates compaction cleanup; history migration has its own
+        # launch-boundary and native-history regressions.
+        self.mock_attr(opencode_session_migration, "migrate_session", Mock())
         self.mock_attr(ctx, "_opencode_bin", lambda: "fixture")
         self.mock_attr(ctx, "_env_for", lambda *a: {})
         self.mock_attr(ctx.time, "sleep", lambda *a: None)

@@ -82,7 +82,7 @@ export default {
   "职业画像（可多选，用于理解需求与推荐工作场景，不授予系统权限）": "Role profiles (multi-select; for understanding requirements and recommendations, not permissions)",
   "确定删除领域「{0}」？已打此领域标签的成员/需求会失去该标签。": "Delete area “{0}”? Members and issues with this tag will lose it.",
   "先定义企业里高频工作如何完成，创建需求时就能自动匹配。": "Define how frequent work is completed so new issues can match automatically.",
-  "职业画像描述员工长期擅长什么；工作场景描述一类需求应该用哪些能力、流程和交付标准。它们都不等于权限，也不绑定 Pi、OpenCode、Claude Code 或 Codex。": "Role profiles describe what an employee is good at over time; work scenarios describe the capabilities, flows and delivery standards a class of work needs. They do not grant permissions or bind to a specific coding agent.",
+  "职业画像描述员工长期擅长什么；工作场景描述一类需求应该用哪些能力、流程和交付标准。它们都不等于权限，也不绑定 Pi、OpenCode 或 Codex。": "Role profiles describe what an employee is good at over time; work scenarios describe the capabilities, flows and delivery standards a class of work needs. They do not grant permissions or bind to a specific coding agent.",
   "需求理解到交付的路径": "From issue understanding to delivery",
   "理解需求": "Understand issue",
   "场景描述“一类工作怎样才算交付”。需求创建时会自动匹配，人仍可在确认卡中改选。": "A scenario defines delivery for a type of work. It is matched automatically on issue creation, and people can change it in the confirmation card.",

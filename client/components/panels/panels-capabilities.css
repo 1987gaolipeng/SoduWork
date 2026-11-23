@@ -203,21 +203,25 @@ button.cap-card{cursor:default}
 /*
  * Decision modals must appear above the .pui-layer plugin preview at z-index 2400 so
  * previews cannot obscure installation confirmation.
+ * Keep the backdrop below the shared titlebar; native caption buttons cannot be blurred.
  */
-.cap-modal-layer{position:fixed;inset:0;z-index:2600;display:flex;align-items:center;justify-content:center;
-  padding:24px;background:rgba(25,32,45,.22);backdrop-filter:blur(2px)}
+.cap-modal-layer{--cap-titlebar:max(var(--window-menu-height,0px),env(titlebar-area-height,0px));
+  position:fixed;inset:var(--cap-titlebar) 0 0;z-index:2600;display:flex;align-items:center;justify-content:center;
+  padding:24px;overflow:hidden;background:rgba(25,32,45,.22);backdrop-filter:blur(2px)}
 .cap-modal-layer[hidden]{display:none}
-.cap-modal{width:min(620px,calc(100vw - 36px));max-height:min(760px,calc(100vh - 42px));
+.cap-modal{width:min(620px,calc(100vw - 36px));max-width:100%;max-height:min(760px,100%);
   display:flex;flex-direction:column;border:1px solid var(--line);border-radius:15px;
   background:var(--bg-0,#fff);box-shadow:0 24px 70px rgba(15,23,42,.2);overflow:hidden}
-.cap-modal-head{display:flex;align-items:flex-start;gap:12px;padding:17px 19px;border-bottom:1px solid var(--line)}
+.cap-modal-head{display:flex;flex-shrink:0;align-items:flex-start;gap:12px;padding:17px 19px;border-bottom:1px solid var(--line)}
 .cap-modal-head>div{min-width:0;flex:1}
 .cap-modal-head b{display:block;font-size:16px;font-weight:650;color:var(--ink)}
 .cap-modal-head span{display:block;margin-top:3px;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4);line-height:1.5}
+/* Inline values inside the subtitle (author name, version) stay on the subtitle line. */
+.cap-modal-head #capModalSub span{display:inline;margin:0;font-size:inherit;color:inherit;line-height:inherit}
 .cap-modal-close{width:30px;height:30px;border:0;border-radius:8px;background:transparent;color:var(--ink-4);font-size:18px}
 .cap-modal-close:hover{background:var(--bg-2);color:var(--ink)}
 .cap-modal-body{min-height:0;overflow:auto;padding:18px 19px;display:flex;flex-direction:column;gap:13px}
-.cap-modal-foot{display:flex;align-items:center;gap:8px;padding:12px 19px;border-top:1px solid var(--line);background:var(--bg-1)}
+.cap-modal-foot{display:flex;flex-shrink:0;align-items:center;gap:8px;padding:12px 19px;border-top:1px solid var(--line);background:var(--bg-1)}
 .cap-modal-foot .push{margin-left:auto}
 .cap-fields{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 .cap-field{display:flex;flex-direction:column;gap:5px;min-width:0}
@@ -564,3 +568,17 @@ button.cap-card{cursor:pointer}
   .cap-tab-connections .cap-mcp-manage-bar{flex-wrap:wrap}
   .cap-tab-connections .cap-mcp-manage-bar>div{flex-basis:100%}
 }
+
+/* 中文：获取技能入口保持轻量，推荐站点可换行以适配窄窗口与深色主题。
+ * English: Keep discovery lightweight; wrap source URLs in narrow windows using theme colors. */
+.cap-skill-help{align-self:flex-start;border:0;background:transparent;color:var(--accent);font:inherit;padding:0;margin:0 0 6px;cursor:pointer}
+/* 中文：与下方标题共用排版参数，悬停保持蓝色且不添加下划线。
+ * English: Match the section heading typography; keep the accent color without a hover underline. */
+.cap-skill-help{font-family:inherit;font-size:16px;font-weight:600;line-height:1.4;letter-spacing:-.015em;text-decoration:none}
+.cap-skill-help:hover{text-decoration:none}
+.cap-skill-help:focus-visible,.cap-skill-source:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.cap-skill-sources{display:grid;gap:12px}
+.cap-skill-source{display:flex;flex-direction:column;gap:6px;padding:16px;border:1px solid var(--line);border-radius:12px;color:var(--ink);text-decoration:none}
+.cap-skill-source:hover{background:var(--bg-2)}
+.cap-skill-source b{color:var(--accent)}
+.cap-skill-source span,.cap-skill-source small{color:var(--ink-3);overflow-wrap:anywhere}

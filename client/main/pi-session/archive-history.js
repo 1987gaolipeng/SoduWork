@@ -29,6 +29,7 @@ async function mapLimit(items, visit) {
 async function readSummary(file, stat, project) {
   let header, firstMessage = '', name, count = 0, activity, workOwner, initialized = false, movedCwd = '';
   const bindings = [];
+  const turn = require('./history-state').archiveTurn();
   const usedHarnesses = new Set();
   const input = fs.createReadStream(file, { encoding: 'utf8' });
   const lines = createInterface({ input, crlfDelay: Infinity });
@@ -42,6 +43,7 @@ async function readSummary(file, stat, project) {
         header = entry;
         continue;
       }
+      turn.observe(entry);
       if (entry.type === 'session_info') name = typeof entry.name === 'string' ? entry.name.trim() : '';
       if (entry.type === 'custom' && entry.customType === 'soduwork.work-entry' && entry.data?.version === 1 &&
           typeof entry.data.owner === 'string') workOwner = entry.data.owner;
@@ -79,6 +81,7 @@ async function readSummary(file, stat, project) {
     id: header.id, path: file,
     cwd: movedCwd || (typeof header.cwd === 'string' ? header.cwd : ''),
     name, firstMessage: firstMessage || '(no messages)', messageCount: count, usedHarnesses: [...usedHarnesses],
+    archivedTurnState: turn.state(),
     ...(workOwner ? { workOwner, workOnly: count === 0 && !initialized } : {}),
     createdAt: Number.isFinite(headerTime) ? headerTime : stat.birthtimeMs,
     modified: activity > 0 ? activity : Number.isFinite(headerTime) ? headerTime : stat.mtimeMs,

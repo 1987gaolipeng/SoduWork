@@ -10,7 +10,7 @@
 .wc-runtime-missing-icon:first-child{margin-left:0}
 .wc-runtime-missing-icon .agent-brand{--agent-brand-size:20px;width:20px;height:20px;flex-basis:20px;display:grid;place-items:center;border:0;border-radius:0;background:transparent;box-shadow:none}
 .wc-runtime-missing-icon .agent-monogram{font-size:12px;letter-spacing:0}
-.wc-runtime-missing-icon .agent-brand>img{display:block;width:15px;height:15px;object-fit:contain}
+.wc-runtime-missing-icon .agent-brand>img{display:block;width:15px;height:15px;object-fit:contain;scale:min(var(--agent-brand-mark-scale,1),calc(20 / 15))}
 .wc-runtime-more{appearance:none;border:0;background:transparent;color:var(--ink-4);height:26px;padding:2px 6px;border-radius:7px;font:inherit;font-size:max(var(--font-min-readable,14.5px),11px);cursor:pointer;white-space:nowrap}
 .wc-runtime-more:hover{background:var(--bg-2);color:var(--ink-2)}
 .wc-runtime-more:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 45%,transparent);outline-offset:1px}

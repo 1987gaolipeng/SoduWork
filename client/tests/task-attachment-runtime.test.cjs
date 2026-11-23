@@ -95,11 +95,64 @@ test('Markdown renders as a safe native preview while CSV, JSON and plain text s
   h.state.type='text/plain; charset="windows-1252"';await h.open('latin.txt');assert.match(h.state.windows.at(-1).url,/charset=windows-1252/);
 });
 
+test('Markdown attachments preserve numeric ranges and explicit strikethrough', async t=>{
+  const h = harness(t);
+  h.state.type = 'text/markdown';
+  h.state.data = Buffer.from('找 3~5 个用户，运行 7~14 天。~~旧建议~~');
+  assert.equal((await h.open('ranges.md')).native, true);
+  const html = Buffer.from(h.state.windows.at(-1).url.split(',')[1], 'base64').toString();
+  assert.match(html, /<p>找 3~5 个用户，运行 7~14 天。<del>旧建议<\/del><\/p>/);
+});
+
 test('Markdown filename preview is independent of a generic server MIME and strips active content', async t=>{
   const h=harness(t);h.state.type='application/octet-stream';h.state.data=Buffer.from('# 标题\n\n<script>alert(1)</script>\n\n![远程图片](https://evil.example/x.png)');
   assert.equal((await h.open('说明.md')).native,true);
   const html=Buffer.from(h.state.windows.at(-1).url.split(',')[1],'base64').toString();
   assert.ok(html.includes('<h1>标题</h1>'));assert.doesNotMatch(html,/<script>/);assert.doesNotMatch(html,/evil\.example\/x\.png/);
+});
+
+test('shared binary uploads preview passive file types without a system handoff', async t => {
+  const h = harness(t);
+  h.state.data = Buffer.from('<script>alert("shared")</script>\n程序员笑话');
+  for (const type of ['application/octet-stream', '']) {
+    h.state.type = type;
+    for (const filename of ['程序员笑话.txt', '数据.csv', '资料.json']) {
+      assert.equal((await h.open(filename)).native, true);
+      const w = h.state.windows.at(-1);
+      assert.match(w.url, /^data:text\/plain;charset=utf-8;base64,/);
+      assert.deepEqual(Buffer.from(w.url.split(',')[1], 'base64'), h.state.data);
+      assert.equal(w.options.webPreferences.javascript, false);
+      assert.equal(w.options.webPreferences.nodeIntegration, false);
+    }
+    assert.equal((await h.open('文档.pdf')).native, true);
+    assert.match(h.state.windows.at(-1).url, /^data:application\/pdf;base64,/);
+    for (const [filename, mime] of [['图片.PNG', 'image/png'], ['照片.jpg', 'image/jpeg'],
+      ['照片.jpeg', 'image/jpeg'], ['动画.gif', 'image/gif'], ['图.webp', 'image/webp'],
+      ['图.bmp', 'image/bmp'], ['图.avif', 'image/avif'], ['图.ico', 'image/x-icon']]) {
+      const result = await h.api.previewAttachment({url, filename, inlineImage: true});
+      assert.equal(result.ok, true, filename);
+      assert.equal(result.mimeType, mime);
+      assert.deepEqual(Buffer.from(result.data, 'base64'), h.state.data);
+    }
+  }
+  assert.deepEqual(h.state.opened, []);
+});
+
+test('passive extension fallback never overrides explicit active MIME or permits executable files', async t => {
+  const h = harness(t);
+  for (const type of ['text/html', 'image/svg+xml', 'application/javascript']) {
+    h.state.type = type;
+    assert.equal((await h.api.previewAttachment({url, filename:'image.png', inlineImage:true})).ok, false);
+    for (const filename of ['image.png', 'report.pdf', 'notes.txt']) {
+      await assert.rejects(h.api.previewAttachment({url, filename}), /不支持直接打开/);
+    }
+  }
+  h.state.type = 'application/octet-stream';
+  for (const filename of ['script.js', 'run.cmd', 'run.ps1', 'run.sh', 'run.exe', 'image.svg', 'notes.txt.exe']) {
+    await assert.rejects(h.api.previewAttachment({url, filename}), /不支持直接打开/);
+  }
+  assert.equal(h.state.opened.length, 0);
+  assert.equal(h.state.windows.length, 0);
 });
 
 test('native preview load failure rejects instead of reporting success', async t=>{
@@ -172,6 +225,45 @@ test('serialized task attachments keep their own route despite task and artifact
     await assert.rejects(h.api.downloadAttachment({...file,url:''}));
     assert.equal(h.state.fetched.length, 2);
   }
+});
+
+test('native save resolves legacy attachment IDs with the current account after picking a path', async t => {
+  const h = harness(t);
+  const attachmentId = 'f107e0de-42d1-4925-bcd4-029de473df0d';
+  const signed = url.replace('12345678', attachmentId);
+  const access = signed.split('?')[0] + '/access';
+  h.state.response = () => Response.json({ attachmentId, url: signed });
+  const link = { attachmentId, filename: 'legacy.md' };
+  for (const payload of [link, { ...link, url: '' }, { ...link, url: null }]) {
+    h.state.fetched.length = 0;
+    assert.deepEqual(await h.api.downloadAttachment(payload), { ok: true });
+    assert.deepEqual(fs.readFileSync(path.join(h.root, 'saved.bin')), h.state.data);
+    assert.deepEqual(h.state.fetched.map(request => request.target), [access, signed]);
+    assert.equal(h.state.fetched[0].options.method, 'POST');
+    assert.equal(h.state.fetched[0].identity.session, 'current-account-session');
+    assert.equal(h.state.fetched[1].identity, undefined);
+  }
+  h.state.fetched.length = 0;
+  h.state.cancel = true;
+  assert.deepEqual(await h.api.downloadAttachment(link), { ok: false, canceled: true });
+  assert.equal(h.state.fetched.length, 0);
+});
+
+test('ID-only saves preserve the destination on denial and leave other URL routes unchanged', async t => {
+  const h = harness(t);
+  const link = { attachmentId: '2891d663-4916-44c5-9860-f8df54a0f702', filename: 'legacy.txt' };
+  const destination = path.join(h.root, 'saved.bin');
+  fs.writeFileSync(destination, 'previous bytes');
+  h.state.response = () => new Response(null, { status: 404 });
+  await assert.rejects(h.api.downloadAttachment(link), /附件不存在或你没有查看权限/);
+  assert.equal(fs.readFileSync(destination, 'utf8'), 'previous bytes');
+  assert.equal(h.state.fetched.length, 1);
+  h.state.fetched.length = 0;
+  await assert.rejects(h.api.downloadAttachment({ ...link, attachmentId: 'not-a-uuid' }));
+  await assert.rejects(h.api.downloadAttachment({ ...link, url: ' ' }));
+  await assert.rejects(h.api.downloadAttachment({ ...link, url: url.replace('127.0.0.1', 'external.invalid') }));
+  await assert.rejects(h.api.readAttachmentBinary(link));
+  assert.equal(h.state.fetched.length, 0);
 });
 
 test('expired attachment tickets renew through the signed account for previews, downloads and library reads', async t => {

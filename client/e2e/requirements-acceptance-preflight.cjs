@@ -83,16 +83,19 @@ app.whenReady().then(async () => {
     await click('[data-tfd-acceptance-session="auto"]');
     await until(`!!document.querySelector('[data-tfd-approval-error]:not([hidden])')`);
     assert.equal(await js('fixtureNavigation.length'), 0);
-    assert.match(await js(`document.querySelector('[data-tfd-approval-error]').textContent`), /自动验收需要明确的验收标准和固定交付版本/);
+    assert.match(await js(`document.querySelector('[data-tfd-approval-error]').textContent`), /请切换为“手动验收”，核对交付成果后确认/);
     assert.equal(await js(`document.querySelector('[data-tfd-approval-note]').value`), 'Keep this review note');
-    assert.equal(await js(`document.querySelector('[data-tfd-acceptance-session="auto"]').disabled`), false);
+    assert.equal(await js(`document.querySelector('[data-tfd-acceptance-session="auto"]').disabled`), true);
+    await click('[data-tfd-acceptance-mode][value="manual"]');
+    await click('[data-tfd-acceptance-mode][value="auto"]');
+    assert.equal(await js(`document.querySelector('[data-tfd-acceptance-session="auto"]').disabled`), true);
     fs.writeFileSync(path.join(output, 'missing-criteria.png'), (await win.webContents.capturePage()).toPNG());
     await click('[data-tfd-acceptance-mode][value="manual"]');
     await click('[data-tfd-acceptance-session="1"]');
     await until('fixtureNavigation.length===1');
     assert.deepEqual(await js('fixtureNavigation[0]'), {id: 'missing-review-criteria', mode: 'manual'});
     assert.equal((await request('/tasks/missing-review-criteria')).requirementStage, 'reviewing');
-    report.checks.push('Native automatic-review click stays on the original card, preserves the note, exposes the existing error and permits manual analysis without changing review state');
+    report.checks.push('Native automatic-review click stays on the original card, preserves the note, disables automatic retry, guides manual review and permits manual analysis without changing review state');
 
     await js(`RequirementsDetail.open('ready-review-criteria')`);
     await click('[data-tfd-acceptance-mode][value="auto"]');

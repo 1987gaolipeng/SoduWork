@@ -1,4 +1,4 @@
-"""Claude's explicitly exposed thinking chunks; signatures are never displayed."""
+"""Read-only compatibility for archived Claude thinking; hide signatures."""
 from __future__ import annotations
 
 

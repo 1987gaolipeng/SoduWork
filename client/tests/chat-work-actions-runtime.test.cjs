@@ -9,6 +9,25 @@ const routeSource = read('panels-chat-work-actions.js');
 const composeSource = read('panels-compose-work-actions.js');
 const hostSource = read('plugin-ui-host.js');
 
+test('automation follow-ups route without reselecting the capability and keep the original input on failure', async () => {
+  let accept=true; const seen=[];
+  const {scope} = fixture({WorkAutomationSheet:{
+    acceptsFollowup:text => text.includes('改为'),
+    refine:async (text, options) => {seen.push({text, options}); return accept;},
+  }});
+  const input = {value:'改为十分钟后',style:{},dispatchEvent(){},focus(){}};
+  const route = () => scope.window.ChatWorkActions.route({text:input.value,input,mention:{action:()=>null}}, {
+    open:async () => {throw Error('must refine the existing card');}, model:()=> 'selected-model',
+  });
+  const before=Date.now();
+  assert.equal((await route()).accepted,true); assert.equal(input.value,'');
+  assert.equal(seen[0].text,'改为十分钟后');
+  assert.ok(seen[0].options.requestedAt>=before && seen[0].options.requestedAt<=Date.now());
+  accept=false; input.value='改为五分钟后';
+  assert.equal((await route()).accepted,false); assert.equal(input.value,'改为五分钟后');
+  input.value='普通聊天'; assert.equal((await route()).handled,false);
+});
+
 test('work entry freezes one model selection for its new conversation and parser before attachment analysis', async () => {
   let selected = 'chosen-model', prepared, parsed, finish;
   const { scope, mention } = fixture({ NativeChat: {
@@ -28,6 +47,16 @@ test('work entry freezes one model selection for its new conversation and parser
   assert.equal(prepared?.adapterId, 'qwen');
   assert.equal(prepared?.modelName, 'chosen-model');
   assert.equal(parsed, 'chosen-model');
+});
+
+test('automation route preserves the submitted timestamp through attachment analysis', async () => {
+  let refined;
+  const {scope} = fixture({WorkAutomationSheet:{acceptsFollowup:()=>true,
+    refine:async (_text, options) => {refined=options;return true;}}});
+  const requestedAt = Date.parse('2099-11-16T12:13:00Z');
+  const result = await scope.window.ChatWorkActions.route({text:'修改为10分钟之后',requestedAt,
+    mention:{action:()=>null},attachments:{analysis:async()=>[]}}, {});
+  assert.equal(result.accepted,true); assert.equal(refined.requestedAt,requestedAt);
 });
 
 test('work entry waits for model discovery and keeps the original draft if the selection is unavailable', async () => {

@@ -84,7 +84,7 @@ test('fast selection keeps the latest response and ignores a late failure', asyn
   page.unmount()
 })
 
-test('charts share the current filters and requests cannot update after unmount', async () => {
+test('historical runtime ledgers keep filters and requests cannot update after unmount', async () => {
   const page = await mountUsage()
   page.nodes(() => false)
   page.calls[0].resolve(result(10)); await page.flush()
@@ -97,4 +97,12 @@ test('charts share the current filters and requests cannot update after unmount'
   page.unmount()
   page.calls.at(-1).resolve(result(100))
   await new Promise((resolve) => setImmediate(resolve))
+})
+
+// Retired execution runtimes remain readable in historical usage records.
+test('usage labels preserve retired runtime history without renaming its identifiers', () => {
+  assert.equal(format.agentName('claude'), 'Claude Code')
+  assert.equal(format.agentName('claude-code'), 'Claude Code')
+  assert.equal(format.agentName('harness2'), 'Google Harness²')
+  assert.equal(format.agentName('codex'), 'Codex')
 })

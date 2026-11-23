@@ -2,6 +2,8 @@
 
 // Trusted host-side projection. Renderer writes contain declarations, never evidence.
 const crypto = require('node:crypto');
+// A fallback, not a discovered provider limit. Explicit output budgets take precedence.
+const DEFAULT_OUTPUT_TOKENS = 16384;
 const CAPABILITIES = ['imageInput', 'toolCalling', 'streaming'];
 const CHECKS = ['connection', ...CAPABILITIES];
 const STATES = ['unknown', 'supported', 'unsupported'];
@@ -18,17 +20,24 @@ function compatibility(raw = {}) {
   };
 }
 function publicEvidence(evidence) {
-  if (!evidence || evidence.reportVersion !== 1) return evidence;
+  if (!evidence || evidence.reportVersion === 3) return evidence;
+  // v2 proved tool emission but never streaming continuation after a receipt.
+  // Preserve its other checks and explicit unsupported results.
   const project = rows => Object.fromEntries(Object.entries(rows || {}).map(([key, check]) => [key,
-    ['toolCalling', 'streaming'].includes(key) && conclusive(check)
+    (evidence.reportVersion === 2 ? key === 'toolCalling' && check?.status === 'passed'
+      : ['toolCalling', 'streaming'].includes(key) && conclusive(check))
       ? { ...check, status: 'inconclusive', code: 'legacy_recheck_required' } : check]));
-  return { ...evidence, checks: project(evidence.checks),
-    ...(evidence.verifiedChecks ? { verifiedChecks: project(evidence.verifiedChecks) } : {}) };
+  const checks = project(evidence.checks), verified = project(evidence.verifiedChecks);
+  for (const [key, check] of Object.entries(verified)) {
+    if (check?.code === 'legacy_recheck_required' && !checks[key]) checks[key] = check;
+  }
+  return { ...evidence, checks,
+    ...(evidence.verifiedChecks ? { verifiedChecks: Object.fromEntries(Object.entries(verified).filter(([, check]) => conclusive(check))) } : {}) };
 }
 function evidenceChecks(evidence) {
   evidence = publicEvidence(evidence);
   if (!evidence || evidence.apiFamily && evidence.apiFamily !== API_FAMILY) return {};
-  return evidence.verifiedChecks || Object.fromEntries(Object.entries(evidence.checks || {}).filter(([, value]) => conclusive(value)));
+  return Object.fromEntries(Object.entries(evidence.verifiedChecks || evidence.checks || {}).filter(([, value]) => conclusive(value)));
 }
 function profile(config = {}, evidence) {
   evidence = publicEvidence(evidence);
@@ -42,10 +51,11 @@ function profile(config = {}, evidence) {
     }
     const verified = known[key], latest = evidence?.checks?.[key];
     if (state === 'unknown' && conclusive(verified)) { state = supported(verified); source = 'verified'; }
+    const observedState = key === 'imageInput' && evidence?.imageInputRejectedSincePass === true ? 'unsupported' : supported(verified);
     result[key] = { state, source,
       ...(latest?.checkedAt ? { checkedAt: latest.checkedAt, checkStatus: latest.status } : {}),
       ...(conclusive(verified) ? { verifiedState: supported(verified), lastVerifiedAt: verified.checkedAt } : {}),
-      ...(source !== 'verified' && state !== 'unknown' && conclusive(verified) && supported(verified) !== state ? { conflict: true } : {}),
+      ...(source !== 'verified' && state !== 'unknown' && conclusive(verified) && observedState !== state ? { conflict: true } : {}),
     };
   }
   const reported = evidence?.apiFamily !== 'responses' && evidence?.reasoningStreamReported === true;
@@ -59,14 +69,21 @@ function mergeEvidence(previous, next) {
   if (same && Number(previous.runSequence || 0) > Number(next.runSequence || 0)) return previous;
   const verifiedChecks = same ? { ...evidenceChecks(previous) } : {};
   const checks = same ? { ...previous.checks } : {};
+  let imageInputRejectedSincePass = same && previous?.imageInputRejectedSincePass === true;
   for (const [key, value] of Object.entries(next.checks || {})) {
     if (!CHECKS.includes(key)) continue;
     // Also protect imported v1 evidence, whose records do not carry a sequence.
     if (!next.runSequence && checks[key]?.checkedAt && value.checkedAt && checks[key].checkedAt > value.checkedAt) continue;
     checks[key] = value;
-    if (conclusive(value)) verifiedChecks[key] = value;
+    if (!conclusive(value)) continue;
+    if (key === 'imageInput') {
+      // Chat retains proven support; manual conflicts follow the latest conclusive attempt.
+      imageInputRejectedSincePass = Boolean(next.configRevision && value.status === 'unsupported' && verifiedChecks[key]?.status === 'passed');
+      if (imageInputRejectedSincePass) continue;
+    }
+    verifiedChecks[key] = value;
   }
-  return { ...next, reportVersion: 2, apiFamily: next.apiFamily || API_FAMILY, checks, verifiedChecks,
+  return { ...next, reportVersion: 3, apiFamily: next.apiFamily || API_FAMILY, checks, verifiedChecks, imageInputRejectedSincePass,
     compatibility: compatibility({ ...(same ? previous.compatibility : {}), ...next.compatibility }),
     reasoningStreamReported: Boolean(next.reasoningStreamReported || same && previous.reasoningStreamReported) };
 }
@@ -78,7 +95,7 @@ function runtimeFields(config = {}, evidence) {
   }
   return { capabilityProfile, imageRouting,
     input: imageRouting === 'native' && capabilityProfile.imageInput.state === 'supported' ? ['text', 'image'] : ['text'],
-    visionFallbackAvailable: false, maxOutputTokens: config.maxOutputTokens || 65536,
+    visionFallbackAvailable: false, maxOutputTokens: config.maxOutputTokens || DEFAULT_OUTPUT_TOKENS,
     compatibility: compatibility(evidence?.apiFamily && evidence.apiFamily !== API_FAMILY ? {} : evidence?.compatibility),
   };
 }
@@ -122,5 +139,5 @@ function assertRequired(model, required) {
   const reason = incompatibility(model, required);
   if (reason) throw Object.assign(Error(reason), { code: 'MODEL_CAPABILITY_INCOMPATIBLE' });
 }
-module.exports = { CAPABILITIES, CHECKS, API_FAMILY, profile, runtimeFields, mergeEvidence, publicEvidence,
+module.exports = { DEFAULT_OUTPUT_TOKENS, CAPABILITIES, CHECKS, API_FAMILY, profile, runtimeFields, mergeEvidence, publicEvidence,
   runtimeRevision, compatibility, piCompatibility, stable, validate, incompatibility, assertRequired };

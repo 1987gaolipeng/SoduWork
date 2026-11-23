@@ -112,6 +112,23 @@ class TerminalRouteTests(unittest.TestCase):
             self.assertEqual(self.frame(fixture)["t"], "ready")
             fixture.opened.assert_called_once()
             self.assertEqual(fixture.opened.call_args.args[4], {"LOCAL_ONLY": "yes"})
+            fixture.env.assert_awaited_once_with("opencode", task="task", ref="run-ref", mode="shell")
+
+    def test_local_terminal_preserves_safe_migration_error(self):
+        from app.services.opencode_session_migration import OpenCodeSessionMigrationError
+        message = "This legacy OpenCode database is not compatible. The original history is unchanged."
+        with self.route(local_allowed=True) as fixture:
+            fixture.env.side_effect = OpenCodeSessionMigrationError(message)
+            self.assertEqual(self.frame(fixture, "&mode=session"), {"t": "err", "d": message})
+            fixture.opened.assert_not_called()
+
+    def test_local_terminal_keeps_other_exception_details_private(self):
+        with self.route(local_allowed=True) as fixture:
+            fixture.env.side_effect = RuntimeError("PRIVATE-FIXTURE-PATH and credential")
+            reply = self.frame(fixture, "&mode=session")
+            self.assertEqual(reply["t"], "err")
+            self.assertNotIn("PRIVATE-FIXTURE", reply["d"])
+            fixture.opened.assert_not_called()
 
     def test_disabled_hub_still_allows_owned_remote_without_hub_secrets(self):
         sentinels = {key: "hub-only-" + key for key in (
@@ -183,6 +200,26 @@ class TerminalRouteTests(unittest.TestCase):
 
 
 class RunnerEnvironmentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runner_reports_safe_migration_error_without_leaking_other_failures(self):
+        from app.services import terminal_environment
+        from app.services.opencode_session_migration import OpenCodeSessionMigrationError
+        message = "This legacy OpenCode database is not compatible. The original history is unchanged."
+        for error, expected in ((OpenCodeSessionMigrationError(message), message),
+                                (RuntimeError("PRIVATE-FIXTURE-PATH and credential"),
+                                 "终端环境未就绪，请在原执行机重新连接会话")):
+            with self.subTest(error=type(error).__name__):
+                machine = runner_main.Runner.__new__(runner_main.Runner)
+                machine.work_root = ""
+                machine._send = AsyncMock()
+                with patch.object(term.pty_term, "available", return_value=(True, "")), \
+                     patch.object(term.pty_term, "open_term") as opened, \
+                     patch.object(terminal_environment, "runner_environment", side_effect=error):
+                    await machine._term_open({"id": "rpc", "task": "task", "ref": "run-ref",
+                                              "mode": "session", "cli": "opencode", "sid": "ses_owned"})
+                machine._send.assert_awaited_once_with({"op": "reply", "id": "rpc", "ok": False,
+                                                        "error": expected})
+                opened.assert_not_called()
+
     async def test_runner_ignores_legacy_hub_env_and_preserves_own_environment(self):
         machine = runner_main.Runner.__new__(runner_main.Runner)
         machine.work_root = ""
@@ -210,8 +247,10 @@ class RunnerEnvironmentTests(unittest.IsolatedAsyncioTestCase):
     async def test_task_model_configuration_is_built_on_runner(self):
         run = {"taskId": "task", "cli": "opencode", "cfg": {"llm": {
             "base": "http://model.invalid/v1", "key": "task-scoped-model-key", "model": "fixture-model"}}}
-        with patch.dict(local_base._RUNS, {"ref": run}, clear=True), \
-             patch.dict(os.environ, {"PATH": "runner-bin", "HOME": "runner-home"}, clear=True):
+        with tempfile.TemporaryDirectory(prefix="soduwork-opencode-model-") as directory, \
+             patch.dict(local_base._RUNS, {"ref": run}, clear=True), \
+             patch.dict(os.environ, {"PATH": "runner-bin", "HOME": directory,
+                 "USERPROFILE": directory, "SODUWORK_DATA_ROOT": directory}, clear=True):
             env = runner_environment("task", "ref", "opencode")
         self.assertEqual(env["PATH"], "runner-bin")
         self.assertEqual(env["SODUWORK_LLM_KEY"], "task-scoped-model-key")
@@ -235,6 +274,123 @@ class RunnerEnvironmentTests(unittest.IsolatedAsyncioTestCase):
             env = runner_environment("task", "ref", "pi")
         self.assertEqual(env["ELECTRON_RUN_AS_NODE"], "1")
         self.assertNotIn("SODUWORK_LLM_KEY", env)
+
+    async def test_recovered_opencode_migrates_owned_history_without_model_credentials(self):
+        from app.services import opencode_session_migration as migration
+        with tempfile.TemporaryDirectory(prefix="soduwork-opencode-terminal-") as directory:
+            run = {"taskId": "task", "cli": "opencode", "cliSid": "ses_owned",
+                   "ws": directory, "cfg": {}}
+            with patch.dict(local_base._RUNS, {"ref": run}, clear=True), \
+                 patch.dict(os.environ, {"SODUWORK_DATA_ROOT": directory,
+                     "OPENCODE_DB": str(Path(directory) / "personal.db")}, clear=True), \
+                 patch.dict(local_base._PROFILES["opencode"], {"bin": lambda: "fixture-opencode"}), \
+                 patch.object(migration, "migrate_session") as migrate:
+                env = runner_environment("task", "ref", "opencode")
+            migrate.assert_called_once_with(env, "ses_owned", directory, "fixture-opencode")
+            self.assertEqual(Path(env["OPENCODE_DB"]),
+                             Path(directory) / "agents/opencode/data/opencode/opencode.db")
+            self.assertNotIn("SODUWORK_LLM_KEY", env)
+            self.assertNotIn("OPENCODE_CONFIG_CONTENT", env)
+            self.assertEqual(run["cliSid"], "ses_owned")
+
+    async def test_shell_does_not_require_legacy_history_migration(self):
+        from app.services import opencode_session_migration as migration
+        with tempfile.TemporaryDirectory(prefix="soduwork-opencode-shell-") as directory, \
+             patch.dict(local_base._RUNS, {"ref": {"taskId": "task", "cli": "opencode",
+                 "cliSid": "ses_owned", "ws": directory, "cfg": {}}}, clear=True), \
+             patch.dict(os.environ, {"SODUWORK_DATA_ROOT": directory,
+                 "HOME": directory, "USERPROFILE": directory}, clear=True), \
+             patch.object(migration, "migrate_session") as migrate:
+            env = runner_environment("task", "ref", "opencode", mode="shell")
+            migrate.assert_not_called()
+            self.assertEqual(Path(env["OPENCODE_DB"]),
+                             Path(directory) / "agents/opencode/data/opencode/opencode.db")
+
+    async def test_terminal_migration_failure_keeps_original_session(self):
+        from app.services import opencode_session_migration as migration
+        with tempfile.TemporaryDirectory(prefix="soduwork-opencode-terminal-") as directory:
+            run = {"taskId": "task", "cli": "opencode", "cliSid": "ses_owned",
+                   "ws": directory, "cfg": {}}
+            with patch.dict(local_base._RUNS, {"ref": run}, clear=True), \
+                 patch.dict(os.environ, {"SODUWORK_DATA_ROOT": directory,
+                     "HOME": directory, "USERPROFILE": directory}, clear=True), \
+                 patch.dict(local_base._PROFILES["opencode"], {"bin": lambda: "fixture-opencode"}), \
+                 patch.object(migration, "migrate_session", side_effect=
+                              migration.OpenCodeSessionMigrationError("Unsupported legacy schema")):
+                with self.assertRaisesRegex(RuntimeError, "Unsupported legacy schema"):
+                    runner_environment("task", "ref", "opencode")
+            self.assertEqual(run["cliSid"], "ses_owned")
+
+    async def test_unowned_rpc_identity_cannot_request_legacy_import(self):
+        from app.services import opencode_session_migration as migration
+        with tempfile.TemporaryDirectory(prefix="soduwork-opencode-terminal-") as directory, \
+             patch.dict(local_base._RUNS, {}, clear=True), \
+             patch.dict(os.environ, {"SODUWORK_DATA_ROOT": directory,
+                 "HOME": directory, "USERPROFILE": directory}, clear=True), \
+             patch.object(migration, "migrate_session") as migrate:
+            runner_environment("task", "missing-ref", "opencode")
+            migrate.assert_not_called()
+
+    async def test_restarted_runner_rehydrates_owned_opencode_history_before_migration(self):
+        from app.services import opencode_session_migration as migration
+        with tempfile.TemporaryDirectory(prefix="soduwork-opencode-restart-") as directory:
+            run = {"taskId": "task", "cli": "opencode", "cliSid": "ses_owned",
+                   "ws": directory, "cfg": {}}
+            def recover(ref):
+                local_base._RUNS[ref] = run
+            with patch.dict(local_base._RUNS, {}, clear=True), \
+                 patch.dict(os.environ, {"SODUWORK_DATA_ROOT": directory,
+                     "HOME": directory, "USERPROFILE": directory}, clear=True), \
+                 patch.dict(local_base._PROFILES["opencode"], {"bin": lambda: "fixture-opencode"}), \
+                 patch.object(local_base, "rehydrate", side_effect=recover) as rehydrate, \
+                 patch.object(migration, "migrate_session") as migrate:
+                env = runner_environment("task", "run-ref", "opencode")
+            rehydrate.assert_called_once_with("run-ref")
+            migrate.assert_called_once_with(env, "ses_owned", directory, "fixture-opencode")
+
+
+class HubOpenCodeHistoryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_local_session_uses_owned_execution_for_history_import(self):
+        from app.services import ai_local, opencode_session_migration as migration
+        cfg = {"llm": {"base": "http://model.invalid/v1", "key": "fixture", "model": "fixture"}}
+        run = {"taskId": "task", "cli": "opencode", "cliSid": "ses_owned",
+               "ws": str(Path(tempfile.gettempdir()).resolve())}
+        with patch.object(term, "SessionLocal", return_value=AsyncMock()), \
+             patch.object(ai_local, "load", AsyncMock(return_value=cfg)), \
+             patch.dict(local_base._RUNS, {"run-ref": run}, clear=True), \
+             patch.dict(local_base._PROFILES["opencode"], {"bin": lambda: "fixture-opencode"}), \
+             patch.object(migration, "migrate_session") as migrate:
+            env = await term._env_for_term("opencode", task="task", ref="run-ref", mode="session")
+        migrate.assert_called_once_with(env, "ses_owned", run["ws"], "fixture-opencode")
+
+    async def test_local_session_cannot_migrate_another_tasks_history(self):
+        from app.services import ai_local, opencode_session_migration as migration
+        cfg = {"llm": {"base": "http://model.invalid/v1", "key": "fixture", "model": "fixture"}}
+        run = {"taskId": "other-task", "cli": "opencode", "cliSid": "ses_other", "ws": "fixture"}
+        with patch.object(term, "SessionLocal", return_value=AsyncMock()), \
+             patch.object(ai_local, "load", AsyncMock(return_value=cfg)), \
+             patch.dict(local_base._RUNS, {"run-ref": run}, clear=True), \
+             patch.object(migration, "migrate_session") as migrate:
+            with self.assertRaisesRegex(ValueError, "不属于"):
+                await term._env_for_term("opencode", task="task", ref="run-ref", mode="session")
+        migrate.assert_not_called()
+
+    async def test_local_session_rehydrates_archive_before_history_import(self):
+        from app.services import ai_local, opencode_session_migration as migration
+        cfg = {"llm": {"base": "http://model.invalid/v1", "key": "fixture", "model": "fixture"}}
+        run = {"taskId": "task", "cli": "opencode", "cliSid": "ses_owned",
+               "ws": str(Path(tempfile.gettempdir()).resolve())}
+        def recover(ref):
+            local_base._RUNS[ref] = run
+        with patch.object(term, "SessionLocal", return_value=AsyncMock()), \
+             patch.object(ai_local, "load", AsyncMock(return_value=cfg)), \
+             patch.dict(local_base._RUNS, {}, clear=True), \
+             patch.dict(local_base._PROFILES["opencode"], {"bin": lambda: "fixture-opencode"}), \
+             patch.object(local_base, "rehydrate", side_effect=recover) as rehydrate, \
+             patch.object(migration, "migrate_session") as migrate:
+            env = await term._env_for_term("opencode", task="task", ref="run-ref", mode="session")
+        rehydrate.assert_called_once_with("run-ref")
+        migrate.assert_called_once_with(env, "ses_owned", run["ws"], "fixture-opencode")
 
 
 if __name__ == "__main__":

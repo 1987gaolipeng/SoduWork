@@ -3,19 +3,51 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
-import weakref
+import math
 import re
+import time
+import uuid
+import weakref
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 
 import anyio
 import httpx
 from fastapi import HTTPException
 
 from . import model_runtime
-from .model_errors import UpstreamError
+from .model_errors import UpstreamError, forbidden_category, refusal_category
+from .model_runtime_transaction import finish_cleanup
 
 log = logging.getLogger("uvicorn.error")
 _clients = weakref.WeakKeyDictionary()
+
+
+def _retry_after(value: str) -> int | None:
+    """Normalize delta-seconds and HTTP dates for the existing client retry budget."""
+    value = value.strip()
+    if re.fullmatch(r"[0-9]+", value):
+        # A day already exceeds the client's maximum retry window. Bound the
+        # diagnostic without converting arbitrarily large upstream integers.
+        digits = value.lstrip("0") or "0"
+        return 86400 if len(digits) > 5 else min(86400, int(digits))
+    try:
+        date = parsedate_to_datetime(value)
+        if date.tzinfo is None:
+            date = date.replace(tzinfo=timezone.utc)
+        return min(86400, max(0, math.ceil(date.timestamp() - time.time())))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _upstream_request_id(headers, credential: str = "") -> str:
+    """Allow bounded opaque identifiers, never arbitrary headers or credentials."""
+    for name in ("x-request-id", "request-id", "x-ms-request-id", "x-amzn-requestid"):
+        value = str(headers.get(name, ""))
+        if (re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", value)
+                and not (credential and credential in value)):
+            return value
+    return ""
 
 
 def _safe_error_text(error) -> str:
@@ -226,9 +258,18 @@ async def open_response(conf, path, body, *, stream=False, timeout=None):
             finally:
                 await wrapped.aclose()
             error = UpstreamError(response.status_code, raw.decode("utf-8", "replace"))
-            retry = response.headers.get("retry-after", "")
-            if retry.isdigit():
-                error.retry_after = min(3600, max(1, int(retry)))
+            if response.status_code == 403:
+                # A partial upstream body cannot establish a neutral refusal.
+                error.forbidden_category = forbidden_category(error.body) if len(raw) < 4000 else "unclassified"
+            error.diagnostic_id = uuid.uuid4().hex
+            error.upstream_request_id = _upstream_request_id(response.headers, str(conf.get("key") or ""))
+            retry = _retry_after(response.headers.get("retry-after", ""))
+            if retry is not None:
+                error.retry_after = retry
+            log.warning("[model-transport] upstream refusal trace=%s status=%s category=%s "
+                        "retry_after=%s upstream_request_id=%s", error.diagnostic_id, error.status,
+                        refusal_category(error.status, error.body), retry,
+                        error.upstream_request_id or "unavailable")
             raise error
         delivered = True
         return wrapped
@@ -237,6 +278,11 @@ async def open_response(conf, path, body, *, stream=False, timeout=None):
         raise
     except (httpx.TimeoutException, TimeoutError) as exc:
         outcome = "timeout"
+        # Distinguish a locally exhausted connection pool from a slow model.
+        # Exception text can contain request data; only log its type and timing.
+        log.warning("[model-transport] request timeout endpoint=%s error=%s openMs=%.1f",
+                    locals().get("endpoint", "<unbuilt>"), type(exc).__name__,
+                    (time.perf_counter() - opened_at) * 1000)
         raise UpstreamError(504, "", "等待模型响应超时，请稍后重试") from exc
     except httpx.HTTPError as exc:
         log.warning("[model-transport] request failed endpoint=%s error=%s detail=%s",
@@ -272,17 +318,25 @@ async def until_disconnect(request, operation):
         if disconnect in done:
             raise HTTPException(499, "客户端已断开连接")
         result = await work
+        stopping = True
+        disconnect.cancel()
+        with anyio.CancelScope(shield=True):
+            await asyncio.gather(disconnect, return_exceptions=True)
+        # The last await must precede handoff, or a cancellation can orphan an
+        # opened Response while both this wrapper and its caller disclaim it.
         delivered = True
         return result
     finally:
         stopping = True
-        work.cancel()
-        disconnect.cancel()
-        with anyio.CancelScope(shield=True):
+        async def reclaim():
+            work.cancel()
+            disconnect.cancel()
             await asyncio.gather(work, disconnect, return_exceptions=True)
             # A response can arrive in the same event-loop tick as disconnect.
-            if not delivered and work.done() and not work.cancelled():
+            if not work.cancelled():
                 result = None if work.exception() else work.result()
                 if isinstance(result, Response):
                     result.outcome = "cancelled"
                     await result.aclose()
+        if not delivered:
+            await finish_cleanup(reclaim())

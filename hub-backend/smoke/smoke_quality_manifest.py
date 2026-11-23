@@ -44,6 +44,9 @@ check("manifest covers smoke files and explicitly registered unittest entries",
 check("release profile is deterministic-only", scripts_for("release") == RELEASE_SMOKES)
 check("extended profile includes release and extended checks",
       scripts_for("extended") == RELEASE_SMOKES + EXTENDED_SMOKES)
+for profile in ("release", "extended"):
+    check("documented SQLite upgrade regression runs exactly once in " + profile,
+          scripts_for(profile).count("test_release_schema_history.py") == 1)
 check("live profile never pulls offline checks in implicitly", scripts_for("live") == LIVE_SMOKES)
 check("every tier is non-empty", all((RELEASE_SMOKES, EXTENDED_SMOKES, LIVE_SMOKES)))
 with tempfile.TemporaryDirectory(prefix="soduwork-misplaced-smoke-") as temporary:
@@ -51,12 +54,11 @@ with tempfile.TemporaryDirectory(prefix="soduwork-misplaced-smoke-") as temporar
     misplaced.write_text("raise AssertionError('must be registered')", encoding="utf-8")
     check("top-level smoke files cannot silently bypass registration",
           any("must live in smoke/" in error for error in audit_manifest(Path(temporary))))
-check("Harness2 and requirement maintenance regressions stay in the offline release gate",
-      {"test_harness2_regressions.py", "test_requirement_review_access.py",
+check("Runtime retirement and requirement maintenance regressions stay in the offline release gate",
+      {"test_retired_agents.py", "test_requirement_review_access.py",
        "test_requirement_maintenance.py", "test_requirement_maintenance_policy.py",
        "test_handoff_maintenance_boundary.py", "test_notice_audience_regression.py",
-       "test_darwin_process_tree.py", "test_harness2_engine.py",
-       "test_harness2_lifecycle.py", "test_harness2_platforms.py",
+       "test_darwin_process_tree.py",
        "test_managed_agent_download.py", "test_opencode_runtime_config.py"}
       <= set(RELEASE_SMOKES))
 import unittest

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import models
 from ..memory_record_models import MemoryRecord
 from ..deps import has_perm
+from ..timestamps import iso_utc
 
 SCOPES = {"session", "workspace", "project"}
 ORG_SCOPE = "org"
@@ -170,8 +171,8 @@ def view(row: MemoryRecord, detail: bool = False) -> dict:
         "title": row.title, "summary": row.summary,
         "revision": row.revision, "archived": bool(row.archived),
         "sourceMeta": dict(row.source_meta or {}),
-        "createdAt": row.created_at.isoformat() if row.created_at else None,
-        "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
+        "createdAt": iso_utc(row.created_at) if row.created_at else None,
+        "updatedAt": iso_utc(row.updated_at) if row.updated_at else None,
     }
     if detail:
         result["fields"] = dict(row.fields or {})
@@ -516,7 +517,7 @@ async def org_create(session: AsyncSession, user: models.User, body: dict) -> di
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
-        raise HTTPException(409, "organization memory changed; reload before editing") from exc
+        raise HTTPException(409, "组织记忆已变更，请重新加载后编辑") from exc
     await session.refresh(row)
     return {"ok": True, "updated": False, "item": _admin_view(row)}
 

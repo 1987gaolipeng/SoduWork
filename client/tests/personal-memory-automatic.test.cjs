@@ -18,6 +18,46 @@ function fixture(t) {
   const read = () => { const rows = local.list({ ...options, scope: 'personal' }).items; return rows[0] && local.get({ ...options, id: rows[0].id }).item; };
   return { root, app, owner, options, save, read };
 }
+test('runtime identity and cutoff answers never become personal memory; ordinary product work does', t => {
+  const f = fixture(t);
+  for (const [key, answer] of Object.entries({
+    qwen: '我是 SoduWork 里的 AI 办公助手（Qwen Code），可以帮你处理工作。',
+    cutoff: '我的底层模型是 **example-chat-large（DeepSeek 训练）**，训练数据覆盖到 2024 年。',
+    english: 'I am Codex. My knowledge cutoff is 2024.',
+  })) f.save(key, answer);
+  assert.equal(f.read(), undefined);
+  f.save('business', 'Compared Qwen Code and Codex deployment costs for the team.');
+  assert.match(f.read().content, /deployment costs/);
+});
+
+test('old automatic identity is retired; edited notes stay on disk but cannot inject runtime identity', t => {
+  const f = fixture(t), crypto = require('node:crypto');
+  f.save('old', 'Original verified delivery');
+  const root = local.userMemoryRoot(f.app, f.owner), file = path.join(root, 'personal.md');
+  const stateFile = path.join(root, '.personal-learning.json');
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  const [id] = Object.keys(state.sources);
+  const block = '<!-- soduwork-work-memory:' + id + ' -->\n## 你是谁\n\n我是 Qwen Code。\n<!-- /soduwork-work-memory -->';
+  state.sources[id].hash = crypto.createHash('sha256').update(block).digest('hex');
+  fs.writeFileSync(stateFile, JSON.stringify(state));
+  fs.writeFileSync(file, '# Personal\n\nKeep my business note.\n\n' + block);
+  assert.doesNotMatch(f.read().content, /Qwen Code|你是谁/);
+  assert.match(f.read().content, /business note/);
+  const current = f.read();
+  local.update({ ...f.options, id: current.id, revision: current.revision,
+    content: '# Notes\n\nMy model is Qwen Code.\n\nUse concise reports.' });
+  assert.match(f.read().content, /My model is Qwen/);
+  assert.doesNotMatch(local.context(f.options).prompt, /My model is Qwen/);
+  assert.match(local.context(f.options).prompt, /Use concise reports/);
+  assert.doesNotMatch(local.contextIds({ ...f.options, ids: [current.id] }).prompt, /My model is Qwen/);
+});
+
+test('historical identity summaries cannot backfill after upgrading', t => {
+  const f = fixture(t);
+  f.save('legacy', '我是 Qwen Code。', { completed: undefined });
+  assert.equal(f.read(), undefined);
+});
+
 test('completed work automatically forms one personal document, updates idempotently, and is default context', t => {
   const f = fixture(t);
   f.save('alpha', 'First verified result');
@@ -143,7 +183,7 @@ test('only visible output after latest user contributes: thoughts, old answers a
   assert.equal(valid.completed, true);
   assert.doesNotMatch(JSON.stringify(valid), /HIDDEN|Previous result|private-key-value/);
 });
-for (const adapter of ['pi', 'codex-harness', 'opencode', 'claude', 'codex', 'qwen', 'dsh']) {
+for (const adapter of ['pi', 'codex-harness', 'opencode', 'codex', 'qwen', 'dsh']) {
   test(adapter + ': completed snapshot survives immediate close/new turn, is owner-scoped and reused without explicit selection', async t => {
     const f = fixture(t), handlers = new Map();
     const service = sessions.install({ app: f.app, ipcMain: { handle: (key, fn) => handlers.set(key, fn) }, identityOf: async () => identity('one') });

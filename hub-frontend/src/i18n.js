@@ -16,20 +16,39 @@ let locale = readLocale()
 
 // Accepts tags, not just the four exact values: `zh`, `ZH-hans-sg`, `zh_CN`,
 // `ja`, `ko` all resolve deterministically. ICU-dependent parsing is avoided so
-// results never depend on the host. Traditional tags map to zh-CN: simplified
-// copy is more readable than English for those users, and Traditional Chinese
-// should be a first-class locale in its own issue rather than a silent remap.
+// results never depend on the host. Traditional Chinese (zh-TW, zh-HK, zh-Hant)
+// falls back to zh-CN with an explicit `remapped` flag so the UI can inform
+// the user rather than silently changing the display language.
 export function normalizeLocale(value) {
   const raw = String(value || '').trim()
   if (LOCALES[raw]) return raw
   const tag = raw.replace(/_/g, '-').toLowerCase()
-  const [primary] = tag.split('-').filter(Boolean)
+  const [primary, region] = tag.split('-').filter(Boolean)
   if (primary === 'en') return 'en-US'
   if (primary === 'ja') return 'ja-JP'
   if (primary === 'ko' || primary === 'kr') return 'ko-KR'
-  // zh, zh-CN, zh-SG, zh-MY, zh-CHS, zh-Hans, zh-TW, zh-HK, zh-Hant…
+  // zh, zh-CN, zh-SG, zh-MY, zh-CHS, zh-Hans → zh-CN (no remap)
+  // zh-TW, zh-HK, zh-Hant → zh-CN (remapped)
   if (primary === 'zh') return SOURCE_LOCALE
   return FALLBACK
+}
+
+/** Return `{ locale, remapped }` so callers can show a fallback notice.
+ * `remapped` is true when the original tag was zh-TW, zh-HK or zh-Hant but
+ * no dedicated Traditional Chinese locale exists yet. */
+export function normalizeLocaleWithRemap(value) {
+  const raw = String(value || '').trim()
+  if (LOCALES[raw]) return { locale: raw, remapped: false }
+  const tag = raw.replace(/_/g, '-').toLowerCase()
+  const [primary, region] = tag.split('-').filter(Boolean)
+  if (primary === 'en') return { locale: 'en-US', remapped: false }
+  if (primary === 'ja') return { locale: 'ja-JP', remapped: false }
+  if (primary === 'ko' || primary === 'kr') return { locale: 'ko-KR', remapped: false }
+  if (primary === 'zh') {
+    const isTraditional = region === 'tw' || region === 'hk' || region === 'hant'
+    return { locale: SOURCE_LOCALE, remapped: isTraditional }
+  }
+  return { locale: FALLBACK, remapped: false }
 }
 function fallbackLocale(value) { return FALLBACKS[normalizeLocale(value)] || FALLBACK }
 

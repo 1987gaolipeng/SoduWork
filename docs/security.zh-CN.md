@@ -6,7 +6,7 @@
 
 涉及凭据泄露、权限绕过、任意代码执行或越权访问的问题，请不要在公开 Issue、Discussions 或 Discord 中披露可利用的细节。
 
-请通过 GitHub 私密漏洞报告提交：打开仓库的 **Security** 页，点击 **Report a vulnerability**（[直接打开](https://github.com/mdiri-ai/SoduWork/security/advisories/new)）。无法使用 GitHub 时，发邮件至 [soduwork@outlook.com](mailto:soduwork@outlook.com)，标题以 `[Security]` 开头。
+请通过 GitHub 私密漏洞报告提交：打开仓库的 **Security** 页，点击 **Report a vulnerability**（[直接打开](https://github.com/mdiri-ai/SoduWork/security/advisories/new)）。无法使用 GitHub 时，发邮件至 [security@soduwork.ai](mailto:security@soduwork.ai)，标题以 `[Security]` 开头。
 
 报告中请提供：受影响的版本、操作系统、部署方式、最小复现步骤、影响范围，以及脱敏后的日志。请在自己控制的隔离环境中验证，不要访问他人的工作区、执行机或数据，不要上传真实令牌、密码、数据库或完整的用户会话。
 

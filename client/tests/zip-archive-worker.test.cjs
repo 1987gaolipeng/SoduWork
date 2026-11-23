@@ -45,6 +45,35 @@ test('worker excludes junctions/dependencies and propagates missing, empty and s
   await assert.rejects(archive.createZipAsync(root), /24 MB/);
 });
 
+test('worker includes files at the depth boundary and rejects deeper folders explicitly', async t => {
+  const root = fixture(t);
+  const boundary = path.join(root, ...Array.from({ length: 12 }, (_, i) => 'level-' + i));
+  fs.mkdirSync(boundary, { recursive: true });
+  fs.writeFileSync(path.join(root, 'index.html'), '<h1>site</h1>');
+  fs.writeFileSync(path.join(boundary, 'required.js'), 'window.fixtureLoaded = true;');
+  const complete = await archive.createZipAsync(root);
+  assert.equal(complete.files, 2);
+  assert.equal(complete.website, true);
+  const deeper = path.join(boundary, 'deeper');
+  fs.mkdirSync(deeper);
+  fs.writeFileSync(path.join(deeper, 'required.js'), 'must not be silently omitted');
+  await assert.rejects(archive.createZipAsync(root), /nested more than 12 levels/);
+});
+
+test('native folder picker reports a depth failure instead of a successful incomplete website', async t => {
+  const root = fixture(t);
+  const deeper = path.join(root, ...Array.from({ length: 13 }, (_, i) => 'level-' + i));
+  fs.mkdirSync(deeper, { recursive: true });
+  fs.writeFileSync(path.join(root, 'index.html'), '<h1>site</h1>');
+  fs.writeFileSync(path.join(deeper, 'required.js'), 'must not be silently omitted');
+  const handler = createPickFolderHandler({ BrowserWindow: { fromWebContents: () => null },
+    dialog: { showOpenDialog: async () => ({ filePaths: [root] }) }, shareArchive: archive });
+  const result = await handler({ sender: {} });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /nested more than 12 levels/);
+  assert.equal(result.data, undefined);
+});
+
 function controlledPool() {
   const workers = [];
   class Worker extends EventEmitter {

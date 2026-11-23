@@ -1,13 +1,15 @@
 """Native terminal evidence must survive zero exits and the ACP translation."""
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from app.services import local_base, local_stream, local_turn_outcome, opencode_turn_outcome as outcome
+from app.services import acp_bridge as bridge, local_base, local_stream, local_turn_outcome, opencode_turn_outcome as outcome
 
 
 class OpenCodeTurnOutcomeTests(unittest.TestCase):
@@ -25,7 +27,10 @@ class OpenCodeTurnOutcomeTests(unittest.TestCase):
 
     def test_zero_exit_with_partial_text_is_failed_without_replaying_tools(self):
         with tempfile.TemporaryDirectory(prefix="soduwork-opencode-settle-") as folder:
-            for reason in ("length", "max_tokens", "stop"):
+            for reason, cleanup_error in (
+                ("length", ""), ("max_tokens", ""), ("stop", ""),
+                ("length", "Execution host did not exit"),
+            ):
                 ref = "opencode-fixture-" + reason
                 run = {"state": "running", "cli": "opencode", "ws": folder,
                        "seq": 0, "lines": [], "cfg": {}, "artifactMode": "files",
@@ -38,9 +43,12 @@ class OpenCodeTurnOutcomeTests(unittest.TestCase):
                                       {"type": "step_finish", "part": {"reason": reason}}):
                             local_stream._on_line(ref, json.dumps(event), terminal)
                         with patch.object(local_stream, "_resume") as resume:
-                            local_stream._finish(ref, 0, terminal, "")
+                            local_stream._finish(ref, 0, terminal, cleanup_error)
                     self.assertEqual(run["state"], "done" if reason == "stop" else "failed")
-                    if reason != "stop":
+                    if cleanup_error:
+                        self.assertNotEqual(run.get("failureKind"), "execution_incomplete")
+                        self.assertEqual(run["error"], cleanup_error)
+                    elif reason != "stop":
                         self.assertEqual(run["failureKind"], "execution_incomplete")
                         self.assertEqual(run["error"], local_turn_outcome.TRUNCATED)
                     resume.assert_not_called()
@@ -177,6 +185,106 @@ if (process.env.SODUWORK_OPENCODE_OUTCOME) throw Error('channel leaked to tools'
         from app.services import runner_sources
         backend = Path(__file__).resolve().parent
         self.assertIn(Path(outcome.__file__), runner_sources.build_inputs(backend, backend.parent))
+
+
+class OpenCodeBridgeOutcomeTests(unittest.TestCase):
+    def setUp(self):
+        environment = patch.dict(os.environ, {
+            'SODUWORK_APPROVAL_CHANNEL': '', bridge.runtime_images.ENV_KEY: '',
+        })
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def fixture(self, folder, rpc_reason, native_reason, protocol_error=False):
+        acp = bridge.AcpBridge([], folder, 'opencode', 'workspace', session_id='saved-opencode')
+        native = outcome.Observer()
+        self.addCleanup(native.close)
+        acp.outcome = native
+        prompts = []
+
+        def marker(kind, **fields):
+            native.consume(outcome.PREFIX + json.dumps({
+                'token': native.token, 'kind': kind, 'invocation': native.invocation, **fields}))
+
+        marker('ready')
+
+        def request(method, params):
+            if method == 'initialize':
+                return {'protocolVersion': 1, 'agentCapabilities': {'loadSession': True}}
+            self.assertEqual(params['sessionId'], 'saved-opencode')
+            if method == 'session/load':
+                return {}
+            self.assertEqual(method, 'session/prompt')
+            prompts.append(params['prompt'][0]['text'])
+            self.assertEqual(len(prompts), 1, 'OpenCode must not automatically replay or continue the prompt')
+            if protocol_error:
+                raise bridge.BridgeError('Fixture ACP protocol rejected the prompt')
+            if native_reason is not None:
+                marker('begin', sid='saved-opencode', user='current-user')
+                marker('end', sid='saved-opencode', user='current-user', reason=native_reason)
+            return {'stopReason': rpc_reason}
+
+        return acp, request, prompts
+
+    def test_run_and_main_preserve_native_outcomes_without_automatic_continuation(self):
+        cases = [('end_turn', 'length', 2), ('end_turn', 'max_tokens', 2),
+                 ('end_turn', 'stop', 0), ('max_tokens', None, 2)]
+        for entry in ('run', 'main'):
+            for rpc_reason, native_reason, expected in cases:
+                with self.subTest(entry=entry, rpc_reason=rpc_reason, native_reason=native_reason), \
+                        tempfile.TemporaryDirectory() as folder:
+                    acp, request, prompts = self.fixture(folder, rpc_reason, native_reason)
+                    args = SimpleNamespace(agent=['fixture'], cwd=folder, agent_name='opencode',
+                                           permission='workspace', session='saved-opencode', terminal=False)
+                    output = io.StringIO()
+                    with patch.object(acp, 'start'), patch.object(acp, 'request', side_effect=request), \
+                            patch.object(acp.access, 'apply'), \
+                            patch.object(bridge.opencode_model_selection, 'apply_model'), \
+                            patch.object(bridge, '_parse', return_value=args), \
+                            patch.object(bridge, '_utf8_stdio'), patch.object(bridge, 'AcpBridge', return_value=acp), \
+                            patch.object(bridge.sys, 'stdin', io.StringIO('Original synthetic task')), \
+                            patch.object(bridge.sys, 'stdout', output), \
+                            patch.object(acp.outcome, 'finish', wraps=acp.outcome.finish) as finish, \
+                            patch.object(acp, 'close', wraps=acp.close) as close:
+                        code = bridge.main() if entry == 'main' else acp.run('Original synthetic task')
+                        self.assertEqual(code, expected)
+                    self.assertEqual(prompts, ['Original synthetic task'])
+                    events = [json.loads(line) for line in output.getvalue().splitlines()]
+                    self.assertFalse(any(event.get('error') for event in events))
+                    self.assertEqual([event['part']['reason'] for event in events
+                                      if event.get('type') == 'step_finish'], [native_reason or rpc_reason])
+                    if native_reason is None:
+                        finish.assert_not_called()
+                    else:
+                        finish.assert_called_once_with()
+                    self.assertEqual(close.call_count, 1 if entry == 'main' else 0)
+
+    def test_genuine_acp_protocol_failure_still_raises_and_main_reports_it(self):
+        for entry in ('run', 'main'):
+            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as folder:
+                acp, request, prompts = self.fixture(folder, 'end_turn', None, protocol_error=True)
+                args = SimpleNamespace(agent=['fixture'], cwd=folder, agent_name='opencode',
+                                       permission='workspace', session='saved-opencode', terminal=False)
+                output = io.StringIO()
+                with patch.object(acp, 'start'), patch.object(acp, 'request', side_effect=request), \
+                        patch.object(acp.access, 'apply'), patch.object(bridge.opencode_model_selection, 'apply_model'), \
+                        patch.object(bridge, '_parse', return_value=args), patch.object(bridge, '_utf8_stdio'), \
+                        patch.object(bridge, 'AcpBridge', return_value=acp), \
+                        patch.object(bridge.sys, 'stdin', io.StringIO('Original synthetic task')), \
+                        patch.object(bridge.sys, 'stdout', output), \
+                        patch.object(acp, 'close', wraps=acp.close) as close:
+                    if entry == 'main':
+                        self.assertEqual(bridge.main(), 2)
+                    else:
+                        with self.assertRaisesRegex(bridge.BridgeError, 'Fixture ACP protocol rejected the prompt'):
+                            acp.run('Original synthetic task')
+                self.assertEqual(prompts, ['Original synthetic task'])
+                events = [json.loads(line) for line in output.getvalue().splitlines()]
+                self.assertFalse(any(event.get('type') == 'step_finish' for event in events))
+                errors = [event['error'] for event in events if event.get('error')]
+                self.assertEqual(errors, [{'name': 'AcpBridgeError',
+                                          'message': 'Fixture ACP protocol rejected the prompt'}] if entry == 'main' else [])
+                self.assertEqual(close.call_count, 1 if entry == 'main' else 0)
 
 
 if __name__ == "__main__":

@@ -16,23 +16,35 @@ Update both the Hub and desktop client and apply the database migration for this
 
 ## What a connection test proves
 
-**Save and test connection** first reads the provider’s model list. A successful list request verifies only that endpoint: it does not prove that chat generation is authorized, that a billing balance is available, or that the selected Agent supports the protocol. If discovery is unavailable, the test can send a minimal chat request, which may incur usage. The result states which probe succeeded.
+In the web admin console, open **Model catalog → Connect a service** to set up an organization model service. **Test connection** reads the provider’s model list using the form values before you save. A successful response can contain zero models. After saving, choose **Add first model** on the configured service card to add a model by ID. For daily summaries and legacy execution, open **Expand overview → Catalog configuration → Organization defaults (legacy)**.
+
+On the desktop, **Save and test connection** first reads the provider’s model list. A successful list request verifies only that endpoint: it does not prove that chat generation is authorized, that a billing balance is available, or that the selected Agent supports the protocol. If discovery is unavailable, the test can send a minimal chat request, which may incur usage. The result states which probe succeeded.
 
 The current managed chat gateway uses OpenAI-compatible endpoints. An Anthropic provider can remain configured for an Agent that supports it, but a successful Anthropic connection test does not make it compatible with this gateway. The model editor and managed model picker show this boundary before execution. Changing only the protocol selector does not convert a provider endpoint; use the corresponding address and key supplied by the provider.
 
 ## Model capability checks
 
+In the desktop **My models** page, save the service first, then fill in the model form and click **Add model**. This button saves only the new model. Use **Save** at the top of the page to commit pending edits to the service name, address or key.
+
+Adding a chat model on the desktop or saving a new chat model in the web **Model catalog** starts a background capability check using the saved settings of a configured, enabled OpenAI-compatible service. When you add several models together, the eligible models are checked one at a time. Reopening the catalog reuses the saved report. You can run **Check capabilities** again from the model row.
+
 **Check capabilities** tests the exact saved model with small real generation requests. It verifies a text reply, digits read from a generated image, a streamed synthetic function call followed by a safe tool-result reply, and a complete streamed text reply. It never executes a system tool. These requests may incur provider usage. Model-list discovery is separate and cannot establish these capabilities.
 
 Automatic checks currently cover the OpenAI-compatible Chat Completions API. Other protocol families remain unconfirmed; a protocol label or model name does not establish support. Limited compatibility negotiation applies only to explicitly rejected optional parameters. A successful check describes this endpoint, credential, model and request configuration; it cannot establish support for another API family or every Agent runtime.
 
-The badges distinguish manual declarations from verified results. Manual declarations take precedence; a disagreement with a conclusive check is shown as a conflict. The latest attempt and the last conclusive result are retained separately: a timeout, network error, incomplete stream or cancellation does not turn earlier verified support into “unsupported.” You can cancel a local check, and closing the model panel also cancels it. Requests have time, size and retry limits.
+The badges distinguish manual declarations from verified results. Manual declarations take precedence; a disagreement with a conclusive check is shown as a conflict. The report records the latest attempt. An inconclusive attempt preserves earlier verified support. With automatic image routing, once the model has successfully read an image, chat can still send it images if a later probe rejects image input on the same configuration. The report shows the rejection and the date of the successful check. For tools and streaming, an explicit rejection updates the capability to unsupported. You can cancel a local check, and closing the model panel also cancels it. Requests have time, size and retry limits.
 
 Older tool-calling and streaming results need a new check because they did not verify the complete streamed tool exchange or stream completion required by the current checks, and could confuse rejected optional parameters with an unsupported capability. Manual declarations and still-applicable image results are retained.
 
 Changing the endpoint, credential, model ID, protocol or request policy invalidates the matching evidence and cancels obsolete checks. Renaming a label, changing a note or editing a manual capability declaration preserves the evidence. Device-local results are encrypted on that device; local credentials and local capability probes are not forwarded to the Hub. Reopening the application restores matching results. If encrypted evidence cannot be read, the model catalog remains available with unconfirmed capabilities; rechecking rebuilds the evidence store and retains a backup of unreadable encrypted data.
 
 The runtime uses the resulting native-image route, output limit and supported compatibility options. Pi requires streaming, and operations that explicitly require tools reject models declared or verified as lacking that capability. Unknown capabilities retain the existing execution behavior. A change applies to later model selections or turns, without changing an already running request. Provider and runtime acceptance should still be verified with the intended deployment before rollout.
+
+## When a tool finishes and the model rejects the next request
+
+In a Pi conversation using an OpenAI-compatible chat completions service, the model can accept an ordinary message and return HTTP 403 when it receives a tool result. Open the failed request details in the conversation to check which model and request stage were involved. A capability check for the saved model tests ordinary text, streaming and a synthetic tool exchange. For a company model, ask the administrator to run the check if you lack access.
+
+If the conversation offers **Switch model and summarize results**, select another chat model and use that action to summarize the confirmed outputs and remaining work. The summary runs without tools. Files already written and the original task outcome are preserved. For a Hub-routed request, this action requires a Hub version that identifies generic upstream rejections. Explicit permission and policy refusals remain blocked.
 
 ## Zhipu GLM endpoints and error 1113
 

@@ -58,10 +58,10 @@ test('desk visibility follows the preference only', () => {
   const settings = read('components', 'settings', 'settings.js');
   const pet = settings.slice(settings.indexOf('function applyPetVisible'), settings.indexOf('function applyDockVisible'));
   /* Pet visibility follows the persisted preference. */
-  assert.ok(pet.includes('cfg.petVisible !== false'), '球显隐只认偏好');
+  assert.ok(pet.includes('cfg.petVisible === true'), '球显隐只认偏好');
   assert.doesNotMatch(pet, /_deskTransient/, '球显隐不得认会话覆盖');
   const dock = read('components', 'pet', 'pet-dock.js');
-  assert.ok(dock.includes('cfg.dockVisible === false || cfg.tasksOn === false'),
+  assert.ok(dock.includes('cfg.dockVisible !== true || cfg.tasksOn === false'),
     '竖条显隐只认偏好');
   assert.doesNotMatch(dock, /_deskTransient/, '竖条显隐不得认会话覆盖');
 });
@@ -104,7 +104,6 @@ test('mac dock icon click reveals a minimized workspace, but pet-driven activati
     '主窗口不得再做任何跨 Space 集合行为（全住第一个桌面）');
   assert.match(main, /app\.on\('activate'[\s\S]*?return;[\s\S]*?BrowserWindow\.getAllWindows\(\)\.length === 0\) \{[\s\S]*?_desktopOverlay\.createWindow\(\);/,
     'Windows 上 activate 原行为必须保留（darwin 分支后不可提前改写）');
-  assert.match(main, /second-instance[\s\S]*?process\.platform === 'darwin'[\s\S]*?openDeskWindow\(\{ panel: 'workspace' \}, null\)/);
 });
 
 test('settings keeps an explicit quick dock visibility control', () => {
@@ -114,6 +113,60 @@ test('settings keeps an explicit quick dock visibility control', () => {
   assert.match(html, /快捷竖条/);
   assert.match(settings, /cfg\.dockVisible = dv\.checked/);
   assert.match(settings, /applyDockVisible\(\)/);
+  for (const id of ['dockVisibleChk', 'petVisibleChk']) {
+    const input = html.match(new RegExp('<input[^>]*id="' + id + '"[^>]*>'))?.[0];
+    assert.ok(input);
+    assert.doesNotMatch(input, /\bchecked\b/);
+  }
+  assert.match(html, /id="trayVisibleChk" checked/);
+  assert.match(read('index.html'), /id="pet" style="display:none"/);
+});
+
+function deskFlagsFixture(raw, errorCode = 'ENOENT') {
+  const writes = [], exported = { exports: {} };
+  vm.runInNewContext(read('main', 'desk-flags.js'), {
+    module: exported, console: { warn() {} },
+    require: name => name === 'path' ? path : name === 'electron' ? { app: { getPath: () => '/isolated/profile' } } : {
+      readFileSync: () => { if (raw !== undefined) return raw; throw Object.assign(Error('missing'), { code: errorCode }); },
+      writeFileSync: (_file, value) => writes.push(JSON.parse(value)),
+    },
+  });
+  return { flags: exported.exports, writes };
+}
+
+test('native startup hides missing widget flags and preserves saved visibility choices', () => {
+  for (const raw of [undefined, '{}', '{invalid', 'null']) {
+    const f = deskFlagsFixture(raw);
+    assert.deepEqual(JSON.parse(JSON.stringify(f.flags.all())), { dock: false, pet: false, tray: true });
+    assert.deepEqual(f.writes, [], 'reading defaults must not rewrite saved preferences');
+  }
+  for (const saved of [{ dock: true, pet: true, tray: false }, { dock: false, pet: true, tray: true },
+    { dock: true, pet: false, tray: true }, { dock: false, pet: false, tray: false }]) {
+    const f = deskFlagsFixture(JSON.stringify(saved));
+    assert.deepEqual(JSON.parse(JSON.stringify(f.flags.all())), saved);
+    assert.equal(f.flags.merge(saved).changed, false);
+    assert.deepEqual(f.writes, []);
+    const next = f.flags.merge({ pet: !saved.pet });
+    assert.equal(next.flags.pet, !saved.pet);
+    assert.equal(next.flags.dock, saved.dock);
+    assert.equal(next.flags.tray, saved.tray);
+  }
+});
+
+test('renderer reports hidden widget defaults and explicit saved choices to the native cache', () => {
+  const bridge = read('core', 'win-bridge.js');
+  const start = bridge.indexOf('function reportFlags()');
+  const source = bridge.slice(start, bridge.indexOf('/* Apply tray preference broadcasts', start));
+  for (const [cfg, expected] of [[{}, { dock: false, pet: false, tray: true }],
+    [{ dockVisible: true, petVisible: true, trayVisible: false }, { dock: true, pet: true, tray: false }],
+    [{ dockVisible: false, petVisible: false }, { dock: false, pet: false, tray: true }]]) {
+    let reported;
+    const context = { Store: { _cfg: cfg }, soduWorkAPI: { reportDeskFlags: flags => { reported = flags; } } };
+    context.global = context;
+    vm.runInNewContext(source, context);
+    context.reportFlags();
+    assert.deepEqual(JSON.parse(JSON.stringify(reported)), expected);
+  }
 });
 
 test('workspace loads recent chats on first mount without opening create', () => {

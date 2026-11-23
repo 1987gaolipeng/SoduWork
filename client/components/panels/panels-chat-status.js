@@ -18,8 +18,9 @@
     const detail = http ? http[1] : source;
     // Only our finite, sanitized model diagnostics have this catalog prefix.
     // Unknown provider text must not be translated as an ordinary UI label.
-    const key = 'model.detail.' + detail, translated = tx(key);
-    if (translated === key) return source;
+    const key = 'model.detail.' + detail;
+    const translated = global.SoduWorkI18n?.t?.(key, '');
+    if (!translated || translated === key) return source;
     return http ? tx('{reason}（HTTP {status}）').replace('{reason}', () => translated)
       .replace('{status}', () => http[2]) : translated;
   }
@@ -28,15 +29,17 @@
     const source = String(value || '');
     const locale = global.SoduWorkI18n?.getLocale?.() || 'zh-CN';
     if (locale === 'zh-CN') return source;
+    const diagnostic = modelDiagnostic(source);
+    if (diagnostic !== source) return diagnostic;
     // Localize system-owned status envelopes only; model replies and user names stay untouched.
     const interrupted = source.match(/^模型服务在回答过程中中断了这一轮(?:（([\s\S]*)）)?。(?:已自动重试 (\d+) 次。)?已有内容和工具结果已保留，(可恢复这一轮继续|请检查模型服务或配置后再继续)。$/);
-    if (interrupted && locale === 'en-US') return [
+    if (interrupted) return [
       interrupted[1] ? tx('模型服务在回答过程中中断了这一轮（{reason}）。')
         .replace('{reason}', () => modelDiagnostic(interrupted[1])) : tx('模型服务在回答过程中中断了这一轮。'),
       interrupted[2] ? tx('已自动重试 {count} 次。').replace('{count}', () => interrupted[2]) : '',
       tx('已有内容和工具结果已保留，' + interrupted[3] + '。'),
     ].filter(Boolean).join(' ');
-    const wrapped = source.match(/^(这一轮没发出去|打不开对话|开不了对话|需求执行失败)（([\s\S]*)）$/);
+    const wrapped = source.match(/^(这一轮没发出去|这一轮没跑成|打不开对话|开不了对话|需求执行失败)（([\s\S]*)）$/);
     if (wrapped) return tx(wrapped[1] + '（{reason}）').replace('{reason}', () => notice(wrapped[2]));
     const patterns = [
       ['当前会话没有授权', '请新建会话并开启对应能力后再使用这个插件', true],
@@ -109,6 +112,18 @@
     const snap = snapshot || {};
     const execution = snap.execution || {};
     if (!pending && waiting(snap)) return notice(snap.statusText || execution.controlled?.reason || '等待输入');
+    if (snap.status === 'queued') {
+      const position = Math.max(0, Number(execution.queuePosition || 0));
+      const reported = String(snap.statusText || '').trim();
+      // Preserve reported queue diagnostics ahead of stale output or an
+      // optimistic draft. Only the standard position label is reconstructed.
+      if (reported && !(position > 0 && /^排队中(?:\s*·\s*(?:第|前面)\s*\d+\s*项)?$/.test(reported)))
+        return notice(reported);
+      return tx('排队中') + (position > 0 ? ' · ' + tx('第 {count} 项').replace('{count}', () => String(position)) : '');
+    }
+    if (!pending && waitingForStart(snap)) return Number(execution.startupWaitSince) > 0 &&
+      Date.now() - Number(execution.startupWaitSince) >= 90000
+      ? tx('执行环境启动时间较长，可停止后检查底座状态') : tx('等待启动');
     const harness = execution.harness || {};
     if (snap.modelRetry && snap.modelRetry.active) {
       const remaining = Math.ceil((Number(snap.modelRetry.retryAt) - Date.now()) / 1000);
@@ -169,6 +184,10 @@
   function waiting(snapshot) {
     return snapshot?.status === 'waiting-user' || Boolean(snapshot?.pendingUi ||
       snapshot?.pendingPermissions?.length || snapshot?.execution?.waitingPermission);
+  }
+
+  function waitingForStart(snapshot) {
+    return snapshot?.status === 'queued' || snapshot?.execution?.waitingForStart === true;
   }
 
   function runtimeBusy(snapshot, pending, pendingSentAt) {
@@ -382,6 +401,22 @@
     }
     function elapsedMs() {
       const current = state();
+      const execution = current.snap?.execution || {};
+      if (!current.pending && execution.configured && current.snap?.taskGoal &&
+          Number.isFinite(execution.elapsedMs)) {
+        // Goal budgets accumulate across native turns. A new process start
+        // must not replace the elapsed time acknowledged for earlier turns.
+        const since = Number(execution.elapsedObservedAt || 0);
+        return Math.max(0, execution.elapsedMs) + (execution.running && since > 0
+          ? Math.max(0, Date.now() - since) : 0);
+      }
+      if (!current.pending && typeof execution.executionStartedAt === 'number') {
+        if (execution.executionStartedAt <= 0) return 0;
+        // Runner admission time is not model execution time. An authoritative
+        // start replaces the optimistic submit clock, including after restore.
+        return execution.running ? Math.max(0, Date.now() - execution.executionStartedAt)
+          : Math.max(0, Number(execution.elapsedMs) || 0);
+      }
       if (!current.pending && waiting(current.snap)) return snapshotElapsedMs();
       const completed = completedElapsedMs(current);
       if (current.snap?.execution?.cloud && !current.pending && snapshotElapsedMs() === null) return null;
@@ -408,7 +443,7 @@
       const base = String(baseText == null
         ? (typeof current.workStatus === 'function' ? current.workStatus() : work(current.snap, current.pending, current.ref))
         : baseText).trim();
-      if (!current.pending && waiting(current.snap)) return base;
+      if (current.snap?.status === 'queued' || !current.pending && (waiting(current.snap) || waitingForStart(current.snap))) return base;
       if (Number(elapsed || 0) < 12000) return base;
       const slot = Math.floor((Number(elapsed || 0) - 12000) / 14000);
       const promo = tx(promos[slot % promos.length]);
@@ -424,8 +459,16 @@
       copy.classList.remove('swap');
     }
     function metricsHtml(busy) {
+      const current = state();
+      if (current.snap?.status === 'queued' || !current.pending && waitingForStart(current.snap)) {
+        const label = current.snap.status === 'queued' ? '排队中' : '等待启动';
+        return '<div data-chat-node="turn-metrics" class="nturn-metrics" aria-label="' + escape(tx('当前工作统计')) + '">' +
+          '<span class="nstatus-metric"><span data-thinking-label>' + tx(label) + '</span> ' +
+          '<b data-thinking-elapsed>' + elapsedText(queueElapsedMs(current)) + '</b></span></div>';
+      }
       const tokens = tokenInfo();
-      const label = busy ? '处理中' : '已处理';
+      const failed = ['failed', 'unreachable', 'no-output', 'incomplete'].includes(current.snap?.status);
+      const label = busy ? '处理中' : failed ? '执行失败' : '已处理';
       return '<div data-chat-node="turn-metrics" class="nturn-metrics" aria-label="' + escape(tx('当前工作统计')) + '">' +
         '<span class="nstatus-metric"><span data-thinking-label>' + tx(label) + '</span> ' +
         '<b data-thinking-elapsed>' + elapsedText(elapsedMs()) + '</b></span><span class="nstatus-divider">·</span>' +
@@ -433,6 +476,13 @@
         '<span data-thinking-estimate' + (tokens.estimated ? '' : ' hidden') + ' aria-label="估算">≈</span>' +
         '<b data-thinking-tokens>' + (tokens.known || tokens.initial ? tokenText(tokens.value) : '—') +
         '</b><em>tokens</em></span></div>';
+    }
+    function queueElapsedMs(current) {
+      const execution = current.snap?.execution || {};
+      if (current.snap?.status !== 'queued' && Number(execution.startupWaitSince) > 0)
+        return Math.max(0, Date.now() - Number(execution.startupWaitSince));
+      if (Number(execution.submittedAt) > 0) return Math.max(0, Date.now() - Number(execution.submittedAt));
+      return typeof execution.queueWaitMs === 'number' ? Math.max(0, execution.queueWaitMs) : null;
     }
     function statusHtml(busy) {
       const current = state();
@@ -461,7 +511,8 @@
       const status = doc && doc.querySelector('#nchatList [data-chat-node="runtime-status"]');
       if (!thinkingStartedAt) return;
       const metrics = doc && doc.querySelector('#nchatList [data-chat-node="turn-metrics"]');
-      const elapsed = elapsedMs();
+      const elapsed = current.snap?.status === 'queued' || !current.pending && waitingForStart(current.snap)
+        ? queueElapsedMs(current) : elapsedMs();
       const elapsedNode = metrics?.querySelector('[data-thinking-elapsed]');
       const tokenNode = metrics?.querySelector('[data-thinking-tokens]');
       const tokens = tokenInfo();
@@ -470,7 +521,7 @@
       if (elapsedNode) elapsedNode.textContent = elapsedText(elapsed);
       if (tokenNode) tokenNode.textContent = tokens.known || tokens.initial ? tokenText(tokens.value) : '—';
       const statusCopy = status?.querySelector('.nstatus-copy');
-      if (statusCopy && !((current.snap && current.snap.execution) || {}).stalled) {
+      if (statusCopy && (!((current.snap && current.snap.execution) || {}).stalled || waitingForStart(current.snap))) {
         statusCopy.textContent = displayText(elapsed);
       }
     }
@@ -522,7 +573,7 @@
     function refreshSlowStatus() {
       const current = state();
       const execution = (current.snap && current.snap.execution) || {};
-      if (!execution.stalled) return;
+      if (!execution.stalled || waitingForStart(current.snap)) return;
       const slot = Math.floor(Date.now() / 14000);
       if (slot === slowStatusSlot) return;
       slowStatusSlot = slot;
@@ -537,7 +588,7 @@
       copy.classList.add('swap');
     }
     function syncSlowStatusTicker(active) {
-      if (!active) { stopSlowStatusTicker(); return; }
+      if (!active || waitingForStart(state().snap)) { stopSlowStatusTicker(); return; }
       if (slowStatusTimer) return;
       slowStatusSlot = Math.floor(Date.now() / 14000);
       slowStatusTimer = setInterval(refreshSlowStatus, 1200);

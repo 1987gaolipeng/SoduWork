@@ -1,10 +1,21 @@
 /* Agent Management surfaces: drawer, install/update/uninstall/check jobs,
  * live probes and their logs. Keys are the exact Chinese phrases the backend
- * (hub-backend/app/services/agent_setup*.py, harness2_probe.py, dsh_runtime.py,
- * harness2_runtime.py, managed_agents.py, agent_npm_*.py, agent_codex_install.py,
  * cli_account_auth.py, codex_runtime_home.py) and the client panel compose. */
 (function (global) {
   const messages = {
+    "已检测到 DeepSeek Harness App。安装 dsh-acp 适配器后即可配置执行。": "DeepSeek Harness App detected. Install the dsh-acp adapter to configure it for tasks.",
+    "缺少适配器": "Adapter missing",
+    "安装适配器": "Install adapter",
+    "未找到命令行适配器 dsh-acp。": "The dsh-acp command-line adapter was not found.",
+    "如果你已安装 DeepSeek Harness App，还需安装命令行适配器，SoduWork 才能调用它。": "If you already have the DeepSeek Harness App, install the command-line adapter so SoduWork can run DeepSeek Harness.",
+    "无法确认 DeepSeek Harness 所选 Node 的平台和架构": "Unable to verify the platform and architecture of the Node runtime selected for DeepSeek Harness.",
+    "无法确认 DeepSeek Harness 所选 Node 的 Linux libc": "Unable to verify the Linux libc of the Node runtime selected for DeepSeek Harness.",
+    "DeepSeek Harness 运行时清单不完整：无法确认 DeepSeek Harness 所选 Node 的平台和架构": "The DeepSeek Harness runtime manifest is incomplete: Unable to verify the platform and architecture of the Node runtime selected for DeepSeek Harness.",
+    "DeepSeek Harness 运行时清单不完整：无法确认 DeepSeek Harness 所选 Node 的 Linux libc": "The DeepSeek Harness runtime manifest is incomplete: Unable to verify the Linux libc of the Node runtime selected for DeepSeek Harness.",
+    "DeepSeek Harness 运行时准备失败：无法确认 DeepSeek Harness 所选 Node 的平台和架构": "DeepSeek Harness runtime preparation failed: Unable to verify the platform and architecture of the Node runtime selected for DeepSeek Harness.",
+    "DeepSeek Harness 运行时准备失败：无法确认 DeepSeek Harness 所选 Node 的 Linux libc": "DeepSeek Harness runtime preparation failed: Unable to verify the Linux libc of the Node runtime selected for DeepSeek Harness.",
+    "DeepSeek Harness 运行时准备失败：DeepSeek Harness 运行时清单不完整：无法确认 DeepSeek Harness 所选 Node 的平台和架构": "DeepSeek Harness runtime preparation failed. The runtime manifest is incomplete: Unable to verify the platform and architecture of the Node runtime selected for DeepSeek Harness.",
+    "DeepSeek Harness 运行时准备失败：DeepSeek Harness 运行时清单不完整：无法确认 DeepSeek Harness 所选 Node 的 Linux libc": "DeepSeek Harness runtime preparation failed. The runtime manifest is incomplete: Unable to verify the Linux libc of the Node runtime selected for DeepSeek Harness.",
     /* ---- job headers & generic job lines ---- */
     "正在修复安装": "Repairing installation",
     "修复未完成": "Repair incomplete",
@@ -93,17 +104,7 @@
     "这个不用配": "Nothing to configure here",
     "还没有能用的模型——先去「我的模型」配一把 key": "No usable model yet — add a key under \"My Models\" first",
     "配好了": "Configured",
-    /* ---- harness2_probe.py ---- */
-    "② 验证 Harness² 日常执行与完整回复；会使用所选模型额度，最多 3 分钟。": "② Verifying Harness² everyday execution and a full reply; uses the selected model's quota, up to 3 minutes.",
-    "收到执行回复，但尚未确认 Harness² 日常执行完整结束，请点「测一下」重试。": "Got an execution reply, but a complete Harness² everyday run is not confirmed yet. Click \"Test\" to retry.",
     "上次测试尚未验证当前日常执行路径；请点「测一下」重新验证。": "The previous test did not verify the current everyday execution path; click \"Test\" to verify again.",
-    "通了 —— Google Harness² {value1} 日常执行已完整结束，口令对上了。": "It works — Google Harness² {value1} completed a full everyday run and the passphrase matched.",
-    /* ---- harness2_runtime.py ---- */
-    "Google Harness² 内置核心缺失，请更新或修复 SoduWork。": "The Google Harness² built-in core is missing; update or repair SoduWork.",
-    "Google Harness² 需要 OpenCode 执行组件，请点「装上」自动准备。": "Google Harness² needs the OpenCode runtime component; click \"Install\" to prepare it automatically.",
-    "Google Harness² 的 OpenCode 执行组件无法启动，请点「装上」修复。": "The OpenCode runtime component for Google Harness² will not start; click \"Install\" to repair.",
-    "Google Harness² 没有可用模型，请先配置或授权模型。": "Google Harness² has no usable model; configure or authorize a model first.",
-    "Google Harness² 当前支持 OpenAI 兼容或 Anthropic 模型接口。": "Google Harness² currently supports OpenAI-compatible or Anthropic model interfaces.",
     /* ---- dsh_runtime.py ---- */
     "当前 Windows CPU 架构尚不受 DeepSeek Harness 支持": "This Windows CPU architecture is not yet supported by DeepSeek Harness",
     "内置运行时没有锁定 {value1} 的完整版本与校验值": "The built-in runtime has no pinned full version and checksum for {value1}",
@@ -113,6 +114,7 @@
     "请在 Agent 管理的 DeepSeek Harness 卡片上点「修复安装」。": "Click \"Repair installation\" on the DeepSeek Harness card in Agent Management.",
     "DeepSeek Harness 运行时清单不完整：": "The DeepSeek Harness runtime manifest is incomplete: ",
     "DeepSeek Harness 的 Windows 原生组件不完整（缺少 {value1}）。": "The Windows native components of DeepSeek Harness are incomplete (missing {value1}).",
+    "DeepSeek Harness 的当前平台原生组件不完整（缺少或损坏 {value1}）。": "The native components of DeepSeek Harness for this platform are incomplete (missing or damaged {value1}).",
     "DeepSeek Harness 存储兼容组件缺失，请更新 SoduWork": "The DeepSeek Harness storage compatibility component is missing; update SoduWork",
     "DeepSeek Harness 收到无效权限模式": "DeepSeek Harness received an invalid permission mode",
     "DeepSeek Harness 运行时临时目录必须与工作目录隔离，请调整工作目录或 Runner 数据目录": "The DeepSeek Harness runtime temp directory must be separate from the working directory; adjust the working directory or the Runner data directory",
@@ -138,7 +140,6 @@
     "DeepSeek Harness 启动自检失败：": "The DeepSeek Harness startup self-check failed: ",
     "DeepSeek Harness 可执行文件不存在，请重新安装。": "The DeepSeek Harness executable does not exist; reinstall it.",
     /* ---- managed_agents.py ---- */
-    "所选 Linux 执行机的 CPU 缺少 {value1} 指令集，无法运行 OpenCode 及依赖它的 Harness²。请选择兼容的执行机，或由管理员调整该虚拟机的 CPU 配置。": "The CPU of the selected Linux machine lacks the {value1} instruction set, so it cannot run OpenCode or Harness² which depends on it. Choose a compatible machine, or have an administrator adjust that VM's CPU configuration.",
     "第 {value1} 次下载失败：{value2}，准备重试": "Download attempt {value1} failed: {value2}; retrying",
     "SoduWork 管理的 OpenCode 已移除；系统中独立安装的版本未受影响。": "The SoduWork-managed OpenCode has been removed; any independently installed copy on the system is untouched.",
     "SoduWork 将安装固定版本 {value1}，并自动准备执行依赖。": "SoduWork will install pinned version {value1} and prepare the runtime dependencies automatically.",

@@ -11,7 +11,7 @@ function body(app) {
   const root = app.isPackaged ? path.join(process.resourcesPath, 'skills/app-developer') : path.resolve(__dirname, '../../skills/app-developer');
   const resource = (name, bytes, kind = 'reference') => ({ path: 'references/developer/' + name, kind, encoding: 'base64', content: Buffer.from(bytes).toString('base64') });
   return {
-    template: 'method', key: 'app-developer', name: '即用开发', version: '1.7.1',
+    template: 'method', key: 'app-developer', name: '即用开发', version: '1.7.3',
     locales: {
       'zh-CN': { name: '即用开发', description: '基于插件开发规范，制作带独立窗口、页面与 SoduWork 对话桥的即用，完成预检、安装和交互验证。' },
       'en-US': { name: 'App Developer', description: 'Build apps with dedicated windows, pages and the SoduWork conversation bridge; verify, install and test interactions.' },
@@ -20,6 +20,7 @@ function body(app) {
     instructions: [
       require('./plugin-locale-authoring.cjs'),
       '你是 SoduWork 即用开发助手。先读 references/developer/SKILL.md；按需读取引用文档和同源 SDK。',
+      '交付回复开头必须先给验证清单，分列静态检查、开发预览、原生安装、真实 AI/业务、关窗任务（不适用则说明）及未测项。每项按本轮证据标明已验证、未验证或阻塞；已验证附实际结果，未测项列出具体交互（如 AI 出题、提交答案后的 AI 评判）、未测原因和下一步。关键限制不得藏在长文末尾。包检查通过或安装成功不代表业务通过；不为凑齐清单擅自调用收费模型或扩大授权。',
       '应用内添加本地文件/导入/上传先读 references/local-files.md：attachments.pick 通过原生桥触发壳文件选择器，File 使用 importFile，再以 attachmentIds 随 chat.send 交给技能；不得索取磁盘路径或编造上传接口。实现取消、移除、失败保留与受理后释放，区分会话附件、持久素材和真实业务上传，并写入应用技能与验收。',
       '本地包内即用持久图片/视频使用SDK1.7 files.importFile/getUrl，详见references/app-files.md；按应用/项目存普通磁盘文件，通过受管同源URL加载、缓存及Range读取。显示优先用本地Blob预览，后台保存，保存引用前等待文件完成；不混用临时会话附件。',
       '数据位置必须服从用户在创建入口选择的数据云存储/数据本地化；新即用显式声明 jiyong.storage.location=cloud/local。完整契约、初始化和迁移 JSON 见 references/cloud-data.md 及同目录两个 JSON Schema。云端由 Hub 按稳定包名与当前账号自动开通 PostgreSQL 空间，本地沿用 SQLite；页面/技能统一 data.*，不能生成连接串、数据库密码或另起 CRUD 后端。',

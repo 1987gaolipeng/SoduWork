@@ -219,24 +219,40 @@ class MessageTests(unittest.TestCase):
         billing = parse({"type": "step_finish", "part": {"tokens": {"input": 20, "output": 5}}}, {})[0]
         self.assertEqual(rm.public_fields(billing)["usage"]["totalTokens"], 25)
 
-    def test_access_cancellation_survives_public_projection_without_hiding_failures(self):
+    def test_unexecuted_cancellation_survives_public_projection_without_hiding_failures(self):
         from types import SimpleNamespace
         from app.services.execution_sessions import _event_api
-        for failed in (False, True):
-            raw = {"type": "tool_execution_end", "toolCallId": "withdrawn", "toolName": "Run command",
-                   "result": "Original native result", "isError": failed,
-                   "state": "cancelled", "cancelReason": "access-change"}
-            event = parse(raw, {})[0]
-            public = rm.public_fields(event)
-            archived = _event_api(SimpleNamespace(seq=2, kind=event["kind"], tool=event["tool"],
-                text=event["text"], at=None, detail=public))
-            self.assertEqual(archived["isError"], failed)
-            self.assertEqual(archived["text"], "Original native result")
-            if failed:
-                self.assertNotIn("cancelReason", archived)
-            else:
-                self.assertEqual(archived["state"], "cancelled")
-                self.assertEqual(archived["cancelReason"], "access-change")
+        for reason in ("access-change", "output-limit"):
+            for failed in (False, True):
+                with self.subTest(reason=reason, failed=failed):
+                    raw = {"type": "tool_execution_end", "toolCallId": "withdrawn", "toolName": "Run command",
+                           "result": "Original native result", "isError": failed,
+                           "state": "cancelled", "cancelReason": reason}
+                    event = parse(raw, {})[0]
+                    public = rm.public_fields(event)
+                    archived = _event_api(SimpleNamespace(seq=2, kind=event["kind"], tool=event["tool"],
+                        text=event["text"], at=None, detail=public))
+                    self.assertEqual(archived["isError"], failed)
+                    self.assertEqual(archived["text"], "Original native result")
+                    if failed:
+                        self.assertNotIn("cancelReason", archived)
+                    else:
+                        self.assertEqual(archived["state"], "cancelled")
+                        self.assertEqual(archived["cancelReason"], reason)
+
+    def test_neutral_cancellation_requires_explicit_nonerror_and_a_known_reason(self):
+        for reason in ("access-change", "output-limit", "unknown", None):
+            for failed in (False, True, None, 0, "false"):
+                with self.subTest(reason=reason, failed=failed):
+                    raw = {"type": "tool_execution_end", "toolCallId": "untrusted",
+                           "result": "Fixture result", "isError": failed,
+                           "state": "cancelled", "cancelReason": reason}
+                    event = parse(raw, {})[0]
+                    if reason in ("access-change", "output-limit") and failed is False:
+                        self.assertEqual(rm.public_fields(event)["cancelReason"], reason)
+                    else:
+                        self.assertNotIn("cancelReason", event)
+                        self.assertNotIn("cancelReason", rm.public_fields(event))
 
     def test_context_occupancy_is_never_billed_and_partial_usage_only_once(self):
         ref = "native-message-fixture"

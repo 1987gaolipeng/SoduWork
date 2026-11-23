@@ -159,24 +159,11 @@ def main(unsupported_type="unregistered-fixture"):
             request("POST", "/ingest", json=body, headers={"X-Ingest-Token": rotated["ingestToken"]})
             checks.append("generic webhook ingestion, deduplication, credential masks and token rotation")
 
-            unsupported = request("POST", "/admin/integrations", json={"name": "Custom fixture",
-                "type": unsupported_type, "config": {"mcpUrl": peer_url + "/mcp"}})
-            refused = request("POST", "/admin/integrations/" + unsupported["id"] + "/pull", status=400)
-            assert refused["detail"] == "该类型不支持拉取"
-            request("POST", "/ingest", json={"external_id": "custom-1", "title": "Custom envelope"},
-                    headers={"X-Ingest-Token": unsupported["ingestToken"]})
-            # Exercise the production scheduler against the same fresh, persisted database.
-            code = ("import asyncio,json; from app.db import SessionLocal,engine; "
-                    "from app.services.poller import run_all\n"
-                    "async def main():\n async with SessionLocal() as s:\n"
-                    "  print(json.dumps(await run_all(s)))\n await engine.dispose()\nasyncio.run(main())")
-            polled = subprocess.check_output([sys.executable, "-c", code], cwd=output,
-                                            env=env, text=True, encoding="utf-8", timeout=60)
-            assert json.loads(polled)["integrations"] == 0, polled
-            assert not seen, seen
-            row = next(row for row in request("GET", "/admin/integrations") if row["id"] == unsupported["id"])
-            assert row["lastPullAt"] is None and row["taskCount"] == 1
-            checks.append("unregistered adapters reject manual pull and skip scheduling without outbound calls")
+            refused = request("POST", "/admin/integrations", status=400, json={
+                "name": "Custom fixture", "type": unsupported_type,
+                "config": {"mcpUrl": peer_url + "/mcp"}})
+            assert refused["detail"]
+            checks.append("unregistered integration types are rejected before persistence")
 
             server = {"id": str(uuid.uuid4()), "name": "fixture-business", "type": "http",
                 "url": peer_url + "/mcp", "enabled": True,

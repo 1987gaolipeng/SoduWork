@@ -87,3 +87,16 @@ test('resolver helpers: case-insensitive locale lookup and zh-CN bypass', () => 
   assert.equal(c._schPickLocale({ 'en-US': 'Hi' }, 'zh-CN'), '');
   assert.equal(c._schTemplateText(TEMPLATE, 'name'), 'Daily work summary');
 });
+
+test('template prefill preserves bounded, open-ended and unlimited effective dates', () => {
+  const c = setup('en-US', []);
+  for (const dates of [{}, { startDate: '2030-12-01' }, { endDate: '2030-12-31' },
+    { startDate: '2030-12-01', endDate: '2030-12-31' }]) {
+    const draft = c._schRecipeValues({ ...TEMPLATE, ...dates, timeZone: 'America/New_York' });
+    assert.equal(draft.startDate, dates.startDate || '');
+    assert.equal(draft.endDate, dates.endDate || '');
+    assert.equal(draft.timeZone, 'America/New_York');
+    assert.equal(draft.atHour, 18);
+    assert.equal(draft.title, 'Daily work summary');
+  }
+});

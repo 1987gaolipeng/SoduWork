@@ -79,7 +79,7 @@ async function verifyCredentials(appId, appSecret, fetchImpl = fetch) {
 async function request(identity, method, route, body) {
   let response, data;
   try {
-    response = await fetch(identity.hub.replace(/\/+$/, '') + '/api/v1' + route, {
+    response = await require('../device-auth-request').fetchWithDeviceAuthRetry(identity, identity.hub.replace(/\/+$/, '') + '/api/v1' + route, {
       method, headers: { Authorization: 'Device ' + identity.session, 'Content-Type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       redirect: 'error', signal: AbortSignal.timeout(40000),

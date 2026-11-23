@@ -19,7 +19,7 @@
   "fields": [
     {
       "key": "REDIS_HOST",
-      "label": "Redis 主机（远程主机强制 TLS；localhost/127.0.0.1/::1 可明文）",
+      "label": "Redis 主机",
       "secret": false,
       "required": true,
       "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,252}|::1)$",
@@ -60,7 +60,7 @@
     },
     {
       "key": "REDIS_TLS",
-      "label": "是否启用 TLS（远程主机必须为 true）",
+      "label": "使用 TLS",
       "secret": false,
       "required": false,
       "pattern": "^(true|false)$",
@@ -69,7 +69,7 @@
     },
     {
       "key": "REDIS_CA_PEM",
-      "label": "TLS CA PEM（可选，换行写作\\n；远程连接始终校验证书）",
+      "label": "TLS CA PEM（用于验证证书，换行写作\\n）",
       "secret": false,
       "required": false,
       "example": ""
@@ -176,9 +176,9 @@
   ],
   "limitations": [
     "只提供固定 PING/SCAN/TYPE/GET 四条只读命令；不提供任意命令执行，不提供 KEYS/SMEMBERS 等无界命令。",
-    "远程主机强制 TLS 且始终校验证书（自签名请提供 CA PEM）；localhost/127.0.0.1/::1 允许明文本机调试。",
+    "默认使用 TLS 并校验证书与主机名。使用明文连接时，请清空 CA 证书并关闭 TLS。",
     "SCAN 是游标遍历，结果不构成某一时刻的完整快照；扫描期间写入的键可能不出现。",
     "SCAN COUNT 仅是提示，不截断页以免丢键；键名页超过 2 MB 拒绝。GET 字符串通过 GETRANGE 有界读取 1 MiB，读取期间可能发生并发变化。",
-    "使用 redis-py 5.x（MIT），远程强制 TLS，始终验证证书与主机名；本机明文需显式关闭 TLS。"
+    "使用 redis-py 5.x（MIT）。"
   ]
 }

@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const updateTrust = require('../update-trust.json');
 const packageInfo = require('../package.json');
 const { PRODUCTION_HUB } = require('./hub-endpoint.cjs');
+const { buildDefaultHub } = require('./default-hub.cjs');
 const PROFILE_ID = 'self-hosted';
 
 function canonical(value) {
@@ -21,7 +22,7 @@ function freeze(value) {
   }
   return value;
 }
-function getProfile(id = PROFILE_ID) {
+function getProfile(id = PROFILE_ID, hubOrigin = PRODUCTION_HUB) {
   if (id !== PROFILE_ID) throw new Error('Unknown Client distribution: ' + String(id));
   const { schema, keys } = updateTrust || {};
   if (schema !== 1 || !keys || typeof keys !== 'object' || Array.isArray(keys) ||
@@ -34,7 +35,7 @@ function getProfile(id = PROFILE_ID) {
   const build = packageInfo.build || {};
   const productName = packageInfo.productName || build.productName || 'SoduWork';
   const profile = JSON.parse(JSON.stringify({
-    distributionId: PROFILE_ID, updateChannel, hubOrigin: PRODUCTION_HUB, websiteUrl: packageInfo.homepage || '',
+    distributionId: PROFILE_ID, updateChannel, hubOrigin, websiteUrl: packageInfo.homepage || '',
     appId: build.appId || 'com.soduwork.app', productName,
     windowsExecutableName: build.win?.executableName || productName,
     linuxExecutableName: build.linux?.executableName || packageInfo.name,
@@ -46,7 +47,7 @@ function getProfile(id = PROFILE_ID) {
 }
 
 function selected(env = process.env) {
-  const profile = getProfile(env.SODUWORK_DISTRIBUTION || PROFILE_ID);
+  const profile = getProfile(env.SODUWORK_DISTRIBUTION || PROFILE_ID, buildDefaultHub(env));
   if (env.SODUWORK_RELEASE_HUB_URL && String(env.SODUWORK_RELEASE_HUB_URL).replace(/\/+$/, '') !== profile.hubOrigin) {
     throw new Error('Release Hub URL does not match Client distribution');
   }

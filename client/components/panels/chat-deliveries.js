@@ -285,9 +285,9 @@
       const nativeIcon = mark?.querySelector('[data-native-file-icon]');
       if (nativeIcon && nativeIcon.dataset.nativeFileIcon !== 'zip') {
         nativeIcon.dataset.nativeFileIcon = 'zip';
-        const image = nativeIcon.querySelector('img'), label = nativeIcon.querySelector('.library-file-extension');
+        const image = nativeIcon.querySelector('img'), fallback = nativeIcon.querySelector('.library-file-fallback');
         if (image) { image.hidden = true; image.removeAttribute('src'); }
-        if (label) { label.hidden = false; label.textContent = 'ZIP'; }
+        if (fallback) fallback.hidden = false;
         global.SoduWorkLibraryFileIcons?.hydrate?.(mark);
       } else if (!nativeIcon) {
         const label = mark?.querySelector('.ndelivery-extension');

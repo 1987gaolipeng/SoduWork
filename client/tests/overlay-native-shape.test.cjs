@@ -2,6 +2,7 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const shape = require('../main/overlay-shape');
+const geometry = require('../main/overlay-geometry.cjs');
 const main = fs.readFileSync(path.join(__dirname, '../main/desktop-overlay.cjs'), 'utf8');
 const applyAndPark = main.slice(main.indexOf('function applyOverlayShape('), main.indexOf('function setOverlayIdleInput()'));
 const sync = main.slice(main.indexOf('function _syncOverlayInputNow('), main.indexOf('function _startOverlayInputGuard('));
@@ -62,7 +63,7 @@ test('dynamic passthrough accepts regions without setShape and parks on reload',
 
 test('dynamic input guard accepts the cursor inside any component and ignores elsewhere', () => {
   const cursor = { x:10, y:10 };
-  const scope = { _overlayShape:shape, _emergencyMode:false, _overlayAwaitingShape:false, _overlayShapeEnabled:true,
+  const scope = { _overlayShape:shape, _overlayGeometry:geometry, _overlayDragging:false, _emergencyMode:false, _overlayAwaitingShape:false, _overlayShapeEnabled:true,
     _overlayInputRects:[], NATIVE_SHAPE:false,
     screen:{ getCursorScreenPoint:()=>cursor },
     _isPointOverWorkWindow:()=>false,
@@ -94,7 +95,7 @@ test('dynamic input guard accepts the cursor inside any component and ignores el
 test('native platforms guard transparent gaps without disabling visible components', () => {
   const decisions = [];
   let cursor = { x: 10, y: 10 };
-  const scope = { _overlayShape:shape, _emergencyMode:false, _overlayShapeEnabled:true,
+  const scope = { _overlayShape:shape, _overlayGeometry:geometry, _overlayDragging:false, _emergencyMode:false, _overlayShapeEnabled:true,
     _overlayAwaitingShape:false,
     _overlayInputRects:[{x:1800,y:900,width:72,height:132},{x:1880,y:300,width:36,height:500}],
     NATIVE_SHAPE:true,

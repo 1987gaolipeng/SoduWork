@@ -17,7 +17,9 @@ test('待验收卡片只保留详情验收入口，其他状态保留原操作',
   const reviewContext = {approvals:new Map([['t',{id:'r',action:'review',status:'pending'}]])};
   const board = f.view.board([pending],f.state,reviewContext);
   assert.match(board,/data-rq-open="t"/);
-  assert.match(board,/核对成果并选择验收方式/);
+  assert.doesNotMatch(board,/rq-card-decision|rq-card-assign/);
+  assert.equal((board.match(/data-rq-open="t"/g) || []).length, 1);
+  assert.doesNotMatch(f.view.board([{...pending,status:'todo'}],f.state,{}), /rq-card-assign/);
   assert.doesNotMatch(board,/data-rq-acceptance/);
   const decided = f.view.board([pending], f.state, {
     approvals: new Map([['t', {...reviewContext.approvals.get('t'), myDecision: {decision: 'approve'}}]])

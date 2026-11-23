@@ -60,9 +60,14 @@ node --test tests/*.test.mjs
 ```sh
 cd hub-backend
 python3 -m pip install -r requirements-test.txt
+python3 -m ruff check app
+python3 scripts/check_changed_lint.py origin/main
+python3 -m mypy app
 python3 quality_gate.py --list
 python3 quality_gate.py --profile release --scope backend
 ```
+
+增量 lint 使用本地 Git 中的目标分支或基线提交。CI 要求全应用 Ruff 检查通过，并拦截 PR 中新增的 Pyflakes、导入顺序和代码风格问题。mypy 报告当前应用的类型错误，后续后端测试仍会运行。
 
 完整离线门禁耗时较长；日常修改先运行清单中对应的检查。`live` 检查连接真实服务或模型，需要自行准备隔离环境，不包含在默认离线验证中。
 
@@ -78,7 +83,7 @@ npm ci
 npm start
 ```
 
-独立启动的客户端保留自己的连接与配置；它与根启动器 `--desktop` 使用的专用配置不同。需要时在登录页更改服务地址。修改主进程后退出应用并重启；修改界面脚本时也应重新打开客户端验证装载顺序和交互。
+独立源码启动的客户端在未保存服务地址时，默认连接 `http://127.0.0.1:18989`，适用于默认端口的本地 Hub 或 Docker 自托管服务。已保存的地址继续生效；使用其他端口时在登录页更改服务地址。它与根启动器 `--desktop` 使用的专用配置不同，后者自动连接本次启动的 Hub 并跟随 `--port`。打包及正式客户端未保存地址时仍默认连接 `https://service.soduwork.ai`。修改主进程后退出应用并重启；修改界面脚本时也应重新打开客户端验证装载顺序和交互。
 
 在 `client/` 运行 `npm test` 和 `npm run check:layout`。Electron 端到端检查见本目录的 `e2e/`，按脚本选择所需环境。`dist/`、`.runtime/` 和生成的 `runner/` 文件是产物，不要提交或复制旧版二进制替代源码。
 
@@ -118,3 +123,7 @@ GitHub 上通过页面顶部的相对链接切换语言，下载后的源码也�
 - 修改启动命令、前置条件、数据或权限说明时同步两种语言，顶部保留互相切换和返回导航的链接。
 - 增加语言时使用明确后缀（例如 `.ja.md`），在首页与文档索引登记已经完成的页面；未翻译内容标明原语言，不提供空页面或把中文链接标作英文。
 - 文档使用相对链接，不写死某个 GitHub 仓库地址或私有开发分支，便于 Fork 和源码包复用。
+
+## 自动化模板目录并发保护
+
+GET `/api/admin/automation-templates` 返回 `items` 和不透明的 `revision`。PUT 必须携带两者；缺少版本返回 428，旧版本返回 409，不覆盖目录。管理界面与后端应同步部署，并刷新旧页面。遇到冲突时保留草稿，加载最新目录、核对其他管理员的修改后再明确保存；已删除模板不会静默重建。内部维护调用方必须先读取当前目录再修改。

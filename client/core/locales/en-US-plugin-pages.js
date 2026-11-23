@@ -1,5 +1,8 @@
 (function (global) {
   const messages = {
+    "\u63d2\u4ef6\u8349\u7a3f\u672a\u901a\u8fc7\u68c0\u67e5\uff0c\u8bf7\u4fee\u590d\u540e\u518d\u5b89\u88c5": "Plugin draft validation failed. Fix the draft before installing.",
+    "\u6b63\u5728\u4fee\u590d\u63d2\u4ef6\u8349\u7a3f": "Repairing plugin draft",
+    "\u6b63\u5728\u68c0\u67e5\u63d2\u4ef6\u8349\u7a3f": "Checking plugin draft",
     "应用版本不完整，请重新安装后再提交审核": "The app version is incomplete. Reinstall it before submitting for review.",
     "至少选择一位可以使用应用的成员": "Select at least one member who can use the app.",
     "至少选择一个可以使用应用的团队或部门": "Select at least one team or department that can use the app.",

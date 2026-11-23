@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createRequire } = require('node:module');
+const { identity } = require('./helpers/platform-session-fixture.cjs');
 
 function loadEnvironment(mocks) {
   const file = path.resolve(__dirname, '../main/pi-session/environment-ipc.js');
@@ -74,7 +75,7 @@ test('local capability discovery fences the first send on Pi warmup', async () =
       prewarm: async () => { warmupStarted = true; await warmup; return { ok: true }; },
       prewarmResources: async () => { resourceWarmupStarted = true; await warmup; return { ok: true }; },
     },
-    identityOf: async () => ({ hub: 'http://fixture', clientId: 'device' }),
+    identityOf: async () => identity(),
     capabilityGrantsOf: () => [],
     _skillDirs: () => [],
     workDir: () => 'C:/fixture',
@@ -109,7 +110,7 @@ test('cloud or non-Pi capability menus do not wait for local Pi warmup', async (
     app: {},
     ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
     session: { prewarm: async () => { prewarmCalls += 1; } },
-    identityOf: async () => ({ hub: 'http://fixture', clientId: 'device' }),
+    identityOf: async () => identity(),
     capabilityGrantsOf: () => [], _skillDirs: () => [], workDir: () => 'C:/fixture',
     _saveConf: () => {}, _conf: () => ({}),
   });

@@ -1,8 +1,16 @@
 'use strict';
 // Shared authoring contract for plugin-builder and app-developer.
+function authoringInstructions() {
+  return [
+    'The user selected Plugin Developer. This turn creates or improves a reusable, installable SoduWork plugin. Treat the user message as the specification of what that plugin should do when invoked, not as a request to perform that business task now.',
+    'Separate authoring decisions from future invocation inputs. Put changing values such as destination, travel dates, travelers, ages, preferences and budget in the plugin inputs; do not require real values merely to build the plugin. Ask only when a missing authoring decision would change the reusable behavior or safety boundary. Preserve explicit user corrections and changes of direction.',
+    'Produce the actual soduwork-plugin-draft.json and declared resource files, validate their final bytes, and register the installable draft in .soduwork/delivery.json. An HTML report is a preview or reusable template resource, not a replacement for the plugin package. Do not invent completed files or claim installation.',
+    'When the package is ready, direct the user to Check and install. The host validates the package and shows the existing installation confirmation; install only after the user confirms. A necessary authoring clarification may finish without creating a draft.',
+  ].join('\n');
+}
 function body() {
   return {
-    template: 'method', key: 'plugin-builder', name: '插件开发助手', version: '1.4.3',
+    template: 'method', key: 'plugin-builder', name: '插件开发助手', version: '1.4.6',
     locales: {
       'zh-CN': { name: '插件开发助手', description: '把你的工作方法整理成可安装、可发布的 SoduWork 插件' },
       'en-US': { name: 'Plugin Developer', description: 'Turn your working methods into installable, publishable SoduWork plugins' },
@@ -10,10 +18,9 @@ function body() {
     description: '把你的工作方法整理成可安装、可发布的 SoduWork 插件',
     resources: [{ path: 'references/plugin-locales.md', kind: 'reference', encoding: 'utf8', content: require('./plugin-locale-authoring.cjs') }],
     instructions: [
+      '插件制作：正文是功能规格，不是本轮业务任务。变化的业务参数放 inputs，仅澄清影响插件行为或安全的作者决策，不索取运行参数。HTML可作制作预览，最终交付可安装插件。',
       '新创作与改进的应用/插件最低支持中英双语；先读随包 references/plugin-locales.md，按 locales 配置翻译并验证回退。',
       'SoduWork 内置 soduwork-media 生成图片/视频。图片插件在 mcpServers 声明 soduwork-media，调用 generate_image（prompt，可选 model、providerId、size、filename）。视频先脚本与分镜再 generate_video。每次生成唯一 generationId，同次重试不变，避免重复扣费。模型与密钥沿用「我的模型」，不索要或保存，不另配外部 MCP；展示真实返回文件。',
-      '你是 SoduWork 插件开发助手。先理解用户希望沉淀的工作方法、输入、步骤、工具、完成标准和风险。',
-      '优先直接形成完整方案；只有缺少会改变结果的关键信息时才询问。',
       '最终在工作目录生成 soduwork-plugin-draft.json，字段必须包含 template、name、version、description、instructions、inputs、setup、mcpServers、runtimeCapabilities、evaluationInstruction、evaluationCriteria。' + '\n' + require('./plugin-connection-authoring.cjs'),
       'inputs 是任务或自动化启动时填写的公开参数，只允许 text、textarea、boolean、number、select；不得收集账号、密码、Token 或密钥。',
       'inputs 的 select.options 支持字符串或 {value,label} 对象；default 必须精确等于某个 options 的 value（字符串选项则等于字符串本身），不能填 label 或删去 value 中的“（默认）”后缀。默认标记应只写在 label 中，value 保持稳定。',
@@ -37,4 +44,4 @@ function body() {
     ].join('\n'),
   };
 }
-module.exports = { body };
+module.exports = { body, authoringInstructions };

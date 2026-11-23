@@ -3,7 +3,10 @@ const fs = require('node:fs'), path = require('node:path'), os = require('node:o
 const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
 
-test('automation and UI really call the same chat open/send pipeline; internal completion stays out of IPC', async () => {
+test('automation and UI really call the same chat open/send pipeline; internal completion stays out of IPC', async t => {
+  // This offline Hub fixture must not depend on external DNS or live sockets.
+  t.mock.method(global, 'fetch', async () => { throw new Error('Fixture Hub is unavailable'); });
+  t.mock.method(global, 'WebSocket', function () { throw new Error('Fixture WebSocket is unavailable'); });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-chat-pipeline-test-'));
   const archivePath = path.join(directory, 'pi-agent', 'sessions', 'archived-chat.jsonl');
   fs.mkdirSync(path.dirname(archivePath), { recursive: true });
@@ -72,9 +75,10 @@ test('automation and UI really call the same chat open/send pipeline; internal c
     const automated = await service.open({ adapterId: 'pi', intent: 'chat', projectId: 'project-1', repoId: 'repo-1' }, identity);
     assert.equal(automated.ok, true, automated.reason); assert.equal(automated.collaboration, false); assert.equal(handles[0].detached, true);
     assert.equal(opens[0].projectId, 'project-1'); assert.equal(opens[0].repoId, 'repo-1');
-    const first = await service.send(automated.ref, '完整自动化说明', [], { submissionId: 'automation-run', projectId: 'project-1', repoId: 'repo-1' });
+    const first = await service.send(automated.ref, '完整自动化说明', [], { source: 'automation', submissionId: 'automation-run', projectId: 'project-1', repoId: 'repo-1' });
     assert.equal(first.ok, true); assert.equal((await first.completion).ok, true);
     assert.equal(submits[0].opts.projectId, 'project-1'); assert.equal(submits[0].opts.repoId, 'repo-1');
+    assert.equal(submits[0].opts.source, 'automation', 'the runtime must preserve required automation plugin authorization');
     const ordinary = await handlers.get('pi-session-open')(event, { adapterId: 'pi', intent: 'chat' });
     assert.equal(ordinary.ok, true); assert.equal(handles[1].detached, false); assert.equal(handles[1].attachedWindow, owner);
     assert.doesNotThrow(() => handles[1].listener({ kind: 'settled' }, handles[1].snapshot()),
@@ -87,6 +91,7 @@ test('automation and UI really call the same chat open/send pipeline; internal c
     assert.equal(reattached.sessionId, automated.sessionId); assert.equal(handles[0].attachedWindow, owner);
     const followup = await handlers.get('pi-session-send')({ sender: {} }, automated.ref, '继续分析', [], {});
     assert.equal(followup.ok, true); assert.equal(submits.length, 3);
+    assert.equal(submits[2].opts.source, undefined, 'a later ordinary turn must not inherit the automation source');
     assert.ok(opens.every(x => !x.taskRef && !x.intent));
     assert.ok(submits.every(x => !x.opts.taskId && !x.opts.controlled));
     assert.equal((await service.open({}, { ...identity, clientId: 'wrong' })).ok, false);
@@ -123,7 +128,7 @@ test('automation and UI really call the same chat open/send pipeline; internal c
     assert.equal(foreignSend.ok, false);
     // Exercise the registered production entry points. Loading a capability
     // menu or opening a Runner-backed chat must not initialize an unrelated Pi.
-    const adapters = ['pi', 'opencode', 'codex', 'codex-harness', 'claude', 'qwen', 'dsh', 'custom-example'];
+    const adapters = ['pi', 'opencode', 'codex', 'codex-harness', 'qwen', 'dsh', 'custom-example'];
     for (const adapterId of adapters) {
       require('../main/conversation/session-memory').bind({ getPath: () => directory },
         'archived-agent:' + adapterId, identity, [], true);

@@ -44,8 +44,13 @@ export default function McpServers({ templates = [] }) {
     try { const r = await (remove ? api.deleteMcpServer(original.id, original) : api.upsertMcpServer(server, original)); setRows(r.servers || []); toast(tx("已保存 · 下一次安排执行即生效")); return true }
     catch (e) {
       if (e.status === 409) {
-        try { const latest = await api.mcpServers(); setRows(latest.servers || []); } catch (_) {}
-        toast(tx('此连接已被更新，当前填写内容已保留。关闭后重新打开可查看最新配置。'))
+        try {
+          const latest = await api.mcpServers()
+          setRows(latest.servers || [])
+          toast(tx('此连接已被更新，当前填写内容已保留。关闭后重新打开可查看最新配置。'))
+        } catch {
+          toast(tx('此连接已被更新，但自动刷新失败。当前填写内容已保留，请稍后重试。'))
+        }
       } else toast(tx("保存失败：") + e.message)
       return false
     }
@@ -102,7 +107,7 @@ export default function McpServers({ templates = [] }) {
         </span>
         <span className="mcp-run-legend" aria-label={tx("连接器执行位置")}>
           <i><Icon name="grid" />{tx("HTTP 由 Hub 调用")}</i>
-          <i><Icon name="desktop" />{tx("stdio 由在线 Runner 执行")}</i>
+          <i><Icon name="monitor" />{tx("stdio 由在线 Runner 执行")}</i>
         </span>
         <span className="mcp-toolbar-actions">
           <input ref={importPicker} type="file" accept=".json,.toml,application/json"

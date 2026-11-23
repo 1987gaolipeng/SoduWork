@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 import {CdpPage,listPages} from './lib/cdp.mjs';
 const [mode='status',adapter='pi',run='']=process.argv.slice(2);
-const supported=['pi','codex-harness','opencode','claude','codex','qwen','dsh'];
+const supported=['pi','codex-harness','opencode','codex','qwen','dsh'];
 assert.ok(supported.includes(adapter));
 assert.ok(!run || /^[a-z0-9-]{1,64}$/.test(run),'Invalid acceptance run label');
 const out=path.join(fileURLToPath(new URL('../../outputs/md-output-live-matrix/',import.meta.url)),run);

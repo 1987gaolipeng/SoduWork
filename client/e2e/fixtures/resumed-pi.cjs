@@ -81,7 +81,7 @@ export default async function(pi) {
   signal?.throwIfAborted();
   const model = { id: 'fixture-model', label: 'Local regression model', contextWindow: options.contextWindow || 200000,
     baseUrl: 'http://127.0.0.1:' + server.address().port + '/v1', key: 'isolated-local-fixture',
-    proxyExpiresAt: Date.now() + 3600000 };
+    proxyExpiresAt: Date.now() + 3600000, ...options.modelOptions };
   // Keep local fault-injection traffic off any machine-wide HTTP proxy.
   config.noProxyFor(model.baseUrl);
   const modelsPath = config.writeModels(agentDir, model);

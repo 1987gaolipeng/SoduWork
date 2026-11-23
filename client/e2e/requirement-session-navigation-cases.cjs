@@ -165,6 +165,7 @@ module.exports = async function navigationCases({ runCase, js, click, until, pha
     const start = Date.now();
     await js('lastSidebarNavigation.then(()=>true)');
     assert.ok(Date.now()-start < 35000, 'card recovery has a bounded completion');
+    await until("document.body.innerText.includes('工作卡片暂时无法读取')", 'archive timeout rendered');
     assert.match(await js('document.body.innerText'), /工作卡片暂时无法读取/);
     assert.equal(await js('calls.opens.length'), 0, 'a missing card archive cannot open a substitute runtime');
     await select('history-session');

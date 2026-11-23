@@ -1,16 +1,18 @@
-#mdPanel .md-model-list{display:flex;flex-direction:column;gap:0;border-top:1px solid var(--line);margin-top:12px}
-#mdPanel .md-model-row.md-mtag{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 16px;padding:16px 0;border:0;border-bottom:1px solid var(--line);border-radius:0;min-width:0;width:100%;box-sizing:border-box;background:transparent;align-items:start}
-#mdPanel .md-model-name{display:flex;align-items:center;gap:9px;min-width:0;font:550 14.5px/1.5 var(--font-ui);color:var(--ink)}
-#mdPanel .md-model-name>span[data-user-content]{overflow-wrap:anywhere;min-width:0}
+#mdPanel .md-model-list{display:flex;flex-direction:column;gap:0;border-top:1px solid var(--line);margin-top:12px;container:model-list / inline-size}
+#mdPanel .md-model-row.md-mtag{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;padding:18px 0;border:0;border-bottom:1px solid var(--line);border-radius:0;min-width:0;width:100%;box-sizing:border-box;background:transparent;align-items:start}
+#mdPanel .md-model-name{display:flex;align-items:baseline;flex-wrap:wrap;gap:9px;min-width:0;font:550 14.5px/1.5 var(--font-ui);color:var(--ink)}
+#mdPanel .md-model-name>span[data-user-content]{flex:1 1 12em;overflow-wrap:anywhere;min-width:0}
 #mdPanel .md-model-id{display:block;font:400 14.5px/1.5 var(--font-ui);color:var(--ink-3);overflow-wrap:anywhere;margin-top:3px}
-#mdPanel .md-model-actions{display:flex;align-items:flex-start;gap:5px;flex-wrap:wrap;justify-content:flex-end}
-#mdPanel .md-model-actions button{display:inline-flex;align-items:center;justify-content:center;width:auto;height:auto;min-height:32px;padding:5px 9px;font:500 14.5px/1.4 var(--font-ui);border:1px solid var(--line);border-radius:var(--r-sm);background:var(--bg-0);color:var(--ink-2)}
-#mdPanel .md-model-report{grid-column:1/-1}
+#mdPanel .md-model-footer{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:10px 16px;min-width:0}
+#mdPanel .md-model-status{flex:1 1 10em;min-width:0;overflow-wrap:anywhere}
+#mdPanel .md-model-actions{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+#mdPanel .md-model-actions button{display:inline-flex;align-items:center;justify-content:center;width:auto;max-width:100%;height:auto;min-height:36px;padding:8px 12px;font:500 14.5px/1.4 var(--font-ui);overflow-wrap:anywhere;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--bg-0);color:var(--ink-2)}
+#mdPanel .md-model-report{grid-column:1/-1;min-width:0;overflow-wrap:anywhere}
 #mdPanel .md-model-actions button:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
 #mdPanel .md-model-actions button:disabled{opacity:.55}
-#mdPanel .md-cap-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
-#mdPanel .md-cap-badge{display:inline-flex;align-items:center;gap:6px;font:400 14.5px/1.5 var(--font-ui);color:var(--ink-3);border:1px solid var(--line);padding:2px 7px;border-radius:6px;background:var(--bg-0)}
-#mdPanel .md-cap-badge b{font-weight:500;color:var(--ink-2)}
+#mdPanel .md-cap-badges{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}
+#mdPanel .md-cap-badge{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0;overflow-wrap:anywhere;font:400 14.5px/1.5 var(--font-ui);color:var(--ink-3);border:1px solid var(--line);padding:10px 12px;border-radius:var(--r-sm);background:var(--bg-1)}
+#mdPanel .md-cap-badge b{margin-top:auto;font-weight:500;color:var(--ink-2)}
 #mdPanel .md-cap-badge.is-supported{border-color:color-mix(in srgb,var(--accent) 25%,var(--line));background:var(--accent-soft)}
 #mdPanel .md-cap-badge.is-supported b{color:var(--accent)}
 #mdPanel .md-cap-unchecked,#mdPanel .md-cap-error{font:400 14.5px/1.6 var(--font-ui);color:var(--ink-3)}
@@ -47,9 +49,14 @@
 #mdPanel .md-model-editor-actions .md-model-add{background:var(--accent);color:var(--on-accent,#fff);border-color:var(--accent)}
 #mdPanel .md-model-editor-actions .md-model-add:hover{background:var(--accent);color:var(--on-accent,#fff);filter:brightness(.96)}
 #mdPanel :is(.md-model-actions button,.md-cap-advanced summary,.md-model-editor summary):focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+/* Switch the whole group before translations are squeezed into narrow cards. */
+@container model-list (max-width:24rem){
+  #mdPanel .md-cap-badges{grid-template-columns:minmax(0,1fr)}
+  #mdPanel .md-cap-badge{flex-direction:row;justify-content:space-between;gap:12px}
+  #mdPanel .md-cap-badge b{margin-top:0}
+  #mdPanel .md-model-actions:has(button){display:grid;grid-template-columns:minmax(0,1fr);width:100%}
+}
 @container model-page (max-width:660px){
-  #mdPanel .md-model-row.md-mtag{grid-template-columns:minmax(0,1fr)}
-  #mdPanel .md-model-actions{justify-content:flex-start}
   #mdPanel .md-cap-grid{grid-template-columns:minmax(0,1fr)}
   #mdPanel .md-model-editor .md-addgrid{grid-template-columns:minmax(0,1fr)}
 }

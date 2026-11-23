@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import automation_models as am, models
 from . import agent_naming, execution_capabilities
 from .runner_identity_error import RunnerIdentityConflict
+from ..timestamps import iso_utc
 
 MODES = {"accepting", "draining", "disabled"}
 _ACTIVE_SESSION = {"queued", "dispatching", "running", "waiting_external"}
@@ -464,7 +465,7 @@ async def list_nodes(session: AsyncSession, allowed_client_ids: set[str] | None 
                 "id": item.id, "taskId": item.task_id,
                 "title": titles.get(item.task_id, "") or "未命名任务",
                 "engine": item.engine or "", "status": item.state or "",
-                "startedAt": item.started_at.isoformat() if item.started_at else "",
+                "startedAt": iso_utc(item.started_at) if item.started_at else "",
             } for item in session_rows[:5]],
         })
     out.sort(key=lambda x: (not x["online"], x["mode"] != "accepting", x["busy"], x["host"]))

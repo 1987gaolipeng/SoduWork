@@ -8,7 +8,13 @@ package=${3:?package}
 version=${4:?version}
 old_package=${5:?pinned old package}
 old_version=${6:?old version}
+legacy_rpm_digest=${7:--}
 case "$kind" in deb|rpm|tgz) ;; *) exit 64 ;; esac
+if [ "$legacy_rpm_digest" != - ]; then
+  test "$kind" = rpm
+  test "$old_package" != -
+  [[ "$legacy_rpm_digest" =~ ^[a-f0-9]{64}$ ]]
+fi
 credential_provider() {
   for provider in gnome-keyring-daemon kwalletd6 kwalletd5; do
     if command -v "$provider" >/dev/null 2>&1; then printf '%s\n' "$provider"; return 0; fi
@@ -26,7 +32,18 @@ if [ "$phase" = prepare ]; then
     else
       apt-get install -y --no-install-recommends libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils libatspi2.0-0 libuuid1 libsecret-1-0 libgbm1 libasound2
     fi
-  else dnf install -y "$package"; fi
+  else
+    # A fresh system must reject an unknown signing key. Then explicitly trust
+    # the published key and require a real signature, not just RPM digests.
+    if rpmkeys --checksig --verbose "$package" > /evidence/rpm-before-import.txt 2>&1; then
+      printf '%s\n' 'RPM unexpectedly verified before importing the release key' >&2
+      exit 1
+    fi
+    rpm --import /pkg/SoduWork-Linux-Signing-Key.asc
+    LC_ALL=C rpmkeys --checksig --verbose "$package" | tee /evidence/rpm-signature.txt
+    grep -Ei 'signature.*: OK' /evidence/rpm-signature.txt
+    dnf --setopt=localpkg_gpgcheck=True install -y "$package"
+  fi
   if [ "$kind" = tgz ]; then
     mkdir /opt/acceptance
     tar -xzf "$package" -C /opt/acceptance
@@ -121,7 +138,7 @@ if [ "$old_package" != - ]; then
   profile=/home/acceptance/soduwork-acceptance-profile-upgrade
   runuser -u acceptance -- mkdir "$profile"
   if [ "$kind" = deb ]; then dpkg -i "$old_package"; app=/opt/SoduWork
-  elif [ "$kind" = rpm ]; then rpm -i "$old_package"; app=/opt/SoduWork
+  elif [ "$kind" = rpm ]; then bash /checks/github/install-rpm-baseline.sh "$old_package" "$legacy_rpm_digest"; app=/opt/SoduWork
   else tar -xzf "$old_package" -C /opt/acceptance; app=/opt/acceptance/SoduWork-$old_version-linux; fi
   smoke old "$old_version" write
   if [ "$kind" = deb ]; then dpkg -i --force-confnew "$package"; app=/opt/SoduWork
@@ -143,9 +160,16 @@ if [ "$kind" != tgz ]; then
 fi
 test "$(cat "$profile/acceptance-sentinel.txt")" = preserve-install-acceptance-data
 dependency_verified=false
+rpm_signature_verified=false
+legacy_unsigned_rpm_baseline=false
+if [ "$legacy_rpm_digest" != - ]; then legacy_unsigned_rpm_baseline=true; fi
+if [ "$kind" = rpm ]; then
+  grep -Ei 'signature.*: OK' /evidence/rpm-signature.txt
+  rpm_signature_verified=true
+fi
 if [ "$kind" != tgz ]; then
   test -s /evidence/installed-credential-provider.txt
   dependency_verified=true
 fi
-printf '{"ok":true,"version":"%s","oldVersion":"%s","upgraded":%s,"reinstalled":%s,"nodeShimExecutable":true,"credentialProviderDependencyVerified":%s,"upgradeDependencyResolutionVerified":false}\n' \
-  "$version" "$accepted_old_version" "$upgraded" "$reinstalled" "$dependency_verified" > /evidence/result.json
+printf '{"ok":true,"version":"%s","oldVersion":"%s","upgraded":%s,"reinstalled":%s,"nodeShimExecutable":true,"credentialProviderDependencyVerified":%s,"upgradeDependencyResolutionVerified":false,"rpmSignatureVerified":%s,"legacyUnsignedRpmBaseline":%s}\n' \
+  "$version" "$accepted_old_version" "$upgraded" "$reinstalled" "$dependency_verified" "$rpm_signature_verified" "$legacy_unsigned_rpm_baseline" > /evidence/result.json

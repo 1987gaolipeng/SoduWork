@@ -12,7 +12,7 @@ function create({ state, queue, runtime, emit, poll, drain, timeoutMs }) {
         return '当前任务正在执行，请等待任务结束后再引导';
       if (state.accessChangePending) return '正在切换权限，请稍后重试';
       if (state.cancelRequested || state.stopPending) return '正在停止当前回复，请稍候';
-      if (state.preparingPlugins || state.turnSubmissionPending || state.started && !state.dispatchReady)
+      if (state.pluginGenerationPreparing || state.preparingPlugins || state.turnSubmissionPending || state.started && !state.dispatchReady)
         return '消息正在准备发送，请稍后重试';
       if (!active && ['streaming', 'queued', 'waiting-user'].includes(state.status))
         return '当前回复正在恢复或等待处理，请处理后再引导';

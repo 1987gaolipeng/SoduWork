@@ -58,6 +58,49 @@ test('draft selection restores the complete encoded local model reference', asyn
   assert.equal(restored.draftSelection.modelName, modelName);
 });
 
+test('automation draft presence and reopened history retain the chosen runtime without claiming execution', async t => {
+  const events = [], f = await fixture(t, { notify: event => events.push(event) });
+  const made = await f.store.reserve({ title: '8分钟后提醒我', draftSelection: { adapterId: 'qwen' } });
+  assert.equal(made.ok, true, made.reason);
+  assert.equal(made.presence.draftAdapterId, 'qwen');
+  assert.deepEqual(made.presence.usedHarnesses, []);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].kind, 'work-conversation-created');
+  const saved = await f.store.save(made.sessionId, card({ actionId: 'work.automation.create' }));
+  assert.equal(saved.ok, true, saved.reason);
+  assert.equal(events.at(-1).presence.draftAdapterId, 'qwen');
+  const history = async () => f.module.visibleHistory(f.app, (await sessions.history(f.app)).chats, f.current());
+  assert.equal((await history())[0].draftAdapterId, 'qwen');
+  for (const [revision, adapterId] of [[1, 'codex-harness'], [2, 'dsh'], [3, 'pi']]) {
+    const changed = await f.store.saveDraftSelection(made.sessionId, { selection: { adapterId }, revision });
+    assert.equal(changed.ok, true, changed.reason);
+    assert.equal(events.at(-1).kind, 'work-draft-selection-saved');
+    assert.equal(events.at(-1).presence.draftAdapterId, adapterId);
+    assert.deepEqual(events.at(-1).presence.usedHarnesses, []);
+    assert.equal((await history())[0].draftAdapterId, adapterId);
+    const reopened = await f.module.create(f.dependencies).read(made.sessionId);
+    assert.equal(reopened.presence.draftAdapterId, adapterId);
+  }
+  const before = events.length;
+  assert.equal((await f.store.saveDraftSelection(made.sessionId, { selection: { adapterId: 'qwen' }, revision: 1 })).ok, false);
+  assert.equal(events.length, before, 'A rejected stale write cannot publish a selection');
+  f.changeIdentity(identity('other'));
+  assert.deepEqual(await history(), []);
+  f.changeIdentity(identity());
+  const entry = (await sessions.historyEntry(f.app, made.sessionId)).entry;
+  f.native.SessionManager.open(entry.path).appendCustomEntry('soduwork.access.policy', { mode: 'readonly' });
+  assert.equal((await history())[0].draftAdapterId, '');
+  assert.equal((await f.store.read(made.sessionId)).presence.draftAdapterId, '');
+});
+
+test('legacy work archives without a saved selection do not inherit the Pi storage format as their chosen runtime', async t => {
+  const f = await fixture(t), made = await f.store.reserve({ title: '旧自动化' });
+  assert.equal(made.presence.draftAdapterId, '');
+  await f.store.save(made.sessionId, card({ seed: { adapterId: 'qwen' } }));
+  const rows = f.module.visibleHistory(f.app, (await sessions.history(f.app)).chats, f.current());
+  assert.equal(rows[0].draftAdapterId, '');
+});
+
 test('仅表单会话写入真实 Pi 存档、列入历史并可由 SDK 恢复，无模型消息', async t => {
   const f = await fixture(t);
   const created = await f.store.reserve({ title: '【需求】修复导出' });

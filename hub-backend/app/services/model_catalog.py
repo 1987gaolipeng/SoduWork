@@ -1,4 +1,4 @@
-"""Administrator-owned models, provider settings, and personal overrides.
+"""Administrator-owned models and separate personal model services.
 
 Startup only adds missing credential-free provider templates. Historical presets and explicit
 migration helpers below never run automatically. Resolve credentials only when preparing
@@ -358,6 +358,25 @@ def _clear_provider_cache(session, _flush_context):
             session.info.pop(key, None)
 
 
+def _organization_provider(p) -> dict:
+    return {
+        "id": p.id, "name": p.name, "kind": p.kind or "openai-compat",
+        "baseUrl": p.base_url or "", "defaultBaseUrl": p.base_url or "",
+        "builtin": bool(p.builtin), "enabled": bool(p.enabled), "note": p.note or "",
+        "personal": False, "addressOverridden": False, "authMode": "key",
+        "apiKey": p.api_key or "",
+    }
+
+
+async def creation_receipt(session: AsyncSession, provider, model) -> dict:
+    # Flush defaults and target generations while the catalog edit lock is held.
+    await session.flush()
+    row = _m_api(model)
+    await model_capabilities.enrich(session, [row], {provider.id: _organization_provider(provider)})
+    return {"revision": row["revision"], "configRevision": row["configRevision"],
+            "providerRevision": model_config_guard.revision(provider)}
+
+
 async def effective_provider_map(session: AsyncSession, client=None) -> dict[str, dict]:
     """Resolve effective personal services without inheriting organization secrets into personal
     endpoints.
@@ -381,19 +400,8 @@ async def effective_provider_map(session: AsyncSession, client=None) -> dict[str
     org_rows = (await session.execute(select(models.ModelProvider)
                                      .execution_options(populate_existing=True))).scalars().all()
     personal = _personal_provider_rows(client)
-    overrides = {str(x.get("id") or ""): x for x in personal if not x.get("personal")}
-    out: dict[str, dict] = {}
-    for p in org_rows:
-        ov = overrides.get(p.id) or {}
-        overridden = bool(str(ov.get("baseUrl") or "").strip())
-        base = str(ov.get("baseUrl") or "").strip() if overridden else (p.base_url or "")
-        out[p.id] = {
-            "id": p.id, "name": p.name, "kind": p.kind or "openai-compat",
-            "baseUrl": base, "defaultBaseUrl": p.base_url or "",
-            "builtin": bool(p.builtin), "enabled": bool(p.enabled), "note": p.note or "",
-            "personal": False, "addressOverridden": overridden, "authMode": "key",
-            "apiKey": "" if overridden else (p.api_key or ""),
-        }
+    # A managed service's endpoint and credential are always administrator-owned.
+    out = {p.id: _organization_provider(p) for p in org_rows}
     for row in personal:
         if not row.get("personal"):
             continue
@@ -419,7 +427,7 @@ async def providers_for_client(session: AsyncSession, client) -> list[dict]:
     mine = dict(getattr(client, "model_keys", None) or {})
     out = []
     for p in (await effective_provider_map(session, client)).values():
-        key = str(mine.get(p["id"]) or "").strip()
+        key = str(mine.get(p["id"]) or "").strip() if p.get("personal") else ""
         out.append({k: v for k, v in p.items() if k != "apiKey"} | {
             "keySet": bool(p.get("apiKey")), "keyLen": len(p.get("apiKey") or ""),
             "myKeySet": bool(key), "myKeyLen": len(key),
@@ -431,7 +439,7 @@ def provider_key(p: dict, client) -> tuple[str, str]:
     if p.get("authMode") == "none":
         # Some compatible SDKs require an API-key field even when the local service ignores authentication.
         return "soduwork-local-no-key", "none"
-    mine = dict(getattr(client, "model_keys", None) or {}) if client is not None else {}
+    mine = dict(getattr(client, "model_keys", None) or {}) if client is not None and p.get("personal") else {}
     own = str(mine.get(p.get("id")) or "").strip()
     if own:
         return own, "mine"
@@ -450,13 +458,12 @@ async def catalog(session: AsyncSession, client=None) -> dict:
 
 async def usable(session: AsyncSession, client=None, modality: str = "chat") -> list[dict]:
     """Return models usable by this client, checking model visibility, enabled provider, endpoint,
-    and required credentials. Prefer personal credentials over organization credentials and
+    and required credentials. Managed and personal services keep their own credentials;
     include keyFrom so users can identify whose quota applies.
     """
     wanted = normalize_modality(modality)
     ps = await effective_provider_map(session, client)
     ms = list((await session.execute(select(models.ModelDef))).scalars().all())
-    mine_keys = dict(getattr(client, "model_keys", None) or {}) if client is not None else {}
     out: list[dict] = []
     seen = set()
     for m in ms:
@@ -481,7 +488,7 @@ async def usable(session: AsyncSession, client=None, modality: str = "chat") -> 
         p = ps.get(pid)
         # Personal models must still respect the provider's enabled state.
         # Disabling a provider applies to all models using it.
-        if not nm or p is None or not p["enabled"] or not p["baseUrl"] or (pid, nm) in seen:
+        if not nm or p is None or not p.get("personal") or not p["enabled"] or not p["baseUrl"] or (pid, nm) in seen:
             continue
         _, key_from = provider_key(p, client)
         if not key_from:
@@ -548,7 +555,7 @@ def probe_sync(base: str, key: str, model: str, kind: str = "openai-compat") -> 
         body = error.read(16000).decode("utf-8", "replace")
         billing = model_errors.billing_diagnostic(body)
         detail = (model_errors.billing_message(billing) + f"（HTTP {status}）"
-                  if billing else model_errors.public_failure(f"HTTP {status}"))
+                  if billing else model_errors.public_failure(f"HTTP {status} {body}"))
         return {"ok": False, "detail": detail,
                 **(billing or {})}
 
@@ -652,27 +659,35 @@ async def resolve(session: AsyncSession, client, model_name: str = "",
             "runtimeRevision": m.get("runtimeRevision", "")}
 
 
+def agent_choice(client, cli_key: str, override: str = "") -> tuple[str, str]:
+    """Read legacy names and provider-qualified preferences without changing stored data."""
+    table = getattr(client, "agent_models", None) or {}
+    saved = table.get(str(cli_key or "").strip().lower(), "")
+    name = canonical_model_name(saved.get("name") if isinstance(saved, dict) else saved)
+    provider = str(saved.get("providerId") or "") if isinstance(saved, dict) else ""
+    requested = canonical_model_name(override)
+    return requested or name, provider if not requested or requested == name else ""
+
+
 def agent_model(client, cli_key: str) -> str:
-    """Return the client's model preference for an agent runtime, independent of machine or seat
-    identity, or empty when unspecified.
-    """
-    table = dict(getattr(client, "agent_models", None) or {}) if client is not None else {}
-    return canonical_model_name(table.get(str(cli_key or "").strip().lower(), ""))
+    """Return the public wire model name for a runtime preference."""
+    return agent_choice(client, cli_key)[0]
+
+
+def agent_choice_row(rows, name, provider):
+    return next((row for row in rows if row["name"] == name
+                 and (not provider or row.get("providerId") == provider)), None)
 
 
 async def resolve_for_agent(session: AsyncSession, client, cli_key: str,
                             override: str = "") -> dict:
-    """Behavior and constraints for this operation."""
-    want = canonical_model_name(str(override or "").strip() or agent_model(client, cli_key))
-    if not want:
-        return await resolve(session, client, "")
-    # Check that a stored runtime preference remains usable.
-    # Do not rely on implicit model substitution during resolution.
-    # Keep preference validation and any fallback explicit to the caller.
-    if any(m["name"] == want for m in await usable(session, client)):
-        return await resolve(session, client, want)
-    # If the stored preference becomes unavailable, explain any fallback to the default.
-    got = await resolve(session, client, "")
-    if got:
-        got["fellBackFrom"] = want
-    return got
+    want, provider = agent_choice(client, cli_key, override)
+    available = await usable(session, client)
+    selected = await resolve(session, client, want, provider_id=provider, available=available)
+    if selected or not want or provider:
+        return selected
+    # Keep the reported fallback for legacy name-only probe/configuration requests.
+    fallback = await resolve(session, client, "", available=available)
+    if fallback:
+        fallback["fellBackFrom"] = want
+    return fallback

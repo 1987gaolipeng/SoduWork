@@ -46,9 +46,9 @@ async function setup(kind = 'hub', options = {}) {
   await js(`NativeChat.reset();calls=[];toasts=[];modelCalls=0;catalogMode='ok';catalogWaiters=[];
     window.releaseSend=null;window.releaseAccess=null;window.releaseRuntime=null;window.releaseCancel=null;
     window.holdNextSend=false;window.holdAccess=false;window.holdRuntime=false;window.holdCancel=false;
-    window.runtimeId=${JSON.stringify(['codex', 'claude'].includes(kind) ? kind : 'pi')};
+    window.runtimeId=${JSON.stringify(['codex'].includes(kind) ? kind : 'pi')};
     model=${JSON.stringify(kind === 'local' ? { id: 'local:model-' + 'c'.repeat(32), label: 'Private fixture', localOnly: true }
-      : { id: ['codex', 'claude'].includes(kind) ? kind + '-account' : 'hub-fixture', label: kind + ' fixture' })};
+      : { id: ['codex'].includes(kind) ? kind + '-account' : 'hub-fixture', label: kind + ' fixture' })};
     window.currentAccess='standard';window.activeTask=false;window.queueReply=false;
     task={id:'task-fixture',title:'Synthetic task',status:'doing',canViewExecution:true,acceptanceCriteria:['Review the saved artifact'],
       workRouting:{conversationTurn:{conversationId:'matrix-chat',state:'completed',executor:'native'}}};
@@ -89,7 +89,7 @@ app.whenReady().then(async () => {
       ['compose-candidate-navigation', 'panels-compose-skills', 'chat-plugin-mention-model', 'chat-plugin-mention', 'chat-send-queue']);
     await js(`window.runtimeId='pi';window.currentAccess='standard';window.activeTask=false;
       window.ac={supported:true,schema:'soduwork.access-policy/v1',modes:['standard','readonly','full'],canChangeDuringSession:true};
-      window.runtimeRows=['pi','qwen','codex','claude'].map(id=>({id,displayName:id,modelMode:['codex','claude'].includes(id)?'account':'managed',accessControl:ac}));
+      window.runtimeRows=['pi','qwen','codex'].map(id=>({id,displayName:id,modelMode:['codex'].includes(id)?'account':'managed',accessControl:ac}));
       idle=()=>({status:'idle',messages:[{role:'assistant',text:'Synthetic archive content',done:true}],tools:[],adapterId:runtimeId,
         execution:{running:false,taskExecutions:[]},modelSelection:{name:model.id,model},accessPolicy:{mode:currentAccess,revision:1},accessControl:ac});
       low.open=async options=>{calls.push({kind:'open',options});return {ok:true,ref:'matrix-ref',sessionId:'matrix-chat',adapterId:runtimeId,model,
@@ -112,14 +112,14 @@ app.whenReady().then(async () => {
       SoduWorkAPI.pluginCatalog=async()=>({items:[{pluginId:'fixture-plugin',key:'fixture-plugin',name:'Fixture plugin',personal:true,enabled:true,
         inputs:[{key:'format',type:'text',label:'Format',default:'fixture-format'}]}]});void 0;`);
 
-    for (const kind of ['hub', 'local', 'codex', 'claude']) for (const resumed of [false, true]) {
+    for (const kind of ['hub', 'local', 'codex']) for (const resumed of [false, true]) {
       await setup(kind, { resumed });
       const selected = await js('model.id'), sent = await send((resumed ? 'Resume ' : 'New ') + kind + ' conversation', { keyboard: resumed });
       assert.equal(sent.text, (resumed ? 'Resume ' : 'New ') + kind + ' conversation');
       assert.equal(sent.options.taskId, ''); assert.equal(sent.options.taskExecution, undefined);
       assert.equal(await js('fixtureContext._snap.modelSelection.name'), selected);
       assert.equal(Boolean(await js('calls.find(row=>row.kind==="open").options.chatId')), resumed);
-      assert.equal(await js('modelCalls>0'), !['codex', 'claude'].includes(kind));
+      assert.equal(await js('modelCalls>0'), !['codex'].includes(kind));
       mark((resumed ? 'Resumed' : 'New') + ' ' + kind + ' conversation sends once through real ' + (resumed ? 'Enter' : 'mouse') + ' input');
     }
     for (const resumed of [false, true]) {

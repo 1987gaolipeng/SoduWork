@@ -25,13 +25,15 @@ const FIELDS = localeMap(() => ([
   ['connectTimeout', '连接超时（秒）', 1, 60],
 ]))
 
-export default function ModelRuntime({ providers, models, catalogActions, catalogSummary }) {
+export default function ModelRuntime({ providers, models, catalogActions, catalogSummary, catalogCounts }) {
   const uiLocale = useLocale();
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [updatedAt, setUpdatedAt] = useState(null)
   const refreshRef = useRef(null)
   const [edit, setEdit] = useState(null)
+  const [overviewOpen, setOverviewOpen] = useState(false)
+  const overviewId = useId()
   const [servicesOpen, setServicesOpen] = useState(false)
   const servicesId = useId()
   useEffect(() => {
@@ -62,12 +64,28 @@ export default function ModelRuntime({ providers, models, catalogActions, catalo
     { key: 'rateLimited', label: tx("上游限流"), value: data ? metrics.rateLimited || 0 : null, unit: tx("次"), note: 'HTTP 429', issue: true },
   ]
   return <section className="model-runtime" aria-label={tx("模型运行情况")}>
-    <div className="model-runtime-head"><div><h3>{tx("模型运行情况")}</h3>
-      <p>{tx("查看目录配置，以及经 SoduWork 代理的实时请求与近一小时统计。")}</p></div>
+    <div className="model-runtime-head"><div><h3>{tx("模型运行情况")}</h3></div>
       <div className="model-runtime-actions">{catalogActions}
         <button className="btn btn-ghost xs" disabled={!data || !!error} onClick={() => setEdit(data)}>
           <Icon name="settings" />{tx("并发与等待")}</button></div></div>
+    <div className="model-runtime-compact">
+      <dl className="model-runtime-quick-stats">
+        {catalogSummary && <>
+          <div><dt>{tx("服务总数")}</dt><dd>{catalogCounts?.providers ?? '—'}</dd></div>
+          <div><dt>{tx("模型总数")}</dt><dd>{catalogCounts?.models ?? '—'}</dd></div>
+        </>}
+        {loads.map(item => <div key={item.key} className={data && item.limit > 0 && item.value >= item.limit ? 'is-full' : ''}>
+          <dt>{item.label}</dt><dd>{data ? item.value : '—'}</dd>
+        </div>)}
+      </dl>
+      <button type="button" className="model-runtime-overview-toggle" aria-expanded={overviewOpen}
+        aria-controls={overviewId} onClick={() => setOverviewOpen(open => !open)}>
+        {overviewOpen ? tx("收起概览") : tx("展开概览")}<Icon name="chevron" aria-hidden="true" />
+      </button>
+    </div>
     {error && <div className="model-runtime-state" role="alert"><div><b>{data ? tx("刷新失败，以下显示上次成功读取的数据。") : tx("运行状态暂不可用")}</b><span>{error}</span></div><button className="btn btn-ghost xs" onClick={() => refreshRef.current?.()}>{tx("重试")}</button></div>}
+    <div id={overviewId} className="model-runtime-overview-body" hidden={!overviewOpen}>
+    <p className="model-dimension-note">{tx("查看目录配置，以及经 SoduWork 代理的实时请求与近一小时统计。")}</p>
     <div className={'model-runtime-metrics' + (catalogSummary ? ' with-catalog' : '')}>
       {catalogSummary}
       <section className="model-runtime-live model-runtime-dimension" aria-label={tx("实时负载")}>
@@ -107,6 +125,7 @@ export default function ModelRuntime({ providers, models, catalogActions, catalo
         {!error && data && !data.groups?.length && <p className="model-runtime-empty">{tx("当前没有正在生成或排队的请求")}</p>}
       </div>
     </div>
+    </div>
     {edit && <CapacityForm initial={edit} providers={providers} models={models}
       onClose={() => setEdit(null)} onSaved={() => { setEdit(null); refreshRef.current?.() }} />}
   </section>
@@ -138,8 +157,8 @@ function CapacityForm({ initial, providers, models, onClose, onSaved }) {
     } catch (e) { setError(e.message || tx("保存失败，当前输入已保留")) }
     finally { setBusy(false) }
   }
-  return <Modal title={tx("并发与等待")} wide onClose={onClose} foot={<>
-    <button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+  return <Modal draft={policy} title={tx("并发与等待")} wide onClose={onClose} foot={dismiss => <>
+    <button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
     <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : tx("保存")}</button></>}>
     <p className="muted">{tx("按模型服务实际额度设置。各项上限同时生效；已提交请求继续使用原策略。这里控制并发，不替代服务商的每分钟额度。")}</p>
     <div className="model-runtime-form">{FIELDS.map(([key, label, min, max]) => <label key={key} className="f-lbl">{label}

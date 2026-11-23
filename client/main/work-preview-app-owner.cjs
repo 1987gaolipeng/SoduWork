@@ -6,7 +6,11 @@ const senders = new WeakMap();
 const denied = () => Object.assign(Error('Application account changed; reopen the application'), { code: 'APP_ACCOUNT_CHANGED' });
 function identity(item) {
   const pluginId = String(item.appBridge?.appId || '').replace(/^plugin:/, '');
-  const origin = new URL(item.appBridge?.origin || '').origin;
+  // Installed pages can be opened by Safari/Firefox with a transient or
+  // malformed origin while the view is being restored.  Treat that state as
+  // an ownership refusal instead of leaking URL/Reference errors to the UI.
+  let origin = '';
+  try { origin = new URL(item.appBridge?.origin || '').origin; } catch (_) { throw denied(); }
   if (!pluginId || !/^https?:/.test(origin)) throw denied();
   return { pluginId, origin };
 }

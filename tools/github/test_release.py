@@ -12,16 +12,22 @@ from unittest.mock import patch
 
 import check_public_ci
 import release
+import linux_signing
 
 
 class ReleaseTests(unittest.TestCase):
+    def linux_checks(self, ctx):
+        return {'ok': True, 'linuxSigning': {'schema': 1, 'primaryFingerprint': 'A' * 40,
+                'rpmEmbedded': True, 'detached': linux_signing.package_names(ctx['version']),
+                'publicKey': linux_signing.PUBLIC_KEY}}
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.env = dict(RELEASE_COMPONENT="source", RELEASE_VERSION="1.2.3",
                         GITHUB_REPOSITORY="example/project", PUBLIC_RELEASE_REPOSITORY="example/project",
-                        GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_REF="refs/heads/release/1.2.3",
+                        GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_REF="refs/heads/release/1.2.x",
                         GITHUB_REF_PROTECTED="true", GITHUB_SHA="a" * 40, GITHUB_RUN_ID="123")
         self.ctx = release.context(self.env)
 
@@ -38,14 +44,31 @@ class ReleaseTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 release.context({**self.env, key: value})
 
+    def test_patch_releases_share_a_branch_and_keep_exact_version_tags(self):
+        for version, branch in [("1.2.0", "1.2.x"), ("1.2.3", "1.2.x"),
+                                ("1.2.24", "1.2.x"), ("10.20.30", "10.20.x")]:
+            with self.subTest(version=version):
+                ctx = release.context({**self.env, "RELEASE_VERSION": version,
+                                       "GITHUB_REF": "refs/heads/release/" + branch})
+                self.assertEqual(ctx["version"], version)
+                self.assertEqual(ctx["tag"], "v" + version)
+
+    def test_context_rejects_other_series_and_version_specific_branches(self):
+        for ref in ["refs/heads/release/1.2.3", "refs/heads/release/1.3.x",
+                    "refs/heads/release/2.2.x", "refs/heads/release/1.20.x",
+                    "refs/heads/release/1.2.X", "refs/heads/main", "refs/tags/v1.2.3"]:
+            with self.subTest(ref=ref), self.assertRaisesRegex(ValueError, "maintenance branch"):
+                release.context({**self.env, "GITHUB_REF": ref})
+
     def test_complete_candidate_verifies(self):
         self.bundle()
         manifest = release.candidate(self.ctx, self.root)
         self.assertEqual(release.verify(self.ctx, self.root), manifest)
 
-    def test_other_run_and_commit_are_rejected(self):
+    def test_other_run_commit_and_patch_version_are_rejected(self):
         self.bundle()
-        for key, value in [("runId", "124"), ("commit", "b" * 40), ("repository", "fork/repo")]:
+        for key, value in [("runId", "124"), ("commit", "b" * 40), ("repository", "fork/repo"),
+                           ("version", "1.2.4"), ("tag", "v1.2.4")]:
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, "another run"):
                 release.candidate({**self.ctx, key: value}, self.root)
 
@@ -111,7 +134,7 @@ class ReleaseTests(unittest.TestCase):
                 release.preflight(self.ctx)
         with patch.object(release, "api", side_effect=[{"private": False}, gate, branch]) as api:
             release.preflight(self.ctx)
-            api.assert_called_with('/git/ref/heads/release/1.2.3')
+            api.assert_called_with('/git/ref/heads/release/1.2.x')
 
     def test_annotated_tag_is_peeled_and_wrong_commit_is_rejected(self):
         with patch.object(release, "preflight"), patch.object(release, "api", side_effect=[
@@ -287,13 +310,19 @@ class ReleaseTests(unittest.TestCase):
 
     def test_combined_candidate_requires_hub_and_every_desktop_shard(self):
         ctx = {**self.ctx, 'component': 'all'}
+        release.write(self.root / 'release-notes.json', {
+            'schema': 1, 'version': ctx['version'], 'sourceCommit': ctx['commit'],
+            'previousCommit': 'b' * 40, 'previousTag': 'v1.2.2', 'runId': ctx['runId'],
+            'repository': ctx['repository'], 'status': 'unavailable',
+            'locales': {}, 'sources': [], 'omitted': []})
+        digest = release.fingerprint(self.root / 'release-notes.json')['sha256']
         import shutil
         for shard in release.SHARDS['all']:
             folder = self.root / shard
             folder.mkdir()
             for name in release.expected(ctx, shard):
                 (folder / name).write_bytes(b'accepted fixture')
-            release.seal(ctx, shard, folder, {'ok': True})
+            release.seal(ctx, shard, folder, {**(self.linux_checks(ctx) if shard == 'linux' else {'ok': True}), 'releaseNotesSha256': digest})
             for file in folder.iterdir():
                 shutil.move(file, self.root / file.name)
             folder.rmdir()
@@ -325,9 +354,15 @@ class ReleaseTests(unittest.TestCase):
         baselines = {key: {'productName': 'SoduWork', 'version': '1.2.2', 'sha256': 'a' * 64,
                           'url': 'https://github.com/example/project/releases/download/client-v1.2.2/installer'} for key in keys}
         file = self.root / 'tools/ci/soduwork-acceptance-baselines.json'
-        release.write(file, baselines)
-        release.policy(ctx, self.root)
-        for field, value in [('version', '1.2.3'), ('url', 'https://example.test/installer'), ('path', '/local/installer')]:
+        for prefix in ['client-v', 'v']:
+            for item in baselines.values():
+                item['url'] = f'https://github.com/example/project/releases/download/{prefix}1.2.2/installer'
+            release.write(file, baselines)
+            release.policy(ctx, self.root)
+        for field, value in [('version', '1.2.3'), ('url', 'https://example.test/installer'),
+                             ('url', 'https://github.com/example/project/releases/download/v1.2.1/installer'),
+                             ('url', 'https://github.com/other/project/releases/download/v1.2.2/installer'),
+                             ('path', '/local/installer')]:
             changed = copy.deepcopy(baselines)
             changed[keys[0]][field] = value
             release.write(file, changed)
@@ -345,6 +380,24 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(release.SHARDS["client"], ["windows", "linux", "macos-arm64", "macos-x64"])
         with self.assertRaises(KeyError):
             release.expected({"version": "1.2.3"}, "android")
+
+    def test_linux_release_requires_signatures_public_key_and_verified_receipt(self):
+        ctx = {**self.ctx, 'component': 'client'}
+        for name in release.expected(ctx, 'linux'):
+            (self.root / name).write_bytes(b'accepted fixture')
+        checks = self.linux_checks(ctx)
+        for changed in [{}, {'rpmEmbedded': False}, {'primaryFingerprint': 'short-id'},
+                        {'detached': []}, {'publicKey': 'unpublished-key.asc'}]:
+            bad = {'ok': True, 'linuxSigning': {**checks['linuxSigning'], **changed} if changed else {}}
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, 'signing acceptance'):
+                release.seal(ctx, 'linux', self.root, bad)
+        for name in linux_signing.asset_names(ctx['version'])[3:]:
+            file = self.root / name
+            file.unlink()
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'artifact files'):
+                release.seal(ctx, 'linux', self.root, checks)
+            file.write_bytes(b'accepted fixture')
+        release.seal(ctx, 'linux', self.root, checks)
 
 
 if __name__ == "__main__":

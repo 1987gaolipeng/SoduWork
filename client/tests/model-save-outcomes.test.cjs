@@ -26,15 +26,18 @@ async function fixture(t, { collision = false, managedPersonal = false, localKey
     baseUrl: 'https://fixture.invalid/v1', modelNames: [], personal: managedPersonal }],
     myModels: collision ? [{ providerId: managedId, name: 'hub-model' }] : [],
     usable: collision ? [{ providerId: managedId, name: 'hub-model' }] : [] };
+  const listeners = new Map();
   const state = { failHubWrite: false, failHubRead: false, localInputs: [], hubInputs: [], probes: [], notices: [], gate: null };
   const values = new Map(), button = { disabled: false, textContent: '' }, field = { disabled: false };
   const body = { innerHTML: '', setAttribute() {}, removeAttribute() {}, querySelector: () => null,
     querySelectorAll: selector => selector === 'input,select,textarea,button' ? [field] : [] };
-  const box = { URL, URLSearchParams, AbortController, Response, CustomEvent: class {}, structuredClone,
+  const box = { URL, URLSearchParams, AbortController, AbortSignal, Response, CustomEvent: class { constructor(type) { this.type = type; } }, structuredClone,
     __SODUWORK_TEST_HUB_CONFIG__: { allowSwitch: true },
     setTimeout: (...args) => { const timer = setTimeout(...args); timers.add(timer); return timer; },
     clearTimeout, setInterval: () => 0, navigator: { platform: 'test' },
-    console: { log() {}, error() {} }, dispatchEvent() {}, addEventListener() {},
+    console: { log() {}, error() {} },
+    dispatchEvent(event) { for (const listener of listeners.get(event.type) || []) listener(event); },
+    addEventListener(type, listener) { if (!listeners.has(type)) listeners.set(type, []); listeners.get(type).push(listener); },
     localStorage: { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)),
       removeItem: key => values.delete(key) },
     document: { getElementById: id => id === 'mdBody' ? body : id === 'mdSave' ? button : null },
@@ -54,9 +57,11 @@ async function fixture(t, { collision = false, managedPersonal = false, localKey
         const input = JSON.parse(options.body); state.hubInputs.push(input);
         if (state.failHubWrite) throw Error('Synthetic Hub write failure');
         assert.equal(input.expectedRevision, managed.revision);
-        managed.providers = input.providers; managed.myModels = input.models;
+        if (input.providers) managed.providers = input.providers;
+        if (input.models) managed.myModels = input.models;
         managed.revision = 'hub-' + (Number(managed.revision.split('-')[1]) + 1);
-        return new Response('{"ok":true}');
+        const usable = managed.myModels.map(row => ({ ...row, configRevision: 'target-' + managed.revision }));
+        return new Response(JSON.stringify({ ok: true, ...(input.returnRevision === true ? { revision: managed.revision } : {}), usable }));
       }
       if (state.failHubRead) throw Error('Synthetic Hub read failure');
       return new Response(JSON.stringify(managed));
@@ -79,7 +84,7 @@ async function fixture(t, { collision = false, managedPersonal = false, localKey
 }
 
 test('a partial mixed save retains Hub edits and retries without rewriting committed local models', async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, { managedPersonal: true });
   f.touch('managed', { baseUrl: 'https://edited.fixture.invalid/v1' });
   f.touch('device:custom-private', { name: 'Saved local edit' });
   f.state.failHubWrite = true;
@@ -100,7 +105,7 @@ test('a partial mixed save retains Hub edits and retries without rewriting commi
 });
 
 test('same-ID local and Hub providers keep distinct catalog, edits, and deletions', async t => {
-  const f = await fixture(t, { collision: true });
+  const f = await fixture(t, { collision: true, managedPersonal: true });
   const api = f.box.SoduWorkAPI, catalog = await api.myModels();
   assert.deepEqual(Array.from(catalog.providers, row => row.id), ['device:custom-private', 'custom-private']);
   assert.equal(catalog.providers[0].localProviderId, 'custom-private');
@@ -125,7 +130,7 @@ test('same-ID local and Hub providers keep distinct catalog, edits, and deletion
 });
 
 test('same-ID provider probes and explicit key patches use their declared ownership', async t => {
-  const f = await fixture(t, { collision: true }), api = f.box.SoduWorkAPI, localProbes = [];
+  const f = await fixture(t, { collision: true, managedPersonal: true }), api = f.box.SoduWorkAPI, localProbes = [];
   f.box.soduWorkAPI.localModels.test = async (providerId, model) => { localProbes.push({ providerId, model }); return { ok: true }; };
   f.box.soduWorkAPI.localModels.checkCapabilities = async input => { localProbes.push({ modelRef: input.modelRef }); return { ok: true }; };
   await assert.rejects(api.testMyModel('custom-private'), /来源不明确/);
@@ -169,7 +174,7 @@ test('deleting a Hub service with the same raw device ID preserves the device se
 });
 
 test('deleting the last local service never sends its removal key to a later managed save', async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, { managedPersonal: true });
   f.touch('managed', { baseUrl: 'https://edited.fixture.invalid/v1' });
   assert.equal(await f.removeProvider('device:custom-private'), true);
   assert.equal(f.snapshot().providers.length, 0);
@@ -232,7 +237,7 @@ test('a committed local save stays successful when catalog rendering fails', asy
 });
 
 for (const change of ['hub', 'panel']) test(`a ${change} switch during local persistence cannot send the old managed draft`, async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, { managedPersonal: true });
   let release;
   f.state.gate = new Promise(resolve => { release = resolve; });
   f.touch('managed', { baseUrl: 'https://previous.fixture.invalid/v1' });
@@ -323,7 +328,7 @@ test('saving another local service leaves an incomplete new service pending', as
 });
 
 test('an incomplete new draft cannot force a local write during a managed save', async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, { managedPersonal: true });
   f.evaluate('_mdAddService(); _mdOpen = "managed"; _mdEditor = "";');
   f.touch('managed', { baseUrl: 'https://edited.fixture.invalid/v1' });
   assert.equal(await f.evaluate('_mdSave(false)'), true);
@@ -408,7 +413,7 @@ test('reloading a saved service clears validation for an invalid edit that was d
 
 for (const patch of [{ name: 'n'.repeat(65) }, { baseUrl: 'https://fixture.invalid/v1/'.padEnd(401, 'x') }])
 test(`an oversized draft ${Object.keys(patch)[0]} cannot block another service save`, async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, { managedPersonal: true });
   f.evaluate('_mdAddService()');
   f.touch(f.evaluate('_mdNew.id'), { name: 'Draft service', baseUrl: 'https://fixture.invalid/v1', ...patch });
   f.evaluate('_mdOpen = "managed"; _mdEditor = "";');
@@ -435,4 +440,242 @@ test('saved device credentials retain local status and local key controls', asyn
   assert.match(f.body.innerHTML, /移除本地密钥/);
   assert.match(f.body.innerHTML, /本地访问密钥已配置/);
   assert.doesNotMatch(f.body.innerHTML, /当前使用这个模型的个人 Key/);
+});
+
+function applyModel(f, providerId, name, { original, modality = 'chat' } = {}) {
+  if (original) f.evaluate('_mdDrafts.set(' + JSON.stringify(providerId) + ', {original:' + JSON.stringify(original) + '})');
+  const values = { '[data-padd]': name, '[data-paddtype]': modality, '[data-paddpath]': '/images/generations',
+    '[data-mdfield="imageInput"]': 'supported' };
+  return f.box._mdApplyModel({ dataset: { mdeditor: providerId }, isConnected: true,
+    querySelector: selector => ({ value: values[selector] || '' }) });
+}
+
+function localChecks(f, gate) {
+  const requests = [];
+  f.box.soduWorkAPI.localModels.checkCapabilities = async request => {
+    const saved = f.snapshot().myModels.find(model => model.id === request.modelRef);
+    assert.ok(saved, 'automatic checks require the persisted opaque reference');
+    requests.push({ ...request, name: saved.name });
+    if (gate) await gate;
+    return { checks: { connection: { status: 'passed' } }, runtimeChanged: false };
+  };
+  return requests;
+}
+const nextTurn = () => new Promise(resolve => setImmediate(resolve));
+const localId = 'device:custom-private';
+const checks = ['connection', 'imageInput', 'toolCalling', 'streaming'];
+
+test('Add model commits each row independently and queues only chat checks, one at a time', async t => {
+  const f = await fixture(t, { managedPersonal: true });
+  let release;
+  const requests = localChecks(f, new Promise(resolve => { release = resolve; }));
+  f.touch(localId, { name: 'Pending service name' });
+  f.touch('managed', { name: 'Pending managed name' });
+  await applyModel(f, localId, 'first');
+  await applyModel(f, localId, 'second');
+  await applyModel(f, localId, 'picture', { modality: 'image' });
+  assert.equal(f.snapshot().providers[0].name, 'Private service');
+  assert.equal(f.state.hubInputs.length, 0);
+  assert.equal(f.evaluate('_mdLocalDirty && _mdManagedDirty'), true);
+  assert.ok(f.state.localInputs.every(body => !('providers' in body) && !('keys' in body)));
+  assert.deepEqual(requests.map(row => row.name), ['first']);
+  await f.box._mdCheckModel(localId, 'first');
+  release(); await nextTurn();
+  assert.deepEqual(requests.map(row => row.name), ['first', 'second']);
+  assert.equal(await f.evaluate('_mdSave(false)'), true);
+  await nextTurn();
+  assert.equal(f.snapshot().providers[0].name, 'Pending service name');
+  assert.equal(requests.length, 2);
+  await f.evaluate('_mdLoad()');
+  assert.equal(requests.length, 2);
+});
+
+test('Hub model addition preserves pending service settings and retries a failed addition', async t => {
+  const f = await fixture(t, { managedPersonal: true });
+  f.touch('managed', { authMode: 'none' });
+  await f.evaluate('_mdSave(false)');
+  f.touch('managed', { baseUrl: 'https://pending.fixture.invalid/v1' });
+  f.touch(localId, { name: 'Local draft' });
+  f.state.failHubWrite = true;
+  await applyModel(f, 'managed', 'hub-add');
+  assert.equal(f.evaluate('_mdMyModels.some(row => row.name === "hub-add")'), false);
+  assert.deepEqual(f.state.probes, []);
+  f.state.failHubWrite = false;
+  await applyModel(f, 'managed', 'hub-add'); await nextTurn();
+  assert.deepEqual(f.state.probes.map(row => row.body), [{ providerId: 'managed', model: 'hub-add', expectedConfigRevision: 'target-hub-3', checks }]);
+  assert.equal(f.state.hubInputs.at(-1).providers, undefined);
+  assert.deepEqual(f.state.hubInputs.at(-1).keys, {});
+  assert.equal(f.state.hubInputs.at(-1).returnRevision, true);
+  assert.equal(f.state.localInputs.length, 0);
+  assert.equal(await f.evaluate('_mdSave(false)'), true);
+  assert.equal(f.state.hubInputs.at(-1).providers[0].baseUrl, 'https://pending.fixture.invalid/v1');
+  assert.equal(f.state.probes.length, 1);
+});
+
+for (const missing of ['receipt', 'target', 'configRevision']) {
+  test('a managed model saved without ' + missing + ' can only be checked manually', async t => {
+    const f = await fixture(t, { managedPersonal: true });
+    f.touch('managed', { authMode: 'none' });
+    assert.equal(await f.evaluate('_mdSave(false)'), true);
+    const fetch = f.box.fetch;
+    f.box.fetch = async (url, options) => {
+      const response = await fetch(url, options);
+      if (options?.method !== 'PUT') return response;
+      const result = await response.json();
+      if (missing === 'receipt') delete result.revision;
+      if (missing === 'target') result.usable = [];
+      if (missing === 'configRevision') delete result.usable[0].configRevision;
+      return new Response(JSON.stringify(result));
+    };
+    await applyModel(f, 'managed', 'manual-only'); await nextTurn();
+    assert.equal(f.evaluate('_mdMyModels.some(row => row.name === "manual-only")'), true);
+    assert.deepEqual(f.state.probes, []);
+    await f.box._mdCheckModel('managed', 'manual-only');
+    assert.equal(f.state.probes.length, 1);
+  });
+}
+
+test('an automatic check skips a queued model changed by another window after addition', async t => {
+  const f = await fixture(t);
+  let release;
+  const requests = localChecks(f, new Promise(resolve => { release = resolve; }));
+  await applyModel(f, localId, 'active'); await applyModel(f, localId, 'queued');
+  const catalog = f.snapshot();
+  store.save({ expectedRevision: catalog.revision, models: catalog.myModels.map(row =>
+    row.name === 'queued' ? { ...row, config: { thinkingMode: 'always' } } : row) });
+  release(); await nextTurn();
+  assert.deepEqual(requests.map(row => row.name), ['active']);
+});
+
+test('closing during the first automatic check drops the queue and cancels its saved reference', async t => {
+  const f = await fixture(t), cancels = [];
+  let release;
+  const requests = localChecks(f, new Promise(resolve => { release = resolve; }));
+  f.box.soduWorkAPI.localModels.cancelCapabilities = async input => cancels.push(input);
+  await applyModel(f, localId, 'active'); await applyModel(f, localId, 'queued');
+  await nextTurn();
+  f.box.closeModelsPanel(); release(); await nextTurn();
+  assert.deepEqual(requests.map(row => row.name), ['active']);
+  assert.equal(cancels[0].modelRef, requests[0].modelRef);
+  assert.equal(cancels[0].requestId, requests[0].requestId);
+});
+
+for (const action of ['reload', 'scope-change', 'delete-service']) {
+  test(action + ' cancels an active automatic check and drops checks queued for the old service', async t => {
+    const f = await fixture(t), cancelled = [];
+    let release;
+    const requests = localChecks(f, new Promise(resolve => { release = resolve; }));
+    f.box.soduWorkAPI.localModels.cancelCapabilities = async input => cancelled.push(input);
+    await applyModel(f, localId, 'active'); await applyModel(f, localId, 'queued');
+    await nextTurn();
+    if (action === 'delete-service') assert.equal(await f.removeProvider(localId), true);
+    else if (action === 'reload') assert.equal(await f.evaluate('_mdLoad()'), true);
+    else f.box.SoduWorkAPI.setHubEnvironment('development', 'http://127.0.0.1:9876');
+    release(); await nextTurn();
+    assert.deepEqual(requests.map(row => row.name), ['active']);
+    assert.deepEqual(cancelled.map(row => row.requestId), [requests[0].requestId]);
+  });
+}
+
+test('reopening during an admitted add reads the committed model and skips its old-view check', async t => {
+  const f = await fixture(t), requests = localChecks(f);
+  let release;
+  f.state.gate = new Promise(resolve => { release = resolve; });
+  const saving = applyModel(f, localId, 'reopened');
+  await nextTurn();
+  assert.equal(f.state.localInputs.length, 1);
+  f.box.closeModelsPanel();
+  const reopening = f.evaluate('_mdLoad()');
+  await nextTurn();
+  release();
+  await saving;
+  assert.equal(await reopening, true);
+  assert.equal(f.evaluate('_mdData.localRevision'), f.snapshot().revision);
+  assert.deepEqual(Array.from(f.evaluate('_mdMyModels'), row => row.name), f.snapshot().myModels.map(row => row.name));
+  assert.deepEqual(requests, []);
+});
+
+for (const action of ['close', 'scope-change']) {
+  test(action + ' between a save click and write admission cannot launch a first check in the next view', async t => {
+    const f = await fixture(t), requests = localChecks(f);
+    const saving = applyModel(f, localId, 'previous-view');
+    if (action === 'close') f.box.closeModelsPanel();
+    else f.box.SoduWorkAPI.setHubEnvironment('development', 'http://127.0.0.1:9876');
+    await saving; await nextTurn();
+    assert.deepEqual(requests, []);
+  });
+}
+
+test('a managed add admitted by the old Hub cannot populate or probe the reopened account', async t => {
+  const f = await fixture(t, { managedPersonal: true });
+  f.touch('managed', { authMode: 'none' });
+  assert.equal(await f.evaluate('_mdSave(false)'), true);
+  const fetch = f.box.fetch;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let admitted = false;
+  f.box.fetch = async (url, options) => {
+    if (options?.method === 'PUT') { admitted = true; await gate; }
+    if (String(url).startsWith('http://127.0.0.1:9876') && (!options?.method || options.method === 'GET'))
+      return new Response(JSON.stringify({ revision: 'other-hub', providers: [], myModels: [], usable: [] }));
+    return fetch(url, options);
+  };
+  const saving = applyModel(f, 'managed', 'old-account-model');
+  await nextTurn();
+  assert.equal(admitted, true);
+  f.box.closeModelsPanel();
+  f.box.SoduWorkAPI.setHubEnvironment('development', 'http://127.0.0.1:9876');
+  const reopened = f.evaluate('_mdLoad()');
+  release();
+  await saving;
+  assert.equal(await reopened, true);
+  assert.equal(f.evaluate('_mdData.revision'), 'other-hub');
+  assert.equal(f.evaluate('_mdMyModels.some(row => row.name === "old-account-model")'), false);
+  assert.deepEqual(f.state.probes, []);
+});
+
+test('adding to an unsaved service leaves the model editor open and creates no persisted rows', async t => {
+  const f = await fixture(t);
+  const pid = f.evaluate('_mdAddService(); _mdNew.id');
+  f.touch(pid, { name: 'New service', baseUrl: 'http://127.0.0.1:1/v1', authMode: 'none' });
+  f.evaluate('_mdDrafts.set(_mdNew.id, { open: true, changed: true })');
+  await applyModel(f, pid, 'waiting');
+  assert.equal(f.state.localInputs.length, 0);
+  assert.equal(f.evaluate('_mdDrafts.get(_mdNew.id).open'), true);
+  assert.equal(await f.evaluate('_mdSave(false)'), true);
+  assert.equal(f.snapshot().myModels.some(row => row.name === 'waiting'), false);
+  await applyModel(f, pid, 'waiting');
+  assert.ok(f.snapshot().myModels.some(row => row.name === 'waiting'));
+});
+
+test('a failed local addition leaves no model, runs no check, and can be retried', async t => {
+  const f = await fixture(t), requests = localChecks(f);
+  const save = f.box.soduWorkAPI.localModels.save;
+  f.box.soduWorkAPI.localModels.save = async () => { throw Error('Synthetic local persistence failure'); };
+  await applyModel(f, localId, 'retry'); await nextTurn();
+  assert.deepEqual(requests, []);
+  assert.equal(f.evaluate('_mdMyModels.some(row => row.name === "retry")'), false);
+  f.box.soduWorkAPI.localModels.save = save;
+  await applyModel(f, localId, 'retry'); await nextTurn();
+  assert.deepEqual(requests.map(row => row.name), ['retry']);
+});
+
+test('a new chat model without saved credentials remains available for a later manual check', async t => {
+  const f = await fixture(t), requests = localChecks(f);
+  f.touch(localId, { authMode: 'key' });
+  assert.equal(await f.evaluate('_mdSave(false)'), true);
+  await applyModel(f, localId, 'no-key');
+  await nextTurn();
+  assert.deepEqual(requests, []);
+  assert.ok(f.snapshot().myModels.some(row => row.name === 'no-key'));
+});
+
+test('saving a personal service with an unprobed protocol skips the automatic Hub request', async t => {
+  const f = await fixture(t, { managedPersonal: true });
+  f.touch('managed', { kind: 'anthropic', authMode: 'none' });
+  assert.equal(await f.evaluate('_mdSave(false)'), true);
+  await applyModel(f, 'managed', 'messages-model');
+  await nextTurn();
+  assert.deepEqual(f.state.hubInputs.at(-1).models.map(row => row.name), ['messages-model']);
+  assert.deepEqual(f.state.probes, []);
 });

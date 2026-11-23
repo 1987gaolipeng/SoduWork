@@ -108,14 +108,14 @@ function attach({ owner, item, createView, loadTarget, safeWebUrl, openExternal,
         if (item.appBridge) appOwner.assertCurrent(page);
         if (disposed) throw Error('应用窗口已关闭');
         const id = item.id + ':page-' + (++sequence);
-        const page = createView(owner, id, item.appBridge, true, options.webContents);
+        const nextPage = createView(owner, id, item.appBridge, true, options.webContents);
         owner.views.delete(id); // The app window, not inline-preview cleanup, owns this page.
-        page.appWindowRoot = item;
-        page.requested = details.url;
-        pages.set(id, page);
-        (item.detachedWin || item.embeddedHost).contentView.addChildView(page.view);
-        page.view.setBorderRadius(12);
-        watch(page);
+        nextPage.appWindowRoot = item;
+        nextPage.requested = details.url;
+        pages.set(id, nextPage);
+        (item.detachedWin || item.embeddedHost).contentView.addChildView(nextPage.view);
+        nextPage.view.setBorderRadius(12);
+        watch(nextPage);
         // Re-add the composer last: a popup must never cover its native surface.
         if (item.composer) (item.detachedWin || item.embeddedHost).contentView.addChildView(item.composer.view);
         if (details.disposition !== 'background-tab') select(id);

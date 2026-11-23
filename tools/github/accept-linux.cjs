@@ -8,6 +8,7 @@ const scenarios = [
   ['ubuntu22-deb', 'ubuntu:22.04', 'deb', 'deb'],
   ['ubuntu24-deb', 'ubuntu:24.04', 'deb', 'deb'],
   ['rocky9-rpm', 'rockylinux:9', 'rpm', 'rpm'],
+  ['fedora45-rpm', 'fedora:45', 'rpm', 'rpm'],
   ['ubuntu22-tgz', 'ubuntu:22.04', 'tar.gz', 'tgz'],
 ];
 async function main() {
@@ -16,6 +17,8 @@ async function main() {
   const packages = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-public-accept-'));
   const checks = [];
   try {
+    await fs.copyFile(path.join(contract.dist, 'SoduWork-Linux-Signing-Key.asc'),
+      path.join(packages, 'SoduWork-Linux-Signing-Key.asc'));
     const old = {};
     for (const item of record.artifacts) {
       await fs.copyFile(path.join(contract.dist, item.name), path.join(packages, item.name));
@@ -23,6 +26,10 @@ async function main() {
     }
     for (const [name, image, format, kind] of scenarios) {
       const item = record.artifacts.find(row => row.format === format), previous = old[format];
+      if (kind === 'rpm' && previous?.rpmSignature !== undefined)
+        assert.equal(previous.rpmSignature, 'legacy-unsigned', 'Unknown RPM baseline signature policy');
+      const legacyDigest = kind === 'rpm' && previous?.rpmSignature === 'legacy-unsigned' ? previous.sha256 : '-';
+      if (legacyDigest !== '-') assert.match(legacyDigest, /^[a-f0-9]{64}$/);
       const output = path.join(contract.root, 'release-evidence/linux', name);
       await fs.mkdir(output, { recursive: true });
       const container = 'soduwork-public-' + require('node:crypto').randomUUID();
@@ -30,10 +37,13 @@ async function main() {
       try {
         await run('docker', ['create', '--name', container, '--cap-add', 'IPC_LOCK', '--cpus', '2', '--memory', '4g', '--pids-limit', '512',
           '-v', packages + ':/pkg:ro', '-v', path.join(contract.root, 'tools') + ':/checks:ro',
+          '-v', path.join(contract.root, 'client/package.json') + ':/client/package.json:ro',
+          '-v', path.join(contract.root, 'client/main/default-hub.cjs') + ':/client/main/default-hub.cjs:ro',
+          '-e', 'SODUWORK_DEFAULT_HUB_URL=' + record.defaultHubUrl,
           '-v', output + ':/evidence', '-e', 'SODUWORK_ACCEPT_UID=' + (os.userInfo().uid || 12001), image, 'sleep', 'infinity']);
         created = true;
         await run('docker', ['start', container]);
-        const args = [kind, '/pkg/' + item.name, record.version, previous ? '/pkg/' + path.basename(previous.path) : '-', previous ? previous.version : '-'];
+        const args = [kind, '/pkg/' + item.name, record.version, previous ? '/pkg/' + path.basename(previous.path) : '-', previous ? previous.version : '-', legacyDigest];
         await run('docker', ['exec', container, 'bash', '/checks/github/linux-installed-check.sh', 'prepare', ...args]);
         await run('docker', ['network', 'disconnect', 'bridge', container]);
         await run('docker', ['exec', container, 'bash', '/checks/github/linux-installed-check.sh', 'verify', ...args]);
@@ -44,20 +54,28 @@ async function main() {
         assert.equal(result.nodeShimExecutable, true);
         assert.equal(result.credentialProviderDependencyVerified, kind !== 'tgz');
         assert.equal(result.upgradeDependencyResolutionVerified, false);
+        assert.equal(result.rpmSignatureVerified, kind === 'rpm');
+        assert.equal(result.legacyUnsignedRpmBaseline, legacyDigest !== '-');
         for (const phase of ['fresh', 'restart', ...(previous ? ['old'] : []), 'restored']) {
           const smoke = await contract.read(path.join(output, phase + '.json'));
+          if (phase !== 'old') assert.equal(smoke.defaultHubUrl, record.defaultHubUrl,
+            'Installed Linux candidate default Hub differs from the build request');
           assert.equal(smoke.secureStorage?.backend, 'gnome_libsecret');
           assert.equal(smoke.secureStorage?.roundTrip, true);
         }
         checks.push({ name, ok: true, upgraded: !!previous, reinstalled: !previous,
           oldVersion: previous ? previous.version : '', secureStorageBackend: 'gnome_libsecret',
           credentialProviderDependencyVerified: result.credentialProviderDependencyVerified,
+          rpmSignatureVerified: result.rpmSignatureVerified,
+          legacyUnsignedRpmBaseline: result.legacyUnsignedRpmBaseline,
+          ...(legacyDigest !== '-' ? { oldSha256: legacyDigest } : {}),
           upgradeDependencyResolutionVerified: false });
       } finally { if (created) await run('docker', ['rm', '-f', container]); }
     }
     await contract.acceptance('linux', checks, [
       'Disposable Xvfb containers with a password-protected GNOME keyring; no desktop login, Wayland, KWallet or polkit interaction.',
       'Upgrade checks reuse dependencies from initial candidate installation; newly added dependency resolution during upgrade is not certified.',
+      ...(checks.some(row => row.legacyUnsignedRpmBaseline) ? ['The explicitly marked pre-signing RPM baseline is installed only after checking its pinned SHA-256; new packages always require a trusted OpenPGP signature.'] : []),
       ...(checks.some(row => !row.upgraded) ? ['First SoduWork release: fresh install, restart and reinstall preserve data; SoduWork Global migration is not supported.'] : []),
     ]);
   } finally { await fs.rm(packages, { recursive: true, force: true }); }

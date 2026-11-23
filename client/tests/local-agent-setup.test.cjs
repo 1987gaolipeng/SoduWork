@@ -64,6 +64,15 @@ test('local setup requests only the authenticated current Runner and removes old
   assert.doesNotMatch(JSON.stringify(result), /cloud-agent|cloud-node/);
 });
 
+test('older Hub inventories cannot reintroduce retired local execution bases', async () => {
+  const agents = [{ key: 'pi' }, { key: 'claude' }, { key: 'harness2' }, { key: 'custom-local' }];
+  const h = await fixture([localRunner], { machines: [{ ...localMachine, agents }], models: [], modelCount: 0 });
+  const result = await h.api.localAgentSetup();
+  assert.deepEqual(Array.from(result.agents, row => row.key), ['pi', 'custom-local']);
+  assert.deepEqual(Array.from(result.machines[0].agents, row => row.key), ['pi', 'custom-local']);
+  assert.equal(h.data.machines[0].agents.length, 4, 'Filtering presentation cannot delete user installations');
+});
+
 test('local-only Agent discovery counts device models without transmitting their references or credentials', async () => {
   const h = await fixture([localRunner], { machines: [localMachine], models: [], modelCount: 0 });
   const model = 'local:model-0123456789abcdef0123456789abcdef';
@@ -102,10 +111,10 @@ async function automaticModelFixture({ agents = [{ key: 'dsh', modelPick: true, 
 }
 
 test('the sole local model becomes an effective managed Agent default without persisting a selection', async () => {
-  const managed = ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'harness2', 'codex-harness'];
+  const managed = ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'codex-harness'];
   const agents = managed.map(key => ({ key, modelPick: true, installed: true, state: 'ready',
     model: '', modelEffective: '', modelGone: false }));
-  const accounts = ['codex', 'claude'].map(key => ({ key, modelPick: false, installed: true,
+  const accounts = ['codex'].map(key => ({ key, modelPick: false, installed: true,
     state: 'ready', model: '', modelEffective: '', modelGone: false }));
   const h = await automaticModelFixture({ agents: agents.concat(accounts) });
   const result = await h.api.localAgentSetup();
@@ -271,7 +280,7 @@ test('a deleted Agent default remains unavailable when the device has no usable 
 });
 
 test('account runtimes do not inherit local-first managed model choices for probes', async () => {
-  for (const key of ['codex', 'claude']) {
+  for (const key of ['codex']) {
     const h = await automaticModelFixture({ agents: [{ key, modelPick: false, state: 'ready', model: '', modelEffective: '' }] });
     await h.api.agentProbe(key, '', localRunner.runnerId);
     assert.equal(h.privateProbes.length, 0);
@@ -340,7 +349,7 @@ test('saved local Agent defaults stay on the device while a deleted selection us
 });
 
 test('device default availability updates all Agent readiness fields without masking runtime or account failures', async () => {
-  const managed = ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'harness2', 'codex-harness'];
+  const managed = ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'codex-harness'];
   const model = 'local:model-0123456789abcdef0123456789abcdef';
   for (const unavailable of [false, true]) {
     const agents = managed.map(key => ({ key, modelPick: true, installed: true, present: true,
@@ -366,7 +375,6 @@ test('device default availability updates all Agent readiness fields without mas
     agents.push({ key: 'custom-partial', modelPick: true, state: 'nollm', setupState: 'nollm', installed: false });
     agents.push({ key: 'custom-runtime', modelPick: true, state: 'bad', setupState: 'nollm', installed: true });
     agents.push({ key: 'codex', modelPick: false, state: 'unauthed', setupState: 'unauthed' });
-    agents.push({ key: 'claude', modelPick: false, state: 'ready', setupState: 'ready' });
     const h = await fixture([localRunner], { machines: [{ ...localMachine, agents }], models: [], modelCount: 0 });
     h.bridge.localAgentModels = { get: async () => ({ ok: true, scopeKey: 'scope-a', revision: 1,
       selections: Object.fromEntries(agents.map(agent => [agent.key, { configured: true, modelName: model, unavailable }])) }) };
@@ -374,7 +382,7 @@ test('device default availability updates all Agent readiness fields without mas
     for (const [index, agent] of result.agents.entries()) {
       assert.equal(agent.state, agents[index].state);assert.equal(agent.setupState, agents[index].setupState);
       assert.equal(agent.why, agents[index].why);
-      if (['codex', 'claude'].includes(agent.key)) assert.deepEqual(plain(agent), agents[index]);
+      if (['codex'].includes(agent.key)) assert.deepEqual(plain(agent), agents[index]);
     }
   }
 });

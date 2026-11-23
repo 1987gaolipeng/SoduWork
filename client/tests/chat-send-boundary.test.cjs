@@ -75,6 +75,23 @@ function fixture({ fresh = false, attachments, send, files: initialFiles } = {})
   return { ctx, input, bridge, requests, notices, added, plugins, switchTo, paints: () => paints };
 }
 
+test('automation timing uses the send click before asynchronous access checks', async () => {
+  const f = fixture(), check = deferred(); let clock = Date.parse('2099-11-16T12:13:00Z'), routed;
+  f.ctx.Date = class extends Date { static now() { return clock; } };
+  f.ctx._composerControls = {waitForAccess: () => check.promise};
+  f.ctx.global.ChatWorkActions = f.ctx.ChatWorkActions = {route: async options => {
+    routed = options; return {handled:true,accepted:true};
+  }};
+  vm.runInContext(require('./renderer-source.cjs').factoryFunction('chat-session-controller.js','ChatSessionController','_send'), f.ctx);
+  f.input.value = '修改为10分钟之后';
+  const sentAt = clock, pending = f.ctx._send(); await flush();
+  clock += 120000; check.resolve(true);
+  assert.equal(await pending, true);
+  assert.equal(routed.requestedAt, sentAt);
+  assert.equal(routed.text, '修改为10分钟之后');
+  assert.equal(f.requests.length, 0);
+});
+
 test('model preflight shows pending state, preserves an acceptance draft on failure, and allows retry', async () => {
   const f = fixture(), check = deferred(), states = [];
   let token = 0, cleared = 0;

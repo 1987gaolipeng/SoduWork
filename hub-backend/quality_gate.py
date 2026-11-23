@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import secrets
@@ -18,6 +19,8 @@ from quality_manifest import (
     missing_live_requirements,
     scripts_for,
 )
+from app.services.acp_process import OwnedProcessGroup, kill_process_tree
+from quality_check_process import WindowsCheckJob
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,25 +58,84 @@ def _node() -> str:
     return executable
 
 
+def _stop_check(process, group) -> None:
+    try:
+        if process.poll() is None:
+            # Native test peers can create private sessions beneath the check.
+            if sys.platform.startswith('linux'):
+                from app.services.linux_process_tree import kill_owned_tree
+                kill_owned_tree(process.pid, process)
+            elif sys.platform == 'darwin':
+                from app.services.darwin_process_tree import kill_owned_tree
+                kill_owned_tree(process.pid, process)
+    finally:
+        # Also covers a reaped leader whose children still hold output pipes.
+        kill_process_tree(process, group)
+
+
 def _run(name: str, args: list[str], cwd: Path, env: dict[str, str], timeout: int) -> tuple[bool, str]:
     started = time.monotonic()
-    result = subprocess.run(
-        args,
-        cwd=cwd,
-        env=env,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
-        shell=False,
-    )
+    # A descendant may outlive its leader and keep stdout open indefinitely.
+    # File capture does not wait for pipe EOF, spawn reader threads, or make
+    # Popen.__exit__ perform an unbounded wait after an interrupted cleanup.
+    with tempfile.TemporaryFile() as capture, tempfile.TemporaryDirectory(prefix="soduwork-check-") as directory:
+        error_path = Path(directory) / "launch-error.json"
+        # Windows venv executables are redirectors: their already-started Python
+        # child would not be retroactively assigned to a Job. Only the trusted
+        # bootstrap uses the real interpreter; the payload keeps its original args.
+        bootstrap_python = getattr(sys, "_base_executable", sys.executable)
+        command = ([bootstrap_python, "-I", str(BACKEND / "quality_check_process.py"), str(error_path)]
+                   if os.name == "nt" else args)
+        result = subprocess.Popen(
+            command, cwd=cwd, env=env,
+            stdin=subprocess.PIPE if os.name == "nt" else subprocess.DEVNULL,
+            stdout=capture, stderr=subprocess.STDOUT, shell=False,
+            start_new_session=os.name != "nt",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+        )
+        group = OwnedProcessGroup(result.pid) if os.name != "nt" else None
+        job = None
+        original = None
+        try:
+            if os.name == "nt":
+                job = WindowsCheckJob()
+                job.attach(result)
+                result.stdin.write(json.dumps(args).encode("utf-8") + b"\n")
+                result.stdin.close()
+            result.wait(timeout=timeout)
+            if error_path.exists():
+                error = json.loads(error_path.read_text(encoding="utf-8"))
+                raise OSError(error["errno"], error["strerror"], error["filename"], error["winerror"])
+        except BaseException as exc:
+            original = exc
+        finally:
+            cleanup_errors = []
+            for cleanup in (
+                lambda: job.stop() if job is not None else None,
+                lambda: _stop_check(result, group),
+                lambda: result.stdin.close() if result.stdin is not None else None,
+            ):
+                try:
+                    cleanup()
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+            # Read a fixed snapshot, even if a cleanup failure left a writer.
+            size = os.fstat(capture.fileno()).st_size
+            capture.seek(0)
+            output = capture.read(size).decode("utf-8", "replace").replace("\r\n", "\n").replace("\r", "\n")
+            if original is not None:
+                for error in cleanup_errors:
+                    original.add_note(f"Quality check cleanup failed: {error!r}")
+                if isinstance(original, subprocess.TimeoutExpired):
+                    original.cmd = args
+                    original.output = output
+                raise original
+            if cleanup_errors:
+                raise cleanup_errors[0]
     elapsed = time.monotonic() - started
     state = "PASS" if result.returncode == 0 else "FAIL"
     print(f"[{state}] {name} ({elapsed:.1f}s)", flush=True)
-    output = result.stdout or ""
+    output = output or ""
     if result.returncode != 0:
         output = f"Process exit code: {result.returncode}\n" + output
         print(output, flush=True)
@@ -221,10 +283,17 @@ def main() -> int:
             try:
                 passed, output = _run(name, command, cwd, check_env, timeout)
             except subprocess.TimeoutExpired as exc:
-                passed, output = False, f"timed out after {exc.timeout}s"
+                partial = exc.output or ""
+                if isinstance(partial, bytes):
+                    partial = partial.decode("utf-8", "replace")
+                passed, output = False, f"timed out after {exc.timeout}s\n{partial}"
+                if notes := getattr(exc, "__notes__", None):
+                    output += "\n" + "\n".join(notes)
                 print(f"[FAIL] {name} (timeout)", flush=True)
             except Exception as exc:
                 passed, output = False, str(exc)
+                if notes := getattr(exc, "__notes__", None):
+                    output += "\n" + "\n".join(notes)
                 print(f"[FAIL] {name} ({exc})", flush=True)
             if not passed:
                 failures.append((name, output[-6000:]))

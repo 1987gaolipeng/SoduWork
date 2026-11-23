@@ -14,6 +14,7 @@ import tempfile
 
 from build import package_native
 from release import ROOT, SHARDS, expected, read, require, write
+from linux_signing import package_names
 
 
 def validation_context(env=None):
@@ -49,7 +50,8 @@ def main():
         packages = ROOT / "client/dist"
         checks = {"ok": True, "checks": ["native-package-build", "packaged-runtime-verification"]}
         signing = "ad-hoc" if args.shard.startswith("macos-") else "unsigned"
-        files = [fingerprint(packages / name) for name in expected(ctx, args.shard)]
+        names = package_names(ctx["version"]) if args.shard == "linux" else expected(ctx, args.shard)
+        files = [fingerprint(packages / name) for name in names]
         report = {**ctx, "shard": args.shard, "validationOnly": True,
                   "publicDistributionAllowed": False, "signing": signing,
                   "checks": checks, "files": files}

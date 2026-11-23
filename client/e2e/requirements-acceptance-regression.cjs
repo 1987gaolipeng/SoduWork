@@ -40,14 +40,22 @@ app.whenReady().then(async()=>{
     const styles = [...fs.readFileSync(path.join(client,'desk.html'),'utf8').matchAll(/<link\b[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)/g)]
       .map(match=>pathToFileURL(path.join(client,match[1])).href);
     await js(`Promise.all(${JSON.stringify(styles)}.map(href=>new Promise((resolve,reject)=>{const n=document.createElement('link');n.rel='stylesheet';n.href=href;n.onload=resolve;n.onerror=reject;document.head.append(n)}))).then(()=>true)`);
+    await js(fs.readFileSync(path.join(client,'core/win-bridge.js'),'utf8'));
     await js(`tasks=[{id:'acceptance',title:'写一篇关于秋天的散文',status:'doing',requirementStage:'reviewing',createdBy:'me',
       canViewExecution:true,canReview:true,canSubmitReview:false,maintenanceBlocked:false,acceptanceCriteria:['格式为 HTML','保留原文并美化样式']}];
-      fixtureApprovals=[{id:'review-html',taskId:'acceptance',action:'review',status:'pending',artifactVersionId:'v2'}];
+      fixtureApprovals=[];
+      window.restoreInboxRefresh=TaskApprovalInbox.refresh;
+      TaskApprovalInbox.refresh=async()=>{await new Promise(resolve=>window.releaseInbox=resolve);
+        fixtureApprovals=[{id:'review-html',taskId:'acceptance',action:'review',status:'pending',artifactVersionId:'v2'}]};
       SoduWorkAPI.listAttachments=async()=>[{id:'old-md',filename:'秋天的散文.md',role:'output',sourceRef:'conversation:original',evidenceMeta:{round:1}},
         {id:'final-html',filename:'秋天的散文.html',role:'output',sourceRef:'conversation:original',evidenceMeta:{round:2}}];
-      RequirementsBoard.render(true);RequirementsDetail.open('acceptance')`);
+      window.__deskPanel='workspace';
+      window.notificationOpen=openApprovalsEntry({taskId:'acceptance',approvalId:'review-html'});true`);
+    assert.equal(await js(`document.querySelectorAll('[data-tfd-acceptance-mode]').length`),0);
+    await js(`releaseInbox();notificationOpen.then(()=>{TaskApprovalInbox.refresh=restoreInboxRefresh;return true})`);
     await wait(150);
     assert.equal(await js(`document.querySelectorAll('[data-tfd-acceptance-mode]').length`),2);
+    report.checks.push('Production notification navigation loads a cold approval cache before exposing the current review card');
     assert.equal(await js(`!!document.querySelector('[data-tfd-approval-action="approve"]')`),true);
     assert.equal(await js(`document.querySelector('[data-tfd-acceptance-session="auto"]').hidden`),true);
     await js(`document.querySelector('.rq-delivery').scrollIntoView({block:'start',behavior:'instant'});void 0;`);

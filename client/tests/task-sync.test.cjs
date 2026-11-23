@@ -64,6 +64,45 @@ test('创建载荷只包含客户端可写字段', () => {
   assert.equal(payload.artifactUrl, undefined);
 });
 
+test('historical PUT payloads preserve full title, source and Unicode characters', () => {
+  const title = '旧'.repeat(199) + '😀' + 'tail';
+  const source = '来源😀'.repeat(50);
+  const payload = sync.taskPayload({ title, source });
+  assert.equal(payload.title, title);
+  assert.equal(payload.source, source);
+  assert.deepEqual(sync.reconcileOperation({ kind: 'put' }, null, payload).data, payload);
+});
+
+test('only a length-only blocked PUT receives one compatible replay', () => {
+  const operation = { id: 'legacy', kind: 'put', token: 'original', restore: true,
+    data: { title: '😀'.repeat(201), source: '旧'.repeat(121) }, sentAt: 12,
+    blocked: 'String should have at most 200 characters；String should have at most 120 characters' };
+  const recovered = sync.recoverTaskTextOperation(operation);
+  assert.equal(recovered.token, operation.token);
+  assert.equal(recovered.restore, true);
+  assert.deepEqual(recovered.data, operation.data);
+  assert.equal(recovered.sentAt, undefined);
+  assert.equal(recovered.blocked, undefined);
+  assert.equal(recovered.textCompatibilityRetried, true);
+  assert.equal(operation.sentAt, 12, 'the saved operation is not mutated');
+  assert.equal(sync.recoverTaskTextOperation({ ...recovered, blocked: operation.blocked }), null);
+});
+
+test('compatibility replay never resumes unrelated refusals or counts emoji as two characters', () => {
+  const operation = { id: 'legacy', kind: 'put', data: { source: '旧'.repeat(121) },
+    blocked: 'String should have at most 120 characters' };
+  assert.ok(sync.recoverTaskTextOperation({ ...operation, blockedStatus: 422 }));
+  for (const change of [
+    ...[400, 401, 403, 409, 500].map(blockedStatus => ({ blockedStatus })),
+    { kind: 'patch' }, { kind: 'delete' }, { data: { source: '😀'.repeat(120) } },
+    { blocked: 'HTTP 422: invalid request' },
+    { blocked: operation.blocked + '；Field required' },
+    { blocked: operation.blocked + '；List should have at most 50 items after validation, not 51' },
+    { blocked: '需求创建尚未确认，请在原表单中重试' },
+    { blocked: 'String should have at most 200 characters' },
+  ]) assert.equal(sync.recoverTaskTextOperation({ ...operation, ...change }), null, JSON.stringify(change));
+});
+
 test('未发送的创建与后续修改合并为一次幂等 PUT', () => {
   const merged = sync.mergeOperation(
     { id: 't1', kind: 'put', data: { title: '旧', status: 'todo' } },

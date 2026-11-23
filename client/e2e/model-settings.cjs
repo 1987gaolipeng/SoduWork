@@ -10,6 +10,14 @@ async function shot(name){await wait(150);const file=path.join(root,name+'.png')
 async function run(){
  win=new BrowserWindow({show:false,width:1500,height:1000,webPreferences:{contextIsolation:true,nodeIntegration:false,offscreen:true,backgroundThrottling:false}});
  await win.loadFile(path.join(__dirname,'fixtures/model-settings.html'));await until('document.querySelectorAll(".md-nav-item").length===6');
+ await js('window.originalCompany=structuredClone(fixture.providers.find(p=>p.id==="company"));Object.assign(fixture.providers.find(p=>p.id==="company"),legacyCompanyOverrides.provider);fixture.myModels.push(structuredClone(legacyCompanyOverrides.model));_mdData=structuredClone(fixture);_mdMyModels=_mdData.myModels.slice();selectService("company")');
+ assert.equal(await js('document.querySelectorAll("[data-purl],[data-pkey],[data-pclear],[data-pdelete],[data-ptest],[data-mdedit],[data-mdeditor],[data-madd],[data-mdel],[data-mdcheck]").length'),0);
+ assert.ok(await js('document.querySelector(".cfg-detail").textContent.includes("\\u670d\\u52a1\\u7aef\\u540c\\u6b65\\uff0c\\u53ea\\u8bfb")'));
+ await js('_mdTouchProvider("company",{baseUrl:"https://unwanted.invalid/v1"});_mdCheckModel("company","legacy-company-model");_mdDoTest({getAttribute:()=>"company"})');
+ assert.equal(await js('saved.length+testCalls.length+capabilityCalls.length'),0);
+ assert.equal(await js('_mdProvider("company").baseUrl'),'https://legacy-override.example.test/v1');
+ report.cases.push('Company service with legacy personal overrides remains read-only with no mutation or probe calls');
+ await js('fixture.providers=fixture.providers.map(p=>p.id==="company"?originalCompany:p);fixture.myModels=fixture.myModels.filter(m=>m.providerId!=="company");_mdData=structuredClone(fixture);_mdMyModels=_mdData.myModels.slice();');
  await js('selectService("personal")');
  assert.equal(await js('document.querySelectorAll(".md-settings-section").length'),2);
  assert.equal(await js('document.querySelectorAll(".cfg-subsection").length'),1);
@@ -34,7 +42,8 @@ async function run(){
  assert.equal(await js('document.querySelector("[data-pkey]").value'),'fixture-key-not-a-secret');
  report.cases.push('service switches and searches retain unsaved key, with password hidden again');
  await js('document.querySelector("[data-mdeditor]").open=true;fill("[data-padd]","custom-report-model");document.querySelector("[data-madd]").click()');
- assert.ok(await js('[...document.querySelectorAll(".md-mtag")].some(el=>el.textContent.includes("custom-report-model"))'));
+ await until('!_mdSaveFlight && [...document.querySelectorAll(".md-mtag")].some(el=>el.textContent.includes("custom-report-model"))');
+ assert.equal(await js('document.querySelector("[data-pkey]").value'),'fixture-key-not-a-secret');
  await js('fill("[data-padd]","custom-report-model");document.querySelector("[data-madd]").click()');
  assert.equal(await js('[...document.querySelectorAll(".md-mtag")].filter(el=>el.textContent.includes("custom-report-model")).length'),1);
  await js('document.querySelector("[data-ptest]").click()');await until('document.querySelector("[data-ptest]").disabled');
@@ -47,6 +56,16 @@ async function run(){
  await until('saved.at(-1)?.models?.every(item=>item.name!=="custom-report-model")');
  assert.equal(await js('[...document.querySelectorAll(".md-mtag")].some(el=>el.textContent.includes("custom-report-model"))'),false);
  report.cases.push('removing a personal model persists immediately and it does not reappear after reload');
+ await js('window.holdModelSave=true;fill("[data-padd]","reopened-chat");document.querySelector("[data-madd]").click()');
+ await until('typeof window.releaseModelSave==="function"');
+ await js('closeModelsPanel();openModelsPanel()');
+ await js('holdModelSave=false;releaseModelSave()');
+ await until('_mdLoadState==="ready" && !_mdSaveFlight');
+ await js('selectService("personal")');
+ assert.equal(await js('_mdData.revision'),await js('fixture.revision'));
+ assert.ok(await js('[...document.querySelectorAll(".md-mtag")].some(el=>el.textContent.includes("reopened-chat"))'));
+ assert.equal(await js('capabilityCalls.some(call=>call.model==="reopened-chat")'),false);
+ report.cases.push('reopening during a personal model save displays the committed row without probing it');
  await js('testFailure=true;document.querySelector("[data-ptest]").click()');await until('document.querySelector(".md-test-r.is-bad")');
  assert.ok(await js('document.querySelector(".md-test-r").textContent.includes("检查 API 地址")'));
  await js('testFailure=false;document.querySelector("[data-ptest]").click()');await until('document.querySelector(".md-test-r.is-ok")');
@@ -76,7 +95,10 @@ async function run(){
  assert.equal(await js('document.querySelector("[data-purl]").hasAttribute("aria-invalid")'),false);
  assert.equal(await js('document.querySelector(".md-field-error")?.hidden'),true);
  assert.equal(await js('document.querySelector("[data-pkey]")'),null);
- await js('fill("[data-padd]","local-demo");document.querySelector("[data-madd]").click();document.querySelector("[data-ptest]").click()');
+ await js('document.querySelector("#mdSave").click()'); await until('!_mdSaveFlight && !_mdDirty');
+ await js('fill("[data-padd]","local-demo");document.querySelector("[data-madd]").click()');
+ await until('!_mdSaveFlight && _mdMyModels.some(m=>m.name==="local-demo")');
+ await js('document.querySelector("[data-ptest]").click()');
  await until('document.querySelector(".md-test-r.is-ok")');
  report.cases.push('new service, no-key local configuration and test result stay usable');
  await js('selectService("personal");fill("[data-pkey]","draft-on-error");saveFailure=true;document.querySelector("#mdSave").click()');

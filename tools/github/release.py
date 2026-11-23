@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import urllib.error
 import urllib.request
+from linux_signing import asset_names, package_names, PUBLIC_KEY
 
 ROOT = Path(__file__).resolve().parents[2]
 VERSION = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
@@ -34,6 +35,12 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def release_branch(version):
+    match = re.fullmatch(VERSION, version)
+    require(match is not None, "Invalid release version")
+    return f"release/{match[1]}.{match[2]}.x"
+
+
 def context(env=None):
     env = os.environ if env is None else env
     component, version = env.get("RELEASE_COMPONENT"), env.get("RELEASE_VERSION", "")
@@ -41,7 +48,8 @@ def context(env=None):
     repo = env.get("GITHUB_REPOSITORY", "")
     require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo), "Invalid repository")
     require(env.get("GITHUB_EVENT_NAME") == "workflow_dispatch", "Release requires workflow_dispatch")
-    require(env.get("GITHUB_REF") == f"refs/heads/release/{version}", "Use the matching unified release branch")
+    require(env.get("GITHUB_REF") == f"refs/heads/{release_branch(version)}",
+            "Use the matching release/X.Y.x maintenance branch")
     require(env.get("GITHUB_REF_PROTECTED") == "true", "Release branch must be protected")
     require(env.get("PUBLIC_RELEASE_REPOSITORY") == repo, "Configure PUBLIC_RELEASE_REPOSITORY explicitly")
     sha, run = env.get("GITHUB_SHA", ""), env.get("GITHUB_RUN_ID", "")
@@ -95,7 +103,9 @@ def policy(ctx, root=ROOT):
             require(item.get("productName") == "SoduWork" and re.fullmatch(VERSION, item.get("version", "")), "Missing public upgrade baseline: " + key)
             require(tuple(map(int, item["version"].split("."))) < tuple(map(int, ctx["version"].split("."))), "Baseline must be older")
             require(re.fullmatch(r"[a-f0-9]{64}", item.get("sha256", "")), "Baseline digest required")
-            require(re.fullmatch(r"https://github\.com/" + re.escape(ctx["repository"]) + r"/releases/download/client-v[0-9.]+/[^/?#]+", item.get("url", "")), "Baseline must be a public release asset in this repository")
+            require(re.fullmatch(r"https://github\.com/" + re.escape(ctx["repository"]) +
+                                r"/releases/download/(?:client-)?v" + re.escape(item["version"]) + r"/[^/?#]+",
+                                item.get("url", "")), "Baseline must be a public release asset in this repository at its declared version")
             require(not any(k in item for k in ["path", "fallbackUrl"]), "Local/private baseline overrides are forbidden")
 
 
@@ -107,7 +117,7 @@ def preflight(ctx):
     environment = api("/environments/public-release")
     require(any(rule.get("type") == "required_reviewers" and rule.get("reviewers")
                 for rule in environment.get("protection_rules", [])), "Configure required reviewers on public-release")
-    require(api("/git/ref/heads/release/" + ctx["version"])["object"]["sha"] == ctx["commit"], "Release branch moved")
+    require(api("/git/ref/heads/" + release_branch(ctx["version"]))["object"]["sha"] == ctx["commit"], "Release branch moved")
 
 
 def fingerprint(file):
@@ -124,18 +134,28 @@ def fingerprint(file):
 def expected(ctx, shard):
     stem = "SoduWork-" + ctx["version"]
     return {"source": [stem + "-source.zip"], "hub": [stem + "-hub-image.tar.gz"],
-            "windows": [stem + "-Setup.exe"], "linux": [stem + "-linux." + ext for ext in ["deb", "rpm", "tar.gz"]],
+            "windows": [stem + "-Setup.exe"], "linux": asset_names(ctx["version"]),
             "macos-arm64": [stem + "-mac-arm64.dmg"], "macos-x64": [stem + "-mac-x64.dmg"]}[shard]
 
 
 def seal(ctx, shard, folder, checks):
     require(shard in SHARDS[ctx["component"]], "Unexpected shard")
     require(checks.get("ok") is True, "Acceptance did not pass")
+    if shard == "linux":
+        validate_linux_signing(ctx, checks)
     names = expected(ctx, shard)
     require(sorted(p.name for p in folder.iterdir()) == sorted(names), "Unexpected artifact files")
     record = {**ctx, "shard": shard, "artifacts": [fingerprint(folder / name) for name in names], "acceptance": checks}
     write(folder / (shard + "-receipt.json"), record)
     return record
+
+
+def validate_linux_signing(ctx, checks):
+    signing = checks.get("linuxSigning", {})
+    require(signing.get("schema") == 1 and signing.get("rpmEmbedded") is True
+            and re.fullmatch(r"[A-F0-9]{40}", signing.get("primaryFingerprint", ""))
+            and signing.get("detached") == package_names(ctx["version"])
+            and signing.get("publicKey") == PUBLIC_KEY, "Missing Linux package signing acceptance")
 
 
 def candidate(ctx, folder):
@@ -145,12 +165,23 @@ def candidate(ctx, folder):
         receipt = read(folder / name)
         require(all(receipt.get(k) == v for k, v in ctx.items()), "Receipt belongs to another run/commit/version")
         require(receipt.get("shard") == shard and receipt.get("acceptance", {}).get("ok") is True, "Invalid acceptance")
+        if shard == "linux":
+            validate_linux_signing(ctx, receipt["acceptance"])
         require([a["name"] for a in receipt["artifacts"]] == expected(ctx, shard), "Incomplete platform inventory")
         for item in receipt["artifacts"]:
             require(fingerprint(folder / item["name"]) == item, "Artifact changed: " + item["name"])
             files.add(item["name"])
         receipts.append(receipt)
         files.add(name)
+    if ctx["component"] in ("client", "all"):
+        import release_notes
+        release_notes.validate(read(folder / release_notes.NAME), ctx)
+        notes_asset = fingerprint(folder / release_notes.NAME)
+        for receipt in receipts:
+            if receipt["shard"] != "hub":
+                require(receipt["acceptance"].get("releaseNotesSha256") == notes_asset["sha256"],
+                        "Installers used different release notes")
+        files.add(release_notes.NAME)
     require(set(p.name for p in folder.iterdir()) == files, "Unexpected candidate files")
     result = {**ctx, "receipts": receipts, "assets": [fingerprint(folder / name) for name in sorted(files)]}
     write(folder / "release-manifest.json", result)
@@ -213,6 +244,10 @@ def draft(ctx, folder):
         authorize(ctx)
     existing = find_release_by_tag(ctx["tag"])
     marker = f"Candidate: {ctx['repository']} / run {ctx['runId']} / {ctx['commit']}"
+    body = marker + "\n\nDraft for internal testing only. See release-manifest.json for checksums and acceptance scope."
+    if ctx["component"] in ("client", "all"):
+        import release_notes
+        body = release_notes.markdown(read(folder / release_notes.NAME)) + "\n---\n\n" + body
     if existing:
         require(existing.get("draft") is True, "Refusing to modify a public Release")
         require(marker in existing.get("body", ""), "Release belongs to another candidate; refusing overwrite")
@@ -222,7 +257,7 @@ def draft(ctx, folder):
         existing = api("/releases", payload={
             "tag_name": ctx["tag"], "target_commitish": ctx["commit"], "draft": True,
             "name": "SoduWork " + ("Client + Hub" if ctx["component"] == "all" else ctx["component"]) + " " + ctx["version"],
-            "body": marker + "\n\nDraft for internal testing only. See release-manifest.json for checksums and acceptance scope.",
+            "body": body,
         })
     require(isinstance(existing, dict) and type(existing.get("id")) is int and existing["id"] > 0,
             "Draft Release response has no valid ID")

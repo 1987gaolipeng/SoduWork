@@ -265,7 +265,6 @@
   font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:700;color:var(--ink);line-height:1.6}
 .fwd-tag{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 10px);font-weight:700;line-height:1.7;padding:0 6px;border-radius:99px;
   background:var(--bg-3);color:var(--ink-3)}
-.fwd-tag.cli-claude{background:rgba(217,119,87,.14);color:#c2673c}
 .fwd-tag.cli-codebuddy{background:rgba(88,120,240,.13);color:#4a6ae0}
 .fwd-tag.cli-opencode{background:rgba(34,160,120,.14);color:#1f8f68}
 .fwd-tag.cli-codex{background:rgba(70,82,96,.14);color:#46525f}

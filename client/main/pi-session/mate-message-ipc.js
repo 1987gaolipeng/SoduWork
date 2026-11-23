@@ -17,7 +17,10 @@ function createPickFolderHandler({ BrowserWindow, dialog, shareArchive }) {
       const website = archive.website;
       return { ok: true, name: archive.name, size: archive.size, files: archive.files, data: archive.base64, website, preview: website ? { status: 'zip_only', reason: 'The complete website is packaged for safe preview in SoduWork' } : null };
     } catch (error) {
-      return { ok: false, ...(error?.code === 'ABORT_ERR' ? { canceled: true } : {}), reason: String(error && error.message || 'Folder packaging failed') };
+      const reason = error?.code === 'ZIP_DEPTH_LIMIT'
+        ? require('../native-locale.cjs').translate('文件夹包含超过12层的文件，请将文件移近所选文件夹后重试')
+        : String(error && error.message || 'Folder packaging failed');
+      return { ok: false, ...(error?.code === 'ABORT_ERR' ? { canceled: true } : {}), reason };
     }
   };
 }

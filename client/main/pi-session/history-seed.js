@@ -5,6 +5,7 @@ const messageTime = require('../conversation/message-time');
 const snapshotWindow = require('./snapshot-window');
 const goalFinalizer = require('../conversation/goal-finalizer');
 const agentSource = require('../conversation/agent-source.cjs');
+const turnOutcome = require('./turn-outcome');
 const SCOPE_ENTRY_TYPE = 'soduwork.message.scope';
 
 // Keep financial facts independently of the bounded presentation replay. Do
@@ -49,6 +50,21 @@ function _seed(acc, piSession, options) {
   const hasEntryMessages = entries.some((item) => item && item.type === 'message' && item.message);
   const sequence = hasEntryMessages ? entries : msgs.map((message) => ({ type: 'message', message }));
   const { tailStart, lastFinalEntry } = snapshotWindow.seedBounds(sequence, opts.maxMessages, goalFinalizer.ENTRY_TYPE);
+  // Keep only the clipped turn's identity/receipt, not its old content. A
+  // long tool turn can otherwise lose its outcome when its user is windowed out.
+  const prefix = stream.create();
+  for (let index = 0; index < tailStart; index++) {
+    const entry = sequence[index];
+    if (entry?.type === 'message' && entry.message?.role === 'user') {
+      prefix.push({ type: 'message_end', message: messageTime.storedMessage(entry), replay: true });
+      prefix.state.messages = prefix.state.messages.slice(-1);
+    } else if (entry?.customType === turnOutcome.ENTRY_TYPE) {
+      turnOutcome.record(prefix.state, entry.data);
+    }
+  }
+  const leading = prefix.state.messages.at(-1);
+  acc.state.leadingTurn = leading ? { sentAt: leading.sentAt, submissionId: leading.submissionId,
+    turnOutcome: leading.turnOutcome } : null;
   const hasStoredScopes = entries.some((item) => item && item.type === 'custom' &&
     item.customType === SCOPE_ENTRY_TYPE);
   const legacyInternalGoal = !hasStoredScopes && Boolean(opts.internalGoal);
@@ -68,6 +84,10 @@ function _seed(acc, piSession, options) {
         return;
       }
       if (!inTail && sequenceIndex !== lastFinalEntry) return;
+      if (entry.customType === turnOutcome.ENTRY_TYPE) {
+        turnOutcome.record(acc.state, entry.data);
+        return;
+      }
       if (entry.customType === 'soduwork.task.tool' && entry.data && entry.data.event) {
         acc.push(entry.data.event);
         return;
@@ -178,6 +198,7 @@ function _seed(acc, piSession, options) {
     acc.recoverProtocol();
   }
   if (n) acc.push({ type: 'agent_settled' });      // Mark restored history as settled rather than actively thinking.
+  turnOutcome.restore(acc.state);
   return n;
 }
 

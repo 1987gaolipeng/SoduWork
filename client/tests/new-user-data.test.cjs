@@ -7,7 +7,7 @@ const TaskSync = require('../core/task-sync');
 const apiSource = fs.readFileSync(path.join(__dirname, '../api.js'), 'utf8');
 const storeSource = fs.readFileSync(path.join(__dirname, '../core/store-lifecycle.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, '../core/store.js'), 'utf8');
-const hub = 'http://127.0.0.1:18989';
+const hub = 'https://service.soduwork.ai';
 const oldKey = kind => ({tasks:'soduwork_work_tasks_v5',ops:'soduwork_work_task_ops_v1',shadow:'soduwork_work_task_shadow_v1'}[kind]) + '@' + encodeURIComponent(hub);
 const op = {id:'old-pending-task',kind:'put',token:'old-operation',data:{title:'旧演示任务',status:'todo',origin:'local'}};
 
@@ -163,7 +163,7 @@ test('startup preserves queues from another Hub without replay even when IDs mat
   const f = fixture({soduwork_work_hub_environment_v1:'development', soduwork_work_hub_url:oldHub,
     [legacyOps]:saved, [scopedOps]:saved});
   f.setTasks([{id:op.id,ownerClientId:'new-install',createdBy:'new-user'}]); await f.start();
-  assert.equal(f.api.hubBase(), 'http://127.0.0.1:18989');
+  assert.equal(f.api.hubBase(), hub);
   assert.equal(f.calls.filter(row => row.method !== 'GET').length, 0);
   assert.equal(f.values.get(legacyOps), saved); assert.equal(f.values.get(scopedOps), saved);
 });

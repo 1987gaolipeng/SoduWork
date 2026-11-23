@@ -1,4 +1,8 @@
 export default {
+  "已配置机器人地址。输入新地址可替换，清除可关闭外部告警。": "A webhook is configured. Enter a new URL to replace it, or clear it to turn off external alerts.",
+  "尚未配置机器人地址。": "No webhook is configured.",
+  "清除地址": "Clear URL",
+  'HTTP 会以明文发送告警内容，建议使用 HTTPS 地址。': 'HTTP sends alert content in plain text. Use an HTTPS URL to keep it encrypted.',
   "参数（英文逗号分隔）": "Arguments (comma-separated)",
   "用英文逗号 , 分隔参数；含逗号的参数请用双引号包裹，例如 \"a,b\"。换行不会拆分参数。": "Separate arguments with English commas (,). Enclose arguments containing commas in double quotes, for example \"a,b\". Line breaks do not separate arguments.",
   "参数的双引号后只能填写英文逗号或空白": "Only a comma or whitespace can follow a closing quote.",
@@ -44,9 +48,14 @@ export default {
   '可用于对话、插件和自动化': 'Available in conversations, plugins and automations',
   '点击连接将检查并启用此连接；检查不会发送或修改业务内容。': 'Connecting checks and enables this connection. The check does not send or change business content.',
   '此连接已被更新，当前填写内容已保留。关闭后重新打开可查看最新配置。': 'This connection has been updated. Your draft has been preserved. Close and reopen it to view the latest configuration.',
+  '此连接已被更新，但自动刷新失败。当前填写内容已保留，请稍后重试。': 'This connection has been updated, but automatic refresh failed. Your draft has been preserved. Please try again later.',
 }
 
 export const ja = {
+  "已配置机器人地址。输入新地址可替换，清除可关闭外部告警。": "Webhook は設定済みです。新しい URL を入力すると置き換えられます。削除すると外部通知が停止します。",
+  "尚未配置机器人地址。": "Webhook は未設定です。",
+  "清除地址": "URL を削除",
+  'HTTP 会以明文发送告警内容，建议使用 HTTPS 地址。': 'HTTP ではアラートの内容が平文で送信されます。HTTPS の URL を使用してください。',
   "参数（英文逗号分隔）": "引数（半角カンマ区切り）",
   "用英文逗号 , 分隔参数；含逗号的参数请用双引号包裹，例如 \"a,b\"。换行不会拆分参数。": "引数は半角カンマ（,）で区切ります。カンマを含む引数は \"a,b\" のように二重引用符で囲んでください。改行では分割されません。",
   "参数的双引号后只能填写英文逗号或空白": "閉じ引用符の後には半角カンマまたは空白のみ入力できます。",
@@ -94,9 +103,14 @@ export const ja = {
   '可用于对话、插件和自动化': '会話、プラグイン、自動化で利用できます',
   '点击连接将检查并启用此连接；检查不会发送或修改业务内容。': '接続すると、設定を確認して有効にします。確認時に業務コンテンツを送信、変更することはありません。',
   '此连接已被更新，当前填写内容已保留。关闭后重新打开可查看最新配置。': 'この接続は更新されています。入力内容は保持されています。最新の設定を確認するには、閉じてから開き直してください。',
+  '此连接已被更新，但自动刷新失败。当前填写内容已保留，请稍后重试。': 'この接続は更新されていますが、自動更新に失敗しました。入力内容は保持されています。しばらくしてから再試行してください。',
 }
 
 export const ko = {
+  "已配置机器人地址。输入新地址可替换，清除可关闭外部告警。": "웹훅이 설정되어 있습니다. 새 URL을 입력하여 교체하거나 지워서 외부 알림을 끄세요.",
+  "尚未配置机器人地址。": "설정된 웹훅이 없습니다.",
+  "清除地址": "URL 지우기",
+  'HTTP 会以明文发送告警内容，建议使用 HTTPS 地址。': 'HTTP를 사용하면 알림 내용이 평문으로 전송됩니다. HTTPS 주소를 사용하세요.',
   "参数（英文逗号分隔）": "인수 (쉼표로 구분)",
   "用英文逗号 , 分隔参数；含逗号的参数请用双引号包裹，例如 \"a,b\"。换行不会拆分参数。": "인수는 영문 쉼표(,)로 구분하세요. 쉼표가 포함된 인수는 \"a,b\"처럼 큰따옴표로 감싸세요. 줄바꿈으로는 인수를 나누지 않습니다.",
   "参数的双引号后只能填写英文逗号或空白": "닫는 큰따옴표 뒤에는 영문 쉼표나 공백만 입력할 수 있습니다.",
@@ -144,4 +158,5 @@ export const ko = {
   '可用于对话、插件和自动化': '대화, 플러그인, 자동화에서 사용할 수 있습니다',
   '点击连接将检查并启用此连接；检查不会发送或修改业务内容。': '연결을 누르면 설정을 확인하고 사용하도록 설정합니다. 확인 중에는 업무 콘텐츠를 보내거나 변경하지 않습니다.',
   '此连接已被更新，当前填写内容已保留。关闭后重新打开可查看最新配置。': '이 연결이 업데이트되었습니다. 입력한 내용은 유지됩니다. 최신 설정을 보려면 닫았다가 다시 여세요.',
+  '此连接已被更新，但自动刷新失败。当前填写内容已保留，请稍后重试。': '이 연결이 업데이트되었지만 자동 새로고침에 실패했습니다. 입력한 내용은 유지됩니다. 잠시 후 다시 시도하세요.',
 }

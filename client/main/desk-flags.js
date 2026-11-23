@@ -11,9 +11,8 @@ const _file = () => path.join(app.getPath('userData'), 'desk-flags.json');
 let _cache = null;
 
 /*
- * Missing legacy flags default to visible. If an existing cache cannot be parsed, retain
- * the tray recovery entry but hide pet and dock until authoritative renderer preferences
- * arrive.
+ * Missing flags keep desktop widgets hidden and the tray recovery entry visible.
+ * Preserve explicitly saved flags until authoritative renderer preferences arrive.
  */
 function all() {
   if (!_cache) {
@@ -27,7 +26,7 @@ function all() {
       }
     }
     _cache = {};
-    KEYS.forEach((k) => { _cache[k] = raw[k] !== false; });
+    KEYS.forEach((k) => { _cache[k] = k === 'tray' ? raw[k] !== false : raw[k] === true; });
   }
   return Object.assign({}, _cache);
 }

@@ -6,15 +6,11 @@ from app.services.cloud_environments import _available_agents
 
 
 class CloudAgentInventoryTests(unittest.TestCase):
-    def test_bundled_harness_can_prepare_its_missing_executor_on_a_cloud_machine(self):
-        items = {row["id"]: row for row in _available_agents([])}
-        self.assertFalse(items["harness2"]["installed"])
-        self.assertTrue(items["harness2"]["installable"])
-        self.assertEqual(items["harness2"]["installer"], "bundled")
 
     def test_unknown_bundled_agent_cannot_claim_the_reviewed_cloud_installer(self):
         from app.services import cloud_environments
-        row = {**cloud_environments.AGENTS["harness2"], "id": "unreviewed"}
+        row = {**cloud_environments.AGENTS["pi"], "id": "unreviewed",
+               "install": {"installer": "bundled"}}
         with patch.dict(cloud_environments.AGENTS, {"unreviewed": row}):
             items = {item["id"]: item for item in _available_agents([])}
         self.assertFalse(items["unreviewed"]["installable"])

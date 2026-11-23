@@ -71,6 +71,19 @@ class CatalogTest(unittest.TestCase):
         from app.agent_catalog import AGENTS
         self.assertEqual(AGENTS['pi']['install']['version'], '0.84.4')
 
+    def test_source_compatible_acp_runtimes_pin_versions_separately_from_package_names(self):
+        from app.agent_catalog import AGENTS, install_specs
+        expected = {
+            'kimi': ('@moonshot-ai/kimi-code', '2.6.2'),
+            'qwen': ('@qwen-code/qwen-code', '0.27.4'),
+            'dsh': ('@openma/deepseek-harness-acp', '0.4.41'),
+        }
+        for key, (package, version) in expected.items():
+            self.assertEqual(AGENTS[key]['install']['pkg'], package)
+            self.assertEqual(install_specs()[key]['version'], version)
+        for key in ('codex', 'codex-harness', 'opencode'):
+            self.assertNotIn('version', AGENTS[key]['install'])
+
     def test_opencode_detection_never_installs_and_ignores_retired_bundle(self):
         from app.services import agent_setup, managed_agents, local_base
         with tempfile.TemporaryDirectory() as directory:

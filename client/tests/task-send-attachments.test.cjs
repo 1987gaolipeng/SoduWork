@@ -6,6 +6,8 @@ const { EventEmitter } = require('node:events'), { createRequire } = require('no
 const { MAX_FILES, MAX_BYTES } = require('../main/pi-session/attachments');
 
 function fixture(t, taskFiles = [], preparationError = '') {
+  // HTTP is mocked separately; native WebSocket also needs an offline fixture.
+  t.mock.method(global, 'WebSocket', function () { throw new Error('Fixture WebSocket is unavailable'); });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-task-send-attachments-'));
   const cwd = path.join(directory, 'workspace'); fs.mkdirSync(cwd);
   const app = new EventEmitter(); app.getPath = () => directory;

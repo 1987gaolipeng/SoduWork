@@ -116,6 +116,66 @@ test('English deletion confirmation retains the same local-only boundary', async
   assert.equal(reply.confirm.detail, 'Delete this local history only. Cloud originals, requirements and output files are retained. Restarting will not restore the deleted local copy.');
   assert.equal(fs.existsSync(f.original), true); assert.equal(f.recycled(), 0);
 });
+
+test('one cloud deletion removes its automatic cache through IPC and restart but preserves saved and imported copies', async t => {
+  const f = await fixture(t), actor = identity();
+  const cloud = { id: 'cloud-original', title: 'Cloud history', cloud: true, locationMode: 'remote',
+    adapterId: 'pi', state: 'completed', taskId: 'cloud-task',
+    owner: require('../main/platform-connections/runtime.cjs').connectionScope(actor) };
+  const receipts = path.join(f.root, 'conversation-handoffs');
+  fs.mkdirSync(receipts, { recursive: true });
+  fs.writeFileSync(path.join(receipts, require('node:crypto').createHash('sha256').update(cloud.id).digest('hex') + '.json'),
+    JSON.stringify({ sessionId: cloud.id, owner: cloud.owner, taskId: cloud.taskId, entryKind: 'cloud', phase: 'committed' }));
+  const view = { historyRow: () => cloud, snapshot: () => ({ messages: [{ role: 'assistant', text: 'Cloud answer' }] }) };
+  await f.history().capture(view, actor);
+  const copy = (await f.history().page()).chats.find(row => row.cached);
+  const saved = { ...copy, id: 'saved-cloud-copy' }, imported = {
+    ...copy, id: 'imported-cloud-copy', importedHistory: true, sourceLocalId: copy.id };
+  await f.history().register([saved, imported]);
+  f.switch(identity('two'));
+  await f.history().capture(view, identity('two'));
+  const foreign = (await f.history().page()).chats.find(row => row.cached);
+  f.switch(actor);
+  let hidden = false, fail = true;
+  f.session.archivedConversation = async (_app, id) => id === cloud.id ? cloud : null;
+  f.session.findRunnerRow = async id => id === cloud.id ? cloud : null;
+  f.session.forgetRunner = async (_app, id) => {
+    assert.equal(id, cloud.id);
+    if (fail) return { ok: false, reason: 'Cloud status unavailable' };
+    hidden = true; return { ok: true };
+  };
+  const handlers = new Map();
+  require('../main/pi-session/history-ipc').install({ app: f.app, session: f.session, sharedHistory: f.history(),
+    ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
+    accountHistory: { resolveLifecycle: async () => ({ ok: true, found: false }),
+      setLifecycle: async () => ({ ok: true, found: false }) },
+    BrowserWindow: { getAllWindows: () => [{ isDestroyed: () => false,
+      webContents: { send: (_, event) => f.events.push(event) } }] } });
+  const remove = options => handlers.get('pi-session-history-delete')({}, cloud.id, options);
+  const confirmation = await remove();
+  assert.equal(confirmation.needsConfirm, true, JSON.stringify(confirmation));
+  assert.equal(hidden, false);
+  assert.equal((await remove({ confirmed: true })).ok, false);
+  assert.equal((await f.history().store.get(copy.id)).deleted, false, 'Failed cloud deletion must retain the cache');
+  fail = false;
+  const deleted = await remove({ confirmed: true });
+  assert.equal(deleted.ok, true, JSON.stringify(deleted));
+  assert.equal(hidden, true);
+  assert.equal((await f.history().store.get(copy.id)).deleted, true, 'One confirmed deletion must remove the automatic cache');
+  assert.ok(deleted.aliasIds.includes(copy.id));
+  assert.ok(f.events.at(-1).presence.historyAliasIds.includes(copy.id));
+  for (const retained of [saved, imported, foreign]) {
+    assert.ok(retained);
+    assert.equal((await f.history().store.get(retained.id)).deleted, false);
+    assert.equal(deleted.aliasIds.includes(retained.id), false);
+  }
+  await f.restart();
+  await f.history().capture(view, actor); // A late snapshot after restart cannot resurrect the cache.
+  assert.equal((await f.history().store.get(copy.id)).deleted, true);
+  const visible = (await f.history().page()).chats.map(row => row.id);
+  assert.equal(visible.includes(copy.id), false);
+  assert.ok(visible.includes(saved.id) && visible.includes(imported.id));
+});
 test('active execution blocks deletion and archive without damaging bytes', async t => {
   const f = await fixture(t); f.busy = true;
   assert.match((await f.remove({ confirmed: true })).reason, /执行/);

@@ -2,6 +2,7 @@ import { translateText as tx, localeMap, useLocale } from '../i18n.js'
 import React, { useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { Icon, Modal, toast, SelectMenu } from '../ui.jsx'
+import { declaredAccess } from './plugin-catalog-model.js'
 import { PluginBindingToolAccess } from './PluginBindingToolAccess.jsx'
 import { LoadIssue } from './PluginOverviewParts.jsx'
 import { Field, NoticeList } from './PluginDialogParts.jsx'
@@ -233,8 +234,10 @@ export function BindingForm({ plugin, binding, onClose, onSaved }) {
   const defaultOwnModel = routeMode === 'fixed' && agentKind && kindMap[agentKind] &&
     kindMap[agentKind].modelPick === false
   const overrideCount = Object.keys(nodeOverrides).length
-  return <Modal scope="plugin-page" wide title={`${binding ? tx("调整") : tx("启用")}「${plugin.name}」`} icon="link"
-    onClose={onClose} foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+  return <Modal draft={{ versionId, projectId, agentKind, model, fallbackMode, routeMode, runnerTags,
+    nodeOverrides: aiNodes.map(node => nodeOverrides[node.key] || {}),
+    secretRefs: declaredSecrets.map(name => secretRefs[name] || ''), mcpTools, mcpRiskConfirmed }} scope="plugin-page" wide title={`${binding ? tx("调整") : tx("启用")}「${plugin.name}」`} icon="link"
+    onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
       <button className="btn btn-primary"
         disabled={busy || !versionId || !!catalogError || !mcpState.ready || mcpState.loading ||
           (routeMode === 'fixed' && !agentKind) || (breakingUpgrade && !confirmBreaking)} onClick={save}>
@@ -260,6 +263,7 @@ export function BindingForm({ plugin, binding, onClose, onSaved }) {
           {versions.map((item) => <option key={item.id} value={item.id}>v{item.version}</option>)}
         </SelectMenu></Field>
       </div>
+      <p>{declaredAccess(version)}</p>
     </section>
     {upgrade && <CompatibilityNotice data={upgrade} confirm={confirmBreaking}
       onConfirm={setConfirmBreaking} />}

@@ -12,6 +12,69 @@ Var updateBodyFont
 Var updateIcon
 Var updateRendered
 Var updateEnglish
+Var updateHeading
+Var updatePreparing
+Var updateComplete
+Var updateHeadingLabel
+Var updateVersionLabel
+Var installRendered
+
+Function InstallVersionText
+  StrCpy $0 "$installToVersion"
+  ${If} $installOperation == "update"
+    StrCpy $0 "$installFromVersion → $installToVersion"
+  ${EndIf}
+FunctionEnd
+
+Function RefreshInstallContext
+  ; A shortcut can win UI ownership just after the lock is acquired but before
+  ; the installer publishes this transaction's metadata. Do not pin stale copy.
+  Call ReadInstallContext
+  StrCpy $0 "$installOperation|$installFromVersion|$installToVersion"
+  ${If} $0 == $installRendered
+    Return
+  ${EndIf}
+  StrCpy $installRendered $0
+  Call PrepareInstallText
+  ${NSD_SetText} $updateHeadingLabel "$updateHeading"
+  Call InstallVersionText
+  ${NSD_SetText} $updateVersionLabel "$0"
+  StrCpy $updateRendered ""
+FunctionEnd
+
+Function PrepareInstallText
+  StrCpy $0 "SoduWork 正在安装"
+  StrCpy $updateHeading "正在安装 SoduWork"
+  StrCpy $updatePreparing "正在准备安装…"
+  StrCpy $updateComplete "安装完成"
+  ${If} $installOperation == "reinstall"
+    StrCpy $0 "SoduWork 正在重新安装"
+    StrCpy $updateHeading "正在重新安装 SoduWork"
+    StrCpy $updateComplete "重新安装完成"
+  ${ElseIf} $installOperation == "update"
+    StrCpy $0 "SoduWork 正在更新"
+    StrCpy $updateHeading "正在更新 SoduWork"
+    StrCpy $updatePreparing "正在准备更新…"
+    StrCpy $updateComplete "更新完成"
+  ${EndIf}
+  ${If} $updateEnglish != 0
+    StrCpy $0 "SoduWork is installing"
+    StrCpy $updateHeading "Installing SoduWork"
+    StrCpy $updatePreparing "Preparing installation…"
+    StrCpy $updateComplete "Installation complete"
+    ${If} $installOperation == "reinstall"
+      StrCpy $0 "SoduWork is reinstalling"
+      StrCpy $updateHeading "Reinstalling SoduWork"
+      StrCpy $updateComplete "Reinstallation complete"
+    ${ElseIf} $installOperation == "update"
+      StrCpy $0 "SoduWork is updating"
+      StrCpy $updateHeading "Updating SoduWork"
+      StrCpy $updatePreparing "Preparing update…"
+      StrCpy $updateComplete "Update complete"
+    ${EndIf}
+  ${EndIf}
+  SendMessage $HWNDPARENT ${WM_SETTEXT} 0 "STR:$0"
+FunctionEnd
 
 ; UI language supplied by the running client: SODUWORK_UPDATE_LANG while the
 ; installer spawned this observer, .soduwork-update-locale in the install root for
@@ -55,7 +118,7 @@ Function CreateUpdatePage
   ${EndIf}
   SetCtlColors $updateDialog 24272D FFFFFF
   ; Dialog units follow the actual system font and DPI, not a hard-coded scale.
-  System::Call '*(i 0, i 0, i 264, i 96) p .r0'
+  System::Call '*(i 0, i 0, i 264, i 108) p .r0'
   System::Call 'user32::MapDialogRect(p $HWNDPARENT, p r0)'
   System::Call '*$0(i, i, i .r2, i .r3)'
   System::Call 'user32::SetWindowPos(p $updateDialog, p 0, i 0, i 0, i r2, i r3, i 0x14)'
@@ -81,36 +144,34 @@ Function CreateUpdatePage
   IntOp $7 $7 + $5
   System::Call 'user32::SetWindowPos(p $HWNDPARENT, p 0, i r6, i r7, i r2, i r3, i 0x14)'
   ; Retitle while the frame is still hidden, so English never flashes Chinese.
-  ${If} $updateEnglish != 0
-    SendMessage $HWNDPARENT ${WM_SETTEXT} 0 "STR:SoduWork is updating"
-  ${EndIf}
+  Call PrepareInstallText
   CreateFont $updateTitleFont "DengXian" 12 600
   CreateFont $updateBodyFont "DengXian" 10 400
   ${NSD_CreateIcon} 16u 12u 24u 24u ""
   Pop $0
   ${NSD_SetIconFromInstaller} $0 $updateIcon
-  StrCpy $0 "正在更新 SoduWork"
-  ${If} $updateEnglish != 0
-    StrCpy $0 "Updating SoduWork"
-  ${EndIf}
-  ${NSD_CreateLabel} 48u 12u 200u 22u $0
+  ${NSD_CreateLabel} 48u 12u 200u 20u $updateHeading
   Pop $0
+  StrCpy $updateHeadingLabel $0
   SendMessage $0 ${WM_SETFONT} $updateTitleFont 1
   SetCtlColors $0 24272D FFFFFF
-  StrCpy $0 "正在准备更新…"
-  ${If} $updateEnglish != 0
-    StrCpy $0 "Preparing update…"
-  ${EndIf}
-  ${NSD_CreateLabel} 16u 40u 196u 16u $0
+  Call InstallVersionText
+  ${NSD_CreateLabel} 16u 34u 232u 12u $0
+  Pop $0
+  StrCpy $updateVersionLabel $0
+  ${NSD_AddStyle} $0 ${SS_ENDELLIPSIS}
+  SendMessage $0 ${WM_SETFONT} $updateBodyFont 1
+  SetCtlColors $0 737A85 FFFFFF
+  ${NSD_CreateLabel} 16u 52u 196u 16u $updatePreparing
   Pop $updateStatus
   SendMessage $updateStatus ${WM_SETFONT} $updateBodyFont 1
   SetCtlColors $updateStatus 555C67 FFFFFF
-  ${NSD_CreateLabel} 216u 40u 32u 16u "0%"
+  ${NSD_CreateLabel} 216u 52u 32u 16u "0%"
   Pop $updatePercent
   ${NSD_AddStyle} $updatePercent ${SS_RIGHT}
   SendMessage $updatePercent ${WM_SETFONT} $updateBodyFont 1
   SetCtlColors $updatePercent 24272D FFFFFF
-  nsDialogs::CreateControl "msctls_progress32" ${WS_CHILD}|${WS_VISIBLE}|1 0 16u 60u 232u 4u ""
+  nsDialogs::CreateControl "msctls_progress32" ${WS_CHILD}|${WS_VISIBLE}|1 0 16u 72u 232u 4u ""
   Pop $updateBar
   ; An unthemed native progress control permits the product's blue fill.
   ; PBS_SMOOTH, never PBS_MARQUEE: the filled length is measured work only.
@@ -118,11 +179,11 @@ Function CreateUpdatePage
   SendMessage $updateBar 0x0409 0 0xFF853D
   SendMessage $updateBar 0x2001 0 0xF2EFEB
   SendMessage $updateBar 0x0406 0 100
-  StrCpy $0 "完成后自动打开，会话和文件会保留"
+  StrCpy $0 "现有会话和文件会保留"
   ${If} $updateEnglish != 0
-    StrCpy $0 "Opens automatically when done. Sessions and files are kept."
+    StrCpy $0 "Existing sessions and files are kept."
   ${EndIf}
-  ${NSD_CreateLabel} 16u 76u 232u 16u $0
+  ${NSD_CreateLabel} 16u 88u 232u 16u $0
   Pop $updateHint
   SendMessage $updateHint ${WM_SETFONT} $updateBodyFont 1
   SetCtlColors $updateHint 737A85 FFFFFF
@@ -145,6 +206,7 @@ Function CreateUpdatePage
 FunctionEnd
 
 Function ReadUpdateProgress
+  Call RefreshInstallContext
   StrCpy $1 ""
   ClearErrors
   FileOpen $0 "$updateRoot\.soduwork-update-phase" r
@@ -221,28 +283,28 @@ Function ReadUpdateProgress
     ${EndIf}
     StrCpy $updateRendered $0
     ${If} $updateEnglish != 0
-      StrCpy $0 "Preparing update…"
+      StrCpy $0 "$updatePreparing"
       ${If} $updatePhase == "extracting"
-        StrCpy $0 "Installing update"
+        StrCpy $0 "Extracting installation files"
       ${ElseIf} $updatePhase == "verifying"
         StrCpy $0 "Verifying files"
       ${ElseIf} $updatePhase == "activating"
         StrCpy $0 "Finishing installation"
       ${ElseIf} $updatePhase == "committed"
-        StrCpy $0 "Update complete, opening"
+        StrCpy $0 "$updateComplete"
       ${ElseIf} $updatePhase == "cleaning"
         StrCpy $0 "Cleaning up the old version"
       ${EndIf}
     ${Else}
-      StrCpy $0 "正在准备更新…"
+      StrCpy $0 "$updatePreparing"
       ${If} $updatePhase == "extracting"
-        StrCpy $0 "正在安装新版本"
+        StrCpy $0 "正在释放安装文件"
       ${ElseIf} $updatePhase == "verifying"
         StrCpy $0 "正在校验文件"
       ${ElseIf} $updatePhase == "activating"
         StrCpy $0 "正在完成安装"
       ${ElseIf} $updatePhase == "committed"
-        StrCpy $0 "更新完成，即将打开"
+        StrCpy $0 "$updateComplete"
       ${ElseIf} $updatePhase == "cleaning"
         StrCpy $0 "正在整理旧版本"
       ${EndIf}

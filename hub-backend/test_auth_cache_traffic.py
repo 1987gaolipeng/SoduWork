@@ -149,20 +149,40 @@ class AuthenticationTrafficTests(AuthenticationHttpFixture):
 
     async def test_model_configuration_changes_are_visible_with_warm_identity_and_secrets_are_masked(self):
         await self.inbox()
+        initial = await self.http[0].get("/api/v1/my-models", headers=self.headers())
+        self.assertEqual(initial.status_code, 200, initial.text[:300])
+        self.assertNotIn("fixture-chat", [m["name"] for m in initial.json()["usable"]])
+        original_secret = "isolated-personal-model-credential"
+        created = await self.http[1].put("/api/v1/my-models", headers=self.headers(), json={
+            "expectedRevision": initial.json()["revision"], "providers": [{"id": "custom-traffic",
+                "name": "Personal fixture", "kind": "openai-compat", "personal": True,
+                "baseUrl": "https://personal-model.invalid/v1"}],
+            "keys": {"custom-traffic": original_secret},
+            "models": [{"providerId": "custom-traffic", "name": "fixture-personal-chat"}]})
+        self.assertEqual(created.status_code, 200, created.text[:300])
         before = await self.http[0].get("/api/v1/my-models", headers=self.headers())
         self.assertEqual(before.status_code, 200, before.text[:300])
-        self.assertIn("fixture-chat", [m["name"] for m in before.json()["usable"]])
+        self.assertIn("fixture-personal-chat", [m["name"] for m in before.json()["usable"]])
         secret = "isolated-replacement-model-credential"
+        denied = await self.http[1].put("/api/v1/my-models", headers=self.headers(), json={
+            "expectedRevision": before.json()["revision"], "keys": {"fixture-provider": secret}})
+        self.assertEqual(denied.status_code, 403)
+        unchanged = await self.http[0].get("/api/v1/my-models", headers=self.headers())
+        self.assertEqual(unchanged.status_code, 200)
+        self.assertEqual(unchanged.json()["revision"], before.json()["revision"])
+        self.assertEqual(unchanged.json()["myModels"], before.json()["myModels"])
         changed = await self.http[1].put("/api/v1/my-models", headers=self.headers(), json={
-            "expectedRevision": before.json()["revision"], "keys": {"fixture-provider": secret},
-            "models": [{"providerId": "fixture-provider", "name": "fixture-alternate", "label": "Alternate"}]})
+            "expectedRevision": before.json()["revision"], "keys": {"custom-traffic": secret},
+            "models": [{"providerId": "custom-traffic", "name": "fixture-alternate", "label": "Alternate"}]})
         self.assertEqual(changed.status_code, 200, changed.text[:300])
         after = await self.http[0].get("/api/v1/my-models", headers=self.headers())
         self.assertEqual(after.status_code, 200)
         self.assertIn("fixture-alternate", [m["name"] for m in after.json()["myModels"]])
+        self.assertNotIn("fixture-personal-chat", [m["name"] for m in after.json()["myModels"]])
         self.assertNotEqual(before.json()["revision"], after.json()["revision"])
-        for response in (before, changed, after):
+        for response in (initial, created, before, denied, unchanged, changed, after):
             self.assertNotIn("isolated-never-used", response.text)
+            self.assertNotIn(original_secret, response.text)
             self.assertNotIn(secret, response.text)
         self.probe.assert_not_called()
 

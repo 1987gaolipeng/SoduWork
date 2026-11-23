@@ -90,7 +90,7 @@ export default {
   "人可以转给人，也可以转给 AI。责任人、进度、会话、证据与成果始终围绕同一项需求。": "Hand work to a person or AI. Ownership, progress, conversation, evidence and results stay attached to the same issue.",
   "胡": "Hu",
   "不绑定任何执行底座": "No dependency on a single agent runtime",
-  "Pi、OpenCode、Claude Code、Codex 都只是可替换的执行资源，新的底座按同一套协议接入。": "Pi, OpenCode, Claude Code and Codex are interchangeable execution resources. New runtimes connect through the same protocol.",
+  "Pi、OpenCode、Codex 都只是可替换的执行资源，新的底座按同一套协议接入。": "Pi, OpenCode and Codex are interchangeable execution resources. New runtimes connect through the same protocol.",
   "本机 · 常驻": "Local · Always available",
   "共享执行机": "Shared runner",
   "本机 · 当前选中": "Local · Selected",

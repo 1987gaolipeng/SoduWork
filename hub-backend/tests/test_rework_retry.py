@@ -121,6 +121,53 @@ class ReworkRetryTests(unittest.IsolatedAsyncioTestCase):
                     models.TaskEvent.task_id == "t-due"))).scalars()]
             self.assertIn("ai.rework", kinds)
 
+    async def test_accepted_retry_after_archive_settles_only_its_pending_card(self):
+        import asyncio
+        from app.services import ai_exec
+
+        loop = asyncio.get_running_loop()
+        async with self.sessions() as session:
+            task = await self._task_with_pending_card(session)
+            original = dict(task.work_routing["reworkPending"])
+            for replace in (False, True):
+                with self.subTest(replace=replace):
+                    if replace:
+                        task.archived_at = None
+                        task.work_routing = {"reworkPending": dict(original)}
+                        session.add(models.TaskEvent(task_id=task.id, kind="ai.rework_pending",
+                                                     detail={"requestId": original["requestId"]}, at=_now()))
+                        await session.commit()
+
+                    async def archive_during_delivery():
+                        async with self.sessions() as other:
+                            row = await other.get(models.Task, task.id)
+                            if replace:
+                                row.work_routing = {"reworkPending": {**original, "requestId": "new-review"}}
+                                other.add(models.TaskEvent(task_id=row.id, kind="ai.rework_pending",
+                                                           detail={"requestId": "new-review"}, at=_now()))
+                            row.archived_at = _now()
+                            await other.commit()
+
+                    def accept(*args, **kwargs):
+                        asyncio.run_coroutine_threadsafe(archive_during_delivery(), loop).result(timeout=10)
+                        return {"ok": True}
+
+                    with patch.object(ai_exec, "say_sync", side_effect=accept) as send:
+                        result = await task_rework.retry_once(session)
+                    self.assertEqual(result["sent"], 1)
+                    send.assert_called_once()
+                    await session.refresh(task)
+                    self.assertIsNotNone(task.archived_at)
+                    if replace:
+                        self.assertEqual(task.work_routing["reworkPending"]["requestId"], "new-review")
+                        anchor = models.TaskEvent
+                        outstanding = await session.scalars(select(anchor).where(
+                            anchor.kind == "ai.rework_pending", ~task_rework._unsettled_exists()))
+                        self.assertIn("new-review", [row.detail["requestId"] for row in outstanding])
+                    else:
+                        self.assertNotIn("reworkPending", task.work_routing)
+                        self.assertEqual(await task_rework.pending_cards(session), 0)
+
     async def test_retry_waits_for_backoff_window(self):
         """Before the backoff deadline, preserve the card and send nothing."""
         async with self.sessions() as session:

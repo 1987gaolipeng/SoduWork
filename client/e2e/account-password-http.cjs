@@ -13,11 +13,12 @@ if (typeof electron === 'string') {
   const { spawn, execFileSync } = require('node:child_process'), { pathToFileURL } = require('node:url'), assert = require('node:assert/strict');
   const sourceManifest = require('./fixtures/account-source-manifest.cjs');
   const client = path.resolve(__dirname, '..'), repo = path.dirname(client);
+  const python = process.env.SODUWORK_TEST_PYTHON || path.join(repo, 'hub-backend/.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-account-http-'));
-  const profile = path.join(temp, 'profile'); fs.mkdirSync(profile); app.setPath('userData', profile); app.disableHardwareAcceleration();
+  const profile = path.join(temp, 'profile'); fs.mkdirSync(profile); app.setPath('userData', profile); app.setPath('sessionData', profile); app.disableHardwareAcceleration();
   const baseline = process.argv.includes('--baseline');
   const out = path.join(repo, 'outputs/password-change-20261024/' + (baseline ? 'baseline-red' : 'http-e2e')); fs.mkdirSync(out, { recursive: true });
-  const report = { ok: false, cases: [], screenshots: [], errors: [], requests: [], boundary: 'Real Chromium input, production ClientAuth and AccountVerification, api.js, Electron device IPC and OS safeStorage, loopback FastAPI with temporary SQLite and actual local TLS SMTP. No production user, external SMTP, business service or model.' };
+  const report = { ok: false, cases: [], screenshots: [], errors: [], requests: [], boundary: 'Real Chromium input, production ClientAuth and AccountVerification, api.js, Electron device IPC and safeStorage, loopback FastAPI with temporary SQLite and actual local TLS SMTP. No production user, external SMTP, business service or model.', credentialStore: app.commandLine.hasSwitch('use-mock-keychain') ? 'Chromium mock keychain' : 'OS safeStorage' };
   report.sourcesAtStart = sourceManifest.snapshot();
   let win, server, serverErrors = '', connection;
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -38,9 +39,7 @@ if (typeof electron === 'string') {
     await click(selector);
     assert.equal(await js(`document.activeElement===document.querySelector(${JSON.stringify(selector)})`), true, 'Typing must target the selected input');
     if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3');
-    for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
-      type, key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2,
-    });
+    win.webContents.selectAll();
     await win.webContents.debugger.sendCommand('Input.insertText', { text: value }); await delay(20);
     assert.equal(await js(`document.querySelector(${JSON.stringify(selector)}).value`), value);
   }
@@ -108,12 +107,12 @@ if (typeof electron === 'string') {
     assert.ok([401, 403].includes(response.status), scheme + ' session issued before change must be invalid');
   }
   async function passwordLogin(account, value, id) {
-    await click('[data-auth-mode="password"]'); await fill('#soduWorkAuthAccount', account); await fill('#soduWorkAuthPassword', value); await click('.soduwork-auth-submit');
+    await click('[data-auth-mode="password"]'); await fill('#soduWorkAuthAccount', account); await fill('#soduWorkAuthPassword', value); await submitAndReload();
     await until('ClientAuth.snapshot().user?.id === ' + JSON.stringify(id));
   }
   async function codeLogin(account, id) {
     await click('[data-auth-mode="emailCode"]'); await fill('#soduWorkAuthAccount', account); await click('[data-send-code]'); await until('!!lastChallenge');
-    await fill('#acEmailCode', await deliveredCode(await js('lastChallenge'))); await click('.soduwork-auth-submit');
+    await fill('#acEmailCode', await deliveredCode(await js('lastChallenge'))); await submitAndReload();
     await until('ClientAuth.snapshot().user?.id === ' + JSON.stringify(id));
   }
   async function emailProof({ wrongFirst = false } = {}) {
@@ -137,10 +136,47 @@ if (typeof electron === 'string') {
       win.webContents.once('did-finish-load', () => { clearTimeout(timer); resolve(); });
     });
   }
+  async function submitAndReload() {
+    const loaded = armReload(); await click('.soduwork-auth-submit'); await loaded;
+  }
+  async function verifyLogoutRecovery(userId, password) {
+    await js('Object.keys(localStorage).filter(key=>key.startsWith("soduwork_work_last_login_account_v1@")).forEach(key=>localStorage.removeItem(key));void 0;');
+    const restored = armReload(); await js('location.reload();void 0;'); await restored;
+    await until('ClientAuth.snapshot().user?.id === ' + JSON.stringify(userId));
+    assert.equal(await js('SoduWorkAPI.rememberedLoginAccount()'), 'password-e2e@example.test');
+    record('an existing authenticated profile initializes its remembered account without another password login');
+    const originalFetch = global.fetch;
+    let release, reached, completed;
+    const held = new Promise(resolve => { release = resolve; });
+    const started = new Promise(resolve => { reached = resolve; });
+    const finished = new Promise(resolve => { completed = resolve; });
+    global.fetch = async (url, options) => {
+      if (String(url) !== connection.hub + '/api/v1/client-auth/logout') return originalFetch(url, options);
+      reached(); await held;
+      try { return await originalFetch(url, options); }
+      finally { completed(); }
+    };
+    try {
+      await js('void SoduWorkAPI.clientLogout().catch(()=>{});void 0;');
+      await started;
+      const loaded = armReload(); await js('location.reload();void 0;'); await loaded; await loginReady();
+      assert.equal(await js('document.querySelector("#soduWorkAuthAccount").value'), 'password-e2e@example.test');
+      assert.equal(await js('document.querySelector("#soduWorkAuthPassword").value'), '');
+      assert.doesNotMatch(await js('document.querySelector(".soduwork-auth-status").textContent'), /重新打开这条对话/);
+      await click('[data-auth-mode="password"]'); await fill('#soduWorkAuthPassword', password); await click('.soduwork-auth-submit');
+      await until('!document.querySelector(".soduwork-auth-submit").disabled && !!document.querySelector(".soduwork-auth-status").textContent');
+      assert.match(await js('document.querySelector(".soduwork-auth-status").textContent'), /退出|稍后|重试/);
+      assert.equal(await js('document.querySelector("#soduWorkAuthPassword").value'), '');
+      release(); await finished;
+      await fill('#soduWorkAuthPassword', password); await submitAndReload();
+      await until('ClientAuth.snapshot().user?.id === ' + JSON.stringify(userId));
+      record('reload during pending logout preserves the account, clears passwords, and permits login retry after logout');
+    } finally { release(); global.fetch = originalFetch; }
+  }
   app.whenReady().then(async () => {
     const ready = new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(Error('Fixture startup timeout: ' + serverErrors)), 25000);
-      server = spawn(path.join(repo, 'hub-backend/.venv/Scripts/python.exe'), ['-B', path.join(__dirname, 'fixtures/account_hub_fixture.py'), '--root', temp], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' } });
+      server = spawn(python, ['-B', path.join(__dirname, 'fixtures/account_hub_fixture.py'), '--root', temp], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' } });
       let stdout = ''; server.stdout.on('data', chunk => { stdout += chunk; const match = stdout.match(/ACCOUNT_FIXTURE_READY (\{[^\n]+\})/); if (match) { clearTimeout(timer); resolve(JSON.parse(match[1])); } });
       server.stderr.on('data', chunk => { serverErrors += chunk; }); server.on('error', reject);
     });
@@ -206,14 +242,17 @@ if (typeof electron === 'string') {
     await shot('registration-password-guidance');
     record('registration shows the password range and rejects seven characters before sending a registration request');
     const password = 'Register'; await fill('#soduWorkAuthPassword', password); await fill('#acConfirmPassword', password);
-    await click('.soduwork-auth-submit');
+    await submitAndReload();
     await until('ClientAuth.snapshot().user?.email === "password-e2e@example.test"');
     assert.equal(await js('ClientAuth.snapshot().user.hasPassword'), true); record('actual registration creates a verified email account with a password');
     const userId = await js('ClientAuth.snapshot().user.id');
     await logout();
+    assert.equal(await js('document.querySelector("#soduWorkAuthAccount").value'), 'password-e2e@example.test');
+    assert.equal(await js('document.querySelector("#soduWorkAuthPassword").value'), '');
+    record('logout remembers the successful account without retaining its password');
     await click('[data-auth-mode="emailCode"]'); await fill('#soduWorkAuthAccount', 'password-e2e@example.test'); await click('[data-send-code]'); await until('!!lastChallenge');
     await fill('#acEmailCode', await deliveredCode(await js('lastChallenge')));
-    await click('.soduwork-auth-submit');
+    await submitAndReload();
     await until('ClientAuth.snapshot().user?.email === "password-e2e@example.test"'); record('same password-bearing account signs in through actual delivered email code');
     await openPassword();
     await shot('email-code-set-password');
@@ -237,7 +276,9 @@ if (typeof electron === 'string') {
     await assertSessionRevoked(oldSession); await assertSessionRevoked(probes.deviceSession); await assertSessionRevoked(probes.bearer, 'Bearer');
     record('new password through authenticated mailbox proof revokes current device, second device and administrator bearer sessions');
     await fill('#soduWorkAuthAccount', 'password-e2e@example.test'); await fill('#soduWorkAuthPassword', password); await click('.soduwork-auth-submit');
-    await until('document.querySelector(".soduwork-auth-status").classList.contains("is-error") && !document.querySelector(".soduwork-auth-submit").disabled');
+    await until('document.querySelector("#soduWorkAuthPassword").getAttribute("aria-invalid") === "true" && !document.querySelector(".soduwork-auth-submit").disabled');
+    assert.equal(await js('document.querySelector("#soduWorkAuthPassword").value'), '');
+    assert.match(await js('document.body.innerText'), /密码不正确/);
     assert.equal(await js('SoduWorkAPI.clientAuthSnapshot().user'), null); record('old password is rejected after the email-authorized change');
     await passwordLogin('password-e2e@example.test', 'Changed-password-2026', userId); record('newly set password signs in to the same account');
     await logout(); await codeLogin('passwordless@example.test', 'fixture-passwordless-user');
@@ -274,6 +315,7 @@ if (typeof electron === 'string') {
     assert.equal(await js('document.querySelector("#acPasswordRequirements").hidden'), true);
     await passwordLogin('password-e2e@example.test', 'Recovery', userId);
     record('password recovery rejects seven characters, accepts eight, and the recovered password signs in');
+    await verifyLogoutRecovery(userId, 'Recovery');
     assert.deepEqual(await js('errors'), []); assert.deepEqual(report.errors, []);
     report.ok = true;
   }).catch(async error => {

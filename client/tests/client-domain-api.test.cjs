@@ -14,7 +14,9 @@ async function fixture(bridge = {}, values = new Map([['soduwork_work_hub_url', 
     fetch: async (url, options) => { requests.push({url, options}); return {ok: true, status: 200,
       text: async () => JSON.stringify(url.endsWith('/client-auth/me')
         ? {user: {id: 'alice'}, quota: {enabled: true, exceeded: false, limit: 1000, used: 10}}
-        : {id: 'project-one', name: 'Saved', revision: 1})}; },
+        : url.endsWith('/my-models') && options.method !== 'PUT'
+          ? {providers: [{id: 'provider', personal: true}], usable: [], myModels: []}
+          : {id: 'project-one', name: 'Saved', revision: 1})}; },
   };
   context.window = context; vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../api.js'), 'utf8'), context);
@@ -66,6 +68,95 @@ test('model and config reads use shared snapshots and successful writes invalida
   await f.api.checkMyModelCapabilities({providerId: 'provider', model: 'model'}); await f.api.syncConfig({theme: 'light'});
   assert.deepEqual(reads, ['models', 'config']);
   assert.deepEqual(invalidated, ['models', 'models', 'models', 'config']);
+});
+
+test('config writes send edited public fields and the revision seen by this editor', async () => {
+  const f = await fixture({clientDomainRead: async () => ({ok: true, value: {
+    theme: 'dark', locale: 'en-US', _configRevision: 'old', _configKeys: ['theme', 'locale']
+  }})});
+  const taskKey = f.api.taskStorageKey('tasks');
+  f.values.set(taskKey, JSON.stringify([{id: 'saved-task'}]));
+  const cfg = await f.api.getConfig();
+  assert.equal(f.values.get(taskKey), JSON.stringify([{id: 'saved-task'}]));
+  assert.deepEqual(Object.keys(cfg).sort(), ['locale', 'theme']);
+  const writes = [];
+  f.context.fetch = async (_url, opts) => {
+    writes.push(JSON.parse(opts.body));
+    return {ok: true, status: 200, text: async () => JSON.stringify({
+      theme: 'blue', locale: 'en-US', _configRevision: 'next', _configKeys: ['theme', 'locale']
+    })};
+  };
+  assert.equal(await f.api.syncConfig({...cfg, theme: 'blue', obsoleteField: true}), true);
+  assert.deepEqual(writes[0], {theme: 'blue', _configRevision: 'old'});
+  await f.api.syncConfig({...cfg, theme: 'blue', locale: 'ja-JP'});
+  assert.deepEqual(writes[1], {locale: 'ja-JP', _configRevision: 'next'});
+  assert.equal(f.values.get(taskKey), JSON.stringify([{id: 'saved-task'}]));
+});
+
+test('a stale editor preserves independent edits and exposes the conflicting Hub preference', async () => {
+  const f = await fixture({clientDomainRead: async () => ({ok: true, value: {
+    theme: 'dark', locale: 'en-US', _configRevision: 'old', _configKeys: ['theme', 'locale']
+  }})});
+  await f.api.getConfig();
+  const current = {theme: 'green', locale: 'en-US', _configRevision: 'new', _configKeys: ['theme', 'locale']};
+  let writes = 0;
+  f.context.fetch = async (_url, opts) => {
+    if (opts.method === 'PUT') {
+      writes++;
+      return {ok: false, status: 409, text: async () => JSON.stringify({detail: 'stale'})};
+    }
+    return {ok: true, status: 200, text: async () => JSON.stringify(current)};
+  };
+  const result = await f.api.syncConfig({theme: 'blue', locale: 'ja-JP'});
+  assert.equal(writes, 1);
+  assert.equal(result.conflict, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.current)), {theme: 'green'});
+  // A later edit can invalidate the response in the store while the conflict GET is pending.
+  // Until accepted, even a follow-up write must still use the previous baseline.
+  const versions = [];
+  f.context.fetch = async (_url, opts) => {
+    if (opts.method === 'PUT') {
+      versions.push(JSON.parse(opts.body));
+      return {ok: false, status: 409, text: async () => JSON.stringify({detail: 'stale'})};
+    }
+    return {ok: true, status: 200, text: async () => JSON.stringify(current)};
+  };
+  await f.api.syncConfig({theme: 'dark', locale: 'ko-KR'});
+  assert.deepEqual(versions[0], {locale: 'ko-KR', _configRevision: 'old'});
+  result.accept({theme: 'green', locale: 'ja-JP'});
+  await f.api.syncConfig({theme: 'green', locale: 'ja-JP'});
+  assert.deepEqual(versions[1], {locale: 'ja-JP', _configRevision: 'new'});
+});
+
+for (const readFirst of [true, false]) test('a late config read keeps the acknowledged revision, read first=' + readFirst, async () => {
+  let release, entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const base = {theme: 'dark', _configRevision: 'one', _configKeys: ['theme']};
+  let loads = 0;
+  const f = await fixture({clientDomainRead: async () => {
+    if (loads++) { entered(); await new Promise(resolve => { release = resolve; }); }
+    return {ok: true, value: base};
+  }});
+  await f.api.getConfig();
+  let finishWrite;
+  const writes = [];
+  f.context.fetch = async (_url, opts) => {
+    const patch = JSON.parse(opts.body);
+    writes.push(patch);
+    if (writes.length === 1) await new Promise(resolve => { finishWrite = resolve; });
+    return {ok: true, status: 200, text: async () => JSON.stringify({...base, theme: patch.theme, _configRevision: 'two'})};
+  };
+  let late = readFirst && f.api.getConfig();
+  if (readFirst) await started;
+  const save = f.api.syncConfig({theme: 'green'});
+  await new Promise(resolve => setImmediate(resolve));
+  if (!readFirst) { late = f.api.getConfig(); await started; }
+  finishWrite();
+  await save;
+  release();
+  await late;
+  await f.api.syncConfig({theme: 'blue'});
+  assert.deepEqual(writes[1], {theme: 'blue', _configRevision: 'two'});
 });
 
 test('offline local catalogs disclose unreadable Hub models without inventing their deletion', async () => {
@@ -143,7 +234,7 @@ test('local snapshots and cached errors cannot change offline status while a fre
 
 test('notification reconciliation revalidates company access within the shared-cache TTL, including a new renderer', async t => {
   const { create } = require('../main/client-domain-cache.cjs');
-  const identity = {hub: 'http://127.0.0.1:18989', clientId: 'desktop',
+  const identity = {hub: 'https://service.soduwork.ai', clientId: 'desktop',
     session: Buffer.from(JSON.stringify({typ: 'device', uid: 'alice', cid: 'desktop', ver: 1})).toString('base64url') + '.fixture'};
   const rows = [
     {id: 'plugin-private', kind: 'plugin_lifecycle', text: 'Former company plugin', recipientId: 'alice'},

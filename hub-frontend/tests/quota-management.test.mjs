@@ -54,10 +54,11 @@ test('catalog saves preserve other plans, the legacy default and revision withou
 
 test('individual assignments retain the assignment revision and do not issue a trial to an old account', () => {
   const member = { assignment: { revision: 8, hasTrial: false } }
-  assert.deepEqual(model.validateAssignment(member, { mode: 'inherit' }, choices), { revision: 8, mode: 'inherit' })
+  assert.deepEqual(model.validateAssignment(member, { mode: 'inherit' }, choices, 3), { revision: 8, catalogRevision: 3, mode: 'inherit' })
+  assert.deepEqual(model.validateAssignment(member, { mode: 'plan', planId: 'standard' }, choices, 3), { revision: 8, catalogRevision: 3, mode: 'plan', planId: 'standard' })
   assert.throws(() => model.validateAssignment(member, { mode: 'plan', planId: 'trial' }, choices), /可分配/)
-  assert.deepEqual(model.validateAssignment({ assignment: { revision: 9, hasTrial: true } }, { mode: 'plan', planId: 'trial' }, choices), { revision: 9, mode: 'plan', planId: 'trial' })
-  assert.deepEqual(model.validateAssignment(member, { mode: 'custom', custom: { ...baseAllowance, totalLimit: 0 } }, choices), { revision: 8, mode: 'custom', custom: { ...baseAllowance, totalLimit: 0 } })
+  assert.deepEqual(model.validateAssignment({ assignment: { revision: 9, hasTrial: true } }, { mode: 'plan', planId: 'trial' }, choices, 3), { revision: 9, mode: 'plan', planId: 'trial' })
+  assert.deepEqual(model.validateAssignment(member, { mode: 'custom', custom: { ...baseAllowance, totalLimit: 0 } }, choices, 3), { revision: 8, mode: 'custom', custom: { ...baseAllowance, totalLimit: 0 } })
   assert.throws(() => model.validateAssignment(member, { mode: 'unknown' }, choices), /额度规则/)
 })
 
@@ -107,7 +108,7 @@ test('quota validators preserve stable error keys for current-language presentat
 const footerButtons = page => page.nodes(node => node.type === 'Modal')[0].props.foot.props.children
 const fieldByLabel = (page, label) => page.nodes(node => node.type === 'label' && node.props.children?.[0]?.props.children === label)[0]?.props.children[1]
 
-async function planHarness(overrides = {}) {
+async function planHarness(overrides = {}, preview = () => ({})) {
   let currentConfig = structuredClone(config)
   const saves = [], notices = []
   const page = await createComponentHarness(new URL('../src/screens/QuotaEditors.jsx', import.meta.url), { exportName: 'PlanEditor', props: {}, dependencies: {
@@ -117,6 +118,7 @@ async function planHarness(overrides = {}) {
       ...overrides,
     } },
     '../ui.jsx': { Modal: 'Modal', SelectMenu: 'SelectMenu', toast: value => notices.push(value) },
+    './QuotaImpactPreview.jsx': { useQuotaImpactPreview: preview, QuotaImpactPreview: 'ImpactPreview' },
     './QuotaAllowanceFields.jsx': { __esModule: true, default: 'AllowanceFields', TotalLimitField: 'TotalLimitField' },
     './quota-model.js': model,
   } })
@@ -132,6 +134,64 @@ test('plan editor saves an edited trial with revision, full retained catalog, an
   assert.equal(saves.length, 1); assert.equal(saves[0].plans[0].durationDays, 14)
   assert.equal(saves[0].revision, 4); assert.equal(saves[0].plans[1].id, 'standard')
   assert.equal('models' in saves[0], false)
+  page.unmount()
+})
+
+test('plan edits require a preview of the current draft before saving', async () => {
+  const { page } = await planHarness({}, ({ draft }) => draft.durationDays === '14' ? { pending: true } : { data: {} })
+  assert.equal(footerButtons(page)[1].props.disabled, false)
+  page.act(() => fieldByLabel(page, '试用有效天数').props.onChange({ target: { value: '14' } }))
+  assert.equal(footerButtons(page)[1].props.disabled, true)
+  assert.equal(page.nodes(node => node.type === 'ImpactPreview')[0].props.trial, true)
+  page.unmount()
+})
+
+test('preview ignores superseded results, retries failures and skips invalid drafts', async () => {
+  const requests = []
+  const props = { config, draft: trial, onConflict() {} }
+  const page = await createComponentHarness(new URL('../src/screens/QuotaImpactPreview.jsx', import.meta.url), {
+    exportName: 'useQuotaImpactPreview', props, dependencies: {
+      '../api.js': { api: { previewQuotaPlan: body => new Promise((resolve, reject) => requests.push({ body, resolve, reject })) } },
+      './quota-model.js': model,
+    },
+  })
+  const settle = () => new Promise(resolve => setTimeout(resolve, 300))
+  assert.ok(page.render().pending)
+  await settle()
+  const changed = { ...props, draft: { ...trial, totalLimit: '500' } }
+  assert.ok(page.render(changed).pending)
+  requests[0].resolve({ newLimit: 100000 })
+  assert.ok((await page.flush()).pending)
+  await settle()
+  assert.equal(requests[1].body.plan.totalLimit, 500)
+  requests[1].reject(Error('offline'))
+  const failed = await page.flush()
+  assert.equal(failed.error, 'offline')
+  failed.retry()
+  assert.ok(page.render().pending)
+  await settle()
+  requests[2].resolve({ newLimit: 500 })
+  assert.equal((await page.flush()).data.newLimit, 500)
+  assert.ok(page.render({ ...props, draft: { ...trial, totalLimit: '' } }).invalid)
+  await settle()
+  assert.equal(requests.length, 3)
+  page.unmount()
+})
+
+test('monthly summaries distinguish full pauses and exhausted model caps, while trial edits apply to new users', async () => {
+  const data = { affectedMembers: 3, previousLimit: 900, newLimit: 500, used: 750, remaining: 1000,
+    pausedMembers: 1, modelLimitedMembers: 2, scopeLimited: true }
+  const page = await createComponentHarness(new URL('../src/screens/QuotaImpactPreview.jsx', import.meta.url), {
+    exportName: 'QuotaImpactPreview', props: { impact: { data } }, dependencies: { '../api.js': {}, './quota-model.js': model },
+  })
+  const terms = () => page.nodes(node => node.type === 'dt').map(node => node.props.children)
+  assert.ok(terms().includes('调整后所有平台模型均暂停的成员'))
+  assert.ok(terms().includes('仅部分模型额度耗尽的成员'))
+  assert.ok(page.nodes(node => node.type === 'p').some(node => node.props.children.includes('所有已分配成员')))
+  page.render({ impact: { data: { ...data, affectedMembers: 0, remaining: 500, reason: 'model_exhausted' } }, trial: true })
+  assert.ok(terms().includes('新用户领取时可用（Tokens）'))
+  assert.ok(page.nodes(node => node.type === 'span').some(node => node.props.children === '新用户领取后，平台模型请求将暂停。'))
+  assert.equal(page.nodes(node => node.type === 'p').length, 0)
   page.unmount()
 })
 
@@ -199,6 +259,7 @@ test('the member editor rejects invalid caps, saves a zero pause and retains unl
     '../api.js': { api: { assignQuota: async (id, body) => { calls.push([id, body]); return { ok: true } } } },
     '../ui.jsx': { Modal: 'Modal', SelectMenu: 'SelectMenu', toast() {} },
     './QuotaAllowanceFields.jsx': { __esModule: true, default: 'AllowanceFields', TotalLimitField: 'TotalLimitField' },
+    './QuotaImpactPreview.jsx': { useQuotaImpactPreview: () => ({}), QuotaImpactPreview: 'QuotaImpactPreview' },
     './quota-model.js': model,
   } })
   page.render()

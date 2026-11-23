@@ -62,7 +62,7 @@ test('production capability IPC forwards the full catalog to every runtime picke
   module.exports.install({ app: f.app, ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
     session: {}, identityOf: async () => f.identity, capabilityGrantsOf: () => [], _skillDirs: () => f.skillDirs,
     workDir: () => f.root, _saveConf() {}, _conf: () => ({}) });
-  for (const adapterId of ['pi', 'opencode', 'harness2']) {
+  for (const adapterId of ['pi', 'opencode', 'kimi']) {
     const result = await handlers.get('conversation-capabilities')({}, { adapterId, executionLocation: 'local' });
     assert.equal(result.ok, true);
     assert.deepEqual(result.skills.map(item => item.name), names);

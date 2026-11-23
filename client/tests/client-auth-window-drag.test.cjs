@@ -40,8 +40,11 @@ test('password field has a reveal toggle that flips the input type and resets af
     /passwordInput\.type = show \? 'text' : 'password'/,
     '缺少 type 明文/掩码切换',
   );
-  assert.match(js, /resetPasswordView/, '缺少清空后收回掩码的复位逻辑');
-  assert.match(js, /passwordInput\.value = '';\s*resetPasswordView\(\);/, '登录返回后清空密码并复位掩码');
-  assert.match(js, /catch \(error\) \{\s*passwordInput\.value = '';\s*resetPasswordView\(\);/,
-    '登录异常后也应清空密码并复位掩码');
+  const submit = js.slice(js.indexOf('async function submit(event)'), js.indexOf('function confirmLogout()'));
+  assert.match(js, /function resetPasswordView\(\) \{\s*if \(passwordInput\) passwordInput\.type = 'password';/,
+    '清空后必须恢复 password 掩码');
+  assert.match(submit, /\}\);\s*if \(legacySubmission !== attempt\) return;\s*passwordInput\.value = '';\s*resetPasswordView\(\);/,
+    '只清空并复位当前登录请求的密码');
+  assert.match(submit, /catch \(error\) \{\s*if \(legacySubmission !== attempt\) return;\s*passwordInput\.value = '';\s*resetPasswordView\(\);/,
+    '当前登录请求异常时也要清空密码并恢复掩码');
 });

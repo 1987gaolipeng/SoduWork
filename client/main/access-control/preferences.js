@@ -21,9 +21,9 @@ function snapshot(app) {
     if (value.schema !== 1 || !MODES.has(value.mode) || !Number.isSafeInteger(value.revision) || value.revision < 0) throw Error('invalid');
     return { mode: value.mode === 'full' && value.fullConsentVersion !== 1 ? 'standard' : value.mode, revision: value.revision };
   } catch (error) {
-    // A fresh profile uses the product default. Invalid/unreadable saved
-    // preferences retain the existing conservative recovery behavior.
-    return { mode: error?.code === 'ENOENT' ? 'full' : 'standard', revision: 0 };
+    // A fresh profile uses the conservative product default. Invalid/unreadable
+    // saved preferences retain the same recovery behavior.
+    return { mode: 'standard', revision: 0 };
   }
 }
 function save(app, mode, current) {

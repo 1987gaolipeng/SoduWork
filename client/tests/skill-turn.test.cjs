@@ -106,6 +106,7 @@ test('production IPC captures only valid names and publishes a recoverable skill
   const context = { require: createRequire(ipcPath), path, app: { getPath: () => root }, BrowserWindow: {},
     _uiWindow: require('../main/pi-session/ui-window').create(),
     _cloudHandoff: { guard: () => null },
+    firstTurnTitle: { prepare: () => null, accepted() {} },
     updateWorkloads: { guard: () => ({ ok: true }) }, session: { get: () => handle },
     sendIdentityOf: async () => ({}), memories: { assertOwner() {} }, pluginDebug: { guard: () => null },
     attachments: { stage: async () => ({ files: [], warnings: [] }) }, workDir: () => root,

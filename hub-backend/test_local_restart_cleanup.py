@@ -67,6 +67,27 @@ class LocalRestartCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(local_base._RUNS[self.ref]["failureKind"], "access_reauthorization")
         watch.assert_not_called()
 
+    def test_unverified_launch_tree_remains_blocked_after_restart_and_stop_retry(self):
+        self._archive()
+        archive = Path(self.temp.name, self.ref, 'meta.json')
+        data = json.loads(archive.read_text())
+        data['failureKind'] = local_base._LAUNCH_TREE_UNCONFIRMED
+        archive.write_text(json.dumps(data), encoding='utf-8')
+        with patch.object(local_stream, '_kill_pid_tree', return_value=True) as terminate, \
+                patch.object(local_base, '_pid_alive', return_value=False), \
+                patch.object(local_base, '_watch_detached') as watch:
+            self.assertEqual(local_base.reclaim(), {'live': 1, 'ended': 0})
+            run = local_base._RUNS[self.ref]
+            self.assertEqual(run['state'], 'running')
+            self.assertTrue(run['stopping'])
+            self.assertFalse(local_stream.stop_sync({}, self.ref)['ok'])
+            terminate.assert_not_called()
+            watch.assert_not_called()
+        saved = json.loads(archive.read_text())
+        self.assertEqual(saved['failureKind'], local_base._LAUNCH_TREE_UNCONFIRMED)
+        self.assertEqual(saved['state'], 'running')
+        self.assertEqual(saved['pid'], 41234)
+
     async def test_refused_followup_cannot_hide_reclaimed_live_process_from_job_session(self):
         self._archive()
         with patch.object(local_stream, "_kill_pid_tree", return_value=False), \

@@ -128,16 +128,18 @@ class VersionProbeTests(unittest.TestCase):
 
     def test_new_package_metadata_overrides_cached_cli_fallback_immediately(self):
         package = self.root / "fixture-agent" / "package.json"
+        package.parent.mkdir()
+        executable = package.parent / "cli.js"
+        executable.write_text("// fixture", encoding="utf-8")
         spec = {"installer": "npm", "pkg": "fixture-agent"}
-        profile = {"bin": lambda: str(self.executable), "argv_prefix": lambda: []}
+        profile = {"bin": lambda: str(executable), "argv_prefix": lambda: []}
         with (patch.dict(agent_setup._SPECS, {"version-fixture": spec}),
               patch.dict(agent_setup._PROFILES, {"version-fixture": profile}),
               patch.object(agent_setup, "_npm_root", return_value=str(self.root)),
               patch.object(agent_setup, "_short", return_value="1.0.0") as run):
             self.assertEqual(agent_setup._version_of("version-fixture")[0], "1.0.0")
             self.assertEqual(agent_setup._version_of("version-fixture")[0], "1.0.0")
-            package.parent.mkdir()
-            package.write_text('{"version":"2.0.0"}', encoding="utf-8")
+            package.write_text('{"name":"fixture-agent","version":"2.0.0"}', encoding="utf-8")
             self.assertEqual(agent_setup._version_of("version-fixture"), ("2.0.0", "pkg", ""))
             self.assertEqual(run.call_count, 1)
 

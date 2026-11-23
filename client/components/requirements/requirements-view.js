@@ -49,10 +49,10 @@
     return '<span class="rq-stage is-' + R.column(task) + '">' + esc(task.status === 'cancel' ? '已取消' :
       R.columns.find(row => row[0] === R.column(task))?.[1] || '待开始') + '</span>';
   }
-  function cardLabels(task) {
+  function cardLabels(task, ctx) {
     return '<span class="rq-card-labels"><span class="rq-kind" data-kind="' + esc(task.kind || 'other') + '">' + esc(R.kinds[task.kind] || R.kinds.other) + '</span>' +
       (R.stage(task) === 'clarifying' ? '<span class="rq-flag">待补充</span>' : '') +
-      (R.blocked(task) ? '<span class="rq-flag">' + (task.status === 'paused' ? '已暂停' : '执行异常') + '</span>' : '') + '</span>';
+      (R.blocked(task, ctx) ? '<span class="rq-flag">' + (R.deliveryProgress(task, ctx)?.text || (task.status === 'paused' ? '已暂停' : '执行异常')) + '</span>' : '') + '</span>';
   }
   function tags(task) {
     const values = [...new Set((Array.isArray(task.tags) ? task.tags : [])
@@ -85,17 +85,10 @@
   function menuButton(task) { return '<button type="button" class="rq-card-menu" data-rq-actions="' + esc(task.id) +
     '" aria-label="需求操作：' + esc(R.content(task).title) + '" aria-haspopup="menu" aria-expanded="false">' + icon('more') + '</button>'; }
   function card(task, state, ctx) {
-    const pending = R.approval(task, ctx);
-    // A request that this user has already decided is still returned by the
-    // hub while other approvers finish. It must not keep advertising the
-    // decision card in the requirement pool; the detail view already treats
-    // it as a waiting state.
-    const actionable = pending && (!pending.status || pending.status === 'pending') && !pending.myDecision && R.approvalActionable(task, ctx)
-      ? pending : null;
-    const acceptance = actionable || global.TaskTraceApproval?.canAcceptTask(task, ctx), id = esc(task.id);
+    const id = esc(task.id);
     const moving = state.movingId === String(task.id);
     return '<article class="rq-card" data-hbid="' + id + '" aria-busy="' + moving + '" draggable="' + (!moving && state.group === 'stage' && R.canTriage(task)) + '">' +
-      '<div class="rq-card-top">' + cardLabels(task) + priorityFlag(task) + menuButton(task) + '</div>' +
+      '<div class="rq-card-top">' + cardLabels(task, ctx) + priorityFlag(task) + menuButton(task) + '</div>' +
       '<button type="button" class="rq-card-open" data-rq-open="' + id + '"><span class="rq-card-title" data-user-content title="' +
       esc(R.content(task).title) + '">' + esc(R.content(task).title || '未命名需求') + '</span>' +
       tags(task) +
@@ -103,9 +96,7 @@
       (task.projectId || task.projectName ? '<span class="rq-project">' + icon('project') + '<span data-user-content>' + esc(project(task, ctx)) + '</span></span>' : '') +
       (due(task) ? '<span class="rq-card-due">' + due(task) + '</span>' : '') +
       '<span class="rq-card-meta">' + owner(task) + '<span class="rq-card-trailing">' + timestamp(task, true) + '</span></span></button>' +
-      (moving ? '<div class="rq-card-moving" role="status"><span class="rq-moving-spinner" aria-hidden="true"></span>正在变更状态…</div>' : acceptance ? '<button type="button" class="rq-card-decision" data-rq-open="' + id + '">' + icon('check') +
-        (actionable?.action === 'review' || (!pending && acceptance) ? '核对成果并选择验收方式' : esc(R.nextStep(task, ctx).text)) + icon('arrow') + '</button>' :
-       assignable(task) ? '<button type="button" class="rq-card-assign" data-rq-assign="' + id + '">' + icon('arrow') + '安排执行</button>' : '') + '</article>';
+      (moving ? '<div class="rq-card-moving" role="status"><span class="rq-moving-spinner" aria-hidden="true"></span>正在变更状态…</div>' : '') + '</article>';
   }
   function groups(list, state, ctx) {
     // Every board column uses actual update chronology, regardless of a saved
@@ -122,6 +113,7 @@
     }
     return [...buckets.values()].sort((a, b) => a[0] === '__none' ? 1 : b[0] === '__none' ? -1 : a[1].localeCompare(b[1], 'zh-CN'));
   }
+  const compactHints = { intake: '整理需求，补充信息', ready: '安排人员或 AI 执行', delivering: '跟进进展，处理确认' };
   function board(list, state, ctx) {
     const archived = state.archive === 'archived';
     return '<div class="' + (archived ? 'rq-archive' : 'rq-kanban' + (state.group !== 'stage' ? ' is-property-group' : '')) + '" role="list" aria-label="需求看板">' +
@@ -130,7 +122,7 @@
         return '<section class="rq-lane' + (stage ? ' is-' + id : '') + '" data-rq-lane="' + esc(id) + '" role="listitem">' +
           '<header class="rq-lane-head"><div class="rq-lane-heading"><h2 class="rq-lane-title" id="' + domId + '-title" title="' + esc(hint || title) + '">' +
           (stage ? icon(id) : icon(state.group === 'owner' ? 'person' : 'project')) + '<span' + (stage || id === '__none' ? '' : ' data-user-content') + '>' + esc(title) +
-          '</span><em>' + items.length + '</em></h2>' + (stage && hint ? '<p class="rq-lane-hint">' + esc(hint) + '</p>' : '') + '</div>' +
+          '</span><em>' + items.length + '</em></h2>' + (stage && hint ? '<p class="rq-lane-hint" title="' + esc(hint) + '">' + esc(compactHints[id] || hint) + '</p>' : '') + '</div>' +
           (!archived && stage && ['intake', 'ready'].includes(id) ? '<button type="button" class="rq-column-add" data-rq-create="' + id +
             '" aria-label="在' + esc(title) + '新建需求">＋</button>' : '') + '</header>' +
           '<div class="rq-lane-cards" id="' + domId + '" tabindex="0" role="region" aria-labelledby="' + domId + '-title">' +
@@ -142,7 +134,7 @@
     const limit = state.limits.list || 80;
     return '<div class="rq-table-wrap"><table class="rq-table"><thead><tr><th>需求</th><th>阶段</th><th>负责人 / 执行者</th><th>创建人</th><th>项目</th><th>优先级</th><th>截止日期</th><th>最近更新</th><th><span class="rq-sr-only">操作</span></th></tr></thead><tbody>' +
       rows.slice(0, limit).map(task => '<tr data-hbid="' + esc(task.id) + '"><td><button class="rq-list-title" type="button" data-rq-open="' + esc(task.id) +
-        '"><span class="rq-list-title-text" data-user-content>' + esc(R.content(task).title || '未命名需求') + '</span><span class="rq-list-labels">' + cardLabels(task) + tags(task) + '</span></button></td><td>' + stageBadge(task) + '</td><td>' +
+        '"><span class="rq-list-title-text" data-user-content>' + esc(R.content(task).title || '未命名需求') + '</span><span class="rq-list-labels">' + cardLabels(task, ctx) + tags(task) + '</span></button></td><td>' + stageBadge(task) + '</td><td>' +
         owner(task) + '</td><td>' + creator(task) + '</td><td><span class="rq-table-project"' + (task.projectId || task.projectName ? ' data-user-content' : '') + ' title="' + esc(project(task, ctx)) + '">' + esc(project(task, ctx)) + '</span></td><td>' +
         esc(R.priorities[task.priority] || '普通') + '</td><td>' + (due(task) || '—') + '</td><td>' + timestamp(task) + '</td><td>' + menuButton(task) + '</td></tr>').join('') + '</tbody></table></div>' +
       (rows.length > limit ? '<button type="button" class="rq-more-cards" data-rq-more="list">再显示 ' + Math.min(80, rows.length - limit) + ' 条</button>' : '');
@@ -190,7 +182,7 @@
       (R.canTriage(task) ? ['intake', 'clarifying', 'ready'].filter(key => key !== R.stage(task)).map(key =>
         '<button type="button" role="menuitem" data-rq-move="' + id + '" data-rq-target="' + key + '">' +
         ({intake:'放回收集箱', clarifying:'标记待补充', ready:'准备好，移到待开始'})[key] + '</button>').join('') : '') +
-      (R.canSubmitReview(task) ? '<button type="button" role="menuitem" data-rq-move="' + id + '" data-rq-target="reviewing">提交验收</button>' : '') +
+      (R.canSubmitReview(task) ? '<button type="button" role="menuitem" data-rq-move="' + id + '" data-rq-target="reviewing">查看并提交验收</button>' : '') +
       (R.canOpenConversation(task, global.SoduWorkAPI?.clientId) && !task.archivedAt ? '<button type="button" role="menuitem" data-rq-chat="' + id + '">打开执行会话（仅本机）</button>' : '') +
       actionButton(R.stage(task) === 'closed' ? 'restore' : 'archive', R.stage(task) === 'closed' ? '恢复需求' : '归档需求') +
       actionButton('delete', '删除需求');

@@ -264,9 +264,9 @@ class OpenCodeDependenciesTests(unittest.TestCase):
 @unittest.skipUnless(os.environ.get("SODUWORK_TEST_OPENCODE_BIN"),
                      "Requires an explicitly selected installed OpenCode")
 class OpenCodeDependenciesNativeTests(unittest.TestCase):
-    def test_real_preparation_then_both_native_tool_loops_with_registry_unavailable(self):
+    def test_real_preparation_then_native_tool_loop_with_registry_unavailable(self):
         from app.services import acp_bridge
-        from test_harness2_native_web import _WebFixture, Harness2NativeWebTests
+        from opencode_web_fixture import _WebFixture, OpenCodeWebChecks
         from test_opencode_native_config import OpenCodeNativeConfigTests
 
         binary = Path(os.environ["SODUWORK_TEST_OPENCODE_BIN"]).resolve()
@@ -277,14 +277,14 @@ class OpenCodeDependenciesNativeTests(unittest.TestCase):
             deps.prepare(str(binary), VERSION, str(root / "runner"), lambda _message: None)
             evidence["prepare_seconds"] = round(time.monotonic() - started, 3)
             self.assertEqual(deps.issue(str(root / "runner"), VERSION), "")
-            for runtime in ("harness2", "opencode"):
+            for runtime in ("opencode",):
                 fixture = _WebFixture()
                 fixture.start()
                 try:
                     work = root / runtime
                     work.mkdir()
                     (work / "unchanged.txt").write_bytes(b"Fixture stays unchanged.")
-                    case = Harness2NativeWebTests()
+                    case = OpenCodeWebChecks()
                     case.fixture = fixture
                     native = OpenCodeNativeConfigTests()
 
@@ -293,8 +293,6 @@ class OpenCodeDependenciesNativeTests(unittest.TestCase):
                         home = root / "empty-home"
                         home.mkdir(exist_ok=True)
                         env.update(HOME=str(home), USERPROFILE=str(home))
-                        if runtime == "harness2":
-                            return case.run_turn(work, env, prompt, session)
                         command = [sys.executable, str(Path(acp_bridge.__file__)),
                                    "--cwd", str(work), "--agent-name", "opencode",
                                    "--session", session, "--", str(binary), "acp"]
@@ -323,10 +321,6 @@ class OpenCodeDependenciesNativeTests(unittest.TestCase):
                     self.assertEqual(fixture.applied, ["standard", "standard", "readonly"])
                     self.assertEqual(fixture.dependency_requests, 0)
                     self.assertFalse(fixture.bad_requests)
-                    if runtime == "harness2":
-                        execution = [row for row in fixture.calls if not row["auxiliary"]]
-                        self.assertTrue(all(row["harness_identity"] for row in execution), fixture.calls)
-                        self.assertFalse(any(row["executor_identity"] for row in execution), fixture.calls)
                     self.assertFalse((root / "refinement").exists())
                     self.assertEqual(deps.issue(str(root / "runner"), VERSION), "")
                     self.assertEqual(

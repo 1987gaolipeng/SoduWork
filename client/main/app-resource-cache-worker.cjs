@@ -24,6 +24,21 @@ function select(row, request, action = request.action) {
   return { row: contribution, definition: row.definition, revision: row.revision };
 }
 function run(request) {
+  if (request.action === 'draft-candidates')
+    return require('./pi-session/plugin-draft-candidates').collect(request.cwd, request.snapshot);
+  if (request.action === 'draft-check') {
+    const { cwd, file, profile, skillRuntimeEntry } = request;
+    const app = profile || skillRuntimeEntry
+      ? { ...(profile ? { getPath: () => profile } : {}), skillRuntimeEntry } : undefined;
+    const draft = require('./pi-session/plugin-draft').readCandidate({ handle: { cwd }, file }, app, { staticValidation: true });
+    if (!draft.ok || request.readOnly) return draft;
+    try {
+      const checked = draft.kind === 'skill' ? { ok: true } : require('./personal-plugins').preflight(draft.body);
+      const failures = (checked.checks || []).filter(row => row.ok === false);
+      return checked.ok && !failures.length ? { ok: true } :
+        { ok: false, reason: failures.map(row => row.label || row.key).join('; ') };
+    } catch (error) { return { ok: false, reason: error.message }; }
+  }
   if (request.action === 'import-file') return require('./plugin-package-picker-worker.cjs').read(request.file);
   if (request.action === 'preflight') return require('./personal-plugins').preflight(request.body);
   if (request.action === 'preflight-archive') return require('./personal-plugins').preflightArchive(request.content);

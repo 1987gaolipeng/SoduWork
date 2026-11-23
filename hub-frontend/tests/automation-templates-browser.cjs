@@ -23,6 +23,11 @@ async function click(text) {
   await js(`(() => { const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(text)});if(!b)throw Error('Missing button');b.click() })()`)
 }
 async function api(method, route, body) {
+  if (method === 'PUT' && body && !Object.hasOwn(body, 'revision')) {
+    const current = await api('GET', '');
+    assert.equal(current.status, 200);
+    body = { ...body, revision: current.data.revision };
+  }
   const response = await fetch(fixture.url + '/api/v1/admin/automation-templates' + route, {
     method, headers: { Authorization: 'Bearer ' + fixture.token, 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -201,17 +206,46 @@ app.whenReady().then(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,'Summarize quarterly progress');
     e.dispatchEvent(new Event('input',{bubbles:true}));})()`)
   assert.equal(await js('document.querySelectorAll(".at-field-error").length'), 0)
+  assert.equal(await js('document.querySelector("[name=unlimitedDates]").checked'), true)
+  assert.equal(await js('document.querySelector("[name=startDate]").disabled'), true)
+  await js('document.querySelector("[name=unlimitedDates]").click()')
+  await click('保存模板')
+  await waitFor('document.querySelector("[name=startDate]").getAttribute("aria-invalid") === "true"', 'date boundary required when limited')
+  assert.equal(saveCount, saveStart)
+  await fill('startDate', '2030-12-01')
+  await fill('endDate', '2030-11-30')
+  await click('保存模板')
+  await waitFor('document.querySelector("[name=endDate]").getAttribute("aria-invalid") === "true"', 'reversed date range')
+  assert.equal(saveCount, saveStart)
+  await fill('endDate', '2030-12-31')
+  await js('document.querySelector("[name=endDate]").scrollIntoView({block:"center"})')
+  await shot('template-effective-dates-desktop')
+  win.setSize(390, 800); await sleep(100)
+  assert.ok(await js('document.documentElement.scrollWidth <= innerWidth + 1'), 'date controls fit narrow screens')
+  await js('document.querySelector("[name=endDate]").scrollIntoView({block:"center"})')
+  await shot('template-effective-dates-narrow')
+  win.setSize(1280, 900)
   await click('保存模板')
   await waitFor('!document.querySelector(".at-editor") && document.querySelectorAll(".at-card").length === 3', 'valid creation')
   const createdCatalog = (await api('GET', '')).data.items
   const created = createdCatalog.find(item => item.id === 'quarterly-review')
   assert.equal(created.name, '季度总结 / 日報 주간 📊')
+  assert.equal(created.startDate, '2030-12-01')
+  assert.equal(created.endDate, '2030-12-31')
   await refreshClient(); assert.ok((await clientIds()).includes(created.id))
+  await clientJs('document.querySelector("[data-sch-recipe=quarterly-review]").click()')
+  for (let i = 0; i < 100 && !await clientJs('!!document.getElementById("schStartDate")'); i++) await sleep(50)
+  assert.deepEqual(await clientJs('[document.getElementById("schStartDate").value, document.getElementById("schEndDate").value]'),
+    ['2030-12-01', '2030-12-31'])
+  await refreshClient()
   assert.equal(saveCount, saveStart + 1)
   checks.push('Create form explains required, malformed, long and duplicate fields inline; no invalid request is sent; correcting permits one real creation')
+  checks.push('Effective dates validate in the real form, persist through the API and prefill the actual desktop editor')
 
   for (const invalid of [{id:'a'.repeat(65)}, {id:'Uppercase'}, {id:' daily'}, {id:'daily-report'},
-    {name:' 　'}, {name:'报'.repeat(81)}, {name:'Invalid\nname'}, {name:'Invalid\u0000name'}, {name:['not a string']}]) {
+    {name:' 　'}, {name:'报'.repeat(81)}, {name:'Invalid\nname'}, {name:'Invalid\u0000name'}, {name:['not a string']},
+    {startDate:'2030-02-30'}, {endDate:'2030-13-01'}, {startDate:true}, {endDate:['2030-12-31']},
+    {startDate:'2031-01-01',endDate:'2030-12-31'}]) {
     const response = await api('PUT', '', { items: [...createdCatalog, {...created, id:'bypass-check', ...invalid}] })
     assert.equal(response.status, 400, JSON.stringify(invalid))
     assert.ok(typeof response.data.detail === 'string' && response.data.detail.length > 0)

@@ -30,7 +30,7 @@ class Channel:
         self.token = secrets.token_urlsafe(48)
         self.condition = threading.Condition(threading.RLock())
         self.pending: dict[str, dict] = {}
-        self.decisions: dict[str, str] = {}
+        self.decisions: dict[str, str | dict] = {}
         self.grants: set[str] = set()
         self.denials: set[str] = set()
         from .local_base import _RUNS
@@ -57,7 +57,8 @@ class Channel:
                     if not isinstance(payload, dict):
                         raise ValueError("invalid body")
                     if self.path == "/request":
-                        result = {"decision": channel.request(payload)}
+                        answer = channel.request(payload)
+                        result = answer if isinstance(answer, dict) else {"decision": answer}
                     elif self.path == "/applied":
                         result = channel.applied(payload)
                     elif self.path == "/control":
@@ -146,9 +147,26 @@ class Channel:
                 run["permissionDenied"] = True
                 run["_accessSessionDenials"] = set(self.denials)
 
-    def request(self, operation: dict) -> str:
+    def request(self, operation: dict) -> str | dict:
         if not operation.get("action"):
             return "deny"
+        question = operation["action"] == "native.question"
+        options = operation.get("options")
+        if question:
+            # These are answer choices, not grants. Keep the opaque ACP IDs
+            # intact, and reject malformed/ambiguous choices before publishing.
+            if (not isinstance(options, list) or not 1 <= len(options) <= 64
+                    or any(not isinstance(item, dict)
+                           or not isinstance(item.get("optionId"), str)
+                           or not 1 <= len(item["optionId"]) <= 1024
+                           or not isinstance(item.get("name"), str) or not item["name"].strip()
+                           or len(item["name"]) > 4000
+                           or item.get("kind") not in {"allow_once", "reject_once"}
+                           for item in options)
+                    or len({item["optionId"] for item in options}) != len(options)
+                    or not any(item["kind"] == "allow_once" for item in options)):
+                return {"decision": "deny"}
+            options = [{key: item[key] for key in ("optionId", "name", "kind")} for item in options]
         digest = hashlib.sha256(json.dumps([
             self.policy.get("policyHash"), self.agent, access_policy.operation_digest(operation)
         ], separators=(",", ":")).encode()).hexdigest()
@@ -168,16 +186,18 @@ class Channel:
             from . import access_transition
             from .local_base import _RUNS
             if access_transition.active(_RUNS.get(self.ref) or {}):
-                return "deny"
-            if self.closed or self.policy["mode"] == "readonly":
+                return {"decision": "deny"} if question else "deny"
+            if self.closed and question:
+                return {"decision": "deny"}
+            if self.closed or (not question and self.policy["mode"] == "readonly"):
                 self._denied()
                 return "deny"
-            if self.policy["mode"] == "full":
+            if not question and self.policy["mode"] == "full":
                 return "once"
-            if digest in self.denials:
+            if not question and digest in self.denials:
                 self._denied()
                 return "deny"
-            if operation.get("allowSession", True) and grant_digest in self.grants:
+            if not question and operation.get("allowSession", True) and grant_digest in self.grants:
                 return "once"
             request_id = uuid.uuid4().hex
             now = time.time()
@@ -188,14 +208,16 @@ class Channel:
                    "kind": str(operation.get("kind") or "")[:100],
                    "tool": str(operation.get("tool") or "")[:100],
                    "target": str(operation.get("target") or "")[:2000],
-                   "title": str(operation.get("title") or operation["action"])[:300],
+                   "title": str(operation.get("title") or operation["action"])[:4000 if question else 300],
                    "reason": str(operation.get("reason") or "")[:500],
                    "arguments": operation.get("arguments") or {},
                    "argsDigest": digest, "createdAt": now,
                    "grantDigest": grant_digest,
                    "sessionScope": {"kind": scope["kind"]} if scope else None,
                    "expiresAt": now + _TIMEOUT_S,
-                   "allowSession": bool(operation.get("allowSession", True))}
+                   "allowSession": not question and bool(operation.get("allowSession", True))}
+            if question:
+                row["options"] = options
             self.pending[request_id] = row
             self._publish()
             self._audit(row, "requested")
@@ -212,6 +234,10 @@ class Channel:
                 answer = self.decisions.pop(request_id, "deny")
                 if self.closed:
                     answer = "deny"
+                if question:
+                    answer = answer if isinstance(answer, dict) else {"decision": "deny"}
+                    self._audit(row, answer["decision"])
+                    return answer
                 if answer == "deny" and not access_transition.active(_RUNS.get(self.ref) or {}):
                     self.denials.add(digest)
                     self._denied()
@@ -221,7 +247,7 @@ class Channel:
                 self.pending.pop(request_id, None)
                 self._publish()
 
-    def respond(self, request_id: str, decision: str, revision) -> dict:
+    def respond(self, request_id: str, decision: str, revision, option_id=None) -> dict:
         with self.condition:
             row = self.pending.get(request_id)
             from .local_base import _RUNS
@@ -238,6 +264,17 @@ class Channel:
             if (run.get("accessPolicy") or {}).get("policyHash") != self.policy.get("policyHash"):
                 return {"ok": False, "code": "PERMISSION_POLICY_CHANGED",
                         "error": "The access policy has changed"}
+            if row["action"] == "native.question":
+                if (decision not in {"answer", "deny"}
+                        or (decision == "answer" and (not isinstance(option_id, str)
+                            or not any(item["optionId"] == option_id for item in row["options"])))):
+                    return {"ok": False, "error": "Choose an available answer or cancel the question"}
+                answer = {"decision": decision}
+                if decision == "answer":
+                    answer["optionId"] = option_id
+                self.decisions[request_id] = answer
+                self.condition.notify_all()
+                return {"ok": True, "requestId": request_id, **answer}
             if decision not in {"once", "session", "deny"}:
                 return {"ok": False, "error": "Invalid permission decision"}
             if decision == "session" and not row["allowSession"]:
@@ -250,6 +287,7 @@ class Channel:
             if decision != "once":
                 for other_id, other in self.pending.items():
                     if (other_id not in self.decisions
+                            and other["action"] != "native.question"
                             and (other["grantDigest"] == row["grantDigest"] if decision == "session"
                                  else other["argsDigest"] == row["argsDigest"])
                             and other["expiresAt"] > time.time()
@@ -294,13 +332,13 @@ def attach(ref: str, cfg: dict, env: dict) -> Channel | None:
     return channel
 
 
-def respond(ref: str, request_id: str, decision: str, revision) -> dict:
+def respond(ref: str, request_id: str, decision: str, revision, option_id=None) -> dict:
     with _CHANNEL_LOCK:
         channel = _CHANNELS.get(ref)
     if not channel:
         return {"ok": False, "code": "PERMISSION_REQUEST_EXPIRED",
                 "error": "The permission channel is no longer available"}
-    return channel.respond(request_id, decision, revision)
+    return channel.respond(request_id, decision, revision, option_id)
 
 
 def wake(ref: str):

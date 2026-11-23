@@ -8,7 +8,7 @@ test('Runner carries declared thinking mappings to the same selected model', () 
   const model = { baseUrl: 'https://fixture.invalid', key: 'fixture', id: 'managed-alias',
     reasoning: true, thinkingMode: 'always', thinkingAlwaysOn: true, thinkingFormat: 'zai', supportsReasoningEffort: true,
     thinkingLevelMap: { off: null, minimal: null, low: 'low', high: 'high' } };
-  for (const adapter of ['harness2', 'kimi', 'opencode']) {
+  for (const adapter of ['qwen', 'kimi', 'opencode']) {
     const cfg = create(model, adapter, ['read']);
     assert.equal(cfg.local_cli, adapter);
     assert.equal(cfg.llm.model, model.id);
@@ -26,10 +26,10 @@ test('Runner carries declared thinking mappings to the same selected model', () 
 test('Normalized profiles survive and unknown models receive no invented mapping', () => {
   const base = { baseUrl: 'https://fixture.invalid', key: 'fixture', id: 'managed-alias' };
   const normalized = create({ ...base, reasoning: true, format: 'openai',
-    supportsReasoningEffort: true, thinkingLevelMap: { low: 'medium' } }, 'harness2').llm;
+    supportsReasoningEffort: true, thinkingLevelMap: { low: 'medium' } }, 'qwen').llm;
   assert.equal(normalized.thinkingFormat, 'openai');
   assert.deepEqual(normalized.thinkingLevelMap, { low: 'medium' });
-  const plain = create(base, 'harness2').llm;
+  const plain = create(base, 'qwen').llm;
   assert.equal(plain.thinkingLevelMap, undefined);
   assert.equal(plain.thinkingFormat, undefined);
   for (const field of ['reasoning', 'thinkingMode', 'thinkingAlwaysOn', 'thinkingLevel']) {
@@ -41,7 +41,7 @@ test('Normalized profiles survive and unknown models receive no invented mapping
 
 test('Runner preserves declared controllable and disabled reasoning without selecting a level', () => {
   const base = { baseUrl: 'https://fixture.invalid', key: 'fixture', id: 'managed-alias' };
-  for (const adapter of ['harness2', 'kimi', 'opencode']) {
+  for (const adapter of ['qwen', 'kimi', 'opencode']) {
     const controllable = create({ ...base, thinkingMode: 'controllable', thinkingAlwaysOn: false,
       thinkingFormat: 'qwen', supportsReasoningEffort: false }, adapter).llm;
     assert.equal(controllable.reasoning, true);
@@ -63,11 +63,11 @@ test('Runner forwards only explicit supported thinking levels and typed policy d
   const base = { baseUrl: 'https://fixture.invalid', key: 'fixture', id: 'managed-alias',
     thinkingMode: 'controllable', reasoning: true };
   for (const level of ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']) {
-    assert.equal(create({ ...base, thinkingLevel: level }, 'harness2').llm.thinkingLevel, level);
+    assert.equal(create({ ...base, thinkingLevel: level }, 'qwen').llm.thinkingLevel, level);
   }
   for (const invalid of [undefined, null, '', 'AUTO', 'controllable ', true, 1, {}]) {
     const llm = create({ ...base, thinkingMode: invalid, thinkingAlwaysOn: invalid,
-      thinkingLevel: invalid }, 'harness2').llm;
+      thinkingLevel: invalid }, 'qwen').llm;
     assert.equal(Object.hasOwn(llm, 'thinkingMode'), false);
     assert.equal(Object.hasOwn(llm, 'thinkingLevel'), false);
     assert.equal(Object.hasOwn(llm, 'thinkingAlwaysOn'), typeof invalid === 'boolean');

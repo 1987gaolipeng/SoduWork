@@ -156,7 +156,7 @@ test('automation preflight results render fully in English with no CJK residue',
   const messages = [
     '执行条件已就绪', '执行条件已就绪；个人插件跟随本机当前版本', '执行条件已就绪；个人插件固定 v1.4.2',
     '等待可用 Runner', '暂时无法探测执行机：connect ECONNREFUSED', '读取 Agent 配置失败：missing file',
-    '请先选择任务归属的 SoduWork', '请先选择执行 Agent',
+    '请先选择任务归属的 SoduWork', '请先选择执行底座', '尚未选择执行底座',
   ];
   const checks = ['Runner 已在线', '已在线', '能力授权满足', '等待可用 Runner',
     '个人插件跟随本机当前版本', '个人插件固定 v2.0'];
@@ -175,6 +175,20 @@ test('automation preflight results render fully in English with no CJK residue',
   const line = tt('执行条件已就绪') + ' · DESKTOP-FIXTURE Runner';
   const small = checks.map(item => tt(item)).join(' · ');
   assert.ok(!CJK.test(line) && !CJK.test(small), line + ' / ' + small);
+});
+
+test('missing runtime preflight messages use runtime wording in every supported locale', () => {
+  const messages = ['请先选择执行底座', '尚未选择执行底座'];
+  const expected = {
+    'zh-CN': ['请先选择执行底座', '尚未选择执行底座'],
+    'en-US': ['Choose an execution runtime first', 'No execution runtime selected yet'],
+    'ja-JP': ['まず実行基盤を選択してください', '実行基盤が未選択です'],
+    'ko-KR': ['먼저 실행 기반을 선택해 주세요', '실행 기반이 아직 선택되지 않았습니다'],
+  };
+  for (const [locale, translated] of Object.entries(expected)) {
+    const tt = boot(locale).SoduWorkI18n.translateText;
+    assert.deepEqual(messages.map(message => tt(message)), translated, locale);
+  }
 });
 
 test('next-run preview and timezone labels compose in English at the source', () => {
@@ -219,7 +233,7 @@ test('zh-CN output stays byte-identical for every schedule string', () => {
     'Runner 已在线', '能力授权满足', '等待可用 Runner', '配置有效；等待具备 视觉识别 的 Runner 在线',
     '暂时无法探测执行机：boom', '今天 18:00', '下一次：今天 18:00', '按北京时间执行 · 触发精度约两分钟',
     '北京时间', '设备当地时间', '当前未就绪', '1 个在线席位', '已保存的执行底座', '当前设备没有可选执行底座',
-    '正在检查执行条件…', '执行条件待确认', '请先选择任务归属的 SoduWork', '请先选择执行 Agent',
+    '正在检查执行条件…', '执行条件待确认', '请先选择任务归属的 SoduWork', '请先选择执行底座', '尚未选择执行底座',
   ]) assert.equal(tt(source), source, source);
 });
 

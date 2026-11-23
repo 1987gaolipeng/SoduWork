@@ -38,8 +38,30 @@ def error_text(event: dict) -> str:
 
 def observe(run: dict, event: dict, terminal: dict) -> str:
     text = error_text(event)
-    if text and (OVERFLOW.search(text) or text.strip().lower() == "context length"):
-        terminal.update(overflow=True, isError=True, result=text[:600])
+    if (run.get("cli") == "codex" and event.get("type") == "error"
+            and isinstance(event.get("message"), str) and not event.get("error")):
+        # Native Codex emits recoverable progress diagnostics on this channel,
+        # including reconnect attempts. Only turn.failed owns its terminal
+        # error; do not let a diagnostic block a later native recovery.
+        text = ""
+    non_pi = bool(run.get("cli")) and run.get("cli") != "pi"
+    context_error = bool(text and (OVERFLOW.search(text) or text.strip().lower() == "context length"))
+    safe_text = text
+    if non_pi and text:
+        from . import runner_usage_receipts
+        safe_text = runner_usage_receipts.sanitize_event(
+            run, {"kind": "out", "text": text}, diagnostic=True)["text"]
+    if non_pi and text and not context_error:
+        # A later protocol/provider failure owns settlement. Neither an older
+        # overflow nor a subsequently emitted successful step may erase it.
+        terminal.pop("overflow", None)
+        terminal.pop("nonPiContextErrorOwned", None)
+        terminal.update(nonPiContextBlocked=True, isError=True, result=safe_text[:600])
+    elif context_error:
+        if not non_pi or not terminal.get("nonPiContextBlocked"):
+            terminal.update(overflow=True, isError=True, result=safe_text[:600])
+            if non_pi:
+                terminal["nonPiContextErrorOwned"] = True
     # Native agents can compact/retry inside the same process. A recovered
     # successful turn must not be replayed merely because an earlier step failed.
     message = event.get("message")
@@ -51,8 +73,9 @@ def observe(run: dict, event: dict, terminal: dict) -> str:
         event.get("type") == "step_finish" and (event.get("part") or {}).get("reason") == "stop") or (
         event.get("type") in ("message_end", "agent_end") and isinstance(message, dict)
         and message.get("stopReason") in ("stop", "toolUse"))
-    if recovered and terminal.get("overflow"):
-        for key in ("overflow", "isError", "result"):
+    if (recovered and terminal.get("overflow") and
+            (not non_pi or terminal.get("nonPiContextErrorOwned"))):
+        for key in ("overflow", "isError", "result", "nonPiContextErrorOwned"):
             terminal.pop(key, None)
     size = (event.get("part") or {}).get("contextWindow")
     if isinstance(size, (int, float)) and 1024 <= size <= 8_000_000:

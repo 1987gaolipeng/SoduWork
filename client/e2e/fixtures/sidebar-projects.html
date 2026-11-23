@@ -24,7 +24,7 @@ window.SoduWorkAPI={hubBase:()=> 'https://sidebar-fixture.invalid',clientAuthSna
 <script>
 WorkspaceShell.mount();WorkspaceShell.setActive('create');
 document.querySelector('#wsCanvas').innerHTML='<div class="fixture-copy">项目会话归类 · 隔离交互验证<br>不连接业务服务，不运行 Agent。</div>';
-window.row=id=>[...document.querySelectorAll('.ws-chat-row')].find(el=>el.querySelector('.ws-chat').dataset.chatId===id);
+window.row=id=>[...document.querySelectorAll('.ws-chat-row')].find(el=>{const data=el.querySelector('.ws-chat').dataset;return(data.sidebarChatId||data.chatId)===id});
 window.projectId=()=>document.querySelector('.ws-project').dataset.projectId;
 window.drag=(id,target,beforeId)=>{
  const source=row(id),data=new DataTransfer(),zone=document.querySelector('[data-sidebar-section="'+target+'"]');

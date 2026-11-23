@@ -265,7 +265,7 @@ class ConversationProtocolTests(unittest.IsolatedAsyncioTestCase):
         with patch('app.services.ai_exec.load', new=AsyncMock(return_value={})), \
                 patch('app.services.agent_route_selection.model_readiness', return_value={
                     'ok': False, 'detail': 'native selection invalid'}):
-            for runtime in ('codex', 'claude'):
+            for runtime in ('codex',):
                 self.schedule.assignee_id = 'local:' + runtime
                 self.schedule.model_name = 'native-model'
                 with self.subTest(runtime=runtime), self.assertRaisesRegex(ValueError, 'native selection invalid'):

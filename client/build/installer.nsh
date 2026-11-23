@@ -16,6 +16,8 @@
     Var soduWorkStartedAt
     !include "${PROJECT_DIR}\.runtime\installer\native-payload.nsh"
     !include "${BUILD_RESOURCES_DIR}\package-check.nsh"
+    !define SODUWORK_INSTALL_CONTEXT_WRITER
+    !include "${BUILD_RESOURCES_DIR}\install-context.nsh"
   !else
     !insertmacro soduworkUninstallDataFunctions
   !endif

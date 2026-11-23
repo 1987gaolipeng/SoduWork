@@ -24,9 +24,11 @@ test('sidebar shows one icon per actual harness across the whole conversation, w
   f.api._paintChatRow(f.row, {id:'whole-chat',title:'多轮协作',adapterId:'claude',
     usedHarnesses:['pi','codex-harness','Pi','Google Harness²','harness2','codex','codex-harness']}, false);
   const icons = [...f.node('.ws-chat-runtime').innerHTML.matchAll(/data-agent-brand="([^"]+)"/g)].map(match=>match[1]);
-  assert.deepEqual(icons, ['pi','codex-harness','harness2','codex']);
+  assert.deepEqual(icons, ['pi','codex-harness','custom','codex']);
   assert.equal(f.node('.ws-chat-runtime').hidden, false);
-  assert.equal(f.node('.ws-chat-runtime').title, 'Pi、Codex Harness、Google Harness²、Codex');
+  assert.equal(f.node('.ws-chat-runtime').title, '');
+  assert.equal(f.node('.ws-chat').title, '', 'Row details do not create a hover tooltip');
+  assert.doesNotMatch(f.node('.ws-chat-runtime').innerHTML, / title=/);
   assert.match(f.node('.ws-chat')['aria-label'], /多轮协作.*Pi、Codex Harness、Google Harness²、Codex/);
   assert.doesNotMatch(f.node('.ws-chat-runtime').innerHTML, /agent-brand-claude|>Pi<|>Codex Harness</);
 });
@@ -36,7 +38,8 @@ test('known legacy saved runtimes keep their distinct icons while unknown and un
   for (const [id, label] of Object.entries(brand.LABELS).filter(([id]) => id !== 'custom')) {
     f.api._paintChatRow(f.row, { id, adapterId: id, title: 'Saved chat' }, false);
     assert.match(f.node('.ws-chat-runtime').innerHTML, new RegExp('data-agent-brand="'+id+'"'));
-    assert.equal(f.node('.ws-chat-runtime').title, label);
+    assert.ok(f.node('.ws-chat')['aria-label'].endsWith(label));
+    assert.equal(f.node('.ws-chat-runtime').title, '');
     assert.equal(f.node('.ws-chat-runtime').hidden, false);
   }
   for (const item of [
@@ -54,10 +57,51 @@ test('minimal renderer boot preserves known provenance as labelled fallback icon
   const f = fixture(false);
   for (const [id, label] of Object.entries(brand.LABELS).filter(([id]) => id !== 'custom')) {
     f.api._paintChatRow(f.row, { id, runtime: id, title: 'Saved chat' }, false);
-    assert.equal(f.node('.ws-chat-runtime').title, label);
+    assert.ok(f.node('.ws-chat')['aria-label'].endsWith(label));
+    assert.equal(f.node('.ws-chat-runtime').title, '');
     assert.match(f.node('.ws-chat-runtime').innerHTML, /<svg/);
     assert.doesNotMatch(f.node('.ws-chat-runtime').innerHTML, new RegExp('>'+label+'<'));
   }
+});
+
+test('work drafts display their persisted selection separately from execution provenance', () => {
+  const f = fixture();
+  const draft = { id: 'automation-draft', title: '8分钟后提醒我', adapterId: 'pi', workOnly: true,
+    usedHarnesses: [], count: 0, draftAdapterId: 'qwen' };
+  f.api._paintChatRow(f.row, draft, false);
+  assert.equal(f.node('.ws-chat-runtime').hidden, false);
+  assert.match(f.node('.ws-chat-runtime').innerHTML, /data-agent-brand="qwen"/);
+  assert.equal(f.node('.ws-chat-runtime').title, '');
+  assert.match(f.node('.ws-chat')['aria-label'], /已选底座 · Qwen Code/);
+  assert.deepEqual(draft.usedHarnesses, [], 'Selecting a draft runtime must not invent an execution');
+  f.api._paintChatRow(f.row, { ...draft, draftAdapterId: 'codex-harness' }, false);
+  assert.match(f.node('.ws-chat-runtime').innerHTML, /data-agent-brand="codex-harness"/);
+  for (const patch of [{ workOnly: false }, { live: true }, { count: 1 }, { draftAdapterId: 'constructor' },
+    { draftAdapterId: 'custom' }, { draftAdapterId: '' }]) {
+    f.api._paintChatRow(f.row, { ...draft, ...patch }, false);
+    assert.equal(f.node('.ws-chat-runtime').hidden, true);
+  }
+  f.api._paintChatRow(f.row, { ...draft, usedHarnesses: ['pi'] }, false);
+  assert.match(f.node('.ws-chat')['aria-label'], /，Pi$/);
+  assert.doesNotMatch(f.node('.ws-chat-runtime').innerHTML, /data-agent-brand="qwen"/);
+});
+
+test('reused sidebar rows preserve offline cache labels and draft runtime selection independently', () => {
+  const f = fixture();
+  const draft = { id: 'draft', title: 'Automation draft', workOnly: true, count: 0,
+    usedHarnesses: [], draftAdapterId: 'codex-harness' };
+  f.api._paintChatRow(f.row, draft, false);
+  assert.match(f.node('.ws-chat')['aria-label'], /已选底座 · Codex Harness/);
+  f.api._paintChatRow(f.row, { id: 'cached-cloud', title: 'Cloud chat', offlineCloudCache: true,
+    displaySlotId: 'cloud-source', usedHarnesses: ['qwen'] }, false);
+  assert.match(f.node('.ws-chat')['aria-label'], /本地缓存（只读）.*Qwen Code/);
+  assert.doesNotMatch(f.node('.ws-chat')['aria-label'], /已选底座/);
+  assert.equal(f.node('.ws-chat').dataset.sidebarChatId, 'cloud-source');
+  assert.equal(f.node('.ws-chat-runtime').title, '');
+  f.api._paintChatRow(f.row, draft, false);
+  assert.match(f.node('.ws-chat')['aria-label'], /已选底座 · Codex Harness/);
+  assert.doesNotMatch(f.node('.ws-chat')['aria-label'], /本地缓存/);
+  assert.equal(f.node('.ws-chat').dataset.sidebarChatId, 'draft');
 });
 
 test('persisted runtime manifest projects complete history icons without adding the selected unused runtime', () => {
@@ -71,6 +115,6 @@ test('persisted runtime manifest projects complete history icons without adding 
   f.api._paintChatRow(f.row,projected,false);
   const ids=[...f.node('.ws-chat-runtime').innerHTML.matchAll(/data-agent-brand="([^"]+)"/g)].map(match=>match[1]);
   assert.deepEqual(ids,['pi','qwen']);
-  assert.equal(f.node('.ws-chat-runtime').title,'Pi、Qwen Code');
+  assert.match(f.node('.ws-chat')['aria-label'],/，Pi、Qwen Code$/);
   assert.doesNotMatch(f.node('.ws-chat')['aria-label'],/OpenCode/);
 });

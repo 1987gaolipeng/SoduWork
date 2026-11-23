@@ -2,8 +2,10 @@
 from __future__ import annotations
 import uuid
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
-from sqlalchemy import func, select
+from typing import Annotated
+
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
@@ -16,6 +18,7 @@ from ..permissions import ALL_KEYS
 from ..realtime import hub
 from ..services import (approval_routing, code_delivery, deployments, release_control,
                         resource_access, storage, task_access, task_rework, task_trace)
+from ..services.task_requirements import public_content
 
 router = APIRouter(prefix="/api/v1/approvals", tags=["approvals"])
 
@@ -44,12 +47,18 @@ async def _item(session: AsyncSession, request: am.ApprovalRequest,
     # Single-item detail views may query them directly when no prefetched values are supplied.
     if assignment is None and user_id:
         assignment = await approval_routing.assignment_for_user(session, request.id, user_id)
+        # A pre-migration ticket may still name the executor until its next authorized write.
+        if (assignment is None and request.action == "review" and request.status == "pending"
+                and (request.policy_snapshot or {}).get("reviewRoutingVersion") != 2 and task.created_by == user_id):
+            creator = await session.get(User, user_id)
+            assignment = am.ApprovalAssignment(user_id=user_id, user_name=creator.display_name or creator.username,
+                                                sources=approval_routing.default_rules("review")["approvers"])
     if decisions is None:
         decisions = await release_control._decisions(session, request.id)
     return {
         **release_control.request_api(request, decisions),
         "task": {
-            "id": task.id, "title": task.title, "note": task.note or "",
+            "id": task.id, **public_content(task),
             "projectId": task.project_id or "", "repoId": task.repo_id or "",
             "priority": task.priority or "normal", "createdBy": task.created_by or "",
             "createdByName": task.created_by_name or "",
@@ -67,19 +76,24 @@ async def _item(session: AsyncSession, request: am.ApprovalRequest,
 
 
 @router.get("")
-async def inbox(view: str = "pending", limit: int = 60,
+async def inbox(view: str = "pending", limit: Annotated[int, Query(ge=1)] = 60,
                 client: Client = Depends(current_client),
-                session: AsyncSession = Depends(get_session)):
+                session: AsyncSession = Depends(get_session),
+                offset: Annotated[int, Query(ge=0, le=2**63-1)] = 0):
     """Return this user's pending queue or their own immutable decision history."""
     user = await _actor(session, client)
     view = "done" if str(view).lower() == "done" else "pending"
-    limit = min(100, max(1, int(limit or 60)))
+    limit = min(100, limit)
     request_ids = set((await session.execute(select(am.ApprovalAssignment.request_id).where(
         am.ApprovalAssignment.user_id == user.id
     ))).scalars().all())
-    pending_rows = list((await session.execute(select(am.ApprovalRequest).where(
+    pending_rows = list((await session.execute(select(am.ApprovalRequest).join(Task, Task.id == am.ApprovalRequest.task_id).where(
         am.ApprovalRequest.status == "pending",
-        am.ApprovalRequest.id.in_(request_ids or {"__none__"}),
+        or_(am.ApprovalRequest.id.in_(request_ids or {"__none__"}),
+            and_(am.ApprovalRequest.action == "review", Task.created_by == user.id,
+                 am.ApprovalRequest.policy_snapshot["reviewRoutingVersion"].as_integer().is_distinct_from(2),
+                 select(am.ApprovalAssignment.id).where(
+                     am.ApprovalAssignment.request_id == am.ApprovalRequest.id).exists())),
         # A co-sign gate can remain pending after this person has voted. It is
         # waiting for the other reviewers, not a second decision from them.
         ~select(am.ApprovalDecision.id).where(
@@ -91,13 +105,15 @@ async def inbox(view: str = "pending", limit: int = 60,
     pending_tasks = {row.id: row for row in (await session.execute(select(Task).where(
         Task.id.in_(pending_task_ids or {"__none__"})
     ))).scalars().all()}
+    pending_versions = {row.id: row for row in await session.scalars(select(am.ArtifactVersion).where(
+        am.ArtifactVersion.id.in_({request.artifact_version_id for request in pending_rows})))}
     pending = []
     for request in pending_rows:
         task = pending_tasks.get(request.task_id)
-        if task is None:
+        artifact = pending_versions.get(request.artifact_version_id)
+        if task is None or artifact is None:
             continue
-        allowed, _ = await release_control.can_decide(session, task, request, user)
-        if allowed:
+        if await approval_routing.preview_can_decide(session, task, request, user, artifact):
             pending.append(request)
     done_count = int((await session.scalar(select(func.count(am.ApprovalDecision.id)).where(
         am.ApprovalDecision.user_id == user.id))) or 0)
@@ -108,12 +124,12 @@ async def inbox(view: str = "pending", limit: int = 60,
             .join(am.ApprovalDecision,
                   am.ApprovalDecision.request_id == am.ApprovalRequest.id)
             .where(am.ApprovalDecision.user_id == user.id)
-            .order_by(am.ApprovalDecision.created_at.desc())
-            .limit(limit)
+            .order_by(am.ApprovalDecision.created_at.desc(), am.ApprovalDecision.id)
+            .offset(offset).limit(limit)
         )).all())
     my_decisions = {request.id: decision for request, decision in done_pairs}
     rows = ([request for request, _ in done_pairs]
-            if view == "done" else pending[:limit])
+            if view == "done" else pending[offset:offset + limit])
     task_ids = {row.task_id for row in rows}
     artifact_ids = {row.artifact_version_id for row in rows}
     tasks = {row.id: row for row in (await session.execute(select(Task).where(
@@ -187,14 +203,15 @@ async def detail(request_id: str, client: Client = Depends(current_client),
         am.ApprovalDecision.request_id == request.id,
         am.ApprovalDecision.user_id == user.id,
     ).limit(1))).scalar_one_or_none()
-    allowed, why = await release_control.can_decide(session, task, request, user)
+    allowed = await approval_routing.preview_can_decide(session, task, request, user, artifact)
     if not allowed and my_decision is None:
-        # Return the actual access-denial reason and current approvers instead of a generic incomplete-load result.
-        # ensure_assignments is idempotent; use existing assignments to explain who can act.
-        names = [a.user_name for a in await approval_routing.ensure_assignments(
-            session, task, request) if a.user_name]
+        names = []
+        if await task_access.can_view(session, client, task):
+            names = list(await session.scalars(select(am.ApprovalAssignment.user_name).where(
+                am.ApprovalAssignment.request_id == request.id, am.ApprovalAssignment.user_name != "")
+                .order_by(am.ApprovalAssignment.user_name)))
         suffix = f"（当前验收人：{'、'.join(names)}）" if names else ""
-        raise HTTPException(status_code=403, detail=f"{why}{suffix}")
+        raise HTTPException(status_code=403, detail=f"这项审批未分配给你，或当前不符合审批职责要求{suffix}")
     item = await _item(session, request, task, artifact, user.id, my_decision)
 
 
@@ -237,6 +254,14 @@ async def detail(request_id: str, client: Client = Depends(current_client),
                               "pageUrl": str(meta.get("url") or "")})
             item["context"] = {**dict(item.get("context") or {}), "receipt": receipt}
             item["receiptShots"] = shots
+    if request.action == "review" and not await task_access.can_view(session, client, task):
+        # An assignment grants this gate's evidence, not the task's execution transcript.
+        from ..services import gate_contract
+        frozen = (my_decision.gate_snapshot or {}) if my_decision else {}
+        item["gateIsSnapshot"] = bool(frozen.get("schemaVersion"))
+        item["gate"] = resource_access.decorate(frozen if item["gateIsSnapshot"] else
+            await gate_contract.packet(session, task, request, artifact))
+        return {"item": item, "trace": {"approvals": [item]}}
     trace = await task_trace.trace(session, task)
     gate = next((row.get("gate") for row in trace.get("approvals") or []
                  if str(row.get("id") or "") == request.id), None)
@@ -400,6 +425,11 @@ async def decide(request_id: str, body: dict = Body(default_factory=dict),
                  client: Client = Depends(current_client),
                  session: AsyncSession = Depends(get_session)):
     user = await _actor(session, client)
+    return await decide_as_user(session, user, request_id, body, client.id)
+
+
+async def decide_as_user(session: AsyncSession, user: User, request_id: str,
+                         body: dict, client_id: str = ""):
     request = await session.get(am.ApprovalRequest, request_id)
     if request is None:
         raise HTTPException(status_code=404, detail="审批项不存在")
@@ -414,10 +444,11 @@ async def decide(request_id: str, body: dict = Body(default_factory=dict),
         session, task, request.id, note,
         body.get("reworkAttachmentIds") if decision == "reject" else [],
     )
+    deploy_vote = decision == "approve" and request.action == "deploy"
     out = await release_control.decide(
         session, task, user, action=request.action, decision=decision, note=rework_note,
         artifact_version_id=request.artifact_version_id,
-        environment_id=request.environment_id,
+        environment_id=request.environment_id, commit=not deploy_vote, request_id=request.id,
     )
     if not out.get("ok"):
         raise _decision_error(out)
@@ -443,9 +474,17 @@ async def decide(request_id: str, body: dict = Body(default_factory=dict),
     # Direct AI tasks and plugin nodes share the idempotent rework service.
     if decision == "approve" and request.action == "merge":
         execution = await code_delivery.merge_approved(session, task, who=who)
-    elif decision == "approve" and request.action == "deploy":
-        execution = await deployments.request_environment(
-            session, task, request.environment_id, who)
+    elif deploy_vote:
+        if out["request"]["status"] == "pending":
+            await session.commit()
+            execution = {"ok": True, "pendingApproval": True, "request": out["request"], "runs": []}
+        else:
+            # The final vote and its queued runs share the task lock and commit.
+            execution = await deployments.request_environment(
+                session, task, request.environment_id, who)
+            if not execution["ok"]:
+                await session.rollback()
+                raise HTTPException(status_code=409, detail=execution["error"])
     elif decision == "approve" and request.action == "uat":
         execution = await deployments.continue_after_acceptance(
             session, task, request.environment_id, who)
@@ -470,7 +509,7 @@ async def decide(request_id: str, body: dict = Body(default_factory=dict),
             await receipts.notify_on_close(session, task, task.owner_client_id)
 
     owner = await session.get(Client, task.owner_client_id) if task.owner_client_id else None
-    if owner and task_access.is_owner(task, owner) and owner.id != client.id:
+    if owner and task_access.is_owner(task, owner) and owner.id != client_id:
         verb = "批准" if decision == "approve" else "退回"
         if rework and rework.get("mode") == "backlog":
             suffix = "，已退回待开始，回需求池等人工重新安排"
@@ -517,7 +556,8 @@ async def revoke(request_id: str, body: dict = Body(default_factory=dict),
     out = await release_control.revoke_approval(
         session, task, user, request_id, note=str(body.get("note") or ""))
     if not out.get("ok"):
-        raise HTTPException(status_code=409, detail=out.get("error") or "撤回没有成功")
+        status = 403 if out.get("reason") == "forbidden" else 409
+        raise HTTPException(status_code=status, detail=out.get("error") or "撤回没有成功")
     who = user.display_name or user.username
     owner = await session.get(Client, task.owner_client_id) if task.owner_client_id else None
     if owner and task_access.is_owner(task, owner) and owner.id != client.id:

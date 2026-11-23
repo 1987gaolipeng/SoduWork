@@ -11,13 +11,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
 from .. import models
+from ..log_safety import redact_log_text
 from .task_access import publish_owner
 from . import (release_control, resource_leases, task_code_targets, task_events,
                workflow_context, workflow_contracts, workflow_diagnostics,
                plugin_ui_contracts)
+from .workflow_contracts import stored_rework_policy
 from .workflow_route_policy import (
     execution_preferences, _execution_layer, normalize_binding_execution, execution_route,
 )
+
+
+_ACTIVE_NODE_STATES = {"queued", "dispatching", "running", "waiting_human", "waiting_external"}
 
 
 def _now():
@@ -77,17 +82,18 @@ async def run_api(session: AsyncSession, run: am.WorkflowRun) -> dict:
                 for key, item in definitions.items()]
     nodes = list((await session.execute(select(am.NodeRun).where(
         am.NodeRun.run_id == run.id
-    ).order_by(am.NodeRun.created_at))).scalars().all())
-    latest_ids = {}
+    ).order_by(am.NodeRun.created_at, am.NodeRun.attempt, am.NodeRun.id))).scalars().all())
+    latest_rows = {}
     for node in nodes:
-        latest_ids[node.node_key] = node.id
+        previous = latest_rows.get(node.node_key)
+        if previous is None or node.attempt >= previous.attempt:
+            latest_rows[node.node_key] = node
     retryable_ids = set()
-    if run.state == "failed":
-        latest_rows = {row.node_key: row for row in nodes
-                       if latest_ids.get(row.node_key) == row.id}
+    if run.state == "failed" and not any(row.state in _ACTIVE_NODE_STATES for row in latest_rows.values()):
         for row in latest_rows.values():
             if row.state not in {"failed", "rework"} \
-                    or row.node_type not in workflow_diagnostics.RETRYABLE_TYPES:
+                    or row.node_type not in workflow_diagnostics.RETRYABLE_TYPES \
+                    or definitions.get(row.node_key, {}).get("type") != row.node_type:
                 continue
             diagnosis = workflow_diagnostics.diagnose(row, True)
             if not diagnosis.get("retryable"):
@@ -96,17 +102,17 @@ async def run_api(session: AsyncSession, run: am.WorkflowRun) -> dict:
             if row.node_type == "human_review" and request_id:
                 request = await session.get(am.ApprovalRequest, request_id)
                 definition = definitions.get(row.node_key) or {}
-                retry_from = str(dict(dict(definition.get("config") or {}).get(
-                    "onReject") or {}).get("retryFrom") or "")
+                policy = stored_rework_policy(definition.get("config") or {}, "onReject")
+                retry_from = policy.get("retryFrom")
                 if not (request and request.status == "rejected"
-                        and row.state == "rework" and retry_from):
+                        and row.state == "rework" and retry_from in definitions):
                     continue
             retryable_ids.add(row.id)
     events = list((await session.execute(select(am.WorkflowEvent).where(
         am.WorkflowEvent.run_id == run.id
     ).order_by(am.WorkflowEvent.at.desc()).limit(200))).scalars().all())
     code_target = await task_code_targets.get(session, run.task_id)
-    return {**run_summary(run),
+    return {**run_summary(run), "error": redact_log_text(run.error or ""),
             "codeTarget": task_code_targets.api(code_target),
             "plugin": {"id": plugin.id, "name": plugin.name,
                        "version": version.version if version else ""} if plugin else {},
@@ -246,7 +252,7 @@ async def _recover_quality_dependencies(
 async def _retry_failed_gate(session: AsyncSession, run: am.WorkflowRun, actor: str,
                              allowed: set[str], node_key: str = "",
                              execution: dict | None = None,
-                             resume_rework: bool = False) -> am.NodeRun:
+                             resume_rework: bool = False, source_node_id: str = "") -> am.NodeRun:
     """Retry a technical gate without modifying previous evidence. Optional agentKind/model
     overrides apply only to that AI node and persist for its later retries, leaving other nodes
     unchanged.
@@ -267,8 +273,7 @@ async def _retry_failed_gate(session: AsyncSession, run: am.WorkflowRun, actor: 
     latest = {}
     for item in rows:
         latest[item.node_key] = item
-    active = {"queued", "dispatching", "running", "waiting_human", "waiting_external"}
-    if any(row.state in active for row in latest.values()):
+    if any(row.state in _ACTIVE_NODE_STATES for row in latest.values()):
         raise ValueError("流程仍有节点在运行，暂时不能重试")
     failed = [row for row in latest.values()
               if row.node_type in allowed and row.state in {"failed", "rework"}]
@@ -280,6 +285,8 @@ async def _retry_failed_gate(session: AsyncSession, run: am.WorkflowRun, actor: 
     if not failed:
         raise ValueError("指定的失败关卡不存在，或不允许从这里重试")
     source = max(failed, key=lambda row: (row.attempt, row.created_at))
+    if source_node_id and source.id != source_node_id:
+        raise ValueError("本关已有新的执行记录，请刷新后查看最新结果")
     version = await session.get(am.PluginVersion, run.plugin_version_id)
     definition = next((node for node in dict(version.workflow or {}).get("nodes") or []
                        if node.get("key") == source.node_key
@@ -293,8 +300,8 @@ async def _retry_failed_gate(session: AsyncSession, run: am.WorkflowRun, actor: 
         review = dict(dict(source.output or {}).get("review") or {})
         if str(review.get("verdict") or "") != "changes_requested":
             raise ValueError("这次 AI 审查没有可恢复的返修结论")
-        policy = dict(dict(definition.get("config") or {}).get("onFailure") or {})
-        retry_from = str(policy.get("retryFrom") or "")
+        policy = stored_rework_policy(definition.get("config") or {}, "onFailure")
+        retry_from = policy.get("retryFrom")
         if not retry_from:
             raise ValueError("当前插件没有为 AI 审查配置返修入口")
         context = dict(run.context or {})
@@ -348,12 +355,13 @@ async def _retry_failed_gate(session: AsyncSession, run: am.WorkflowRun, actor: 
     if source.node_type == "human_review" and (source.output or {}).get("requestId"):
         request = await session.get(
             am.ApprovalRequest, str((source.output or {}).get("requestId") or ""))
-        on_reject = dict(dict(definition.get("config") or {}).get("onReject") or {})
-        retry_from = str(on_reject.get("retryFrom") or "")
+        on_reject = stored_rework_policy(definition.get("config") or {}, "onReject")
+        retry_from = on_reject.get("retryFrom")
         # Recover older rejections blocked by historical retry counters.
         # Resume the requested rework node without reopening or changing the human decision.
-        if request and request.status == "rejected" and source.state == "rework" and retry_from:
-            nodes = list(dict(version.workflow or {}).get("nodes") or [])
+        nodes = list(dict(version.workflow or {}).get("nodes") or [])
+        if (request and request.status == "rejected" and source.state == "rework"
+                and retry_from in {node["key"] for node in nodes}):
             affected, changed = {retry_from}, True
             while changed:
                 changed = False
@@ -408,6 +416,11 @@ async def _retry_failed_gate(session: AsyncSession, run: am.WorkflowRun, actor: 
             raise ValueError("只有 AI 执行的关卡可以换底座重跑")
         context = dict(run.context or {})
         overrides = dict(context.get("executionOverrides") or {})
+        if manual_route.keys() == {"model"}:
+            # Changing only the model retains an earlier manual Runner/Agent selection.
+            manual_route = {**_execution_layer(overrides.get(source.node_key)), **manual_route}
+            if source_node_id:
+                manual_route["modelSource"] = "catalog"
         overrides[source.node_key] = manual_route
         context["executionOverrides"] = overrides
         run.context = context
@@ -477,10 +490,10 @@ RETRYABLE_GATE_TYPES = workflow_diagnostics.RETRYABLE_TYPES
 async def retry_failed_gate(
         session: AsyncSession, run: am.WorkflowRun, actor: str = "system",
         node_key: str = "", execution: dict | None = None,
-        resume_rework: bool = False) -> am.NodeRun:
+        resume_rework: bool = False, source_node_id: str = "") -> am.NodeRun:
     """Retry the failed technical gate in place; never replay audited ancestors."""
     return await _retry_failed_gate(session, run, actor, RETRYABLE_GATE_TYPES,
-                                    node_key, execution, resume_rework)
+                                    node_key, execution, resume_rework, source_node_id)
 
 
 async def redispatch_running_gate(
@@ -834,8 +847,8 @@ def _continuation_rework_feedback(
     from . import workflow_engine
 
     for definition in reversed(nodes):
-        policy = dict(dict(definition.get("config") or {}).get("onFailure") or {})
-        if str(policy.get("retryFrom") or "").strip() != target:
+        policy = stored_rework_policy(definition.get("config") or {}, "onFailure")
+        if policy.get("retryFrom") != target:
             continue
         source = source_latest.get(str(definition.get("key") or ""))
         if source is None or source.state not in {"failed", "rework"}:

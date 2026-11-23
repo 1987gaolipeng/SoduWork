@@ -131,11 +131,7 @@ test('automation templates come only from the admin console (no built-in fallbac
   assert.doesNotMatch(panel, /SCH_RECIPES/);
   assert.match(panel, /_schTemplates\.length/);
   assert.match(panel, /sch-recipes/);
-  assert.match(panel, /sch-blueprint/);
-  assert.match(panel, /schBpWhen/);
-  assert.match(panel, /schBpWork/);
   assert.match(css, /\.sch-recipes>div/);
-  assert.match(css, /\.sch-blueprint ol/);
   /* Omit the template section when no administrator templates exist; do not fabricate examples. */
   assert.match(panel, /function _schRecipeHtml\(compact\) \{\r?\n  if \(!_schTemplates\.length\) return '';/);
   assert.doesNotMatch(panel, /每日工作总结/);

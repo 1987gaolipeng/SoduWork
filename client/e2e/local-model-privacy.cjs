@@ -3,31 +3,43 @@
 // Real Electron safeStorage, utilityProcess and Pi SDK. Hub and inference are
 // isolated loopback fixtures; no production account or paid model is used.
 const electron = require('electron');
+const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
+const privateModel = 'private-model-e2e-sentinel-739', privateLabel = 'Private label e2e sentinel 739';
+const providerId = 'private-e2e-sentinel', endpointPath = '/private-endpoint-739/v1';
+const privateKey = typeof electron === 'string' ? require('node:crypto').randomBytes(24).toString('hex') : process.env.SODUWORK_TEST_SENTINEL;
+delete process.env.SODUWORK_TEST_SENTINEL;
+assert.ok(privateKey);
 if (typeof electron === 'string') {
   const env = { ...process.env, PI_TELEMETRY: '0' };
   for (const key of ['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'CHROME_CRASHPAD_PIPE_NAME',
     'CHROME_CRASHPAD_PIPE_HANDLE', 'ELECTRON_NO_ATTACH_CONSOLE']) delete env[key];
   const args = [__filename, '--no-sandbox', '--disable-gpu'];
   if (process.platform === 'linux' && !env.DISPLAY) args.push('--ozone-platform=headless');
-  const result = require('node:child_process').spawnSync(electron, args, {
-    env, stdio: 'inherit', timeout: 180000,
+  const status = require('./lib/isolated-profile.cjs').withTemporaryRoot('soduwork-private-model-e2e-', root => {
+    env.SODUWORK_PRIVACY_TEST_ROOT = root;
+    env.SODUWORK_TEST_SENTINEL = privateKey;
+    const result = require('node:child_process').spawnSync(electron, args, {env, stdio:'inherit', timeout:180000});
+    if (result.status === 0) {
+      scan(root);
+      console.log('[local-model-privacy] Verified final product, workspace and Chromium files after Electron exit.');
+    }
+    return result.status;
   });
-  process.exit(result.status ?? 1);
+  process.exit(status ?? 1);
 }
 const { app, BrowserWindow, safeStorage } = electron;
-const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
-const http = require('node:http'), assert = require('node:assert/strict');
-const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-private-model-e2e-')));
+const http = require('node:http');
+const root = process.env.SODUWORK_PRIVACY_TEST_ROOT;
 const profile = path.join(root, 'profile'), cwd = path.join(root, 'workspace');
 fs.mkdirSync(profile); fs.mkdirSync(cwd);
 app.setPath('userData', profile);
+const sessionData = path.join(root, 'chromium');
+fs.mkdirSync(sessionData);
+app.setPath('sessionData', sessionData);
 app.disableHardwareAcceleration();
 app.on('window-all-closed', () => {});
 const store = require('../main/local-model-store.cjs');
 const report = { ok: false, platform: process.platform, cases: [], boundary: 'Real native Electron safeStorage, BrowserWindow, utilityProcess and Pi SDK. Synthetic authenticated identity, loopback Hub and provider; no production data or paid inference.' };
-const privateModel = 'private-model-e2e-sentinel-739', privateLabel = 'Private label e2e sentinel 739';
-const privateKey = require('node:crypto').randomBytes(24).toString('hex');
-const providerId = 'private-e2e-sentinel';
 const requests = [], hubRequests = [], serverErrors = [];
 let runtime, bridge, handle, win, providerServer, hubServer, reporter, modelRef, providerUrl;
 let mode = 'normal';
@@ -57,9 +69,9 @@ function scan(file) {
   if (stat.isSymbolicLink()) return;
   if (stat.isDirectory()) { for (const name of fs.readdirSync(file)) scan(path.join(file, name)); return; }
   const data = fs.readFileSync(file);
-  for (const sentinel of [privateModel, privateLabel, privateKey, providerId, providerUrl]) {
+  for (const sentinel of [privateModel, privateLabel, privateKey, providerId, endpointPath]) {
     assert.equal(data.includes(Buffer.from(sentinel)), false,
-      'Private model metadata persisted in ' + path.relative(profile, file));
+      'Private model metadata persisted in ' + path.basename(file));
   }
 }
 async function turn(text) {
@@ -100,7 +112,7 @@ app.whenReady().then(async () => {
       } catch (error) { serverErrors.push(error.message); res.writeHead(500); res.end(); }
     });
   });
-  providerUrl = await listen(providerServer) + '/private-endpoint-739/v1';
+  providerUrl = await listen(providerServer) + endpointPath;
   hubServer = http.createServer((req, res) => {
     let body = ''; req.on('data', part => { body += part; });
     req.on('end', () => { hubRequests.push({ path: req.url, body }); res.writeHead(403); res.end('{"detail":"blocked"}'); });
@@ -235,6 +247,5 @@ app.whenReady().then(async () => {
     const ended = new Promise(resolve => server.close(resolve)); server.closeAllConnections(); await ended;
   }
   console.log(JSON.stringify(report, null, 2));
-  fs.rmSync(root, { recursive: true, force: true });
   app.exit(report.ok ? 0 : 1);
 });

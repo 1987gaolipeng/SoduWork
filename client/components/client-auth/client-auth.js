@@ -34,6 +34,7 @@
   var passwordEye = null;
   var displayInput = null;
   var statusNode = null;
+  var statusSource = '';
   var submitButton = null;
   var retryButton = null;
   var recoveryNode = null;
@@ -44,7 +45,15 @@
   var currentQuota = null;
   var policy = null;
   var booting = false;
+  var restoringLogin = true;
+  var restoringNode = null;
+  var restoringMessage = null;
+  var switchingConnection = false;
+  var legacySubmission = null;
   var emailView = null;
+  var loginAccountHub = null;
+  var loginAccountEdited = false;
+  var loginReload = null;
   var policyRevision = 0;
   var quotaNotice = null;
   var dismissedQuotaNotice = '';
@@ -56,6 +65,43 @@
 
   function api() {
     return global.SoduWorkAPI || null;
+  }
+
+  function trackLoginAccount() {
+    accountInput?.addEventListener('input', function () { loginAccountEdited = true; });
+  }
+
+  function restoreLoginAccount(reset) {
+    if (!accountInput) return;
+    var bridge = api(), hub = bridge?.hubBase?.() || '';
+    if (reset || (loginAccountHub !== null && loginAccountHub !== hub)) {
+      accountInput.value = '';
+      loginAccountEdited = false;
+    }
+    loginAccountHub = hub;
+    // Enrollment resolves the saved service before the form adopts its account.
+    if (booting || switchingConnection || gate?.hidden || loginAccountEdited || accountInput.value) return;
+    var remembered = bridge?.rememberedLoginAccount?.();
+    if (typeof remembered === 'string') accountInput.value = remembered;
+  }
+
+  function scheduleLoginReload(user) {
+    var bridge = api();
+    function scope() {
+      var identity = bridge?.clientAuthSnapshot?.();
+      if (bridge !== api() || !identity?.user?.id || identity.state !== 'active' || identity.user.id !== user?.id) return '';
+      return JSON.stringify([bridge.hubBase(), identity.clientId, identity.user.id]);
+    }
+    var key = scope();
+    if (!key) return false;
+    if (loginReload?.key === key) return true;
+    var request = loginReload = { key: key };
+    global.setTimeout(function () {
+      if (loginReload !== request) return;
+      loginReload = null;
+      if (scope() === key) global.location.reload();
+    }, 300);
+    return true;
   }
 
   function hubLabel() {
@@ -74,14 +120,16 @@
 
   function connectionMessage(reason) {
     var detail = reason || {};
+    var transition = global.EmailAuth?.transitionMessage?.(detail);
+    if (transition) return transition;
     var raw = text(detail.error || detail.message || detail.reason);
     if (!isConnectionFailure(detail)) return raw;
-    return '暂时无法连接 SoduWork 服务。请检查网络后重试。';
+    return '暂时无法连接 SoduWork 服务，请检查网络后重试。';
   }
 
   /*
-   * Show the collapsible endpoint editor only when the main process marks a source launch
-   * editable; omit it in installed clients and internalTest fixtures.
+   * Show the collapsible endpoint editor whenever the main process permits service
+   * selection, including installed clients; fixed test connections remain hidden.
    */
   function connectionPanelHtml() {
     var editable = false;
@@ -92,7 +140,7 @@
     if (!editable) return '';
     return '<details class="soduwork-auth-connection"><summary>服务连接 · 更改地址</summary>' +
         '<label for="soduWorkAuthHub">SoduWork 服务地址</label>' +
-        '<div class="soduwork-auth-connection-row"><input id="soduWorkAuthHub" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:18989">' +
+        '<div class="soduwork-auth-connection-row"><input id="soduWorkAuthHub" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://service.soduwork.ai">' +
           '<button class="soduwork-auth-connect" type="button">保存并连接</button></div>' +
         '<p>使用本机服务，或填写你部署的服务地址。各服务的账号与数据独立保留。</p>' +
       '</details>';
@@ -132,7 +180,8 @@
 
   /* Reload after the main process confirms the saved endpoint; on failure, keep login open and expand the editor. */
   async function switchConnection(environment, hub) {
-    if (hubButton && hubButton.disabled) return;
+    if (switchingConnection || (hubButton && hubButton.disabled)) return;
+    switchingConnection = true;
     setBusy(true, '正在连接服务');
     setStatus('正在保存服务地址并重新连接…', 'working');
     try {
@@ -143,7 +192,9 @@
       if (global.WinSync && global.WinSync.pushHubEnvironment) global.WinSync.pushHubEnvironment();
       global.setTimeout(function () { global.location.reload(); }, 300);
     } catch (error) {
+      switchingConnection = false;
       setBusy(false);
+      restoreLoginAccount(false);
       setStatus(connectionMessage({ error: error && error.message || error }), 'error');
       setRecoveryActions({ error: error && error.message || error });
     }
@@ -151,8 +202,9 @@
 
   function setRecoveryActions(reason) {
     var failed = isConnectionFailure(reason);
-    if (recoveryNode) recoveryNode.hidden = !failed;
-    if (retryButton) retryButton.hidden = !failed;
+    var recheck = failed || reason?.activationRequired === true || reason?.state === 'pending';
+    if (recoveryNode) recoveryNode.hidden = !recheck;
+    if (retryButton) retryButton.hidden = !recheck;
     /* Expand endpoint settings after connection failure to allow correction. */
     if (failed && connectionDetails) connectionDetails.open = true;
   }
@@ -216,8 +268,10 @@
   }
 
   function setStatus(message, kind) {
+    if (emailView) { emailView.setStatus(message, kind); return; }
     if (!statusNode) return;
-    statusNode.textContent = text(message);
+    statusSource = text(message);
+    statusNode.textContent = translate(statusSource);
     statusNode.className = 'soduwork-auth-status' + (kind ? ' is-' + kind : '');
   }
 
@@ -240,7 +294,7 @@
 
   function createGate() {
     if (gate) return gate;
-    try { return mountGate(); }
+    try { mountGate(); }
     catch (error) {
       // Authentication hides the workspace before mounting. A partially built
       // gate must be replaced with visible recovery, never leave a blank page
@@ -253,7 +307,7 @@
       if (gate) gate.remove();
       gate = document.createElement('div');
       gate.id = 'soduWorkClientAuthGate';
-      gate.className = 'soduwork-auth-gate';
+      gate.className = 'soduwork-auth-gate' + (restoringLogin ? ' is-restoring' : '');
       gate.setAttribute('role', 'dialog');
       gate.setAttribute('aria-modal', 'true');
       gate.setAttribute('aria-labelledby', 'soduWorkAuthTitle');
@@ -272,24 +326,48 @@
       card.append(title, element('p', '', '登录界面未能加载，请重新打开客户端。'), statusNode, reload, footer);
       gate.appendChild(card);
       document.body.appendChild(gate);
-      return gate;
     }
+    restoringNode = document.createElement('main');
+    restoringNode.className = 'soduwork-auth-restoring';
+    restoringNode.setAttribute('data-auth-restoring', '');
+    restoringNode.setAttribute('role', 'status');
+    restoringNode.setAttribute('aria-live', 'polite');
+    var brand = document.createElement('b'); brand.textContent = 'SoduWork';
+    restoringMessage = document.createElement('p');
+    restoringMessage.id = 'soduWorkAuthRestoringTitle';
+    restoringMessage.textContent = translate('正在加载…');
+    restoringNode.appendChild(brand);
+    restoringNode.appendChild(restoringMessage);
+    gate.appendChild(restoringNode);
+    setRestoringLogin(restoringLogin);
+    return gate;
+  }
+
+  function setRestoringLogin(restoring) {
+    restoringLogin = restoring;
+    if (!gate) return;
+    // Keep private content covered without presenting sign-in before restoration settles.
+    gate.classList.toggle('is-restoring', restoring);
+    gate.setAttribute('aria-labelledby', restoring ? 'soduWorkAuthRestoringTitle' : 'soduWorkAuthTitle');
+    if (restoringNode) restoringNode.hidden = !restoring;
   }
 
   function mountGate() {
     gate = document.createElement('div');
     gate.id = 'soduWorkClientAuthGate';
-    gate.className = 'soduwork-auth-gate';
+    gate.className = 'soduwork-auth-gate' + (restoringLogin ? ' is-restoring' : '');
     gate.setAttribute('role', 'dialog');
     gate.setAttribute('aria-modal', 'true');
     gate.setAttribute('aria-labelledby', 'soduWorkAuthTitle');
     if (global.EmailAuth) {
-      emailView = global.EmailAuth.mount(gate, { api: api, retry: boot,
+      emailView = global.EmailAuth.mount(gate, { api: api, retry: function () { return boot({ recheckAuth: true }); },
         success: function (result) {
+          if (!scheduleLoginReload(result.user)) return false;
           updateIdentity(result.user, result.quota);
-          global.setTimeout(function () { global.location.reload(); }, 300);
+          return true;
         } });
       form = emailView.form; accountInput = emailView.accountInput; passwordInput = emailView.passwordInput;
+      trackLoginAccount();
       displayInput = null; statusNode = emailView.statusNode; submitButton = emailView.submitButton;
       recoveryNode = gate.querySelector('.soduwork-auth-recovery'); retryButton = gate.querySelector('.soduwork-auth-retry');
       gate.querySelector('.soduwork-auth-hub b').textContent = hubLabel();
@@ -332,6 +410,7 @@
     document.body.appendChild(gate);
     form = gate.querySelector('form');
     accountInput = gate.querySelector('#soduWorkAuthAccount');
+    trackLoginAccount();
     bindSingleLineInput(accountInput);
     passwordInput = gate.querySelector('#soduWorkAuthPassword');
     passwordEye = gate.querySelector('.soduwork-auth-pw-eye');
@@ -361,7 +440,7 @@
     retryButton.addEventListener('click', function () {
       setBusy(true, '\u6b63\u5728\u91cd\u8bd5\u8fde\u63a5');
       setStatus('\u6b63\u5728\u91cd\u65b0\u8fde\u63a5\u5f53\u524d\u540e\u53f0\u2026', 'working');
-      boot();
+      boot({ recheckAuth: true });
     });
     return gate;
   }
@@ -373,14 +452,19 @@
     }
     if (quotaNotice) quotaNotice.hidden = true;
     createGate();
+    setRestoringLogin(false);
+    var reset = gate.hidden || reason?.code === 'LOGOUT';
+    if (reset) { loginReload = null; invalidateLogin(); }
     gate.hidden = false;
+    restoreLoginAccount(reset);
     document.documentElement.classList.add('soduwork-auth-pending');
     document.body.classList.add('soduwork-client-auth-open');
     var detail = reason || {};
     if (detail.code === 'TOKEN_QUOTA_EXCEEDED' || detail.state === 'quota') {
       setStatus(detail.error || '\u672c\u6708 AI Token \u989d\u5ea6\u5df2\u7528\u5b8c\uff0c\u53ef\u6362\u7528\u5176\u4ed6\u8d26\u53f7\u6216\u8054\u7cfb\u7ba1\u7406\u5458\u3002', 'quota');
-    } else if (detail.error) {
-      setStatus(connectionMessage(detail), 'error');
+    } else {
+      var message = connectionMessage(detail);
+      if (message) setStatus(message, 'error');
     }
     mountConnectionPanel();
     setRecoveryActions(detail);
@@ -394,12 +478,32 @@
     }, 50);
   }
 
+  function invalidateLogin() {
+    legacySubmission = null;
+    if (emailView) emailView.invalidate();
+    else {
+      if (passwordInput) passwordInput.value = '';
+      resetPasswordView();
+      setBusy(false);
+      setStatus('');
+    }
+    // Enrollment and service selection own independent form locks.
+    if (switchingConnection) setBusy(true, '正在连接服务');
+    else if (booting) setBusy(true, '正在恢复登录');
+  }
+
   function updateIdentity(user, quota) {
     if (user?.id && currentUser?.id && user.id !== currentUser.id) currentQuota = null;
     currentUser = user || currentUser;
     currentQuota = quota || currentQuota;
     global.SoduWorkQuotaNotice?.update({ user: currentUser, quota: currentQuota });
     renderQuotaNotice();
+    renderIdentity();
+    if (currentUser) mountSettings();
+  }
+
+  // Repaint rebuilt account controls from the cached identity without refreshing auth or quota.
+  function renderIdentity() {
     if (!currentUser) return;
     var name = text(currentUser.displayName).trim() || text(currentUser.username).trim() || '我的';
     ['#wsMine b', '#wsMine .ws-mine-name', '[data-soduwork-user-name]'].forEach(function (selector) {
@@ -408,7 +512,6 @@
     document.querySelectorAll('[data-soduwork-user-initial]').forEach(function (node) {
       renderAccountAvatar(node, name);
     });
-    mountSettings();
   }
 
   function clearQuotaNotice() {
@@ -427,7 +530,8 @@
     updateIdentity(user, quota);
     if (!currentQuota?.exceeded) dismissedQuotaNotice = '';
     void global.LegalUpdates?.refresh();
-    if (emailView) emailView.invalidate();
+    invalidateLogin();
+    setRestoringLogin(false);
     document.documentElement.classList.remove('soduwork-auth-pending');
     document.body.classList.remove('soduwork-client-auth-open');
     if (gate) gate.hidden = true;
@@ -473,6 +577,7 @@
 
   async function submit(event) {
     event.preventDefault();
+    if (legacySubmission || booting || switchingConnection) return;
     var account = text(accountInput.value).trim();
     var password = text(passwordInput.value);
     if (account.length < 3) {
@@ -485,6 +590,7 @@
       passwordInput.focus();
       return;
     }
+    var attempt = legacySubmission = {};
     setBusy(true);
     setStatus('\u6b63\u5728\u9a8c\u8bc1\u8d26\u53f7\u5e76\u7ed1\u5b9a\u5f53\u524d\u7ec8\u7aef\u2026', 'working');
     try {
@@ -493,6 +599,7 @@
         password: password,
         displayName: text(displayInput.value).trim()
       });
+      if (legacySubmission !== attempt) return;
       passwordInput.value = '';
       resetPasswordView();
       if (!result || !result.ok) {
@@ -503,17 +610,20 @@
         passwordInput.focus();
         return;
       }
+      if (!scheduleLoginReload(result.user)) throw new Error('暂未确认登录状态，请重试。');
       updateIdentity(result.user, result.quota);
       setStatus(result.created ? '\u8d26\u53f7\u5df2\u521b\u5efa\uff0c\u6b63\u5728\u8fdb\u5165\u5de5\u4f5c\u53f0\u2026' :
         '\u767b\u5f55\u6210\u529f\uff0c\u6b63\u5728\u8fdb\u5165\u5de5\u4f5c\u53f0\u2026', 'success');
       setBusy(true, '\u6b63\u5728\u8fdb\u5165');
-      setTimeout(function () { global.location.reload(); }, 300);
     } catch (error) {
+      if (legacySubmission !== attempt) return;
       passwordInput.value = '';
       resetPasswordView();
       setStatus(connectionMessage(error) || '\u767b\u5f55\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc\u3002', 'error');
       setRecoveryActions(error);
       setBusy(false);
+    } finally {
+      if (legacySubmission === attempt) legacySubmission = null;
     }
   }
 
@@ -852,14 +962,14 @@
     }
   }
 
-  async function boot() {
+  async function boot(options) {
     if (booting || !api()) return;
     booting = true;
     createGate();
     setBusy(true, '\u6b63\u5728\u6062\u590d\u767b\u5f55');
     setStatus('\u6b63\u5728\u5b89\u5168\u6062\u590d\u8fd9\u53f0\u7535\u8111\u7684\u767b\u5f55\u72b6\u6001\u2026', 'working');
     try {
-      var result = await api().registerClient();
+      var result = await api().registerClient(options?.recheckAuth === true ? { recheckAuth: true } : undefined);
       if (result && result.ok && result.user) {
         activate(result.user, result.quota);
         void api().clientAuthMe().then(function (fresh) { if (fresh?.user?.id === currentUser?.id) updateIdentity(fresh.user, fresh.quota); }).catch(function () {});
@@ -884,6 +994,7 @@
       booting = false;
       // Enrollment replaces the provisional renderer ID. Read policy only after
       // that identity settles, so the stale-response guard cannot discard it.
+      restoreLoginAccount(false);
       void loadPolicy();
       if (gate) gate.querySelector('.soduwork-auth-hub b').textContent = hubLabel();
     }
@@ -894,16 +1005,27 @@
     api()?.listenAccountProfileChanges?.();
     global.addEventListener('soduwork-profile-updated', function (event) { updateIdentity(event.detail, null); });
     global.addEventListener('soduwork-locale-change', function () {
+      if (restoringMessage) restoringMessage.textContent = translate('正在加载…');
+      if (!emailView && statusNode) statusNode.textContent = translate(statusSource);
       mountSettings();
       renderQuotaNotice();
     });
     global.addEventListener('soduwork-device-auth', function (event) {
       var detail = event.detail || {};
-      if (detail.state === 'active' && detail.user) activate(detail.user, detail.quota);
+      if (detail.state === 'active' && detail.user) {
+        activate(detail.user, detail.quota);
+        // Explicit sign-in publishes the authenticated scope before its caller resumes.
+        if (detail.interactiveLogin === true) scheduleLoginReload(detail.user);
+      }
       else if (detail.state === 'pending' || detail.state === 'quota') show(detail);
     });
     global.addEventListener('soduwork-client-auth-required', function (event) {
       show(event.detail || {});
+    });
+    global.addEventListener('soduwork-data-scope-changed', function () {
+      loginReload = null;
+      invalidateLogin();
+      restoreLoginAccount(false);
     });
     var attempts = 0;
     var identityTimer = setInterval(function () {
@@ -922,6 +1044,7 @@
     accountCardHtml: accountCardHtml,
     changePassword: openChangePwd,
     updateIdentity: updateIdentity,
+    renderIdentity: renderIdentity,
     clearQuotaNotice: clearQuotaNotice,
     snapshot: function () { return { user: currentUser, quota: currentQuota, policy: policy }; }
   };

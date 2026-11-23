@@ -54,7 +54,8 @@ if (typeof electron === 'string') {
     for (const file of ['theme/variables.css', 'components/panels/panels-chat.css', 'components/panels/chat-collaboration.css']) {
       await run(`new Promise(resolve => { const link=document.createElement('link'); link.rel='stylesheet'; link.href=${JSON.stringify(pathToFileURL(path.join(client, file)).href)}; link.onload=link.onerror=resolve; document.head.append(link); })`);
     }
-    for (const file of ['vendor/markdown/purify.min.js', 'vendor/markdown/marked.umd.js',
+    for (const file of ['vendor/markdown/purify.min.js', 'vendor/markdown/marked.umd.js', 'core/markdown.js',
+      'components/panels/chat-read-aloud-core.js',
       'components/panels/chat-output-links.js', 'components/panels/chat-markdown.js', 'components/panels/chat-dom-patch.js']) await load(file);
     await run(`
       window.ctx = { _ref: 'history-a', _liveTextKey: 'block-a', esc: s => String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') };
@@ -96,6 +97,15 @@ if (typeof electron === 'string') {
           return { viewport: state.viewport, main: state.main, footer: state.footer };
         });
       }
+    }
+    for (const mode of ['rich', 'stream']) {
+      await check(`numeric-ranges-and-explicit-strikethrough:${mode}`, async () => {
+        const source = '找 3~5 个用户，运行 7~14 天。~~旧建议~~';
+        await run(`md.reset();paint(${JSON.stringify(source)},${JSON.stringify(mode)});void 0;`);
+        assert.equal(await run('document.querySelector("#list .ntext").textContent.trim()'), '找 3~5 个用户，运行 7~14 天。旧建议');
+        assert.deepEqual(await run('[...document.querySelectorAll("#list del")].map(node => node.textContent)'), ['旧建议']);
+        assert.equal(await run(`SoduWorkReadAloudCore.plainText(${JSON.stringify(source)},marked.lexer,"Table")`), '找 3~5 个用户，运行 7~14 天。旧建议');
+      });
     }
     await check('inline-positioned-overlay-is-inert', async () => {
       await run('md.reset();paint(' + JSON.stringify('<div style="position:fixed;inset:0;z-index:2147483647" id="overlay">覆盖层正文仍可读。</div>') + ');void 0;');

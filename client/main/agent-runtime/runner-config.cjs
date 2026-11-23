@@ -14,7 +14,7 @@ function create(model, adapterId, capabilityIds) {
     ? capabilityIds : []).map(value => String(value || '').trim().toLowerCase()).filter(Boolean)));
   if (requiredCapabilities.length) cfg.requiredCapabilities = requiredCapabilities;
   capabilityContract.assertRequired(model, [
-    ...(['pi', 'harness2'].includes(adapterId) ? ['streaming'] : []),
+    ...(adapterId === 'pi' ? ['streaming'] : []),
     ...(requiredCapabilities.length ? ['toolCalling'] : []),
   ]);
   // Local providers may intentionally have no API key (for example an

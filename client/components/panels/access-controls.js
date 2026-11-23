@@ -1,6 +1,7 @@
 (function (global) {
   'use strict';
   const overlays = new WeakMap();
+  const ANSWER_TIMEOUT_MS = 60000;
   function clean(value, key) {
     if (/token|secret|password|authorization|api[_-]?key/i.test(key || '')) return '••••';
     if (Array.isArray(value)) return value.map(item => clean(item));
@@ -9,8 +10,28 @@
   }
   function render(request, escape, options = {}) {
     const esc = escape;
+    const attribute = source => esc(global.SoduWorkI18n?.t ? global.SoduWorkI18n.t(source) : source);
     const text = source => global.SoduWorkI18n?.html ? global.SoduWorkI18n.html(source, source)
       : esc(global.SoduWorkI18n?.t ? global.SoduWorkI18n.t(source) : source);
+    if (request.action === 'native.question') {
+      const choices = Array.isArray(request.options) && request.options.length <= 64 && request.options.every(item =>
+        item && typeof item.optionId === 'string' && item.optionId.length > 0 && item.optionId.length <= 1024 &&
+        typeof item.name === 'string' && item.name.trim() && item.name.length <= 4000 &&
+        ['allow_once', 'reject_once'].includes(item.kind)) &&
+        new Set(request.options.map(item => item.optionId)).size === request.options.length ? request.options : [];
+      const button = (decision, label, optionId) => '<button type="button" class="nask-btn" data-ui-answer="permission"' +
+        ' data-ui-value="' + decision + '" data-permission-request="' + esc(request.requestId) +
+        '" data-permission-revision="' + Number(request.policyRevision) + '"' +
+        (optionId === undefined ? '' : ' data-permission-option="' + esc(optionId) + '" data-user-content') + '>' + label + '</button>';
+      return '<section class="access-request access-question" role="dialog" aria-modal="true" aria-label="' + attribute('请选择') +
+        '" data-permission-ref="' + esc(options.ref || '') + '"><header class="access-head" aria-live="polite">' +
+        '<div><b>' + text('请选择') + '</b></div><span class="access-count" role="status"></span></header>' +
+        '<div class="access-body"><p class="access-target" data-user-content>' + esc(request.title || '') + '</p>' +
+        '<div class="nask-btns access-question-options" role="group" aria-label="' + attribute('请选择') + '">' +
+        choices.map(item => button('answer', esc(item.name), item.optionId)).join('') + '</div></div>' +
+        '<footer><div class="nask-btns">' + button('deny', text('取消')) +
+        '</div><p class="access-error" role="alert" hidden></p></footer></section>';
+    }
     const titles = { 'file.read': '允许读取文件？', 'file.write': '允许修改文件？', 'command.execute': '允许运行命令？', 'tool.execute': '允许使用此工具？' };
     const targetLabels = { 'file.read': '文件位置', 'file.write': '文件位置', 'command.execute': '将运行的命令' };
     const payload = clean(request.arguments || {});
@@ -23,8 +44,12 @@
     const target = commandPreview || (files.length ? [...new Set(files)].join('\n') : request.target) || '';
     const missingInput = payload.inputUnavailable === true || payload.input === null;
     const detail = missingInput ? '' : typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
-    const scopeNote = Number.isInteger(options.fullRevision)
-      ? text('始终允许') + '：' + text('仅对此会话生效，可随时调整') : text('仅允许这一次操作。');
+    const canRemember = request.allowSession === true && Array.isArray(request.choices) && request.choices.includes('session') &&
+      !missingInput && !payload.inputIncomplete;
+    const canElevate = Number.isInteger(options.fullRevision);
+    const scopeNote = canRemember
+      ? text(command ? '记住这条命令；命令或目录改变后仍需确认。' : '本会话允许相同操作')
+      : canElevate ? text('始终允许') + '：' + text('仅对此会话生效，可随时调整') : text('仅允许这一次操作。');
     const button = (decision, label, className = '') =>
       '<button type="button" class="nask-btn ' + className +
       '" data-ui-answer="permission" data-ui-value="' + decision + '" data-permission-request="' + esc(request.requestId) +
@@ -42,8 +67,9 @@
       (request.tool || request.agent ? '<code data-user-content>' + esc(request.tool || request.agent) + '</code>' : '') +
       '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></summary><pre data-user-content>' + esc(detail.slice(0, 20000)) + '</pre></details>' : '') +
       '</div>' +
-      '<footer><div class="nask-btns" role="group" aria-label="' + text('权限确认') + '">' + button('deny', '拒绝') + button('once', '允许一次') +
-      (Number.isInteger(options.fullRevision) ? button('full', '始终允许', 'access-full') : '') + '</div>' +
+      '<footer><div class="nask-btns' + (canRemember && canElevate ? ' access-four-choices' : '') + '" role="group" aria-label="' + attribute('权限确认') + '">' + button('deny', '拒绝') + button('once', '允许一次') +
+      (canRemember ? button('session', '本会话允许') : '') +
+      (canElevate ? button('full', canRemember ? '完全访问' : '始终允许', 'access-full') : '') + '</div>' +
       '<small>' + scopeNote + '</small><p class="access-error" role="alert" hidden></p></footer></section>';
   }
   function sync(el, ref, snapshot, escape, onAnswer) {
@@ -94,7 +120,7 @@
     const focusDialog = () => {
       const active = document.activeElement;
       if (state.layer.contains(active)) return;
-      focusables()[0]?.focus({ preventScroll: true });
+      (state.layer.querySelector('[data-ui-value="deny"]') || focusables()[0])?.focus({ preventScroll: true });
     };
     const blockDock = blocked => {
       const dock = state.dock;
@@ -149,7 +175,7 @@
       snapshot.accessControl.modes?.includes('full') && policy?.mode !== 'full' && Number.isInteger(policy?.revision)
       ? policy.revision : undefined;
     const key = JSON.stringify([ref, request.requestId, request.policyRevision, request.action, request.tool,
-      request.agent, request.target, request.arguments, request.allowSession, request.sessionScope, fullRevision]);
+      request.agent, request.target, request.arguments, request.title, request.options, request.allowSession, request.choices, request.sessionScope, fullRevision]);
     if (state.key !== key) {
       state.layer.innerHTML = render(request, escape, { ref, fullRevision }); state.key = key;
     }
@@ -171,14 +197,27 @@
     state.blockDock?.(false);
     state.life.abort(); state.observer?.disconnect(); state.layer.remove(); overlays.delete(el);
   }
-  async function answer(button, api, ref) {
+  function withTimeout(promise, ms) {
+    let timer;
+    const guard = new Promise((_, reject) => {
+      timer = global.setTimeout(() => {
+        const failure = Error('approval timeout');
+        failure.code = 'APPROVAL_TIMEOUT';
+        reject(failure);
+      }, ms);
+    });
+    return Promise.race([Promise.resolve(promise), guard]).finally(() => global.clearTimeout(timer));
+  }
+  async function answer(button, api, ref, options = {}) {
     const card = button.closest('.access-request');
     if (!card || card.dataset.answerPending === 'true') return { ok: false };
     if (card.dataset.permissionRef && card.dataset.permissionRef !== ref) return { ok: false, reason: '权限请求已失效' };
     const response = { requestId: button.dataset.permissionRequest,
       policyRevision: Number(button.dataset.permissionRevision), decision: button.dataset.uiValue };
+    if (response.decision === 'answer') response.optionId = button.dataset.permissionOption;
     const buttons = [...card.querySelectorAll('[data-ui-answer]')];
     const error = card.querySelector('.access-error');
+    const timeout = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : ANSWER_TIMEOUT_MS;
     card.dataset.answerPending = 'true'; card.setAttribute('aria-busy', 'true');
     buttons.forEach(item => { item.disabled = true; }); if (error) error.hidden = true;
     let accepted = false;
@@ -188,11 +227,14 @@
       if (full) {
         if (typeof api.setAccessMode !== 'function') throw Error('Unsupported access change');
         const rect = button.getBoundingClientRect();
-        result = await api.setAccessMode(ref, 'full', Number(button.dataset.accessRevision), { anchor: {
-          left: rect.left, top: rect.top, width: rect.width, height: rect.height,
-          screenX: Number(global.screenX) + rect.left, screenY: Number(global.screenY) + rect.top,
-        } });
-      } else result = await api.answerUi(ref, response);
+        result = await withTimeout(api.setAccessMode(ref, 'full', Number(button.dataset.accessRevision), {
+          approval: { requestId: response.requestId, policyRevision: response.policyRevision, expiresAt: Date.now() + timeout },
+          anchor: {
+            left: rect.left, top: rect.top, width: rect.width, height: rect.height,
+            screenX: Number(global.screenX) + rect.left, screenY: Number(global.screenY) + rect.top,
+          },
+        }), timeout);
+      } else result = await withTimeout(api.answerUi(ref, response), timeout);
       accepted = result?.ok === true && result.effective !== 'next-turn';
       if (accepted) card.hidden = true;
       else if (error && !result?.cancelled && !result?.canceled) {
@@ -202,9 +244,13 @@
         error.classList.toggle('access-feedback', result?.ok === true);
       }
       return result || { ok: false, reason: '权限确认失败，请重试' };
-    } catch (_) {
-      if (error) { error.hidden = false; error.textContent = '权限确认失败，请重试'; }
-      return { ok: false, reason: '权限确认失败，请重试' };
+    } catch (failure) {
+      const message = failure?.code === 'APPROVAL_TIMEOUT' ? '权限确认超时，请重试' : '权限确认失败，请重试';
+      if (error) {
+        error.hidden = false; error.classList.toggle('access-feedback', false);
+        error.textContent = global.SoduWorkI18n?.t?.(message) || message;
+      }
+      return { ok: false, reason: message };
     } finally {
       if (!accepted && card.isConnected) {
         card.dataset.answerPending = 'false'; card.setAttribute('aria-busy', 'false');

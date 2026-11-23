@@ -30,7 +30,7 @@ assert.equal(brand.version({ key: 'pi', version: '0.84.4' }), '0.84.4');
 [
   ['runner:pc-01:pi', 'pi'],
   [{ key: 'codex-harness', name: 'Codex Harness' }, 'codex-harness'],
-  [{ cli: 'Claude Code', key: 'runner:pc-01:claude' }, 'claude'],
+  [{ cli: 'Codex', key: 'runner:pc-01:codex' }, 'codex'],
   ['OpenCode', 'opencode'],
   ['DeepSeek Harness', 'dsh'],
   ['pipeline', 'custom'],
@@ -99,3 +99,8 @@ for (const htmlName of ['desk.html', 'index.html']) {
 }
 
 console.log('agent brand UX: shared commercial identity passed');
+
+for (const id of ['claude', 'harness2']) {
+  assert.equal(brand.canonical(id), 'custom');
+  assert.equal(brand.ICONS[id], undefined);
+}

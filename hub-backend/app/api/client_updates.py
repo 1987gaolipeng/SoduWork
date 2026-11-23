@@ -30,6 +30,7 @@ from ..services import client_updates as contract
 from ..services import client_release_files
 from ..services import rbac
 from ..services import update_safety
+from .input_validation import parse_integer
 
 
 router = APIRouter(prefix="/api/v1/client-updates", tags=["client-updates"])
@@ -496,7 +497,8 @@ async def report_update_event(
         contract.validate_transition(row.state, state)
     except contract.UpdateContractError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    progress = max(0, min(100, int(body.get("progress") or 0)))
+    progress = max(0, min(100, parse_integer(
+        body.get("progress"), field="progress", default=0)))
     current = str(body.get("currentVersion") or "").strip()
     if state == "installed":
         current_v, target_v = contract.parse_version(current), contract.parse_version(row.target_version)

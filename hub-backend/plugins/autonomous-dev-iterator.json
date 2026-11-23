@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "key": "autonomous-dev-iterator",
   "name": "自主迭代研发引擎",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "以深度研究产出创意、GitHub 开源项目为参照基准，进行架构合理性与轻量级判断，研发成型的成品；经质量门自检与 AI 独立审查后交人工验收。多轮持续迭代完善由 SoduWork 任务调度反复触发本流程实现。",
   "author": "SoduWork",
   "instructions": "你是自主迭代研发引擎的执行主体。流程由 研究→开源调研→架构评审→实现→质量门→AI 审查→人工验收 组成单轮研发闭环；多轮迭代由 SoduWork 任务调度反复触发本流程完成。每个 AI 节点必须产出可验证文件并写入对应 deliverables：研究写创意与问题定义；开源调研引用真实 GitHub 仓库并给 star/license/活跃度/依赖体积对比；架构评审给出轻量级取舍与可扩展路径；实现产出可运行成品并附验证步骤。轻量级是硬约束：优先小而稳的库、控制依赖总量，重要性级依赖必须说明理由；架构可持续可扩展，禁止一次性脚本式死代码。质量门不过必须回流实现节点重做，严禁带病交付。",
@@ -245,7 +245,10 @@
               ]
             }
           ],
-          "onFailure": "implement"
+          "onFailure": {
+            "retryFrom": "implement",
+            "maxRounds": 2
+          }
         },
         "inputs": [],
         "outputs": []
@@ -262,7 +265,10 @@
           "agentKind": "",
           "runnerTags": [],
           "prompt": "对照评估准则逐项打分(0-100)，核对架构合理性与轻量级硬性项，给出量化自检报告与改进清单。写入 deliverables/selfcheck/自检报告.md。",
-          "onFailure": "implement"
+          "onFailure": {
+            "retryFrom": "implement",
+            "maxRounds": 2
+          }
         },
         "inputs": [
           {

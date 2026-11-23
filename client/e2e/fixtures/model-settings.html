@@ -20,20 +20,31 @@ addEventListener('unhandledrejection',e=>errors.push(String(e.reason?.stack||e.r
 const esc=v=>String(v??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
 window.petSay=message=>window.notice=message;window._humanErr=e=>e.message;
 window.saved=[];window.testCalls=[];window.capabilityCalls=[];window.testFailure=false;window.saveFailure=false;window.capabilityFailure=false;
-window.fixture={providers:[
+window.fixture={revision:'hub-1',localRevision:0,providers:[
  {id:'company',name:'共享模型服务',baseUrl:'https://gateway.example.test/v1',kind:'openai-compat',keySet:true,modelNames:['default-multimodal'],modelDefs:[{name:'default-multimodal',modality:'chat',config:{imageRouting:'native'}}]},
- {id:'personal',name:'OpenAI 兼容（个人）',baseUrl:'https://personal.example.test/v1',kind:'openai-compat',myKeySet:true,myKeyLen:32,modelNames:[]},
+ {id:'personal',personal:true,name:'OpenAI 兼容（个人）',baseUrl:'https://personal.example.test/v1',kind:'openai-compat',myKeySet:true,myKeyLen:32,modelNames:[]},
  {id:'deepseek',name:'DeepSeek',baseUrl:'https://api.example.test/v1',modelNames:['deepseek-chat','deepseek-reasoner']},
  {id:'glm',name:'智谱 GLM',baseUrl:'https://glm.example.test/v1',modelNames:['glm-flash']},
  {id:'claude',name:'Anthropic Claude',baseUrl:'https://claude.example.test',kind:'anthropic',modelNames:['claude-model']},
  {id:'local',name:'本机开发服务',baseUrl:'http://127.0.0.1:11434/v1',personal:true,authMode:'none',modelNames:['local-model']}
 ],myModels:[{providerId:'personal',name:'business-review-model',label:'business-review-model',config:{thinkingMode:'always',thinkingFormat:'zai',imageRouting:'auto',capabilities:{imageInput:'unknown'},maxOutputTokens:8192},ctxWindow:128000}],
 usable:[{providerId:'company',name:'default-multimodal',keyFrom:'org'},{providerId:'personal',name:'business-review-model',keyFrom:'mine'}]};
+// Existing personal overrides on a company service do not make it user-owned.
+window.legacyCompanyOverrides={provider:{baseUrl:'https://legacy-override.example.test/v1',myKeySet:true,myKeyLen:32,addressOverridden:true,defaultBaseUrl:'https://company.example.test/v1'},
+ model:{providerId:'company',name:'legacy-company-model',label:'Legacy company override',config:{maxOutputTokens:8192}}};
 window.SoduWorkAPI={myModels:async()=>structuredClone(fixture),hubBase:()=> 'isolated-model-ui',
+localModels:async()=>structuredClone({ revision:fixture.localRevision,providers:fixture.providers.filter(p=>p.localOnly),
+ myModels:fixture.myModels.filter(m=>m.localOnly),usable:[],mediaUsable:{} }),
+saveLocalModels:async({models,expectedRevision})=>{
+ if(expectedRevision!==fixture.localRevision)throw Error('Stale fixture revision');
+ fixture.myModels=fixture.myModels.filter(m=>!m.localOnly).concat(structuredClone(models));
+ fixture.localRevision++;return SoduWorkAPI.localModels();
+},
 checkMyModelCapabilities:async body=>{capabilityCalls.push(structuredClone(body));await new Promise(r=>setTimeout(r,240));if(capabilityFailure)throw Error('能力检测未完成，请重试');const checks=Object.fromEntries(body.checks.map(key=>[key,{status:'passed',code:'verified'}]));const capabilityProfile=Object.fromEntries(['imageInput','toolCalling','streaming'].map(key=>[key,{state:'supported',source:'verified'}]));return {ok:true,checks,capabilityProfile,checkedAt:'2026-09-30T08:00:00Z',configRevision:'fixture-v1',runtimeRevision:'fixture-run-v1'};},
 saveMyModels:async body=>{
  if(saveFailure)throw Error('模拟保存失败');
  saved.push(structuredClone(body));
+ if(window.holdModelSave)await new Promise(resolve=>window.releaseModelSave=resolve);
  const local=Array.isArray(body.localProviders),keys=(local?body.localKeys:body.keys)||{};
  fixture.myModels=fixture.myModels.filter(m=>!!m.localOnly!==local).concat(structuredClone((local?body.localModels:body.models)||[]));
  if(local)fixture.providers=fixture.providers.filter(p=>!p.localOnly);
@@ -42,6 +53,10 @@ saveMyModels:async body=>{
   if(!p){p={...provider,modelNames:[]};fixture.providers.push(p)}else Object.assign(p,provider);
   if(keys[p.id]){p.myKeySet=true;p.myKeyLen=keys[p.id].length}
  }
+ if(local){fixture.localRevision++;return SoduWorkAPI.localModels()}
+ fixture.revision='hub-'+(Number(fixture.revision.slice(4))+1);
+ const usable=fixture.myModels.map(row=>({...row,configRevision:'target-'+fixture.revision}));
+ return {ok:true,...(body.returnRevision===true?{revision:fixture.revision}:{}),usable,mediaUsable:{image:[],video:[]}};
 },
 testMyModel:async id=>{testCalls.push(id);await new Promise(r=>setTimeout(r,160));return testFailure?{ok:false,detail:'连接失败：请检查 API 地址与凭据'}:{ok:true,detail:'连接成功 · 测试模型可用'}}};
 window.WorkspaceHost={open:()=>{}};
@@ -54,10 +69,9 @@ window.WorkspaceHost={open:()=>{}};
 <script src="../../core/locales/en-US-shell.js"></script>
 <script src="../../core/locales/en-US-capability-pages.js"></script>
 <script src="../../core/locales/en-US-chat-pages.js"></script>
+<script src="../../core/locales/en-US-cloud-pages.js"></script>
 <script src="../../core/locales/en-US-work-pages.js"></script>
 <script src="../../core/locales/en-US-runtime-pages.js"></script>
-<script src="../../core/locales/ja-JP-runtime-surfaces.js"></script>
-<script src="../../core/locales/ko-KR-runtime-surfaces.js"></script>
 <script src="../../core/locales/en-US-plugin-pages.js"></script>
 <script src="../../core/locales/en-US-trace-pages.js"></script>
 <script src="../../core/locales/en-US-native.js"></script>
@@ -67,6 +81,22 @@ window.WorkspaceHost={open:()=>{}};
 <script src="../../core/locales/en-US-notification-pages.js"></script>
 <script src="../../core/locales/en-US-final-pages.js"></script>
 <script src="../../core/locales/en-US-library.js"></script>
+<script src="../../core/locales/en-US-gap-pages.js"></script>
+<script src="../../core/locales/locale-registry.js"></script>
+<script src="../../core/locales/ja-JP.js"></script>
+<script src="../../core/locales/ja-JP-gap-pages.js"></script>
+<script src="../../core/locales/ko-KR.js"></script>
+<script src="../../core/locales/ko-KR-gap-pages.js"></script>
+<script src="../../core/locales/zh-CN-runtime-surfaces.js"></script>
+<script src="../../core/locales/en-US-runtime-surfaces.js"></script>
+<script src="../../core/locales/ja-JP-runtime-surfaces.js"></script>
+<script src="../../core/locales/ko-KR-runtime-surfaces.js"></script>
+<script src="../../core/locales/en-US-agent-pages.js"></script>
+<script src="../../core/locales/ja-JP-agent-pages.js"></script>
+<script src="../../core/locales/ko-KR-agent-pages.js"></script>
+<script src="../../core/locales/builtin-skills.js"></script>
+<script src="../../core/locales/builtin-ui.js"></script>
+<script src="../../core/locales/global-search.js"></script>
 <script src="../../core/i18n-dom.js"></script>
 <script src="../../core/i18n.js"></script>
 <script src="../../components/workspace/workspace-chat-history.js"></script>

@@ -27,21 +27,16 @@ def command(exe, args, ws, cfg, profile):
     if agent == "opencode":
         sid = args[args.index("--session") + 1] if "--session" in args else ""
         actual = acp_agents.command_argv(agent, exe, acp_agents.run_args(sid, "work", ws, cfg), ws, cfg)
-    elif agent in {"codex-harness", "qwen", "dsh", "harness2"}:
+    elif agent in {"codex-harness", "qwen", "dsh"}:
         actual = original_argv(exe, args, ws, cfg, profile)
     else:
         actual = None
-    if agent == "harness2":
-        entry = str(Path(__file__).with_name("handoff_harness2_entry.py"))
-        return [actual[0], entry, *actual[2:]]
     return [*actual[:actual.index("--") + 1], *peer] if agent in {"codex-harness", "opencode", "qwen", "dsh"} else [*peer, *args]
 local_process._command_argv = command
 def environment(profile, *_args, **_kwargs):
-    if profile is local_base._PROFILES.get("harness2"):
-        from app.services import harness2_runtime
-        return {**os.environ, harness2_runtime.MODEL_ENV: "{}",
-                harness2_runtime.EXECUTOR_ENV: sys.executable,
-                harness2_runtime.ROOT_ENV: str(work / "harness2")}
+    if profile is local_base._PROFILES["opencode"]:
+        from tests.opencode_peer_session import environment as opencode_environment
+        return opencode_environment(work / "opencode")
     return dict(os.environ)
 local_process._env_for = environment
 local_stream._llm_gate_check = lambda *_args: ""

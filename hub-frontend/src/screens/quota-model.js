@@ -14,7 +14,7 @@ export function allowanceDraft(value = {}) {
   }
 }
 
-function tokenNumber(value) {
+export function tokenNumber(value) {
   if (value === null || typeof value === 'boolean' || (typeof value === 'string' && !value.trim())) return null
   const number = Number(value)
   return Number.isSafeInteger(number) && number >= 0 && number <= MAX_TOKENS ? number : null
@@ -58,13 +58,16 @@ export function replacePlan(config, plan) {
   }
 }
 
-export function validateAssignment(member, draft, choices) {
+export function validateAssignment(member, draft, choices, catalogRevision) {
   const body = { revision: member.assignment.revision, mode: draft.mode }
   if (draft.mode === 'plan') {
     if (!draft.planId || (draft.planId === 'trial' && !member.assignment.hasTrial)) throw Error(deferredMessageKey('请选择可分配的套餐'))
     body.planId = draft.planId
   } else if (draft.mode === 'custom') body.custom = validateAllowance(draft.custom, choices)
   else if (draft.mode !== 'inherit') throw Error(deferredMessageKey('请选择额度规则'))
+  if (draft.mode === 'inherit' || (draft.mode === 'plan' && draft.planId !== 'trial')) {
+    body.catalogRevision = catalogRevision
+  }
   return body
 }
 

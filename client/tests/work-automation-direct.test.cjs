@@ -30,7 +30,7 @@ test('conditional and literal enable text never reactivates a paused direct crea
 
 test('pause intent composes with monthly and custom recurrence from main', async () => {
   const rule = 'DTSTART;TZID=Asia/Shanghai:20990101T105100\nRRULE:FREQ=HOURLY;INTERVAL=3;COUNT=6';
-  for (const [text, every] of [['每月5日收集资料。保存为暂停状态。', 'monthly'],
+  for (const [text, every] of [['每月5日9点收集资料。保存为暂停状态。', 'monthly'],
     ['保存为暂停状态。\n采集资料\n' + rule, 'custom']]) {
     const f = fixture();
     await f.direct.create(params(text));
@@ -72,7 +72,7 @@ test('one-off keeps its date; missing date is rejected and monthly frequency is 
   const once=await f.direct.create(params('2030年12月20日晚上8点执行一次，采集资料'));
   assert.equal(once.schedule.every,'once');assert.equal(f.writes[0].runAt,'2030-12-20T12:00:00.000Z');
   await assert.rejects(f.direct.create(params('执行一次，收集资料')),/日期|时间/);
-  const monthly=await f.direct.create(params('每月5日收集资料'));
+  const monthly=await f.direct.create(params('每月5日9点收集资料'));
   assert.equal(monthly.schedule.every,'monthly');assert.deepEqual([...monthly.schedule.monthDays],[5]);
   await assert.rejects(f.direct.create(params('每两小时收集资料')),/支持/);
   await assert.rejects(f.direct.create(params('每天25点收集资料')),/时间无效/);
@@ -116,10 +116,12 @@ test('identity change during parsing aborts; transport failure after create stay
   const failed=fixture({createSchedule:async()=>{throw Error('network');}});
   const result=await failed.direct.create(params('每天9点采集资料'));assert.equal(result.uncertain,true);assert.equal(result.ok,false);
 });
-test('unspecified time uses disclosed 18:00 default and waiting preflight is visible in receipt',async()=>{
+test('unspecified time is rejected and explicit time retains the waiting preflight receipt',async()=>{
   const f=fixture({preflightSchedule:async()=>({state:'waiting',message:'执行机离线'})});
-  const result=await f.direct.create(params('采集行业资料'));
-  assert.equal(result.schedule.every,'daily');assert.equal(result.schedule.atHour,18);assert.equal(result.executionState,'waiting');
+  await assert.rejects(f.direct.create(params('采集行业资料')), /执行方式|时间/);
+  assert.equal(f.writes.length,0);
+  const result=await f.direct.create(params('每天9点采集行业资料'));
+  assert.equal(result.schedule.every,'daily');assert.equal(result.schedule.atHour,9);assert.equal(result.executionState,'waiting');
   assert.equal(result.message,'执行机离线');
 });
 test('permission is checked again after parsing/preflight and immediately before creation',async()=>{

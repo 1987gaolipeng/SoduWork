@@ -114,7 +114,7 @@ class AgentProbeRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rpc.await_args_list[1].args, (remote, "agent.setup", {"hasModel": False}))
 
     async def test_account_agent_defaults_reject_hub_models_before_catalog_access(self):
-        for key in ("codex", "claude"):
+        for key in ("codex",):
             session = SimpleNamespace(commit=AsyncMock())
             with (self.subTest(key=key), patch.object(agents.model_catalog, "usable", new=AsyncMock()) as usable):
                 with self.assertRaises(HTTPException) as raised:
@@ -125,7 +125,7 @@ class AgentProbeRouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_account_agent_defaults_can_clear_a_legacy_mismatch_without_changing_managed_defaults(self):
         from app.services import client_domain_events
-        for key in ("codex", "claude"):
+        for key in ("codex",):
             self.owner.agent_models = {key: "legacy-hub-model", "qwen": "hub-model"}
             session = SimpleNamespace(commit=AsyncMock())
             with (self.subTest(key=key),
@@ -140,7 +140,7 @@ class AgentProbeRouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_managed_agent_defaults_accept_available_hub_models(self):
         from app.services import client_domain_events
-        for key in ("pi", "qwen", "opencode", "dsh", "kimi", "harness2", "codex-harness"):
+        for key in ("pi", "qwen", "opencode", "dsh", "kimi", "codex-harness"):
             self.owner.agent_models = {}
             session = SimpleNamespace(commit=AsyncMock())
             with (self.subTest(key=key),
@@ -155,22 +155,22 @@ class AgentProbeRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_account_agent_setup_never_projects_hub_models_or_legacy_overrides(self):
         self.owner.agent_models = {"codex": "missing-model", "claude": "hub-model", "qwen": "hub-model"}
         machines = [{"env": {}, "execution": "runner", "agents": [
-            {"key": "codex", "needsLlm": False}, {"key": "claude", "needsLlm": False},
+            {"key": "codex", "needsLlm": False},
             {"key": "qwen", "needsLlm": True},
         ]}]
         with (patch.object(agents.model_catalog, "usable", new=AsyncMock(return_value=[{"name": "hub-model"}])),
               patch.object(agents, "_machines", new=AsyncMock(return_value=machines))):
             result = await agents.get_agent_setup(self.owner, self.session, None, False)
-        for row in result["agents"][:2]:
+        for row in result["agents"][:1]:
             self.assertFalse(row["modelPick"])
             self.assertEqual(row["model"], "")
             self.assertEqual(row["modelEffective"], "")
             self.assertFalse(row["modelGone"])
-        self.assertTrue(result["agents"][2]["modelPick"])
-        self.assertEqual(result["agents"][2]["modelEffective"], "hub-model")
+        self.assertTrue(result["agents"][1]["modelPick"])
+        self.assertEqual(result["agents"][1]["modelEffective"], "hub-model")
 
     async def test_account_agent_configure_does_not_resolve_or_forward_hub_credentials(self):
-        for key in ("codex", "claude"):
+        for key in ("codex",):
             runner = SimpleNamespace(id="fixture-runner", client_id=self.owner.id)
             with (self.subTest(key=key),
                   patch.object(agents.runner_hub, "get", return_value=runner),

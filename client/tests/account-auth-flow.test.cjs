@@ -7,18 +7,87 @@ const { createSafeStorage } = require('./helpers/device-safe-storage-fixture.cjs
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-account-auth-'));
   const file = require.resolve('../main/device-auth'); delete require.cache[file];
-  const auth = require(file), app = { getPath: () => root }, handlers = new Map();
+  const auth = require(file), app = { getPath: () => root }, handlers = new Map(), safeStorage = createSafeStorage();
   auth.install({ app, ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
-    safeStorage: createSafeStorage() });
+    safeStorage });
   const realFetch = global.fetch;
   t.after(() => { global.fetch = realFetch;
     assert.ok(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep + 'soduwork-account-auth-'));
     fs.rmSync(root, { recursive: true, force: true }); });
-  return { auth, app, root, handlers, hub: 'http://account-fixture.invalid' };
+  return { auth, app, root, handlers, safeStorage, hub: 'http://account-fixture.invalid' };
 }
 const response = (data, status = 200) => ({ ok: status < 400, status,
   text: async () => JSON.stringify(data), json: async () => data });
 const enrolled = () => response({ authState: 'pending', activationRequired: true });
+
+test('anonymous native readers reuse the confirmed pending result without enrolling on every poll', async t => {
+  const f = fixture(t); let requests = 0;
+  global.fetch = async () => { requests++; return enrolled(); };
+  await f.auth.enroll(f.app, { hub: f.hub });
+  for (let i = 0; i < 20; i++) {
+    await assert.rejects(f.auth.authenticatedIdentity(f.app), /激活/);
+    assert.equal((await f.auth.enroll(f.app, { hub: f.hub })).activationRequired, true);
+  }
+  assert.equal(requests, 1); assert.equal(f.auth.canConnect(f.app), false);
+  global.fetch = async () => { requests++; return response({ session: 'admin-activated-session', expiresIn: 600 }); };
+  assert.equal((await f.auth.enroll(f.app, { hub: f.hub, recheckAuth: true })).session, 'admin-activated-session');
+  assert.equal(requests, 2); assert.equal(f.auth.canConnect(f.app), true);
+});
+
+test('offline logout cancels old native traffic and stays signed out across process restart until explicit login', async t => {
+  const f = fixture(t); let requests = 0, pendingSignal;
+  global.fetch = async url => {
+    requests++;
+    if (url.endsWith('/clients/enroll')) return enrolled();
+    if (url.endsWith('/logout')) throw Error('offline');
+    return response({ session: 'fixture-active-session', expiresIn: 600, user: { id: 'account-user' } });
+  };
+  await f.auth.login(f.app, { hub: f.hub, account: 'fixture-owner' });
+  const old = await f.auth.authenticatedIdentity(f.app);
+  const transport = require('../main/device-auth-request');
+  const canceled = assert.rejects(transport.fetchWithDeviceAuthRetry(old, f.hub + '/api/v1/tasks', {}, async (_url, options) => {
+    pendingSignal = options.signal;
+    return new Promise((_, reject) => pendingSignal.addEventListener('abort', () => reject(pendingSignal.reason), { once: true }));
+  }), /账号或服务已变化/);
+  assert.equal(pendingSignal.aborted, false);
+  assert.equal((await f.auth.logout(f.app)).ok, false); await canceled;
+  assert.equal(pendingSignal.aborted, true);
+  const afterLogout = requests;
+  await assert.rejects(transport.fetchWithDeviceAuthRetry(old, f.hub + '/api/v1/tasks'), /账号或服务已变化/);
+  const file = require.resolve('../main/device-auth'); delete require.cache[file];
+  const restarted = require(file);
+  restarted.install({ app: f.app, ipcMain: { handle() {} }, safeStorage: f.safeStorage });
+  assert.equal((await restarted.enroll(f.app, { hub: f.hub })).activationRequired, true);
+  assert.equal((await restarted.enroll(f.app, { hub: f.hub, recheckAuth: true })).activationRequired, true);
+  assert.equal(restarted.canConnect(f.app), false); assert.equal(requests, afterLogout);
+  assert.equal((await restarted.login(f.app, { hub: f.hub, account: 'fixture-owner' })).ok, true);
+  assert.equal(restarted.canConnect(f.app), true);
+  assert.ok((await restarted.authenticatedIdentity(f.app)).session);
+});
+
+for (const stage of ['headers', 'body']) test('logout cancels isolated runtime HTTP during ' + stage, async t => {
+  const f = fixture(t); let pendingSignal, ready;
+  const started = new Promise(resolve => { ready = resolve; });
+  global.fetch = async url => url.endsWith('/clients/enroll') ? enrolled()
+    : response({ session: 'runtime-fixture-session', expiresIn: 600, user: { id: 'account-user' } });
+  await f.auth.login(f.app, { hub: f.hub, account: 'fixture-owner' });
+  const host = require('../main/agent-runtime/process-auth').createHostAuth({
+    app: f.app, identity: await f.auth.authenticatedIdentity(f.app), deviceAuth: f.auth,
+    fetchImpl: async (_url, options) => {
+      pendingSignal = options.signal;
+      if (stage === 'headers') return new Promise((_, reject) => {
+        pendingSignal.addEventListener('abort', () => reject(pendingSignal.reason), { once: true }); ready();
+      });
+      return new Response(new ReadableStream({ start(controller) {
+        pendingSignal.addEventListener('abort', () => controller.error(pendingSignal.reason), { once: true }); ready();
+      } }));
+    },
+  });
+  const rejected = assert.rejects(host.request(f.hub + '/api/v1/tasks/task-1'), /账号或服务已变化/);
+  await started; assert.equal(pendingSignal.aborted, false);
+  await f.auth.logout(f.app); await rejected;
+  assert.equal(pendingSignal.aborted, true); host.close();
+});
 
 test('account contract allows only fixed endpoints and whitelisted fields', () => {
   assert.throws(() => contract.request('https://evil.invalid', {}, 'd1'));

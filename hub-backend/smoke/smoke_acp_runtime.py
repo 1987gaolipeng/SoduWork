@@ -6,11 +6,81 @@ import os
 import subprocess
 import sys
 import tempfile
+import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 BRIDGE = ROOT / "app" / "services" / "acp_bridge.py"
+
+
+class AcpFileReadTests(unittest.TestCase):
+    def setUp(self):
+        from app.services.acp_bridge import AcpBridge
+        directory = tempfile.TemporaryDirectory(prefix="soduwork-acp-file-read-")
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.bridge = AcpBridge([], directory.name, "kimi", "workspace")
+        self.addCleanup(self.bridge.close)
+        self.target = self.root / "large.txt"
+
+    def read(self, **params):
+        return self.bridge._read_text_file({"path": str(self.target), **params})["content"]
+
+    def test_full_file_edit_preserves_tail_and_line_endings(self):
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=repr(newline)):
+                original = newline.join(["replace-me", *[f"line-{i}" for i in range(2, 2501)], "tail-\u5b8c"])
+                self.target.write_bytes(original.encode("utf-8"))
+                # Kimi's ACP file backend asks for the complete file without a
+                # limit, replaces one string, and writes that complete text.
+                content = self.read()
+                self.assertEqual(content, original)
+                self.bridge._write_text_file({"path": str(self.target),
+                                              "content": content.replace("replace-me", "replaced", 1)})
+                self.assertEqual(self.target.read_bytes(), original.replace("replace-me", "replaced", 1).encode("utf-8"))
+
+    def test_full_file_append_preserves_all_existing_lines(self):
+        original = "".join(f"line-{i}\n" for i in range(2501))
+        self.target.write_bytes(original.encode("utf-8"))
+        self.bridge._write_text_file({"path": str(self.target), "content": self.read() + "appended\n"})
+        self.assertEqual(self.target.read_bytes(), (original + "appended\n").encode("utf-8"))
+
+    def test_explicit_ranges_are_not_capped_and_omitted_limit_reads_to_end(self):
+        lines = [f"line-{i}\r\n" for i in range(1, 2502)]
+        self.target.write_bytes("".join(lines).encode("utf-8"))
+        self.assertEqual(self.read(line=2, limit=1), lines[1])
+        self.assertEqual(self.read(limit=2100), "".join(lines[:2100]))
+        self.assertEqual(self.read(line=2001), "".join(lines[2000:]))
+        self.assertEqual(self.read(line=2501, limit=20), lines[-1])
+        self.assertEqual(self.read(line=2502), "")
+
+    def test_invalid_ranges_are_rejected_instead_of_silently_clamped(self):
+        from app.services.acp_bridge import BridgeError
+        self.target.write_bytes(b"line\n")
+        for field in ("line", "limit"):
+            for value in (0, -1, True, 1.5, "2", [], {}):
+                with self.subTest(field=field, value=value):
+                    with self.assertRaisesRegex(BridgeError, "Invalid file line range"):
+                        self.read(**{field: value})
+
+    def test_byte_limit_rejects_oversize_even_when_size_probe_is_stale(self):
+        from app.services.acp_bridge import BridgeError, _MAX_FILE_BYTES
+        self.target.write_bytes(("\u754c" * (_MAX_FILE_BYTES // 3 + 1)).encode("utf-8"))
+        with self.assertRaisesRegex(BridgeError, "cannot exceed 4 MB"):
+            self.read()
+        with patch("app.services.acp_bridge.os.path.getsize", return_value=1):
+            with self.assertRaisesRegex(BridgeError, "cannot exceed 4 MB"):
+                self.read(limit=1)
+
+    def test_exact_byte_limit_and_empty_files_are_read_in_full(self):
+        from app.services.acp_bridge import _MAX_FILE_BYTES
+        content = "x" * _MAX_FILE_BYTES
+        self.target.write_bytes(content.encode("utf-8"))
+        self.assertEqual(self.read(), content)
+        self.target.write_bytes(b"")
+        self.assertEqual(self.read(), "")
 
 
 def _send(value: dict) -> None:
@@ -241,12 +311,14 @@ def main() -> int:
             "base": "https://model.invalid/v1", "key": "never-on-argv",
             "model": "coding"}})
     assert str(BRIDGE) in codex and "never-on-argv" not in codex
-    import unittest
-    result = unittest.TextTestRunner(verbosity=2).run(
-        unittest.defaultTestLoader.loadTestsFromName("test_acp_process_lifecycle"))
+    suite = unittest.TestSuite([
+        unittest.defaultTestLoader.loadTestsFromTestCase(AcpFileReadTests),
+        unittest.defaultTestLoader.loadTestsFromName("test_acp_process_lifecycle"),
+    ])
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful():
         return 1
-    print(f"ACP_RUNTIME_OK: 62 assertions; lifecycle passed={result.testsRun - len(result.skipped)}, "
+    print(f"ACP_RUNTIME_OK: 62 assertions; file/lifecycle passed={result.testsRun - len(result.skipped)}, "
           f"platform_skipped={len(result.skipped)}")
     return 0
 

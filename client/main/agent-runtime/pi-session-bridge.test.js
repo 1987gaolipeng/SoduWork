@@ -75,6 +75,27 @@ test('Pi bridge opens a real legacy handle through the runtime registry', async 
   await bridge.dispose();
 });
 
+test('native replay rechecks an indexed failure after the unavailable handle finishes disposal', async () => {
+  const raw = fakeSessionModule(), bridge = createPiSessionBridge({ sessionModule: raw, runnerAdapters: [] });
+  let indexed = { state: 'completed' }, release;
+  bridge.setReplicaHistory({ indexedRow: async () => indexed });
+  await bridge.open({ ref: 'before-loss' });
+  const handle = raw.handles[0], snapshot = handle.snapshot.bind(handle);
+  handle.snapshot = () => ({ ...snapshot(), runtimeUnavailable: true });
+  raw.closeHook = () => new Promise(resolve => { release = () => {
+    indexed = { state: 'failed', status: 'unreachable' }; raw.closeHook = null; resolve();
+  }; });
+  assert.equal(bridge.findBySessionId(handle.sessionId), null);
+  const reopening = bridge.open({ ref: 'after-loss', resumePath: 'synthetic.jsonl',
+    retainedHistoryId: handle.sessionId, retainedExecutionFailure: false });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(raw.opened.length, 1);
+  release();
+  assert.equal((await reopening).ok, true);
+  assert.equal(raw.opened[1].retainedExecutionFailure, true);
+  await bridge.dispose();
+});
+
 test('Pi task binding mismatch remains a typed refusal through the runtime adapter and bridge', async () => {
   const raw = fakeSessionModule();
   raw.open = async () => ({ ok: false, code: 'TASK_BINDING_MISMATCH', reason: '这条会话不是该需求的协作会话' });

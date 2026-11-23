@@ -6,6 +6,9 @@
   // Product localization uses the same app concept in Chinese and English.
   // This is intentional, not a literal translation; keep app/jiyong IDs stable.
   const messages = {
+    '验证范围': 'Verification scope',
+    '安装检查仅验证包结构与声明，不代表真实 AI 或业务功能已验证。': 'Installation checks validate package structure and declarations only, not live AI or business functionality.',
+    '请查看交付总结中的未测项，在实际使用前确认关键功能。': 'Review the untested items in the delivery summary and verify key functions before use.',
     '按设定时间创建普通会话，发送提示词并在对话中查看过程与结果。': 'Start a chat at the scheduled time, send the prompt, and view progress and results in the conversation.',
     '记录目标与完成标准，保存到需求池或交办给同事': 'Record the goal and completion criteria, then save the issue or assign it to a teammate',
     '阶段：': 'Stage: ',
@@ -744,6 +747,8 @@
     '结束日期无效，请重新选择': 'End date is invalid. Choose another date.',
     '开始日期不能晚于结束日期': 'Start date cannot be later than end date.',
     '请选择小时（00–23）': 'Choose an hour (00–23)',
+    "请补充下午的具体执行时间，例如下午三点": "Please specify the afternoon time, for example 3 PM",
+    "请选择有效的时区": "Choose a valid time zone",
     '请选择分钟（00–59）': 'Choose a minute (00–59)',
     '请选择至少一个星期': 'Select at least one weekday',
     '请选择至少一个月度日期': 'Select at least one day of the month',
@@ -753,6 +758,30 @@
     '当前支持每天、每周、每月、每小时或指定日期执行一次，请将执行时间写为支持的方式': 'Choose daily, weekly, monthly, hourly, or one-time execution and enter a supported schedule.',
     '执行时间无效，请填写0至23点、0至59分': 'The execution time is invalid. Enter an hour from 0 to 23 and a minute from 0 to 59.',
   };
+  Object.assign(messages, {
+    "正在完善此自动化，可继续发送消息补充任务或修改时间。": "You are editing this automation. Send another message to add details or change its schedule.",
+    "已返回普通对话，可点击继续补充来修改自动化。": "You are back in chat. Choose Continue editing to update the automation.",
+    "继续补充": "Continue editing",
+    "返回普通对话": "Back to chat",
+    "取消修改": "Cancel changes",
+    "保存修改": "Save changes",
+    "修改自动化": "Edit automation",
+    "停用自动化": "Disable automation",
+    "自动化已停用": "Automation disabled",
+    "已停止后续自动触发，可在自动化管理中重新启用。": "Future automatic runs are disabled. You can enable them in automation management.",
+    "可继续发送“修改这个自动化”及具体要求": "Send “edit this automation” with your changes to continue.",
+    "已取消创建自动化": "Automation creation cancelled",
+    "任务内容需要补充": "Task details are missing",
+    "请说明具体要完成什么，可以继续发送消息补充": "Describe what the task should do. You can send another message with the details.",
+    "请指定有效的相对时间，例如五分钟后或半小时后": "Specify a valid delay, such as in five minutes or in half an hour.",
+    "执行时间存在多个可能，请明确一个执行时间": "The schedule is ambiguous. Specify one execution time.",
+    "请明确执行时间，例如“五分钟后”；不会使用默认时间": "Specify an execution time, such as in five minutes. No default time will be used.",
+    "请先确认保存结果": "Check the save result first",
+    "自动化修改已保存": "Automation changes saved",
+    "上次保存结果尚未确认，请先到自动化管理中查询，避免重复提交。": "The previous save is unconfirmed. Check automation management before submitting again.",
+    "服务端未返回自动化编号，请到自动化管理中确认保存结果": "No automation ID was returned. Check automation management to confirm the save.",
+    "启用自动化": "Enable automation"
+  });
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
   global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'en-US': Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages['en-US'], messages)) }));
 })(globalThis);

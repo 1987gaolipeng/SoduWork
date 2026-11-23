@@ -16,6 +16,120 @@ LOCAL = {"localOnly": True, "base": "http://private-probe.invalid/v1", "key": "p
          "model": "private-probe-wire", "authMode": "api-key"}
 
 
+class ProbeMarkerTests(unittest.TestCase):
+    def test_marker_with_platform_line_endings_and_console_formatting(self):
+        marker = agent_setup._TOKEN
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=repr(newline)):
+                events = [
+                    {"type": "text", "part": {"streamId": "answer", "delta": "SODUWORK\u00a0_",
+                                               "done": False}},
+                    {"type": "text", "part": {"streamId": "answer", "delta": "AG\r\nENT _OK"}},
+                ]
+                output = "\ufeff" + newline.join(
+                    "\x1b[32m" + json.dumps(event, ensure_ascii=False) + "\x1b[0m"
+                    for event in events) + newline
+                self.assertTrue(agent_setup._probe_succeeded(output, 0, marker))
+                self.assertFalse(agent_setup._probe_succeeded(output, 1, marker))
+
+    def test_unicode_whitespace_remains_inside_json_records(self):
+        for whitespace in ("\u0085", "\u2028", "\u2029"):
+            for newline in ("\n", "\r\n", "\r"):
+                with self.subTest(whitespace=repr(whitespace), newline=repr(newline)):
+                    event = {"type": "text", "part": {
+                        "text": "SODUWORK" + whitespace + "_AGENT_OK", "done": True}}
+                    records = [{"type": "step_start"}, event]
+                    output = newline.join(json.dumps(record, ensure_ascii=False) for record in records)
+                    self.assertTrue(agent_setup._probe_succeeded(output, 0, agent_setup._TOKEN))
+                    failure = json.dumps({"error": {"message": "model request failed"}})
+                    self.assertFalse(agent_setup._probe_succeeded(
+                        output + newline + failure, 0, agent_setup._TOKEN))
+
+    def test_spaced_marker_in_a_single_completed_answer(self):
+        marker = agent_setup._TOKEN
+        chunks = [
+            {"type": "text", "part": {"streamId": "answer", "delta": delta, "done": done}}
+            for delta, done in (("SODUWORK _", False), (" AG ENT", False), ("\t_OK", True))
+        ]
+
+        def matches(events, code=0):
+            return agent_setup._probe_succeeded(
+                "\n".join(json.dumps(event) for event in events), code, marker)
+
+        self.assertTrue(matches(chunks))
+        self.assertFalse(matches(chunks[:-1]))
+        self.assertFalse(matches(chunks, code=1))
+        self.assertFalse(matches([*chunks, {"error": {"message": "model request failed"}}]))
+        self.assertFalse(matches([{"type": "reasoning", "text": "SODUWORK _ AG ENT _OK"}]))
+        self.assertFalse(matches([
+            {"type": "text", "part": {"text": value}}
+            for value in ("SODUWORK _", "AG ENT _OK")
+        ]))
+        self.assertFalse(agent_setup._probe_succeeded(agent_setup._PROMPT, 0, marker))
+
+    def test_native_truncation_requires_a_later_successful_turn(self):
+        answer = {"type": "text", "part": {"text": "SODUWORK _ AG ENT _OK"}}
+        stopped = {"type": "step_finish", "part": {"reason": "stop"}}
+        error = {"error": {"message": "model request failed"}}
+        for reason in ("length", "max_tokens"):
+            truncated = {"type": "step_finish", "part": {"reason": reason}}
+            cases = (
+                ([answer, truncated], False),
+                ([answer, truncated, {**stopped, "contextOnly": True}], False),
+                ([answer, truncated, {"type": "step_finish", "part": {"reason": "tool-calls"}}], False),
+                ([answer, truncated, stopped], True),
+                ([answer, stopped, truncated], False),
+                ([answer, truncated, stopped, error], False),
+                ([answer, error, truncated, stopped], False),
+            )
+            for events, expected in cases:
+                with self.subTest(reason=reason, events=events):
+                    output = "\n".join(json.dumps(event) for event in events)
+                    self.assertEqual(agent_setup._probe_succeeded(output, 0, agent_setup._TOKEN), expected)
+
+
+class ProbePersistenceTests(unittest.TestCase):
+    def test_real_child_updates_the_persisted_probe_only_after_a_successful_reply(self):
+        for reply, exit_code, expected in (
+            ("SODUWORK _ AG ENT _OK", 0, True),
+            ("SODUWORK _ AG ENT _OK", 1, False),
+            ("SODUWORK _ AG ENT", 0, False),
+        ):
+            with self.subTest(reply=reply, exit_code=exit_code), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                history = root / "agent-probe.json"
+                other = {"ok": True, "detail": "another runtime"}
+                history.write_text(json.dumps({"kimi": {"ok": not expected}, "qwen": other}), encoding="utf-8")
+                child = root / "fixture.py"
+                event = {"type": "text", "part": {"text": reply, "done": True}}
+                child.write_text(
+                    "import sys\n"
+                    "if '--version' in sys.argv:\n"
+                    "    print('fixture-version')\n"
+                    "    sys.exit(0)\n"
+                    "assert sys.stdin.buffer.read().decode('utf-8') == " + repr(agent_setup._PROMPT) + "\n"
+                    "sys.stdout.buffer.write(" + repr((json.dumps(event) + "\r\n").encode()) + ")\n"
+                    "sys.exit(" + str(exit_code) + ")\n", encoding="utf-8")
+                identity = agent_setup._new_job("kimi", "probe")
+                try:
+                    with patch.object(agent_setup, "_PROBE_FILE", str(history)), \
+                            patch.object(agent_setup, "_probe_ws", return_value=folder), \
+                            patch.object(agent_setup, "_bin_of", return_value=sys.executable), \
+                            patch.dict(agent_setup._PROFILES["kimi"], {"argv_prefix": lambda: [str(child)],
+                                                                        "start": lambda *args: []}), \
+                            patch.object(agent_setup, "_command_argv", return_value=[sys.executable, str(child)]), \
+                            patch.object(local_base, "_env_for", return_value=None):
+                        agent_setup._guard(identity, agent_setup._run_probe, "kimi", {
+                            "base": "http://fixture.invalid/v1", "model": "fixture", "key": "fixture-key"})
+                    saved = json.loads(history.read_text(encoding="utf-8"))
+                    self.assertEqual(saved["qwen"], other)
+                    self.assertEqual(saved["kimi"]["ok"], expected)
+                    self.assertEqual([step["ok"] for step in saved["kimi"]["steps"]], [True, expected])
+                    self.assertEqual(agent_setup.job(identity)["ok"], expected)
+                finally:
+                    agent_setup._JOBS.pop(identity, None)
+
+
 class PrivateProbeRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_only_parent_pipe_can_start_and_poll_private_managed_probes(self):
         machine = Runner.__new__(Runner)
@@ -125,9 +239,6 @@ class PrivateProbeProcessTests(unittest.TestCase):
         if not success:
             output = {"type": "error", "message": "private-probe-wire private-probe-key http://private-probe.invalid/v1"}
         source = "import json; print(" + repr(json.dumps(output)) + ",flush=True)"
-        if key == "harness2" and success:
-            source += "; print(" + repr(json.dumps({"type": "harness2_probe_complete",
-                "coverage": "native-execute-v1", "stages": 0})) + ",flush=True)"
         try:
             with tempfile.TemporaryDirectory() as data:
                 history = Path(data) / "agent-probe.json"

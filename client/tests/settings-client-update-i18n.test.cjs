@@ -37,9 +37,9 @@ const STUBBED_IDS = new Set(['clientUpdateBadge', 'clientUpdateDot', 'clientUpda
   'settingsPanel', 'remindSeg', 'scaleSeg', 'fontSeg', 'localeSelect', 'workRootInput',
   'workRootSave', 'workRootNote', 'boxNameInput', 'boxNameSave', 'boxBindNote',
   'skinOpenBtn', 'skinCurName', 'petVisibleChk', 'dockVisibleChk', 'trayVisibleChk',
-  'trayOffNote', 'settingsClose']);
+  'trayOffNote', 'settingsClose', 'pet']);
 
-function bootClientUpdateCard() {
+function bootClientUpdateCard(initialCfg = { uiScale: 'medium', fontScale: 'medium', petVisible: true, dockVisible: true, trayVisible: true }) {
   // Use an isolated VM to avoid repeated top-level constant declarations.
   const listeners = {};
   const elements = new Map();
@@ -64,7 +64,7 @@ function bootClientUpdateCard() {
     removeEventListener() {},
     dispatchEvent(event) { for (const fn of listeners[event.type] || []) fn(event); return true; },
     CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
-    cfg: { uiScale: 'medium', fontScale: 'medium', petVisible: true, dockVisible: true, trayVisible: true },
+    cfg: { ...initialCfg },
     saveCfg() {}, petSay() {}, Store: {}, User: { id: 'u-1', name: 'tester' },
     soduWorkAPI: {
       clientUpdateStatus: async () => ({ state: 'current', currentVersion: '1.12.79' }),
@@ -88,6 +88,29 @@ function bootClientUpdateCard() {
 }
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('settings defaults leave desktop widgets unchecked and late saved preferences remain effective', () => {
+  const sandbox = bootClientUpdateCard({});
+  const checkbox = id => sandbox.document.getElementById(id);
+  assert.equal(checkbox('petVisibleChk').checked, false);
+  assert.equal(checkbox('dockVisibleChk').checked, false);
+  assert.equal(checkbox('trayVisibleChk').checked, true);
+  assert.equal(checkbox('pet').style.display, 'none');
+  let reports = 0;
+  sandbox.WinSync = { reportFlags: () => reports++ };
+  Object.assign(sandbox.cfg, { petVisible: true, dockVisible: true, trayVisible: false });
+  sandbox.dispatchEvent(new sandbox.CustomEvent('soduwork-config-hydrated'));
+  assert.equal(checkbox('petVisibleChk').checked, true);
+  assert.equal(checkbox('dockVisibleChk').checked, true);
+  assert.equal(checkbox('trayVisibleChk').checked, false);
+  assert.equal(checkbox('pet').style.display, '');
+  assert.equal(reports, 1);
+  Object.assign(sandbox.cfg, { petVisible: false, dockVisible: false });
+  sandbox.dispatchEvent(new sandbox.CustomEvent('soduwork-store-hydrated'));
+  assert.equal(checkbox('petVisibleChk').checked, false);
+  assert.equal(checkbox('dockVisibleChk').checked, false);
+  assert.equal(checkbox('pet').style.display, 'none');
+});
 
 const EXPECT_TITLE = {
   'zh-CN': '当前版本已就绪 · 当前版本 1.12.79',

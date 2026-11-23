@@ -66,6 +66,149 @@ function localTask(id) {
   };
 }
 
+function historicalTask(id) {
+  return { ...localTask(id), title: '旧'.repeat(199) + '😀complete title',
+    source: '来源😀'.repeat(50), canEditRequirement: true, canDeleteRequirement: true };
+}
+
+function oldLengthBlocked(task) {
+  return { id: task.id, kind: 'put', token: 'legacy-' + task.id, data: TaskSync.taskPayload(task),
+    blocked: 'String should have at most 120 characters' };
+}
+
+test('upgraded Store replays a historical blocked PUT with the same identity and complete text', async () => {
+  const task = historicalTask('legacy-replay'), requests = [];
+  const store = fixture({ online: true, putTask: async (id, data) => {
+    requests.push({ id, data });
+    const queued = store._readTaskOps()[0];
+    assert.equal(queued.token, 'legacy-' + task.id);
+    assert.equal(queued.textCompatibilityRetried, true, 'persist the retry marker before sending');
+    return { ...task, ...data, id };
+  }});
+  store._scheduleTaskFlush = () => {};
+  store._writeTaskOps([oldLengthBlocked(task)]);
+  assert.equal(await store._flushTaskOps(), true);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].data.title, task.title);
+  assert.equal(requests[0].data.source, task.source);
+  assert.equal(store.tasks[0].title, task.title);
+  assert.equal(store._shadow[task.id].source, task.source);
+  assert.equal(store._readTaskOps().length, 0);
+});
+
+test('a still-old Hub blocks the compatibility retry once across refreshes and restart', async () => {
+  const task = historicalTask('legacy-old-hub'); let requests = 0;
+  const api = { online: true, putTask: async () => {
+    requests++;
+    throw Object.assign(new Error('String should have at most 120 characters'), { status: 422 });
+  }};
+  const store = fixture(api); store._scheduleTaskFlush = () => {};
+  store._writeTaskOps([oldLengthBlocked(task)]);
+  assert.equal(await store._flushTaskOps(), false);
+  const saved = store._readTaskOps();
+  assert.equal(saved[0].textCompatibilityRetried, true);
+  assert.equal(saved[0].blockedStatus, 422);
+  assert.equal(saved[0].data.source, task.source);
+  await store._flushTaskOps(); await store._flushTaskOps(true);
+  const restarted = fixture(api); restarted._scheduleTaskFlush = () => {};
+  restarted._writeTaskOps(saved);
+  await restarted._flushTaskOps();
+  assert.equal(requests, 1);
+  assert.equal(restarted._readTaskOps()[0].blocked, saved[0].blocked);
+});
+
+test('Store preserves authorization failures and mixed validation failures in the outbox', async () => {
+  const task = historicalTask('not-compatible'); let requests = 0;
+  const store = fixture({ online: true, putTask: async () => { requests++; } });
+  const denied = oldLengthBlocked(task);
+  const operations = [
+    { ...denied, id: 'forbidden', blockedStatus: 403 },
+    { ...denied, id: 'mixed', blocked: denied.blocked + '；Field required' },
+    { ...denied, id: 'patch', kind: 'patch', blockedStatus: 422 },
+    { ...denied, id: 'uncertain', blocked: '需求创建尚未确认，请在原表单中重试' },
+  ];
+  store._writeTaskOps(operations);
+  await store._flushTaskOps();
+  assert.equal(requests, 0);
+  assert.equal(JSON.stringify(store._readTaskOps()), JSON.stringify(operations));
+});
+
+test('compatibility recovery cannot overwrite an active flight or populate a switched account', async () => {
+  const task = historicalTask('legacy-scope'); let owner = 'account-a', complete, started;
+  const pending = new Promise(resolve => { complete = resolve; });
+  const ready = new Promise(resolve => { started = resolve; });
+  const requests = [];
+  const store = fixture({ online: true, taskStorageKey: kind => owner + '-' + kind,
+    putTask: async (id, data, scope) => { requests.push(scope); started(); await pending; return { ...task, ...data, id }; }
+  });
+  store._scheduleTaskFlush = () => {};
+  const blocked = oldLengthBlocked(task);
+  store._writeTaskOps([blocked]);
+  const active = store._beginTaskFlight(task.id, 'existing', 'account-a-ops', 'put', blocked.data);
+  await store._flushTaskOps();
+  assert.equal(requests.length, 0);
+  assert.equal(store._readTaskOps()[0].textCompatibilityRetried, undefined);
+  store._finishTaskFlight(task.id, active);
+  const flush = store._flushTaskOps(); await ready;
+  owner = 'account-b'; store.beginEnvironmentSwitch(); complete();
+  assert.equal(await flush, false);
+  assert.deepEqual(requests, ['account-a-ops']);
+  assert.equal(store._readTaskOps().length, 0);
+  assert.equal(store.tasks.length, 0);
+  assert.equal(Object.keys(store._shadow).length, 0);
+  owner = 'account-a';
+  assert.equal(store._readTaskOps()[0].textCompatibilityRetried, true);
+  assert.equal(store._readTaskOps()[0].token, blocked.token);
+});
+
+test('a failed marker save leaves a legacy operation blocked without sending', async () => {
+  const task = historicalTask('legacy-full-storage'); let requests = 0;
+  const store = fixture({ online: true, putTask: async () => { requests++; } });
+  store._writeTaskOps([oldLengthBlocked(task)]);
+  store.__context.localStorage.setItem = () => { throw new Error('quota'); };
+  await store._flushTaskOps(); await store._flushTaskOps();
+  assert.equal(requests, 0);
+  assert.ok(store._readTaskOps()[0].blocked);
+  assert.equal(store._readTaskOps()[0].textCompatibilityRetried, undefined);
+});
+
+for (const phase of ['not sent', 'in flight', 'completed']) {
+  test(`undo preserves complete historical text when deletion is ${phase}`, async () => {
+    const task = historicalTask('legacy-undo-' + phase), server = new Map([[task.id, { ...task }]]);
+    let releaseDelete, startedDelete;
+    const deleting = new Promise(resolve => { startedDelete = resolve; });
+    const gate = new Promise(resolve => { releaseDelete = resolve; });
+    const requests = [];
+    const store = fixture({ online: true,
+      putTask: async (id, data) => { requests.push({ kind: 'put', id, data }); server.set(id, { ...task, ...data, id }); return server.get(id); },
+      deleteTask: async id => { requests.push({ kind: 'delete', id }); startedDelete(); if (phase === 'in flight') await gate; server.delete(id); },
+    });
+    store._scheduleTaskFlush = () => {};
+    store.tasks.push({ ...task }); store._setShadow([{ ...task }]);
+    const removed = store.removeTask(task.id, 0);
+    let drain;
+    if (phase !== 'not sent') {
+      drain = store._flushTaskOps();
+      if (phase === 'in flight') await deleting;
+      else await drain;
+    }
+    assert.equal(store.restoreTask(removed.task, removed.index), true);
+    if (phase === 'in flight') { releaseDelete(); await drain; }
+    await store._flushTaskOps();
+    const restored = server.get(task.id);
+    assert.equal(restored.title, task.title);
+    assert.equal(restored.source, task.source);
+    assert.equal(store.tasks[0].title, task.title);
+    assert.equal(store._shadow[task.id].source, task.source);
+    assert.equal(store._readTaskOps().length, 0);
+    assert.equal(requests.filter(request => request.kind === 'delete').length, phase === 'not sent' ? 0 : 1);
+    for (const request of requests.filter(request => request.kind === 'put')) {
+      assert.equal(request.data.title, task.title);
+      assert.equal(request.data.source, task.source);
+    }
+  });
+}
+
 test('single save receipt updates only its task without hydration or a detail reload', () => {
   const store = fixture({online:true, getTasks(){assert.fail('no full fetch on save');}});
   let detailReloads = 0;

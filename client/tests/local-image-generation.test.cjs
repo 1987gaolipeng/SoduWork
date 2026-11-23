@@ -4,7 +4,7 @@ const fs = require('node:fs'), path = require('node:path'), os = require('node:o
 const store = require('../main/local-model-store.cjs'), image = require('../main/pi-session/image-model');
 const turn = require('../main/pi-session/image-turn'), media = require('../main/pi-session/local-image-turn.cjs');
 const quota = require('../main/conversation/quota-admission.cjs');
-const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1kAAAAASUVORK5CYII=', 'base64');
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mPw01oLAAHvASadyK5SAAAAAElFTkSuQmCC', 'base64');
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-local-images-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -120,6 +120,62 @@ test('a local image turn posts only to its configured provider and retains ordin
   assert.doesNotMatch(JSON.stringify(f.tools), /local:model-/);
   const classified = require('../main/conversation/delivery-contract').classify(f.root, [result.artifact]);
   assert.equal(classified.items.length, 1); assert.equal(classified.items[0].kind, 'image');
+});
+
+test('valid JPEG and WebP are published without re-encoding; corrupt pixel data and incomplete containers never become artifacts', async t => {
+  const f = fixture(t);
+  const jpeg = Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAb/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAwb/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCDAWhn/9k=', 'base64');
+  const webp = Buffer.from('UklGRjYAAABXRUJQVlA4ICoAAABwAQCdASoBAAEAAUAmJaACdAFAAAD+9bh//q0P/+Wh//y0P3PpV6vK4AA=', 'base64');
+  const generate = bytes => f.generate(async () => Response.json({ data: [{ b64_json: bytes.toString('base64') }] }));
+  for (const [bytes, type] of [[jpeg, 'image/jpeg'], [webp, 'image/webp']]) {
+    const result = await generate(bytes);
+    assert.equal(result.ok, true, result.reason);
+    assert.equal(result.artifact.mimeType, type);
+    assert.deepEqual(fs.readFileSync(result.artifact.path), bytes);
+  }
+  const output = path.join(f.root, 'outputs');
+  const before = fs.readdirSync(output).sort(), index = fs.readFileSync(path.join(output, '.soduwork-media-index.json'));
+  const corrupt = Buffer.from(png); corrupt[42] ^= 1;
+  for (const bytes of [png.subarray(0, 16), png.subarray(0, -2), corrupt, jpeg.subarray(0, -2), webp.subarray(0, -2)]) {
+    const result = await generate(bytes);
+    assert.equal(result.ok, false);
+    assert.equal(result.retrySafe, false);
+    assert.match(result.reason, /图片文件无效/);
+    assert.equal(f.tools.at(-1).isError, true);
+    assert.doesNotMatch(f.messages.at(-1)[1], /图片已生成|outputs\//);
+    assert.deepEqual(fs.readdirSync(output).sort(), before);
+    assert.deepEqual(fs.readFileSync(path.join(output, '.soduwork-media-index.json')), index);
+  }
+});
+
+test('an unavailable decoder blocks a local billable POST and explains how to restore an independent development venv', async t => {
+  const f = fixture(t);
+  const exists = fs.existsSync;
+  t.mock.method(fs, 'existsSync', value => String(value).endsWith('generated_image.py') ? false : exists(value));
+  let calls = 0;
+  const result = await f.generate(async () => { calls++; });
+  assert.equal(calls, 0);
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /校验组件不可用/);
+  if (process.env.SODUWORK_RUNTIME_MANAGED !== '1' && process.env.SODUWORK_SOURCE_SESSION !== '1')
+    assert.match(result.reason, /pip install.*Pillow/);
+});
+
+test('provider refusals report only the status and the relevant configuration hint', async t => {
+  const f = fixture(t);
+  for (const [status, hint] of [[400, '请求格式'], [422, '请求格式'], [401, 'API Key'], [403, '访问权限'], [404, '/images/generations']]) {
+    let calls = 0;
+    const result = await f.generate(async () => {
+      calls++;
+      return new Response('private-wire synthetic-private-key', { status });
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.retrySafe, false);
+    assert.equal(calls, 1);
+    assert.ok(result.reason.includes('HTTP ' + status));
+    assert.ok(result.reason.includes(hint));
+    assert.doesNotMatch(JSON.stringify([result, f.tools, f.messages]), /private-wire|synthetic-private-key/);
+  }
 });
 
 for (const attack of ['redirect', 'cross-origin', 'oversize', 'invalid-bytes', 'error-secret', 'symbolic-output', 'symbolic-index']) {

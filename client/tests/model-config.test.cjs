@@ -16,7 +16,7 @@ async function fetchDeclaredModel(metadata) {
     'managed-alias', 8000,
     async () => new Response(JSON.stringify({ ok: true, key: 'fixture', model: 'managed-alias', ...metadata }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    false, 'harness2');
+    false, 'kimi');
 }
 
 test('unsupported streaming keeps Hub archives readable while rejecting a new Pi turn', async t => {
@@ -93,7 +93,7 @@ test('Hub reasoning declarations survive model normalization and the runner boun
       supportsReasoningEffort: true, thinkingLevelMap: { low: 'low', high: 'high' } });
     assert.equal(result.ok, true);
     assert.equal(result.model.reasoning, declaration.thinkingMode !== 'none');
-    const runner = create(result.model, 'harness2').llm;
+    const runner = create(result.model, 'kimi').llm;
     for (const model of [result.model, runner]) {
       assert.equal(model.thinkingMode, declaration.thinkingMode);
       assert.equal(model.thinkingAlwaysOn, declaration.thinkingAlwaysOn);
@@ -137,11 +137,26 @@ test('Hub explicit thinking level remains explicit through the runner boundary',
       thinkingFormat: 'zai', thinkingLevel });
     assert.equal(result.ok, true);
     assert.equal(result.model.thinkingLevel, thinkingLevel);
-    assert.equal(create(result.model, 'harness2').llm.thinkingLevel, thinkingLevel);
+    assert.equal(create(result.model, 'kimi').llm.thinkingLevel, thinkingLevel);
   }
 });
 
-test('模型中心支持个人地址覆盖与任意自定义服务', () => {
+test('conflicting mandatory-thinking declarations reject runtime admission without breaking normalization', async t => {
+  const cfg = require('../main/pi-session/model-config');
+  const ref = 'local:model-' + '7'.repeat(32);
+  t.mock.method(require('../main/local-model-store.cjs'), 'resolve', () => ({
+    modelRef: ref, name: 'glm_5.3_flash', baseUrl: 'https://fixture.invalid/v1', key: '',
+    config: { thinkingMode: 'none' },
+  }));
+  const local = await cfg.fetchModel(null, ref, 1000, () => { throw Error('No request expected'); }, false, 'pi', { allowLocal: true });
+  assert.equal(local.ok, false); assert.equal(local.code, 'MODEL_THINKING_CONFLICT');
+  assert.match(local.reason, /不支持关闭思考/);
+  const managed = await fetchDeclaredModel({ model: 'glm-5.3', reasoning: false });
+  assert.equal(managed.ok, false); assert.equal(managed.code, 'MODEL_THINKING_CONFLICT');
+  assert.match(managed.reason, /不支持关闭思考/);
+});
+
+test('模型中心支持个人自建服务与本地服务', () => {
   const panel = read('components', 'panels', 'panels-models.js');
   const api = read('api.js');
   assert.match(panel, /添加模型服务/);
@@ -156,7 +171,7 @@ test('模型中心支持个人地址覆盖与任意自定义服务', () => {
 
 test('saving personal models keeps local services out of the Hub payload', async () => {
   const values = new Map(), calls = [], localCalls = [];
-  const response = { ok: true, providers: [{ id: 'company-provider', hasKey: false }] };
+  const response = { ok: true, providers: [{ id: 'custom-hub', personal: true, hasKey: false }] };
   const window = { dispatchEvent() {}, soduWorkAPI: {
     getHubConnection: async () => ({ ok: true, hub: 'https://hub.example.test', editable: true }),
     deviceAuthBootstrap: async () => ({ ok: true, stored: true, clientId: 'device-1',
@@ -178,14 +193,14 @@ test('saving personal models keeps local services out of the Hub payload', async
   await api.registerClient();
   const body = {
     providers: [
-      { id: 'company-provider', baseUrl: 'https://personal.example.test/v1' },
+      { id: 'custom-hub', baseUrl: 'https://personal.example.test/v1' },
       { id: 'custom-local', name: 'Local service', baseUrl: 'http://127.0.0.1:12345/v1', kind: 'openai-compat', personal: true, authMode: 'none', localOnly: true },
     ],
     models: [
-      { name: 'company-model', providerId: 'company-provider', label: 'Company model' },
+      { name: 'personal-model', providerId: 'custom-hub', label: 'Personal model' },
       { name: 'custom-model', providerId: 'custom-local', label: 'Custom model', localOnly: true },
     ],
-    keys: { 'company-provider': null, 'custom-local': 'local-secret' },
+    keys: { 'custom-hub': null, 'custom-local': 'local-secret' },
     localProviders: [{ id: 'custom-local', name: 'Local service', baseUrl: 'http://127.0.0.1:12345/v1', kind: 'openai-compat', personal: true, authMode: 'none', localOnly: true }],
     localModels: [{ name: 'custom-model', providerId: 'custom-local', label: 'Custom model', localOnly: true }],
     localKeys: { 'custom-local': 'local-secret' },
@@ -196,14 +211,14 @@ test('saving personal models keeps local services out of the Hub payload', async
   assert.equal(localCalls.length, 1);
   assert.equal(localCalls[0].expectedRevision, 7);
   assert.equal(localCalls[0].keys['custom-local'], 'local-secret');
-  const hubCalls = calls.filter(call => call.url === 'https://hub.example.test/api/v1/my-models');
+  const hubCalls = calls.filter(call => call.url === 'https://hub.example.test/api/v1/my-models' && call.options.method === 'PUT');
   assert.equal(hubCalls.length, 1);
   assert.equal(hubCalls[0].options.method, 'PUT');
   assert.equal(hubCalls[0].options.headers.Authorization, 'Device fixture-session');
   const hubBody = JSON.parse(hubCalls[0].options.body);
-  assert.deepEqual(hubBody.providers, [{ id: 'company-provider', baseUrl: 'https://personal.example.test/v1' }]);
-  assert.deepEqual(hubBody.models, [{ name: 'company-model', providerId: 'company-provider', label: 'Company model' }]);
-  assert.deepEqual(hubBody.keys, { 'company-provider': null });
+  assert.deepEqual(hubBody.providers, [{ id: 'custom-hub', baseUrl: 'https://personal.example.test/v1' }]);
+  assert.deepEqual(hubBody.models, [{ name: 'personal-model', providerId: 'custom-hub', label: 'Personal model' }]);
+  assert.deepEqual(hubBody.keys, { 'custom-hub': null });
   assert.equal(JSON.stringify(hubBody).includes('custom-local'), false);
 });
 
@@ -298,11 +313,10 @@ test('a missing local bridge cannot forward local-looking keys to the Hub', asyn
   assert.equal(hubCalls.length, 0);
 });
 
-test('模型配置保留就地真实探测与组织地址恢复能力', () => {
+test('个人模型配置保留就地真实探测', () => {
   const panel = read('components', 'panels', 'panels-models.js');
   assert.match(panel, /保存并测试/);
   assert.match(panel, /SoduWorkAPI\.testMyModel/);
-  assert.match(panel, /恢复组织默认地址/);
   assert.match(panel, /连接设置/);
   assert.match(panel, /访问凭据/);
   assert.match(panel, /模型清单/);

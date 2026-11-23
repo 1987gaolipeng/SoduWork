@@ -9,9 +9,9 @@ const catalogs = { 'en-US': english, 'ja-JP': ja, 'ko-KR': ko }
 const wired = { 'en-US': messages, 'ja-JP': messagesByLocale['ja-JP'], 'ko-KR': messagesByLocale['ko-KR'] }
 const slots = value => (value.match(/\{\d+\}/g) || []).sort()
 
-test('capability catalog has the same 42 lookup keys and placeholders in English, Japanese and Korean', () => {
+test('capability catalog has matching lookup keys and placeholders in English, Japanese and Korean', () => {
   const keys = Object.keys(english).sort()
-  assert.equal(keys.length, 42)
+  for (const key of ['保存开放策略', '查看原文', '原文', '始终开放', '开放 {0}']) assert.ok(keys.includes(key), key)
   for (const [locale, catalog] of Object.entries(catalogs)) {
     assert.deepEqual(Object.keys(catalog).sort(), keys, locale + ': same key set')
     for (const key of keys) {

@@ -6,6 +6,7 @@ const catalog = require('./agent-runtime/runtime-catalog');
 function instructions() {
   const routes = catalog.runtimes().map(row => row.displayName + '=local:' + row.id).join('；');
   return [
+    'JSON.stringify/json.dump 序列化草稿，写盘后重读解析。公开参数用 root inputs；node inputs 仅用于上游交接。宿主安装预检最终文件，同轮最多修复两次；不自动安装或执行资源脚本。',
     '草稿顶层 mcpServers、runtimeCapabilities、skills 必须是字符串数组。写本地文件用 runtimeCapabilities:["files"]，需要终端才追加 "terminal"；无连接器/额外技能分别用 mcpServers:[]、skills:[]。不能写 runtimeCapabilities:{"files":true} 或 mcpServers:{}。随包 .mcp.json 内的 mcpServers 配置对象不是草稿字段；草稿只填写连接器名称，不复制连接配置。随包参考文件写 resources，不把文件名或自创技能名放进 skills。',
     '多底座协调必须使用 template=workflow，不能只在 instructions 中描述多个 Agent 或编造 agent/multi_agent 节点。',
     '个人本机协作节点仅使用 ai、ai_review、human_review、publish；spec、quality、approval、merge、deploy_chain、validate 是企业执行节点，安装后须经企业审核并绑定项目，不能用于直接本机试用。',
@@ -16,18 +17,18 @@ function instructions() {
     '每个 inputs[].fromNode 必须直接出现在当前节点 dependsOn 数组中，此规则包括 human_review；间接依赖不算。例：review 依赖 draft，accept 同时验收 draft 和 review 的产出时，accept.dependsOn 必须是 ["draft","review"]，不能只写 ["review"]。每个 outputKey 还必须存在于对应 fromNode 的 outputs 中。交付前逐节点核对这些关系；平台预检报错时按缺失节点或字段修正草稿，不修改校验规则。自写的 JSON 检查脚本不等于平台安装预检。',
     '最小双底座流程示例（这是完整草稿；按用户需求修改名称、prompt、文件和评测）：' + JSON.stringify({
       template: 'workflow', key: 'pi-qwen-workflow', name: 'Pi 与 Qwen 协作', version: '1.0.0',
-      description: 'Pi 形成计划文件，Qwen 依据该计划交付结果，最后由用户验收',
-      instructions: '按各节点的指令和真实输入清单协作，文件交接由平台核验，等待人工验收后完成。',
-      inputs: [], setup: { preferences: [] }, skills: [], mcpServers: [], runtimeCapabilities: ['files'], resources: [],
-      evaluationInstruction: '给出一个明确目标，核对两节点完成文件交接并等待人工验收。',
-      evaluationCriteria: ['Pi 生成 plan.md', 'Qwen 读取平台交接的 plan.md 后生成 result.md', '未经人工验收不能完成'],
+      description: '\u89c4\u5212\u3001\u5b9e\u65bd\u4e0e\u4eba\u5de5\u9a8c\u6536',
+      instructions: '\u6309\u8282\u70b9\u8bf4\u660e\u534f\u4f5c\uff0c\u4f7f\u7528\u5e73\u53f0\u4ea4\u63a5\u6750\u6599\u5e76\u7b49\u5f85\u4eba\u5de5\u9a8c\u6536\u3002',
+      inputs: [{ key: 'design_brief', type: 'text', required: true }], setup: { preferences: [] }, skills: [], mcpServers: [], runtimeCapabilities: ['files'], resources: [],
+      evaluationInstruction: '\u6838\u5bf9\u6587\u4ef6\u4ea4\u63a5\u548c\u4eba\u5de5\u9a8c\u6536',
+      evaluationCriteria: ['plan.md', 'result.md', 'human_review'],
       workflow: { nodes: [
       { key: 'plan', type: 'ai', name: '理解规划', dependsOn: [], inputs: [],
-        outputs: [{ key: 'plan', kind: 'file', path: 'plan.md', label: '执行计划' }],
-        config: { agentKind: 'local:pi', prompt: '理解本次目标，将可执行计划写入当前节点目录的 plan.md。' } },
+        outputs: [{ key: 'plan', kind: 'file', path: 'plan.md' }],
+        config: { agentKind: 'local:pi', prompt: 'design_brief: 理解本次目标，将可执行计划写入当前节点目录的 plan.md。' } },
       { key: 'work', type: 'ai', name: '实施交付', dependsOn: ['plan'],
         inputs: [{ key: 'plan', fromNode: 'plan', outputKey: 'plan', required: true }],
-        outputs: [{ key: 'result', kind: 'file', path: 'result.md', label: '交付文件' }],
+        outputs: [{ key: 'result', kind: 'file', path: 'result.md' }],
         config: { agentKind: 'local:qwen', prompt: '从“上游已校验材料”清单找到 inputKey=plan 的记录，按其实际 path/absolutePath 读取计划，在本节点目录内完成并核对 result.md。不得猜测输入路径或修改输入副本。' } },
       { key: 'accept', type: 'human_review', name: '人工验收', dependsOn: ['plan', 'work'],
         inputs: [{ key: 'plan', fromNode: 'plan', outputKey: 'plan', required: true },

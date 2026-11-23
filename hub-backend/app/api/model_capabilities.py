@@ -13,12 +13,19 @@ from ..services import audit, model_capabilities as capabilities, model_capabili
 router = APIRouter(prefix="/api/v1", tags=["models"])
 
 
+def _revision_conflict():
+    return HTTPException(409, "模型配置在检测期间已变更，请重新检测",
+                         headers={"X-Error-Code": "model_config_revision_changed"})
+
+
 async def _target(session, client, provider_id, model):
+    providers = await model_catalog.effective_provider_map(session, client)
+    if client is not None and provider_id in providers and not providers[provider_id].get("personal"):
+        raise HTTPException(403, "组织模型能力只能由管理员检测")
     rows = await model_catalog.usable(session, client)
     row = next((item for item in rows if item["providerId"] == provider_id and item["name"] == model), None)
     if row is None:
         raise HTTPException(404, "请先保存模型，并确认服务已启用且凭据可用")
-    providers = await model_catalog.effective_provider_map(session, client)
     conf = await model_catalog.resolve(session, client, model, provider_id=provider_id,
                                        available=rows, providers=providers)
     scope = capabilities.principal_scope(client, row, conf.get("keyFrom"))
@@ -66,7 +73,7 @@ async def _revalidate_principal(session, client_binding, admin_binding, request)
 
 
 async def check_saved(body, session, client=None, *, request=None, admin_binding=None):
-    if set(body) - {"providerId", "model", "checks"}:
+    if set(body) - {"providerId", "model", "checks", "expectedConfigRevision"}:
         raise HTTPException(400, "能力检测只接受已保存的服务和模型标识")
     provider_id, model = body.get("providerId"), body.get("model")
     checks = body.get("checks", list(probe.CHECKS))
@@ -75,6 +82,8 @@ async def check_saved(body, session, client=None, *, request=None, admin_binding
             or any(not isinstance(item, str) or item not in probe.CHECKS for item in checks)):
         raise HTTPException(400, "请选择已保存的模型和有效的检测项目")
     row, conf, slot, revision = await _target(session, client, provider_id, model)
+    if "expectedConfigRevision" in body and body["expectedConfigRevision"] != revision:
+        raise _revision_conflict()
     global_scope = capabilities.principal_scope(client, row, conf.get("keyFrom")) == "organization"
     client_binding = (client.id, client.user_ref, int(client.auth_version or 1)) if client is not None else None
     # Release the read transaction before waiting for network work.
@@ -84,12 +93,13 @@ async def check_saved(body, session, client=None, *, request=None, admin_binding
     stored = False
     try:
         result = await probe.run(conf, list(dict.fromkeys(checks)))
+        checks_passed = all(result["checks"][key]["status"] == "passed" for key in checks)
         session.info.clear()
         session.expire_all()
         client = await _revalidate_principal(session, client_binding, admin_binding, request)
         current, _, current_slot, current_revision = await _target(session, client, provider_id, model)
         if current_revision != revision or current_slot != slot:
-            raise HTTPException(409, "模型配置在检测期间已变更，请重新检测")
+            raise _revision_conflict()
         result.update({"providerId": provider_id, "model": model, "configRevision": revision})
         result = await capabilities.persist(session, slot, result, lease=lease)
         stored = True
@@ -104,7 +114,7 @@ async def check_saved(body, session, client=None, *, request=None, admin_binding
     else:
         await client_domain_events.device_changed(client, "models")
     fields = capabilities.runtime_fields(current.get("config") or {}, result)
-    return {"ok": all(item["status"] == "passed" for item in result["checks"].values()),
+    return {"ok": checks_passed,
             **result, **fields, "runtimeRevision": capabilities.runtime_revision(revision, fields)}
 
 

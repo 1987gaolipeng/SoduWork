@@ -108,16 +108,18 @@ export async function requirementsJourney(ctx) {
         });
         document.querySelector('[data-selbtn="who"]').click();
         document.querySelector('[data-selv="who|me"]').click();
+        const stage = document.querySelector('#cpTriage'); stage.value = 'ready'; stage.dispatchEvent(new Event('change', { bubbles:true }));
         document.querySelector('#cpCreate').click();
       }, requirementTitle);
-      await ctx.main.waitFor(() => document.querySelector('#workEntryLayer .cp-ok'), null, 15000);
+      await ctx.main.waitFor(() => document.querySelector('.wes-result-dialog.is-success[open] .wes-result-secondary'), null, 15000);
       const saved = await ctx.main.run(async title => (await SoduWorkAPI.getTasks()).filter(t => t.title === title), requirementTitle);
       assert(saved.length === 1 && saved[0].status === 'todo' && saved[0].triageStage === 'ready' &&
         saved[0].note.includes('business context') && saved[0].acceptanceCriteria.length === 2,
         '需求字段没有写入同一 Task，或产生了重复执行入口', saved);
       ctx.requirementId = saved[0].id;
-      await ctx.main.run(async () => { WorkEntrySheet.close(true, true); await RequirementsBoard.refresh(); });
-      await ctx.main.run(id => document.querySelector('[data-rq-open="' + id + '"]').click(), ctx.requirementId);
+      await ctx.main.run(() => document.querySelector('.wes-result-secondary').click());
+      await ctx.main.waitFor(id => document.querySelector('.rq-detail-content')?.dataset.taskId === id && document.querySelector('[data-rq-edit]'), ctx.requirementId);
+      await ctx.main.run(() => document.querySelector('[data-rq-edit]').click());
       await ctx.main.waitFor(() => document.querySelector('#rqEditForm'), null, 7000);
       const detail = await ctx.main.run(() => ({
         title: document.querySelector('#rqEditForm [name="title"]').value,
@@ -159,9 +161,9 @@ export async function catalogJourney(ctx) {
         overflow: document.documentElement.scrollWidth > window.innerWidth + 1,
       };
     }, null, 10000, 160);
-    assert(center.tabs.includes('plugins') && center.tabs.includes('skills') && center.tabs.includes('mcp') &&
+    assert(center.tabs.includes('plugins') && center.tabs.includes('skills') && center.tabs.includes('connections') &&
       center.tabs.includes('market') && center.cards > 0 && !center.error && !center.overflow,
-    '插件中心没有完整加载插件、Skill、MCP 和市场入口', center);
+    '插件中心没有完整加载插件、技能、连接器和市场入口', center);
     await ctx.main.run(() => {
       document.querySelector('#capPanel .cap-plugin-card [data-plugin]')?.click();
       return true;

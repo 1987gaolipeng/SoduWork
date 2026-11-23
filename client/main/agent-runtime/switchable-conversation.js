@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const segments = require('../conversation/runtime-segments');
+const titles = require('../conversation/titles');
 const windowed = require('../pi-session/snapshot-window');
 const clone = value => JSON.parse(JSON.stringify(value));
 const nativeSource = require('../conversation/native-agent-source.cjs');
@@ -60,6 +61,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
   let prefix = restored?.prefix || { messages: [], tools: [] }, persistError = '';
   const listeners = new Set(), overlays = Object.create(null), methods = new Map();
   const publicId = restored?.id || initial.sessionId, publicRef = options.ref || initial.ref;
+  let generatedTitle = options.app?.getPath && titles.read(options.app, publicId)?.generatedTitle;
   // UI/service decorations live on the conversation, not the disposable native segment.
   overlays.ui = initial.ui || {};
   const originAdapter = restored?.originAdapter || initial.adapterId;
@@ -155,6 +157,8 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
         sessionTitle: segments.title(record) || raw.historyRow?.()?.title || '',
         modelName, reasoningEffort: '', resumePath: '', resumeCwd: '', runtimeConversationId: '',
         nativeDispatchId: '', nativeSessionStarted: undefined, verifyLegacySegment: false,
+        // A fresh native segment does not replay the original archive's failure receipt.
+        retainedHistoryId: '', retainedExecutionFailure: false,
         intent: '', mode: '', goal: '', acceptance: '', accessPolicy: policy,
         activePluginIds: before.activePlugins || [],
         contextPrompts: [...(options.contextPrompts || []), segments.brief(before)] };
@@ -168,6 +172,14 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       }
       const old = raw, oldDescriptor = { ...descriptor(old), usedHarnesses:
         old.historyRow?.()?.usedHarnesses || harnesses.fromSnapshot(old.snapshot(), old.adapterId) };
+      // Freeze the exact trusted index before retiring the old native segment.
+      // Its original scan boundary cannot be reconstructed from chat text later.
+      const artifactSnapshot = await require('../conversation/artifact-runtime').snapshotAsync(handle);
+      const artifactHistory = require('../conversation/runtime-artifacts.cjs').capture(old.cwd,
+        artifactSnapshot, { sessionId: old.sessionId, adapterId: old.adapterId });
+      await selection.validate?.();
+      switchIdentity(selection);
+      if (closed || busy(raw)) throw Error(closed ? '会话已关闭，本次切换已取消' : BUSY);
       const historical = clone({ messages: before.messages || [], tools: before.tools || [],
         usageReceipts: before.usageReceipts || [], turnMetrics: before.turnMetrics || [] });
       // Native tools may reuse small IDs. Namespace only the newly-finished
@@ -178,7 +190,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
         if (block.toolCall?.id && ids.has(block.toolCall.id)) block.toolCall.id = ids.get(block.toolCall.id);
       const nextRecord = { version: 1, id: publicId, owner,
         title: segments.title(record) || old.historyRow?.()?.title || '', cwd: old.cwd, originAdapter,
-        at: Date.now(), prefix: historical,
+        at: Date.now(), prefix: historical, artifactHistory,
         accessPolicy: policy, readOnly: options.readOnly,
         activePluginIds: before.activePlugins || [],
         segments: [...(record?.segments || []), oldDescriptor],
@@ -224,13 +236,18 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
     uiSnapshot: value => record ? windowed.limitSnapshot(snapshot(), value) :
       { ...nativeSource.snapshot(raw.uiSnapshot?.(value) || windowed.limitSnapshot(snapshot(), value), raw.adapterId), runtimeSwitching: switching },
     on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    applyGeneratedTitle(title) {
+      generatedTitle = title;
+      emit({ kind: 'renamed' });
+    },
     inFlight: () => switching || Boolean(raw.inFlight?.()),
     historyRow(s) {
       const current = raw.historyRow?.(s);
       return { ...current, id: publicId, ref: publicRef,
         usedHarnesses: harnesses.merge(harnesses.fromRecord(record),
           current?.usedHarnesses || harnesses.fromSnapshot(raw.snapshot(), raw.adapterId)),
-        ...(record ? { title: segments.title(record) || current?.title || '' } : {}), adapterId: raw.adapterId };
+        ...(record ? { title: segments.title(record) || current?.title || '' } : {}),
+        ...(generatedTitle ? { title: generatedTitle } : {}), adapterId: raw.adapterId };
     },
     async close() { closed = true; unsub?.(); listeners.clear(); overlays.ui?.memorySubscription?.();
       await switchingCompletion;
@@ -242,6 +259,8 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       if (key === 'ref') return publicRef;
       if (key === 'sessionId') return publicId;
       if (key === 'runtimeOriginAdapter') return originAdapter;
+      if (key === 'artifactHistory') return record?.artifactHistory;
+      if (key === 'artifactState') return record ? raw.snapshot() : undefined;
       if (key === 'runtimeAdapters') return [...new Set([originAdapter, ...(record?.segments || []).map(s => s.adapterId), raw.adapterId])];
       if (Object.hasOwn(overlays, key)) return overlays[key];
       if (Object.hasOwn(own, key)) return own[key];

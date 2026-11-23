@@ -68,6 +68,7 @@ test('authorized plugin selections persist for later turns and explicit clearing
 test('closing a session during grant resolution cannot persist its pending selection', async t => {
   let resolveGrant, cleanup = 0;
   const f = fixture(t, { active: ['previous'], resolve: () => new Promise(resolve => { resolveGrant = resolve; }) });
+  const logicalOwner = {}; f.ctx.run = {pluginGenerationTurn:logicalOwner};
   const pending = f.send('Pending work', [], { pluginIds: ['replacement'] });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(typeof resolveGrant, 'function');
@@ -78,6 +79,7 @@ test('closing a session during grant resolution cannot persist its pending selec
   assert.deepEqual(f.commits, []);
   assert.equal(f.starts(), 0);
   assert.equal(cleanup, 1);
+  assert.equal(f.ctx.run.pluginGenerationTurn,logicalOwner);
 });
 
 test('an ordinary Pi message after a settled preflight failure can send without clicking resume', async () => {
@@ -112,4 +114,12 @@ test('an ordinary Pi message after a settled preflight failure can send without 
   assert.equal(queue.state().paused, true);
   assert.deepEqual(sent, ['First plain message', 'New plain message']);
   queue.clear();
+});
+
+test('rejected preflight preserves the original recovery generation token',async t=>{
+  for(const options of [{},{ticket:{ok:false,reason:'Synthetic model preflight failure'}}]) {
+    const f=fixture(t,options),logicalOwner={};f.ctx.run={pluginGenerationTurn:logicalOwner};
+    assert.equal((await f.send('Rejected new request',[],{pluginIds:['browser-work']})).ok,false);
+    assert.equal(f.ctx.run.pluginGenerationTurn,logicalOwner);
+  }
 });

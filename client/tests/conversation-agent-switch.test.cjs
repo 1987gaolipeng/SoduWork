@@ -18,7 +18,7 @@ test('completed goal conversations can switch while active goals remain protecte
   assert.equal(goalSwitchBlocked({ execution: { configured: true, harness: { state: 'completed' } } }), false);
 });
 
-function fixture(t) {
+function fixture(t, { nativeHistory = false, nativeOutputs = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-agent-switch-')), app = { getPath: () => root };
   const archives = new Map(), runs = new Map(), openings = [], requests = [];
   let serial = 0, unavailable = '', busy = false, gate = null, strictMissing = false;
@@ -44,6 +44,22 @@ function fixture(t) {
         selectModel(name) { model = name; return { ok: true, selection: raw.snapshot().modelSelection }; },
         close() { listeners.clear(); },
       };
+      if (nativeHistory || nativeOutputs) {
+        const ctx = { shared: { _presenceState: require('../main/pi-session/history-state').presenceState },
+          opts: options, ref: options.ref, effectiveCwd: root, displayTitle: 'Switch test',
+          piSession: { sessionId: id, sessionManager: { getSessionFile: () => file } },
+          goal: {}, prep: { model: {} }, acc: { state: { messages } }, handle: raw,
+          taskBinding: { taskIds: [], taskBindings: [] },
+          turnQueue: { size: () => 0 }, inFlight: false, _snapshot: () => raw.snapshot(),
+          failedLastTurn: options.retainedExecutionFailure === true,
+          startedAt: Date.now(), run: { startedAt: 0 } };
+        const native = require('../main/pi-session/session-handle').create(ctx);
+        if (nativeHistory) raw.historyRow = native.historyRow;
+        if (nativeOutputs) for (const key of ['outputs', 'outputSnapshot', 'outputSnapshotAsync']) raw[key] = native[key];
+        const submit = raw.submit;
+        // Match session-send's reset when a new turn passes preflight.
+        raw.submit = (...args) => { ctx.failedLastTurn = false; return submit(...args); };
+      }
       archives.set(file, { raw, messages }); return { ok: true, session: raw };
     },
     history: async () => ({ ok: true, chats: [...archives.values()].map(x => x.raw.historyRow()) }),
@@ -92,6 +108,37 @@ function fixture(t) {
     set strictMissing(v) { strictMissing = v; }, set absence(v) { absence = v; },
     set unavailable(v) { unavailable = v; }, set busy(v) { busy = v; }, set gate(v) { gate = v; } };
 }
+
+test('successful execution stays completed after switching away from and back to a retained failed Pi conversation', async t => {
+  const f = fixture(t, { nativeHistory: true }), actor = identity('owner');
+  const opened = await f.bridge.open({ ...options(f), identity: actor,
+    retainedHistoryId: 'original-history', retainedExecutionFailure: true });
+  assert.equal(opened.ok, true, opened.reason);
+  const handle = opened.session, id = handle.sessionId;
+  const native = [...f.archives.values()][0];
+  native.messages.push({ role: 'user', text: 'Earlier request' },
+    { role: 'assistant', text: 'Earlier saved answer', done: true });
+  assert.equal(handle.historyRow(handle.snapshot()).state, 'failed', 'opening still retains the genuine failure');
+  const store = require('../main/conversation/replica-store.cjs').create(path.join(f.root, 'history.sqlite'));
+  const history = require('../main/conversation/shared-history.cjs').create({
+    app: f.app, session: f.bridge, store, identityOf: () => actor });
+  try {
+    await send(handle, 'Successful Pi turn');
+    await history.capture(handle, actor);
+    assert.equal(store.get(id).state, 'completed');
+    assert.equal((await handle.selectAgent('qwen')).ok, true);
+    await send(handle, 'Successful Qwen turn');
+    assert.equal((await handle.selectAgent('pi')).ok, true);
+    assert.equal(handle.sessionId, id);
+    assert.ok(handle.snapshot().messages.some(message => message.text === 'Earlier request'));
+    await history.capture(handle, actor);
+    assert.equal(store.get(id).state, 'completed', 'a fresh segment cannot revive a superseded failure receipt');
+    assert.equal(handle.historyRow(handle.snapshot()).state, 'completed');
+    assert.equal(f.openings.at(-1).resumePath, '');
+    assert.equal(f.openings.at(-1).retainedExecutionFailure, false);
+    assert.equal(f.openings.at(-1).retainedHistoryId, '');
+  } finally { await history.close(); }
+});
 
 test('history and live presence retain used runtimes across switches and exclude unused choices', async t => {
   const f = fixture(t);
@@ -222,25 +269,135 @@ test('switching to Codex with an empty native directory retains an unknown defau
   assert.equal(f.requests.filter(row => row.op === 'job.dispatch').length, 0);
 });
 
-test('switching account runtimes uses the target catalog default without inheriting another account model', async t => {
-  t.mock.method(require('../main/agent-runtime/native-model-catalog'), 'list', () => ({ ok: true,
-    models: [{ id: 'target-codex-default' }] }));
+test('retired runtime switches preserve the active runtime and transcript without starting a replacement', async t => {
   const f = fixture(t), handle = (await f.bridge.open(options(f))).session, id = handle.sessionId;
-  await send(handle, 'Keep this conversation across account runtimes');
-  assert.equal((await handle.selectAgent('codex', { modelName: 'explicit-codex-model' })).ok, true);
-  assert.equal((await handle.selectAgent('claude')).ok, true);
-  assert.equal(handle.sessionId, id);
-  assert.equal(handle.snapshot().modelSelection.name, '');
-  assert.equal((await handle.selectAgent('codex')).ok, true);
-  assert.equal(handle.snapshot().modelSelection.name, 'target-codex-default');
-  assert.equal((await handle.selectAgent('claude', { modelName: 'explicit-claude-model' })).ok, true);
-  assert.equal(handle.snapshot().modelSelection.name, 'explicit-claude-model');
-  assert.equal(handle.sessionId, id);
-  assert.equal(handle.snapshot().messages[0].text, 'Keep this conversation across account runtimes');
+  await send(handle, 'Keep this conversation on its current runtime');
+  const before = handle.snapshot(), requests = f.requests.length;
+  for (const adapterId of ['claude', 'harness2']) {
+    const result = await handle.selectAgent(adapterId);
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /Agent/);
+    assert.equal(handle.sessionId, id);
+    assert.equal(handle.snapshot().adapterId, before.adapterId);
+    assert.deepEqual(handle.snapshot().messages, before.messages);
+    assert.equal(f.requests.length, requests);
+  }
 });
+
 const options = f => ({ app: f.app, ref: 'chat-switch', cwd: f.root, identity: identity('alice'), adapterId: 'pi', modelName: 'model-a',
   resolvePlugins: async ids => ({ items: ids.map(pluginId => ({ pluginId, name: 'Meeting', context: 'Fixture plugin context' })) }) });
 async function send(handle, text) { const sent = handle.submit(text, [], {}); assert.equal(sent.accepted, true); const done = await sent.completion; assert.equal(done.ok, true, JSON.stringify(done)); }
+
+test('switching Runner preserves an indexed image without expanding the new delivery', async t => {
+  const f = fixture(t), runtime = require('../main/conversation/artifact-runtime');
+  const handle = (await f.bridge.open({ ...options(f), adapterId: 'dsh' })).session;
+  const image = path.join(f.root, 'goldfish.png');
+  fs.writeFileSync(image, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5F0AAAAASUVORK5CYII=', 'base64'));
+  // Windows filesystem timestamps can lag behind the session's wall clock.
+  const writtenAt = new Date();
+  fs.utimesSync(image, writtenAt, writtenAt);
+  const before = await runtime.snapshotAsync(handle);
+  const item = before.items.find(row => row.name === 'goldfish.png');
+  assert.ok(item);
+  assert.equal((await runtime.action(handle, handle.ref, item.artifactId, 'image-full', {})).ok, true);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal((await handle.selectAgent('kimi')).ok, true);
+  const after = await runtime.snapshotAsync(handle);
+  assert.ok(after.items.some(row => row.artifactId === item.artifactId));
+  assert.ok(!after.delivery.items.some(row => row.artifactId === item.artifactId));
+  assert.ok(!after.got.files.some(row => row.path === image));
+  assert.equal((await runtime.action(handle, handle.ref, item.artifactId, 'image-full', {})).ok, true);
+});
+
+for (const [from, to] of [['pi', 'dsh'], ['dsh', 'pi'], ['dsh', 'codex-harness'], ['dsh', 'qwen'], ['dsh', 'opencode']]) {
+  test(`historical outputs remain addressable when switching ${from} to ${to}`, async t => {
+    const f = fixture(t, { nativeOutputs: true }), runtime = require('../main/conversation/artifact-runtime');
+    const handle = (await f.bridge.open({ ...options(f), adapterId: from })).session;
+    const file = path.join(f.root, 'saved.txt');
+    fs.writeFileSync(file, 'Retained content');
+    // Filesystem write timestamps can precede the session's wall-clock boundary.
+    const writtenAt = new Date();
+    fs.utimesSync(file, writtenAt, writtenAt);
+    const item = (await runtime.snapshotAsync(handle)).items.find(row => row.name === 'saved.txt');
+    assert.ok(item);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const result = await handle.selectAgent(to);
+    assert.equal(result.ok, true, result.reason);
+    const after = await runtime.snapshotAsync(handle), retained = after.items.find(row => row.artifactId === item.artifactId);
+    assert.equal(retained.historical, true);
+    assert.equal(retained.primary, false);
+    assert.equal(retained.changedInTurn, false);
+    assert.equal((await runtime.action(handle, handle.ref, item.artifactId, 'read', {})).text, 'Retained content');
+    assert.ok(!after.delivery.items.some(row => row.artifactId === item.artifactId));
+  });
+}
+
+test('repeated switches and cold reopening retain exact outputs without claiming them as new delivery', async t => {
+  const f = fixture(t), runtime = require('../main/conversation/artifact-runtime');
+  const handle = (await f.bridge.open({ ...options(f), adapterId: 'dsh' })).session;
+  fs.writeFileSync(path.join(f.root, 'first.txt'), 'First content');
+  // Align fixture timestamps with the session clock, as in the single-switch
+  // cases above; filesystem timestamps may otherwise precede the turn boundary.
+  const firstWrittenAt = new Date();
+  fs.utimesSync(path.join(f.root, 'first.txt'), firstWrittenAt, firstWrittenAt);
+  const first = (await runtime.snapshotAsync(handle)).items.find(row => row.name === 'first.txt');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal((await handle.selectAgent('kimi')).ok, true);
+  fs.writeFileSync(path.join(f.root, 'second.txt'), 'Second content');
+  const secondWrittenAt = new Date();
+  fs.utimesSync(path.join(f.root, 'second.txt'), secondWrittenAt, secondWrittenAt);
+  const second = (await runtime.snapshotAsync(handle)).items.find(row => row.name === 'second.txt');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal((await handle.selectAgent('qwen')).ok, true);
+  const id = handle.sessionId;
+  const saved = segments.read(f.app, id).artifactHistory;
+  assert.ok(saved.items.some(row => row.metadata.artifactId === first.artifactId));
+  assert.ok(saved.items.some(row => row.metadata.artifactId === second.artifactId));
+  await f.restart();
+  const reopened = await f.bridge.open({ ...options(f), ref: 'restored-outputs', runtimeConversationId: id });
+  assert.equal(reopened.ok, true, reopened.reason);
+  await waitIdle(reopened.session);
+  const after = await runtime.snapshotAsync(reopened.session);
+  for (const item of [first, second]) {
+    assert.ok(after.items.some(row => row.artifactId === item.artifactId && row.historical));
+    assert.ok(!after.delivery.items.some(row => row.artifactId === item.artifactId));
+    assert.equal((await runtime.action(reopened.session, reopened.session.ref, item.artifactId, 'read', {})).ok, true);
+  }
+  await f.restart();
+  const denied = await f.bridge.open({ ...options(f), identity: identity('another-owner'), runtimeConversationId: id });
+  assert.equal(denied.ok, false);
+});
+
+test('an unreadable output snapshot refuses the switch and retains the old runtime', async t => {
+  const f = fixture(t, { nativeOutputs: true });
+  const handle = (await f.bridge.open(options(f))).session;
+  const native = [...f.archives.values()][0].raw;
+  native.outputSnapshotAsync = async () => { throw Error('Output index unavailable'); };
+  const result = await handle.selectAgent('kimi');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /Output index unavailable/);
+  assert.equal(handle.adapterId, 'pi');
+  assert.equal(segments.read(f.app, handle.sessionId), null);
+});
+
+test('an output read started before a runtime switch cannot return the old source afterward', async t => {
+  const f = fixture(t, { nativeOutputs: true }), runtime = require('../main/conversation/artifact-runtime');
+  const handle = (await f.bridge.open(options(f))).session;
+  const native = [...f.archives.values()][0].raw, original = native.outputSnapshotAsync;
+  let release, entered, calls = 0;
+  const started = new Promise(resolve => { entered = resolve; });
+  const pending = new Promise(resolve => { release = resolve; });
+  native.outputSnapshotAsync = async () => {
+    const value = await original();
+    if (++calls === 1) { entered(); await pending; }
+    return value;
+  };
+  const reading = runtime.snapshotAsync(handle);
+  const rejected = assert.rejects(reading, { code: 'ARTIFACT_SOURCE_CHANGED' });
+  await started;
+  assert.equal((await handle.selectAgent('kimi')).ok, true);
+  release(); await rejected;
+});
 
 async function waitIdle(handle) {
   for (let n = 0; n < 200; n++) {

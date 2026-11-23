@@ -63,6 +63,37 @@ test('default jitter, Retry-After and explicit user schedules retain their contr
   assert.equal(value.plan({ settings: { ...settings, enabled: false }, attempt: 1 }), false);
 });
 
+test('provider waits are honored in full or stop within the shared turn budget', () => {
+  for (const error of [{ retryAfterMs: 360000 }, { errorMessage: 'HTTP 429. Retry after 360 seconds.' },
+    { errorMessage: 'HTTP 429 retry_after_ms=360000' }]) {
+    const value = budget.create({ random: () => .5 });
+    assert.equal(value.plan({ settings: defaults, attempt: 1, error }).delayMs, 360000);
+    assert.equal(value.plan({ settings: defaults, attempt: 2, error }), false);
+    assert.equal(value.snapshot().used, 1, 'a rejected wait does not reserve another attempt');
+    assert.equal(value.reserve(), false, 'automatic recovery cannot bypass the rejected provider wait');
+  }
+  for (const retryAfterMs of [700000, 86400000, Infinity]) {
+    const value = budget.create();
+    assert.equal(value.plan({ settings: defaults, attempt: 1, error: { retryAfterMs } }), false);
+    assert.equal(value.snapshot().used, 0);
+    assert.equal(value.available(), false);
+    assert.equal(value.reserve(), false);
+    value.reset();
+    assert.equal(value.plan({ settings: defaults, attempt: 1 }).delayMs >= 4000, true);
+  }
+});
+
+test('provider waits also fit the remaining elapsed turn window', () => {
+  let now = 1000;
+  const value = budget.create({ clock: () => now, random: () => .5 });
+  assert.equal(value.plan({ settings: defaults, attempt: 1 }).delayMs, 5000);
+  // Time spent on the intervening model/tool work consumes the same window.
+  now += value.snapshot().windowMs - 1000;
+  assert.equal(value.plan({ settings: defaults, attempt: 2, error: { retryAfterMs: 2000 } }), false);
+  assert.equal(value.snapshot().used, 1);
+  assert.equal(value.reserve(), false);
+});
+
 test('large journal streams asynchronously and preserves interleaving, unsent context and restart', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-journal-pressure-'));
   t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 6 }));

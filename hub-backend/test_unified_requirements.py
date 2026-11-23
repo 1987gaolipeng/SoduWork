@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import unittest
 import uuid
-from contextlib import closing
+from contextlib import closing, contextmanager, ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -507,6 +507,134 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
         for method, path in (("GET", "work-items"), ("POST", "work-items/delivery-task"), ("PATCH", "work-items/old")):
             result = await self.call(method, path, json={})
             self.assertEqual(result.status_code, 410, result.text)
+
+    async def _seed_guard_milestone(self, *, task_status="doing", status="planned", rounds=0,
+                                    source="", suffix=""):
+        tid, mid = "guard-task" + suffix, "guard-step" + suffix
+        async with self.sessions() as session:
+            session.add(models.Task(id=tid, title="Guard fixture", status=task_status,
+                                    owner_client_id="owner", created_by="owner"))
+            session.add(models.Milestone(id=mid, task_id=tid, title="Fixture step",
+                                         status=status, rounds=rounds, src_task_id=source,
+                                         note="Original note"))
+            await session.commit()
+        return tid, mid
+
+    @contextmanager
+    def _milestone_executor(self, *, switch=None, runner_done=True):
+        # Only replace external execution/configuration; HTTP, ownership, state and events are real.
+        with ExitStack() as stack:
+            for name, value in (("load", {}), ("available", True), ("with_model", {}),
+                                ("milestone_brief", "Synthetic milestone instructions")):
+                stack.enter_context(patch("app.services.ai_exec." + name, return_value=value))
+            stack.enter_context(patch.object(tasks, "_dispatch_ref", new=AsyncMock(return_value="fixture-ref")))
+            stack.enter_context(patch.object(tasks, "_attach_dev_flow", new=AsyncMock()))
+            stack.enter_context(patch.object(tasks, "_stage_switch", new=AsyncMock(return_value=switch)))
+            say = stack.enter_context(patch("app.services.ai_exec.say_sync", return_value={"ok": True}))
+            dispatch = stack.enter_context(patch.object(tasks, "_run_stage_with", new=AsyncMock(
+                return_value={"ok": True, "ref": "fixture-new-ref"})))
+            info = stack.enter_context(patch("app.services.ai_exec.runner_info_sync",
+                                             return_value={"done": runner_done}))
+            yield say, dispatch, info
+
+    async def test_milestone_unexecuted_verdict_cannot_change_state_or_source(self):
+        for index, status in enumerate(("planned", "skipped", "failed", "doing", "done")):
+            with self.subTest(status=status):
+                tid, mid = await self._seed_guard_milestone(status=status, source="shared", suffix=str(index))
+                with self._milestone_executor() as (say, dispatch, info):
+                    response = await self.call("POST", f"tasks/{tid}/milestones/{mid}/verdict",
+                                               json={"pass": True})
+                self.assertEqual(response.status_code, 409, response.text)
+                say.assert_not_called()
+                dispatch.assert_not_awaited()
+                info.assert_not_called()
+                async with self.sessions() as session:
+                    milestone = await session.get(models.Milestone, mid)
+                    self.assertEqual((milestone.status, milestone.rounds, milestone.note),
+                                     (status, 0, "Original note"))
+                    self.assertEqual((await session.get(models.Task, "shared")).status, "todo")
+                    events = (await session.execute(select(models.TaskEvent).where(
+                        models.TaskEvent.task_id.in_((tid, "shared"))))).scalars().all()
+                    self.assertEqual(events, [])
+
+    async def test_milestone_executed_verdict_keeps_acceptance_and_rejection(self):
+        for index, (status, passed) in enumerate((("failed", True), ("skipped", True),
+                                                ("planned", False))):
+            with self.subTest(status=status, passed=passed):
+                tid, mid = await self._seed_guard_milestone(status=status, rounds=1, suffix=str(index))
+                response = await self.call("POST", f"tasks/{tid}/milestones/{mid}/verdict",
+                                           json={"pass": passed, "note": "Fixture review"})
+                self.assertEqual(response.status_code, 200, response.text)
+                async with self.sessions() as session:
+                    milestone = await session.get(models.Milestone, mid)
+                    self.assertEqual((milestone.status, milestone.rounds, milestone.note),
+                                     ("done" if passed else "failed", 1, "Fixture review"))
+                    events = (await session.execute(select(models.TaskEvent).where(
+                        models.TaskEvent.task_id == tid,
+                        models.TaskEvent.kind == "ai.milestone_verdict"))).scalars().all()
+                    self.assertEqual(len(events), 1)
+
+    async def test_milestone_running_verdict_still_waits_for_execution(self):
+        tid, mid = await self._seed_guard_milestone(status="doing", rounds=1)
+        with self._milestone_executor(runner_done=False) as (_, _, info):
+            response = await self.call("POST", f"tasks/{tid}/milestones/{mid}/verdict", json={"pass": True})
+        self.assertEqual(response.status_code, 409, response.text)
+        info.assert_called_once()
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(models.Milestone, mid)).status, "doing")
+
+    async def test_milestone_terminal_task_cannot_dispatch_or_resume(self):
+        for index, (status, explicit) in enumerate((
+                ("done", True), ("done", False), ("cancel", True), ("cancel", False))):
+            with self.subTest(status=status, explicit=explicit):
+                tid, mid = await self._seed_guard_milestone(task_status=status, suffix=str(index))
+                with self._milestone_executor(switch={"id": "fixture-agent"} if explicit else None) as (say, dispatch, _):
+                    response = await self.call("POST", f"tasks/{tid}/ai-run-milestone",
+                                               json={"id": mid} if explicit else {})
+                self.assertEqual(response.status_code, 409, response.text)
+                say.assert_not_called()
+                dispatch.assert_not_awaited()
+                async with self.sessions() as session:
+                    self.assertEqual((await session.get(models.Task, tid)).status, status)
+                    milestone = await session.get(models.Milestone, mid)
+                    self.assertEqual((milestone.status, milestone.rounds), ("planned", 0))
+                    self.assertEqual((await session.execute(select(models.TaskEvent).where(
+                        models.TaskEvent.task_id == tid))).scalars().all(), [])
+
+    async def test_milestone_active_task_keeps_initial_retry_and_executor_switch(self):
+        cases = (("todo", "planned", 0, True, None),
+                 ("doing", "failed", 1, False, None),
+                 ("doing", "planned", 0, True, {"id": "fixture-agent"}))
+        for index, (status, step_status, rounds, explicit, switch) in enumerate(cases):
+            with self.subTest(status=status, step_status=step_status, switch=switch):
+                tid, mid = await self._seed_guard_milestone(
+                    task_status=status, status=step_status, rounds=rounds, suffix=str(index))
+                with self._milestone_executor(switch=switch) as (say, dispatch, _):
+                    response = await self.call("POST", f"tasks/{tid}/ai-run-milestone",
+                                               json={"id": mid} if explicit else {})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(say.call_count, 0 if switch else 1)
+                self.assertEqual(dispatch.await_count, 1 if switch else 0)
+                async with self.sessions() as session:
+                    self.assertEqual((await session.get(models.Task, tid)).status, "doing")
+                    milestone = await session.get(models.Milestone, mid)
+                    self.assertEqual((milestone.status, milestone.rounds), ("doing", rounds + 1))
+                    events = (await session.execute(select(models.TaskEvent).where(
+                        models.TaskEvent.task_id == tid,
+                        models.TaskEvent.kind == "ai.milestone_run"))).scalars().all()
+                    self.assertEqual(len(events), 1)
+
+    async def test_milestone_guards_preserve_ownership_and_retry_limit(self):
+        tid, mid = await self._seed_guard_milestone(status="failed", rounds=2)
+        with self._milestone_executor() as (say, dispatch, _):
+            for action in ("ai-run-milestone", f"milestones/{mid}/verdict"):
+                response = await self.call("POST", f"tasks/{tid}/{action}", "peer",
+                                           json={"id": mid, "pass": True})
+                self.assertEqual(response.status_code, 404, response.text)
+            response = await self.call("POST", f"tasks/{tid}/ai-run-milestone", json={"id": mid})
+            self.assertEqual(response.status_code, 409, response.text)
+            say.assert_not_called()
+            dispatch.assert_not_awaited()
 
     def test_six_swimlane_mapping(self):
         from types import SimpleNamespace

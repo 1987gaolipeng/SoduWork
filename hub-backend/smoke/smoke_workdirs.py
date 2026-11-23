@@ -207,9 +207,9 @@ try:
 
     # Verify path safety.
     evil = FakeRepo(id="r9", name="坏", local_dir="../../跑出去")
-    ed = workdirs.repo_dir(root, evil)
+    rejected = workdirs.plan(root, evil, "invalid-path")
     chk("★工程子目录不许跳出工作目录（../..）",
-        os.path.normcase(root) in os.path.normcase(ed), ed)
+        not rejected["ok"] and not rejected["dir"], rejected)
 finally:
     rm_tree(base)
     rm_tree(SMOKE_DATA)

@@ -46,6 +46,8 @@ ${If} $0 == -1
 ${EndIf}
 StrCpy $soduworkLock $0
 !insertmacro soduworkDetectPreviousInstall
+StrCpy $installContextRoot "$soduWorkRoot"
+Call WriteInstallContext
 ${If} ${FileExists} "$appExe"
   ; Legacy clients passed /S only: still preserve their shortcuts.
   ${If} ${Silent}

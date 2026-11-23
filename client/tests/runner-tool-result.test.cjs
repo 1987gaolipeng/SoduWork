@@ -51,7 +51,7 @@ test('resumed Harness2 errors show guidance while successful JSON and unknown di
     { seq: 5, kind: 'do', tool: 'request', callId: 'failed-request' },
     { seq: 6, kind: 'out', tool: 'request', callId: 'failed-request', text: envelope, isError: true },
   ];
-  const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime('harness2'),
+  const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime('kimi'),
     modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'fixture', key: 'fixture' } }) },
     runnerRuntime: { async rpc(op) {
       return { ok: true, data: op === 'job.session' ? { status: 'done', items: rows } : {} };

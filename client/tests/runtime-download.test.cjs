@@ -13,9 +13,9 @@ const { downloadFile, downloadLabel, errorLabel } = require('../scripts/runtime-
 
 // Generate an isolated, short-lived test CA with Node alone. No committed keys,
 // external OpenSSL installation or globally disabled TLS verification is needed.
-let material;
-function certificate() {
-  if (material) return material;
+const materials = new Map();
+function certificate(ip = '127.0.0.1') {
+  if (materials.has(ip)) return materials.get(ip);
   function der(tag, ...parts) {
     const body = Buffer.concat(parts.map(value => Buffer.isBuffer(value) ? value : Buffer.from(value)));
     const length = body.length < 128 ? Buffer.from([body.length]) : (() => {
@@ -37,20 +37,21 @@ function certificate() {
   };
   const pair = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
   const algorithm = seq(oid('1.2.840.113549.1.1.11'), der(5, Buffer.alloc(0)));
-  const name = seq(der(0x31, seq(oid('2.5.4.3'), der(0x0c, 'SoduWork generated download fixture'))));
+  const name = seq(der(0x31, seq(oid('2.5.4.3'), der(0x0c, 'SoduWork generated download fixture ' + ip))));
   const time = offset => der(0x17, new Date(Date.now() + offset).toISOString().replace(/[-:T]/g, '').slice(2, 14) + 'Z');
   const extensions = der(0xa3, seq(
     seq(oid('2.5.29.19'), der(1, Buffer.from([255])), der(4, seq(der(1, Buffer.from([255]))))),
     seq(oid('2.5.29.17'), der(4, seq(
       ...['localhost', 'archive.invalid', 'redirect.invalid'].map(host => der(0x82, host)),
-      der(0x87, Buffer.from([127, 0, 0, 1])),
+      der(0x87, ip === '::1' ? Buffer.from('00000000000000000000000000000001', 'hex') : Buffer.from(ip.split('.').map(Number))),
     ))),
   ));
   const tbs = seq(der(0xa0, der(2, Buffer.from([2]))), der(2, Buffer.from([1])), algorithm, name,
     seq(time(-86400000), time(86400000)), name, pair.publicKey.export({ format: 'der', type: 'spki' }), extensions);
   const signed = seq(tbs, algorithm, der(3, Buffer.concat([Buffer.from([0]), crypto.sign('sha256', tbs, pair.privateKey)])));
   const pem = '-----BEGIN CERTIFICATE-----\n' + signed.toString('base64').match(/.{1,64}/g).join('\n') + '\n-----END CERTIFICATE-----\n';
-  material = { cert: pem, key: pair.privateKey.export({ format: 'pem', type: 'pkcs8' }), tls: { ca: pem } };
+  const material = { cert: pem, key: pair.privateKey.export({ format: 'pem', type: 'pkcs8' }), tls: { ca: pem } };
+  materials.set(ip, material);
   return material;
 }
 
@@ -60,11 +61,11 @@ function directory(t) {
   return path.join(folder, 'archive.exe');
 }
 
-async function listen(t, server) {
+async function listen(t, server, host = '127.0.0.1') {
   const sockets = new Set();
   server.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
   await new Promise((resolve, reject) => {
-    server.once('error', reject); server.listen(0, '127.0.0.1', resolve);
+    server.once('error', reject); server.listen(0, host, resolve);
   });
   t.after(async () => {
     for (const socket of sockets) socket.destroy();
@@ -83,9 +84,9 @@ async function origin(t, handler) {
   return { port, received, url: `https://127.0.0.1:${port}/archive`, remote: `https://archive.invalid:${port}/archive` };
 }
 
-async function proxy(t, originPort, { secure = false, authorization = '' } = {}) {
+async function proxy(t, originPort, { secure = false, authorization = '', tlsMaterial, host = '127.0.0.1' } = {}) {
   const received = [], upstreams = new Set();
-  const server = secure ? https.createServer(certificate()) : http.createServer();
+  const server = secure ? https.createServer(tlsMaterial || certificate()) : http.createServer();
   server.on('connect', (request, socket, head) => {
     received.push({ target: request.url, headers: { ...request.headers } });
     if (authorization && request.headers['proxy-authorization'] !== authorization) {
@@ -103,9 +104,9 @@ async function proxy(t, originPort, { secure = false, authorization = '' } = {})
     socket.on('error', () => upstream.destroy());
     socket.once('close', () => upstream.destroy());
   });
-  const port = await listen(t, server);
+  const port = await listen(t, server, host);
   t.after(() => { for (const socket of upstreams) socket.destroy(); });
-  return { received, url: `${secure ? 'https' : 'http'}://127.0.0.1:${port}` };
+  return { received, url: `${secure ? 'https' : 'http'}://${host.includes(':') ? '[' + host + ']' : host}:${port}` };
 }
 
 function options(environment = {}, extra = {}) {
@@ -158,6 +159,36 @@ test('trusted HTTPS proxies work and proxy credentials never reach the origin', 
   assert.equal(tunnel.received[0].headers['proxy-authorization'], authorization);
   assert.equal(source.received[0].headers['proxy-authorization'], undefined);
   assert.equal(source.received[0].headers.authorization, undefined);
+});
+
+test('HTTPS proxy DNS names retain SNI and trusted certificate checks', async t => {
+  const source = await origin(t, (_request, response) => response.end('DNS proxy fixture'));
+  const tunnel = await proxy(t, source.port, { secure: true });
+  const target = directory(t);
+  await downloadFile(source.remote, target, options({ https_proxy: tunnel.url.replace('127.0.0.1', 'localhost') }));
+  assert.equal(fs.readFileSync(target, 'utf8'), 'DNS proxy fixture');
+});
+
+test('trusted IPv6 HTTPS proxies connect without sending an IP literal as SNI', async t => {
+  const source = await origin(t, (_request, response) => response.end('IPv6 proxy fixture'));
+  const ipv6 = certificate('::1');
+  const tunnel = await proxy(t, source.port, { secure: true, host: '::1', tlsMaterial: ipv6 });
+  const target = directory(t);
+  await downloadFile(source.remote, target, options({ https_proxy: tunnel.url },
+    { tls: { ca: [certificate().cert, ipv6.cert] } }));
+  assert.equal(fs.readFileSync(target, 'utf8'), 'IPv6 proxy fixture');
+});
+
+test('a trusted HTTPS proxy certificate with the wrong IP is rejected before reaching the origin', async t => {
+  const source = await origin(t, (_request, response) => response.end('must not arrive'));
+  const wrong = certificate('127.0.0.2');
+  const tunnel = await proxy(t, source.port, { secure: true, tlsMaterial: wrong });
+  const target = directory(t);
+  await assert.rejects(downloadFile(source.remote, target, options({ https_proxy: tunnel.url },
+    { tls: { ca: [certificate().cert, wrong.cert] } })), /ERR_TLS_CERT_ALTNAME_INVALID/);
+  assert.equal(source.received.length, 0);
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(fs.existsSync(target + '.part'), false);
 });
 
 test('redirects select a new CONNECT destination and retain origin credential isolation', async t => {
@@ -225,6 +256,47 @@ test('the total deadline ends a continuously active response and cleans partial 
   assert.equal(fs.existsSync(target + '.part'), false);
 });
 
+test('a known-size archive can finish beyond the original deadline with sustained progress', async t => {
+  const chunk = Buffer.alloc(32 * 1024, 0x53);
+  const chunks = 10;
+  const source = await origin(t, (_request, response) => {
+    let sent = 1;
+    response.write(chunk);
+    const timer = setInterval(() => {
+      if (++sent === chunks) response.end(chunk);
+      else response.write(chunk);
+    }, 80);
+    response.once('close', () => clearInterval(timer));
+  });
+  const target = directory(t);
+  await downloadFile(source.url, target, options({}, {
+    resume: true, expectedBytes: chunk.length * chunks, timeoutMs: 400, idleTimeoutMs: 2000,
+  }));
+  assert.deepEqual(fs.readFileSync(target), Buffer.alloc(chunk.length * chunks, 0x53));
+});
+
+test('a resumed prefix and small trickles do not renew the progress deadline', async t => {
+  const target = directory(t);
+  const prefix = Buffer.alloc(64 * 1024 - 1);
+  fs.writeFileSync(target + '.part', prefix);
+  const expectedBytes = prefix.length + 3;
+  const source = await origin(t, (_request, response) => {
+    response.writeHead(206, { 'Content-Range': `bytes ${prefix.length}-${expectedBytes - 1}/${expectedBytes}` });
+    let sent = 0;
+    const timer = setInterval(() => {
+      if (++sent === 3) response.end('x');
+      else response.write('x');
+    }, 240);
+    response.once('close', () => clearInterval(timer));
+  });
+  await assert.rejects(downloadFile(source.url, target, options({}, {
+    resume: true, expectedBytes, timeoutMs: 600, idleTimeoutMs: 1500,
+  })), /time limit|deadline|progress.*timeout/i);
+  assert.equal(fs.existsSync(target), false);
+  const retained = fs.statSync(target + '.part').size;
+  assert.ok(retained > prefix.length && retained < expectedBytes);
+});
+
 test('redirects share one total deadline', async t => {
   const source = await origin(t, (_request, response) => {
     const timer = setTimeout(() => { response.writeHead(302, { Location: '/archive' }); response.end(); }, 80);
@@ -267,6 +339,48 @@ test('a complete partial is published after a matching 416 total', async t => {
   const source = await origin(t, (_request, response) => { response.writeHead(416, { 'Content-Range': `bytes */${content.length}` }); response.end(); });
   await downloadFile(source.url, target, options({}, { resume: true }));
   assert.equal(fs.readFileSync(target, 'utf8'), content);
+});
+
+test('a 416 matching the partial cannot publish it at the wrong pinned size', async t => {
+  const target = directory(t);
+  fs.writeFileSync(target + '.part', 'part');
+  const source = await origin(t, (_request, response) => {
+    response.writeHead(416, { 'Content-Range': 'bytes */4' });
+    response.end();
+  });
+  await assert.rejects(downloadFile(source.url, target, options({}, { resume: true, expectedBytes: 8 })));
+  assert.equal(fs.existsSync(target), false);
+});
+
+test('a short complete response retains its bytes and the next request resumes from them', async t => {
+  const target = directory(t);
+  const source = await origin(t, (request, response) => {
+    if (request.headers.range) {
+      response.writeHead(206, { 'Content-Range': 'bytes 3-5/6' });
+      response.end('def');
+    } else {
+      response.write('abc');
+      response.end();
+    }
+  });
+  const settings = options({}, { resume: true, expectedBytes: 6 });
+  await assert.rejects(downloadFile(source.url, target, settings));
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(fs.readFileSync(target + '.part', 'utf8'), 'abc');
+  await downloadFile(source.url, target, settings);
+  assert.equal(source.received[1].headers.range, 'bytes=3-');
+  assert.equal(fs.readFileSync(target, 'utf8'), 'abcdef');
+});
+
+test('an oversized body removes the corrupt partial even when resume is enabled', async t => {
+  const target = directory(t);
+  const source = await origin(t, (_request, response) => {
+    response.write('abc');
+    response.end('def');
+  });
+  await assert.rejects(downloadFile(source.url, target, options({}, { resume: true, expectedBytes: 5 })));
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(fs.existsSync(target + '.part'), false);
 });
 
 test('a mismatched 416 total discards the partial and retries from zero', async t => {

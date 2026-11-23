@@ -17,7 +17,10 @@ function _candidate(handle, snapshot) {
     if (typeof handle.outputSnapshot !== 'function') return null;
     try { snapshot = handle.outputSnapshot(); } catch (_) { return null; }
   }
-  const matches = candidates.collect(handle.cwd, snapshot);
+  return newest(handle, candidates.collect(handle.cwd, snapshot));
+}
+
+function newest(handle, matches) {
   matches.sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
   const file = matches[0];
   return file ? { handle, file, at: Number(file.at || handle.startedAt || 0) } : null;
@@ -40,7 +43,7 @@ async function readRecentAsync(handles, app) {
     try {
       const snapshot = typeof handle?.outputSnapshotAsync === 'function'
         ? await handle.outputSnapshotAsync() : handle?.outputSnapshot?.();
-      return snapshot ? _candidate(handle, snapshot) : null;
+      return snapshot && handle.cwd ? newest(handle, await candidates.collectAsync(handle.cwd, snapshot)) : null;
     } catch (_) { return null; }
   }))).filter(Boolean).sort((a, b) => b.at - a.at);
   return rows.length ? readCandidate(rows[0], app)
@@ -83,38 +86,62 @@ async function readSessionAsync(handle, target, app) {
   return readSession(handle, target, await require('../conversation/artifact-runtime').snapshotAsync(handle), app);
 }
 
-function readCandidate(found, app) {
+function readCandidate(found, app, options = {}) {
+  let json;
   try {
-    if (typeof found.handle.inFlight === 'function' && found.handle.inFlight()) {
+    if (!options.staticValidation && typeof found.handle.inFlight === 'function' && found.handle.inFlight()) {
       return { ok: false, reason: '插件还在制作中，请等本轮完成后安装' };
     }
     resources.assertNoLinks(path.resolve(found.handle.cwd), path.resolve(found.file.path));
     const stat = fs.statSync(found.file.path);
     if (!stat.isFile()) return { ok: false, reason: '插件草稿已经不在了' };
     if (stat.size > MAX_BYTES) return { ok: false, reason: '插件草稿超过 24MB，无法安全读取' };
-    const bytes = fs.readFileSync(found.file.path);
-    if (bytes.length > MAX_BYTES) return { ok: false, reason: '插件草稿超过 24MB，无法安全读取' };
+    const bytes = resources.readSized(found.file.path, stat.size);
+    const verify = options.staticValidation && found.file.pluginManifestDigest;
+    const changed = () => Object.assign(Error('Draft or resource bytes changed during validation'), { code: 'EAGAIN' });
+    if (verify && candidates.hash(bytes) !== found.file.pluginManifestDigest) throw changed();
     const source = { sessionId: String(found.handle.sessionId || ''),
       relative: String(found.file.relative || DRAFT_NAME), at: found.at };
     const skillPackages = require('./skill-package-candidate');
     if (candidates.SKILL_ARCHIVE.test(found.file.path)) return skillPackages.result(skillPackages.read(bytes, app), source);
-    const body = candidates.ARCHIVE.test(found.file.path)
-      ? require('../plugin-package-reader.cjs').readPersonalArchive(bytes)
-      : candidates.parseJson(bytes.toString('utf8'));
+    let body;
+    if (candidates.ARCHIVE.test(found.file.path)) {
+      body = require('../plugin-package-reader.cjs').readPersonalArchive(bytes);
+    } else {
+      json = bytes.toString('utf8');
+      body = candidates.parseJson(json);
+    }
     if (!body || Array.isArray(body) || typeof body !== 'object') {
       return { ok: false, reason: '插件草稿不是有效的 JSON 对象' };
     }
     const collected = resources.collect(body, found.file.path, found.handle.cwd);
+    if (verify && !candidates.ARCHIVE.test(found.file.path)) {
+      const digests = new Map((collected.resources || []).map(row => [row.path, row.sha256]));
+      const signatures = [found.file.pluginManifestDigest, ...(body.resources || [])
+        .filter(row => !Object.hasOwn(row, 'content')).map(row => [row.path, digests.get(row.path)])];
+      if (candidates.revisionOf(signatures) !== found.file.pluginRevision) throw changed();
+    }
     const skill = skillPackages.fromLegacy(collected, app, candidates.ARCHIVE.test(found.file.path) ? bytes : undefined);
     if (skill) return skillPackages.result(skill, source);
     return {
       ok: true,
-      body: require('../jiyong-edit-source.cjs').reconcile({app,cwd:found.handle.cwd,file:found.file.path,
+      body: options.staticValidation ? collected : require('../jiyong-edit-source.cjs').reconcile({app,cwd:found.handle.cwd,file:found.file.path,
         body:collected}),
       source,
     };
   } catch (error) {
-    return { ok: false, reason: '读取插件草稿失败：' + String((error && error.message) || error) };
+    if (error instanceof SyntaxError) {
+      const location = /position (\d+)/i.exec(error.message);
+      let line, column;
+      if (json !== undefined && (location || /unexpected end/i.test(error.message))) {
+        const source = json.replace(/^\uFEFF/, '');
+        const prefix = location ? source.slice(0, Number(location[1])) : source;
+        const lines = prefix.split('\n'); line = lines.length; column = lines.at(-1).length + 1;
+      }
+      return { ok: false, reason: '\u8bfb\u53d6\u63d2\u4ef6\u8349\u7a3f\u5931\u8d25\uff1aInvalid JSON syntax', diagnostic: { field: 'JSON', line, column, message: 'Invalid JSON syntax' } };
+    }
+    return { ok: false, retryable: ['EBUSY','EACCES','EPERM','EMFILE','ENFILE','EIO','EAGAIN'].includes(error.code),
+      reason: '读取插件草稿失败：' + String((error && error.message) || error) };
   }
 }
 
@@ -129,4 +156,4 @@ function installIpc(ipcMain, session, app) {
   });
 }
 
-module.exports = { installIpc, readRecent, readRecentAsync, readSession, readSessionAsync, findRecent, DRAFT_NAME, MAX_BYTES, _candidate };
+module.exports = { installIpc, readRecent, readRecentAsync, readSession, readSessionAsync, readCandidate, findRecent, DRAFT_NAME, MAX_BYTES, _candidate };

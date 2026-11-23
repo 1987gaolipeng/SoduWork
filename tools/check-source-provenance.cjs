@@ -5,7 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const ROOT = path.resolve(__dirname, '..');
 const INVENTORY = 'third-party/source-files.json';
-const ROOTS = ['client/vendor/', 'client/assets/connector-brands/', 'hub-backend/app/services/harness2_vendor/'];
+const ROOTS = ['client/vendor/', 'client/assets/connector-brands/'];
 const LICENSES = new Set(['MIT', 'BSD-3-Clause', 'Apache-2.0', 'CC0-1.0']);
 const validPath = name => typeof name === 'string' && name.length > 0 &&
   !/[\\:\0]/.test(name) && !name.startsWith('/') &&

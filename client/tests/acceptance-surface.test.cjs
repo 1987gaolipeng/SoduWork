@@ -18,7 +18,8 @@ test('acceptance decision has exactly one surface: the acceptance card in the re
   // The board opens that same drawer; it must not create a second direct
   // SoduWork acceptance action or session.
   assert.doesNotMatch(view, /data-rq-acceptance/);
-  assert.match(view, /核对成果并选择验收方式/);
+  assert.match(view, /data-rq-open=/);
+  assert.doesNotMatch(view, /rq-card-decision|rq-card-assign/);
 });
 
 test('approval inbox rows open the requirement details, not the conversation', () => {
@@ -39,10 +40,17 @@ test('approval notification entry with a task routes to the requirement details'
   assert.match(entry, /routeToWorkWindow\('history', \{ requirementId/);
 });
 
-test('requirement pool hides the acceptance action after this user has decided', () => {
-  const view = read('../components/requirements/requirements-view.js');
-  assert.match(view, /const actionable = pending && \(!pending\.status \|\| pending\.status === 'pending'\) && !pending\.myDecision/);
-  assert.match(view, /const acceptance = actionable \|\| global\.TaskTraceApproval/);
+test('requirement cards keep one detail entry before and after this user has decided', () => {
+  const window = { Requirements: require('../core/requirements.js'), __teamCap: { meId: 'me' } };
+  require('node:vm').runInNewContext(read('../components/requirements/requirements-view.js'), { window });
+  const task = { id: 't', title: 'Delivery', status: 'done', createdBy: 'me', canReview: true };
+  for (const myDecision of [undefined, { decision: 'approve' }]) {
+    const html = window.RequirementsView.board([task], { ...window.Requirements.defaults, limits: {} }, {
+      approvals: new Map([['t', { id: 'r', action: 'review', status: 'pending', myDecision }]])
+    });
+    assert.equal((html.match(/data-rq-open="t"/g) || []).length, 1);
+    assert.doesNotMatch(html, /rq-card-decision|data-rq-acceptance/);
+  }
 });
 
 test('conversation entries stay device-gated and labelled as device-local', () => {
@@ -141,7 +149,7 @@ test('hub decide endpoint honours rework=false by returning the task to the back
 test('creator direct acceptance reuses the same card face; quick buttons stay retired', () => {
   const detail = read('../components/requirements/requirements-detail.js');
   // Prevent duplicate quick-review actions from returning to the drawer.
-  assert.doesNotMatch(detail, /data-rq-review\b/);
+  assert.doesNotMatch(detail, /data-rq-review(?=[\s=>\]])/);
   assert.doesNotMatch(detail, /data-rq-reject/);
   assert.doesNotMatch(detail, /确认交付/);
   // Creator review without a Hub approval uses synthetic direct:{taskId} and injected directApi.

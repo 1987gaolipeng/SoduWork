@@ -6,6 +6,19 @@ const path = require('node:path');
 const processRoles = new Set(['process', 'evidence', 'verification', 'input', 'internal']);
 const normalize = value => String(value || '').replace(/\\/g, '/').normalize('NFC');
 function text(message) {
+  if (message?.role === 'assistant') {
+    if (message.done === false || message.errorMessage ||
+        /^(?:tool_?use|tool_?calls?|error|aborted|cancelled|canceled|length|max_tokens)$/i.test(message.stopReason || '') ||
+        message.scope && !['normal', 'goal-final'].includes(message.scope)) return '';
+    // Pi and Runner snapshots carry visible replies in blocks; their text
+    // field can be empty. Only the final prose after the last tool call is a
+    // delivery declaration, never thinking, tool arguments or progress text.
+    if (Array.isArray(message.blocks) && message.blocks.length) {
+      const lastTool = message.blocks.findLastIndex(block => block?.kind === 'toolcall');
+      const final = message.blocks.slice(lastTool + 1).filter(block => block?.kind === 'text');
+      return final.some(block => block.done === false) ? '' : final.map(block => block.text || '').join('\n');
+    }
+  }
   if (typeof message?.text === 'string') return message.text;
   if (typeof message?.content === 'string') return message.content;
   return Array.isArray(message?.content) ? message.content.map(part => part.text || '').join('\n') : '';
@@ -16,7 +29,7 @@ function turn(snapshot = {}) {
   return { request: start < 0 ? '' : text(messages[start]),
     answer: start < 0 ? '' : text(messages.slice(start + 1).findLast(message => message.role === 'assistant')) };
 }
-function requestedExtension(request) {
+function requestedExtension(request, {explicitOnly = false} = {}) {
   if (!/(?:生成|转换?|导出|另存|改成|改为|generate|convert|export|save\s+as)/i.test(request)) return '';
   const target = request.match(/(?:转(?:换)?(?:为|成)|改成|改为|导出为|另存为|\b(?:to|as)\s+)([^，。;\n]{1,40})/i)?.[1] || request;
   const formats = [
@@ -30,13 +43,16 @@ function requestedExtension(request) {
   // clause. Extra instructions or negation must retain the existing manifest;
   // removing individual "keep only" phrases loses their surrounding meaning.
   const namedFormat = '(?:' + format.source + ')';
-  const exclusive = new RegExp('^\\s*(?:(?:请)?(?:把(?:交付)?格式)?' +
+  const command = '^\\s*(?:(?:请)?(?:把(?:交付)?格式)?' +
     '(?:生成|转换?(?:为|成)?|导出(?:为)?|另存(?:为)?|改成|改为)\\s*' + namedFormat +
-    '|(?:please\\s+)?(?:generate|convert(?:\\s+to)?|export(?:\\s+(?:to|as))?|save\\s+as)\\s+' + namedFormat + ')' +
+    '|(?:please\\s+)?(?:generate|convert(?:\\s+to)?|export(?:\\s+(?:to|as))?|save\\s+as)\\s+' + namedFormat + ')';
+  const end = '\\s*(?:文件|文档|格式|版本|file|document|format|version)?\\s*[。.!！]?\\s*$';
+  const exclusive = new RegExp(command +
     '\\s*(?:[，,。.;；\\n]|\\band\\b|并且|并)\\s*' +
     '(?:(?:请)?(?:只|仅|仅仅)\\s*保留\\s*(?:(?:最终|最后|最新)(?:的)?\\s*)?|' +
     '(?:please\\s+)?(?:keep\\s+only|only\\s+keep)\\s+(?:the\\s+)?(?:(?:final|latest)\\s+)?)' +
-    namedFormat + '\\s*(?:文件|文档|格式|版本|file|document|format|version)?\\s*[。.!！]?\\s*$', 'i');
+    namedFormat + end, 'i');
+  if (explicitOnly && !new RegExp(command + end, 'i').test(request) && !exclusive.test(request)) return '';
   if (/(?:同时|都要|两种|两份|保留|以及|和|both|keep|alongside|as well)/i.test(request) && !exclusive.test(request)) return '';
   return extension;
 }
@@ -71,4 +87,4 @@ function select(cwd, delivery, snapshot) {
   }
   return { ...delivery, items };
 }
-module.exports = { select, turn, requestsCaptures, processRoles };
+module.exports = { select, turn, mentioned, requestedExtension, requestsCaptures, processRoles };

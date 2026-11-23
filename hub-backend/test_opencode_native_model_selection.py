@@ -108,7 +108,8 @@ class OpenCodeNativeModelSelectionTests(unittest.TestCase):
                     if index:
                         self.assertTrue(any("MODEL_SELECTED_original" in json.dumps(row["messages"])
                                             for row in current), "Original assistant history must reach the selected model")
-                self.assertTrue((root / "native.db").is_file())
+                self.assertTrue(Path(env["OPENCODE_DB"]).is_file())
+                self.assertFalse((root / "native.db").exists())
         finally:
             server.shutdown()
             server.server_close()

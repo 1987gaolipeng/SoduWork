@@ -111,7 +111,7 @@ test('builder delivery example is accepted by the real manifest parser and expos
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-builder-delivery-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const app = { getPath: () => root }, builder = personal.get(app, personal.BUILDER_ID);
-  assert.equal(builder.version, '1.4.3');
+  assert.equal(builder.version, '1.4.6');
   assert.match(builder.localDraft.instructions, /source\.type=package.*entry=ui\/index\.html/);
   const instructions = builder.localDraft.instructions;
   const parseLine = prefix => {
@@ -134,6 +134,17 @@ test('builder delivery example is accepted by the real manifest parser and expos
   assert.deepEqual(result.warnings, []);
   assert.deepEqual(result.items.map(item => [item.relative, item.kind, item.primary]),
     [['soduwork-plugin-draft.json', 'file', true]]);
+});
+
+test('the complete builder contract survives schema validation and local installation without truncation', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-builder-contract-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const app = { getPath: () => root }, body = require('../main/plugin-builder-plugin.cjs').body();
+  assert.ok(body.instructions.length < 8000, 'check raw source before the schema can truncate it');
+  assert.match(body.instructions, /HTML.*制作预览.*最终交付可安装插件/);
+  assert.equal(personal.preflight(body).manifest.instructions, body.instructions);
+  const installed = personal.create(app, { ...body, key: 'builder-contract-fixture' }).plugin;
+  assert.equal(personal.exportDraft(app, installed.pluginId).instructions, body.instructions);
 });
 
 test('the shipped builder separates select labels from values and checks the final on-disk revision', () => {
@@ -207,4 +218,15 @@ test('human review must directly depend on every input source and reports the mi
   const graph = personal.preflight(corrected).workflow;
   assert.deepEqual(graph.nodes[2].inputs.map(input => input.fromNode), ['plan', 'build']);
   assert.deepEqual(graph.nodes[2].dependsOn, ['plan', 'build']);
+});
+
+test('authoring distinguishes root public input from node handoff and uses safe JSON serialization',()=>{
+  const instructions=require('../main/plugin-workflow-authoring.cjs').instructions();
+  const sample=JSON.parse(instructions.split('\n').find(line=>line.includes('"key":"pi-qwen-workflow"')).split('{').slice(1).join('{').replace(/^/,'{'));
+  assert.equal(sample.inputs[0].key,'design_brief');assert.equal(sample.inputs[0].type,'text');
+  assert.deepEqual(sample.workflow.nodes[0].inputs,[]);
+  assert.match(sample.workflow.nodes[0].config.prompt,/design_brief/);
+  assert.match(instructions,/JSON\.stringify.*json\.dump/);
+  assert.match(instructions,/root inputs.*node inputs/);
+  assert.equal(personal.preflight(sample).ok,true);
 });

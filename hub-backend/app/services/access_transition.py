@@ -124,6 +124,11 @@ def _restore_failed(ref, run, old):
                 run.pop(key, None)
             else:
                 run[key] = prior
+        if run.get('_hostCleanup'):
+            # The completion joiner still owns a live or unconfirmed host.
+            # Restoring policy must not discard its PID and permit a new turn.
+            run['error'] = 'Permission-controlled execution host cleanup is still pending'
+            return {"ok": False, "error": run['error']}
         run.update(state="interrupted", proc=None, pid=0, appliedAccessPolicy={},
                    error="The Agent did not confirm the new permissions; the saved session is preserved")
     return {"ok": False, "error": run["error"]}
@@ -135,7 +140,7 @@ def apply(ref, value, expected_revision, *, timeout=40):
         run = _RUNS.get(ref)
         if not run:
             return {"ok": False, "error": "Session not found"}
-        if run.get("_accessTransition") or run.get("stopping"):
+        if run.get("_accessTransition") or run.get("stopping") or run.get('_hostCleanup'):
             return {"ok": False, "error": "The session is already changing or stopping"}
         try:
             from . import codex_account_acp

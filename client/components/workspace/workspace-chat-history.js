@@ -13,7 +13,7 @@
     'waiting-user': 'waiting', paused: 'waiting', idle: 'completed', done: 'completed',
     archived: 'completed', released: 'completed',
     error: 'failed', unreachable: 'failed', incomplete: 'failed', 'no-output': 'failed',
-    cancelled: 'stopped', aborted: 'stopped',
+    cancelled: 'stopped', aborted: 'stopped', interrupted: 'stopped',
   };
   function chatState(item) {
     if (item && item.pending) return 'starting';

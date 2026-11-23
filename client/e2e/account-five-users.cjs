@@ -2,8 +2,13 @@
 // Full production main.js -> preload.js -> desk.html. Only OS side effects,
 // external SMTP reception and the model provider are isolated test boundaries.
 const electron = require('electron');
+const runJourneys = process.argv.includes('--user-journeys');
+const path = require('node:path');
+const output = path.resolve((runJourneys && process.env.SODUWORK_JOURNEY_OUTPUT) ||
+  path.join(__dirname, '../../outputs', runJourneys ? 'isolated-user-journeys' : 'account-center-five-users-20261023'));
 if (typeof electron === 'string') {
   const env = { ...process.env };
+  if (runJourneys) env.SODUWORK_JOURNEY_NODE = process.execPath;
   for (const key of ['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'ELECTRON_NO_ATTACH_CONSOLE',
     'CHROME_CRASHPAD_PIPE_NAME', 'CHROME_CRASHPAD_PIPE_HANDLE']) delete env[key];
   const spawnedAt = Date.now();
@@ -12,7 +17,7 @@ if (typeof electron === 'string') {
   const cleanup = require('./fixtures/owned-child-cleanup.cjs').createOwnedChildCleanup({ child, spawnedAt,
     timeoutMs: 18 * 60 * 1000, intervalMs: 5000, onReport(value) {
       const fs = require('node:fs'), path = require('node:path');
-      const file = path.resolve(__dirname, '../../outputs/account-center-five-users-20261023/process-cleanup.json');
+      const file = path.join(output, 'process-cleanup.json');
       fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(value, null, 2));
     } });
   cleanup.ready.catch(error => process.stderr.write('Process supervision baseline: ' + error.message + '\n'));
@@ -24,7 +29,11 @@ if (typeof electron === 'string') {
   const client = path.resolve(__dirname, '..'), repo = path.dirname(client);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-account-five-'));
   const profile = path.join(root, 'profile'), workspace = path.join(root, 'workspace');
-  const out = path.join(repo, 'outputs/account-center-five-users-20261023');
+  const out = output;
+  if (runJourneys) {
+    app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1');
+    app.commandLine.appendSwitch('remote-debugging-port', '0');
+  }
   for (const dir of [profile, workspace, path.join(root, 'home'), out]) fs.mkdirSync(dir, { recursive: true });
   process.env.SODUWORK_USER_DATA = profile;
   process.env.USERPROFILE = path.join(root, 'home');
@@ -102,8 +111,13 @@ if (typeof electron === 'string') {
   }
   async function fill(selector, value) {
     await click(selector);
-    for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: 'A', modifiers: ['control'] });
+    // sendInputEvent is queued; insertText can overtake a synthetic Ctrl+A and
+    // append to the remembered account. Await selection in the focused field,
+    // then retain Chromium's real insertion/input-event path.
+    await js(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(document.activeElement!==e)throw Error('Input is not focused');e.select()})()`);
     await win.webContents.insertText(value); await delay(40);
+    assert.equal(await js(`document.querySelector(${JSON.stringify(selector)})?.value===${JSON.stringify(value)}`), true,
+      'The visible input must contain exactly the requested text: ' + selector);
   }
   async function textButton(label, scope = 'body') {
     const selector = await js(`(()=>{const e=[...document.querySelectorAll(${JSON.stringify(scope + ' button')})].find(e=>e.checkVisibility()&&e.textContent.trim()===${JSON.stringify(label)});if(!e)throw Error('Missing button '+${JSON.stringify(label)});e.dataset.qaAction='current';return '[data-qa-action="current"]'})()`);
@@ -148,7 +162,10 @@ if (typeof electron === 'string') {
     return new Promise((resolve, reject) => {
       process.stdout.write('START isolated Hub and local SMTP\n');
       const timeout = setTimeout(() => reject(Error('Isolated Hub startup timed out: ' + serverErrors)), 180000);
-      server = spawn(path.join(repo, 'hub-backend/.venv/Scripts/python.exe'), ['-B', path.join(__dirname, 'fixtures/full_client_hub_fixture.py'), '--root', root],
+      const python = process.env.SODUWORK_TEST_PYTHON || path.join(repo, 'hub-backend/.venv/Scripts/python.exe');
+      const args = ['-B', path.join(__dirname, 'fixtures/full_client_hub_fixture.py'), '--root', root];
+      if (runJourneys) args.push('--user-journeys');
+      server = spawn(python, args,
         { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PYTHONPATH: pythonDeps, PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' } });
       report.ownedProcesses.push({ pid: server.pid, role: 'isolated Hub and SMTP' }); flush();
       let stdout = '';
@@ -201,12 +218,24 @@ if (typeof electron === 'string') {
       'account summary no longer exposes the duplicate three-dot menu');
     await click('.ac-center [data-tab=security]');
     await click('.ac-center [data-logout]');
+    const beforeNavigation = await js('performance.timeOrigin');
     await click('.ac-logout-confirm [data-ac-confirm]');
+    // Logout can reveal the gate in the departing document before reloading.
+    // Do not type the next account into that document.
+    await until(`performance.timeOrigin!==${JSON.stringify(beforeNavigation)} && document.readyState==='complete'`, 45000);
     await loginGate(); return true;
   }
   async function authenticatedWorkspace(account, beforeNavigation) {
-    await until(`ClientAuth.snapshot().user?.email===${JSON.stringify(account.email)} && !document.documentElement.classList.contains('soduwork-auth-pending') && !document.querySelector('#soduWorkClientAuthGate')?.checkVisibility()`, 60000);
-    const state = await js(`(async()=>{const me=await SoduWorkAPI.clientAuthMe();return{user:me.user,rendererUserId:ClientAuth.snapshot().user?.id,scope:SoduWorkAPI.taskStorageKey('ops'),timeOrigin:performance.timeOrigin,taskIds:tasks.map(t=>t.id),cachedIds:JSON.parse(localStorage.getItem(SoduWorkAPI.taskStorageKey('tasks'))||'[]').map(t=>t.id)}})()`);
+    // Interactive login schedules a reload after accepting the identity. Wait
+    // for that new document before navigating or taking the isolation snapshot.
+    await until(`performance.timeOrigin!==${JSON.stringify(beforeNavigation)} && document.readyState==='complete' && ClientAuth.snapshot().user?.email===${JSON.stringify(account.email)} && !document.documentElement.classList.contains('soduwork-auth-pending') && !document.querySelector('#soduWorkClientAuthGate')?.checkVisibility()`, 60000);
+    let state;
+    // Registration reloads the document. A /me request in the outgoing page
+    // can be cancelled even after its auth UI reports the new user.
+    await until(async () => {
+      state = await js(`(async()=>{const me=await SoduWorkAPI.clientAuthMe();return{user:me.user,rendererUserId:ClientAuth.snapshot().user?.id,scope:SoduWorkAPI.taskStorageKey('ops'),timeOrigin:performance.timeOrigin,taskIds:tasks.map(t=>t.id),cachedIds:JSON.parse(localStorage.getItem(SoduWorkAPI.taskStorageKey('tasks'))||'[]').map(t=>t.id)}})()`);
+      return state.user?.id && state.rendererUserId;
+    }, 30000);
     assert.equal(state.user.email, account.email);
     assert.equal(state.rendererUserId, state.user.id, 'Renderer and authenticated API must agree on the active user');
     if (account.user) assert.equal(state.user.id, account.user.id);
@@ -400,6 +429,31 @@ if (typeof electron === 'string') {
       }
       if (method === 'Network.loadingFailed') report.errors.push({ transport: 'chromium', error: params.errorText, type: params.type, canceled: params.canceled });
     });
+    if (runJourneys) {
+      const account = { key: 'journeys', email: 'journey@example.test', password: require('node:crypto').randomUUID() };
+      await register(account);
+      const endpoint = require('../main/hub-endpoint.cjs').current(app);
+      assert.equal(endpoint.internalTest, true);
+      assert.equal(endpoint.hub, connection.hub);
+      assert.equal(app.getPath('userData'), profile);
+      const portFile = [profile, app.getPath('sessionData')].map(dir => path.join(dir, 'DevToolsActivePort')).find(file => fs.existsSync(file));
+      assert.ok(portFile, 'The isolated Electron profile must own its debugger port');
+      const port = Number(fs.readFileSync(portFile, 'utf8').split(/\r?\n/)[0]);
+      const pages = await (await fetch('http://127.0.0.1:' + port + '/json/list')).json();
+      const target = (await win.webContents.debugger.sendCommand('Target.getTargetInfo')).targetInfo.targetId;
+      assert.equal(pages.find(row => row.url.includes('desk.html?panel=workspace'))?.id, target);
+      win.webContents.debugger.detach();
+      const args = [path.join(__dirname, 'user-journeys.mjs'), '--port=' + port, '--hub=' + connection.hub];
+      const only = process.argv.find(arg => arg.startsWith('--only='));
+      if (only) args.push(only);
+      const driver = spawn(process.env.SODUWORK_JOURNEY_NODE, args, {
+        windowsHide: true, stdio: ['ignore', 'inherit', 'inherit', 'ipc'], timeout: 480000,
+      });
+      driver.on('message', row => { report.cases.push(row); flush(); });
+      const [code] = await require('node:events').once(driver, 'exit');
+      report.ok = code === 0 && report.cases.length > 0 && report.cases.every(row => row.ok);
+      return;
+    }
     for (let i = 0; i < limit; i++) {
       const key = String.fromCharCode(65 + i), account = { key, email: 'qa-1023-' + key.toLowerCase() + '@example.test',
         password: 'Fixture-account-1023-' + key, name: '验收-1023-' + key, title: '验收需求-1023-' + key,
@@ -442,8 +496,9 @@ if (typeof electron === 'string') {
     // `logout()` clicks its [data-ac-confirm] button, then this request is the
     // observable server-side completion. Native `window.confirm` is not used.
     await delay(500);
-    report.logoutConfirmations = (report.backendEvidence.requests || []).filter(row => row.method === 'POST' && /\/client-auth\/logout$/.test(row.path));
+    report.logoutConfirmations = report.backendEvidence.logoutRequests;
     assert.equal(report.logoutConfirmations.length, limit * 3, 'Each registration, relogin and matrix cycle must use the real logout confirmation call');
+    assert.ok(report.logoutConfirmations.every(row => row.status === 200), 'Every confirmed logout must succeed on the Hub');
     const owners = report.backendEvidence.tasks.map(task => [task.createdBy, task.ownerUserId]);
     assert.equal(report.backendEvidence.users.filter(user => user.email?.endsWith('@example.test')).length, limit);
     assert.equal(report.backendEvidence.tasks.length, limit);

@@ -338,3 +338,25 @@ test('temporary network errors remain retryable and late failures cannot disable
   await pending;
   assert.equal(late.entry.unavailable, undefined);
 });
+
+test('session timeout preserves text and cursor, then retries from the same event', async () => {
+  const cursors = [];
+  const { context, controller } = loadHarness({
+    aiSession: async (_task, since) => {
+      cursors.push(since);
+      if (cursors.length === 1) return { ok: false, httpStatus: 504,
+        code: 'SESSION_READ_TIMEOUT', retryable: true, items: [] };
+      return { ok: true, ref: 'run', status: 'running', last: 8,
+        items: [{ seq: 8, text: 'new output', runId: 'run' }] };
+    },
+  });
+  controller.setExecution({}, 'run');
+  controller.applyEvent({ seq: 7, text: 'saved output', runId: 'run' });
+  await context._loadCollabRun('t1');
+  assert.equal(controller.snapshot().eventCursor, 7);
+  assert.deepEqual(Array.from(controller.snapshot().events, e => e.text), ['saved output']);
+  await context._loadCollabRun('t1');
+  assert.deepEqual(cursors, [7, 7]);
+  assert.equal(controller.snapshot().eventCursor, 8);
+  assert.deepEqual(Array.from(controller.snapshot().events, e => e.text), ['saved output', 'new output']);
+});

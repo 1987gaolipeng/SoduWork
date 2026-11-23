@@ -164,7 +164,7 @@ test('installed account renewal retries a plugin grant only for its original acc
   const localAuth = require('../main/device-auth'), requestAuth = require('../main/device-auth-request');
   localAuth.install({ app: f.app, ipcMain: { handle() {} },
     safeStorage: require('./helpers/device-safe-storage-fixture.cjs').createSafeStorage() });
-  t.after(() => requestAuth.setIdentityRefresher(null));
+  t.after(() => { requestAuth.setIdentityRefresher(null); requestAuth.setRequestAdmission(null); });
   let account = 'alice', enrollments = 0;
   t.mock.method(global, 'fetch', async (url, options) => {
     assert.ok(url.endsWith('/clients/enroll'), 'only the installed account resolver renews the session');

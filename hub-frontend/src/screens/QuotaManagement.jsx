@@ -23,7 +23,7 @@ export default function QuotaManagement() {
   if (loading && !config) return <Loading />
   if (!config) return <div className="qm-feedback" role="alert"><p>{error}</p><button className="btn btn-ghost" onClick={load}>{tx('重试')}</button></div>
   return <section className="quota-management" aria-label={tx('额度管理')}>
-    <header className="qm-header"><div><span className="qm-eyebrow">{tx('AI 使用额度')}</span><h2>{tx('让每位成员都有合适的额度')}</h2><p>{tx('套餐统一配置，个人灵活调整；总量与模型额度同时管控。')}</p></div>
+    <header className="qm-header"><div><span className="qm-eyebrow">{tx('AI 使用额度')}</span><h2>{tx('让每位成员都有合适的额度')}</h2><p>{tx('设置套餐或个人总额度，也可为指定模型添加上限。')}</p></div>
       <button className="btn btn-ghost" disabled={loading} onClick={load}><Icon name="refresh" />{tx('刷新')}</button></header>
     {error && <div className="qm-feedback" role="alert">{error}</div>}
     <div className="qm-tabs" role="tablist" aria-label={tx('额度管理')}>
@@ -40,17 +40,18 @@ export default function QuotaManagement() {
         <div className="qm-plan-grid">{config.plans.map(plan => <article key={plan.id} className={'qm-plan-card ' + (plan.id === 'trial' ? 'qm-trial' : '')}>
           <div className="qm-plan-title"><h3>{plan.name}</h3><span className="qm-pill">{plan.id === 'trial' ? tx('新用户默认') : tx('月度套餐')}</span></div>
           <p className="qm-description">{plan.description || (plan.id === 'trial' ? tx('注册后自动领取一次') : tx('按成员分配，可随时调整'))}</p>
-          <div className="qm-plan-amount"><strong>{plan.totalLimit === null ? tx('不限额') : number(plan.totalLimit)}</strong><span>{plan.totalLimit === null ? tx('总量不限') : 'Tokens'} · {plan.id === 'trial' ? tx('{0} 天有效', [plan.durationDays]) : tx('每自然月')}</span></div>
-          <div className="qm-plan-models"><span>{plan.models.length ? tx('{0} 个模型额度', [plan.models.length]) : tx('所有模型共用总额度')}</span>
+          <div className="qm-plan-amount"><span>{tx('总 Token 额度')}</span><strong>{plan.totalLimit === null ? tx('不限额') : number(plan.totalLimit)}</strong><span>{plan.id === 'trial' ? tx('{0} 天有效', [plan.durationDays]) : tx('每自然月')}</span></div>
+          <div className="qm-plan-models"><strong>{plan.models.length ? tx('模型额度 · 已启用 {0} 项', [plan.models.length]) : tx('模型额度 · 未启用')}</strong>
             {plan.models.slice(0, 3).map(row => <div key={row.provider + '/' + row.model}><span title={row.provider + ' / ' + row.model}>{row.model}</span><b>{number(row.limit)}</b></div>)}
             {plan.models.length > 3 && <small>{tx('另有 {0} 个模型', [plan.models.length - 3])}</small>}
-            {plan.restrictModels && <small>{tx('仅限所列模型')}</small>}
+            {plan.models.length ? <small>{plan.restrictModels ? tx('仅限所列模型') : tx('其他模型共用总额度')}</small> :
+              <small>{config.models.length ? tx('所有模型共用总额度。编辑套餐可添加模型额度。') : tx('所有模型共用总额度')}</small>}
           </div>
           <footer><span>{plan.id === 'trial' ? tx('一次性试用，不自动续期') : tx('调整不清空已用量')}</span><button className="btn btn-ghost" aria-label={tx('编辑套餐：{0}', [plan.name])} onClick={() => setEditor({ type: 'plan', plan })}>{tx('编辑')}</button></footer>
         </article>)}</div>
         <p className="qm-note"><Icon name="shield" />{tx('额度耗尽只暂停新的 AI 请求；账号登录、历史对话、插件目录仍可正常使用。')}</p>
       </>}
-      {tab === 'members' && <QuotaMembers config={config} revision={revision + config.revision} />}
+      {tab === 'members' && <QuotaMembers config={config} onConfig={setConfig} revision={revision + config.revision} />}
       {tab === 'defaults' && <article className="qm-default-card"><Icon name="settings" /><div><h3>{tx('原有账号默认额度')}</h3><p>{tx('仅适用于未分配套餐、未设个人额度的原有账号。新注册用户使用试用套餐。')}</p>
         <div className="qm-plan-amount"><strong>{config.defaultLimit === null ? tx('不限额') : number(config.defaultLimit)}</strong><span>Tokens · {tx('每自然月')}</span></div>
         <p className="qm-help">{tx('已有的个人设置继续生效，不会被默认规则覆盖。')}</p>

@@ -6,6 +6,7 @@ No packet in this store starts or retries an execution.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -137,6 +138,58 @@ class Outbox:
                 ORDER BY CASE WHEN p.ref > ? THEN 0 ELSE 1 END, p.ref
                 LIMIT ?""", (after_ref, limit)).fetchall()
         return [self._packet(row) for row in rows]
+
+    def archive_local(self, bindings: dict[str, str]) -> int:
+        """Retire only independently proven local streams, never manufacture ACKs.
+
+        A protected, content-addressed recovery archive is durable before deletion.
+        Retrying after either commit boundary is safe. Collection marks survive so
+        old output cannot be collected again. Mixed-task streams remain untouched.
+        This does not interpret NACKs or infer ownership from a task ID prefix.
+        """
+        from . import durable_file
+
+        retired = 0
+        for ref, task_id in bindings.items():
+            if not ref or not task_id:
+                continue
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                rows = connection.execute("""SELECT p.ref, s.stream_id, p.delivery_seq,
+                        p.digest, p.payload FROM packets p JOIN streams s ON s.ref=p.ref
+                    WHERE p.ref=? ORDER BY p.delivery_seq""", (ref,)).fetchall()
+                if not rows or any(self._packet(row)["snapshot"].get("taskId") != task_id
+                                   for row in rows):
+                    continue
+                stream = connection.execute("SELECT * FROM streams WHERE ref=?", (ref,)).fetchone()
+                archive = snapshot_bytes({"version": 1, "reason": "desktop-local-events",
+                    "stream": list(stream), "packets": [
+                        {"ref": row[0], "streamId": row[1], "deliverySeq": row[2],
+                         "digest": row[3], "payload": base64.b64encode(row[4]).decode("ascii")}
+                        for row in rows]})
+                target = self.root / ("local-events-" + hashlib.sha256(archive).hexdigest() + ".archive")
+                if target.is_symlink():
+                    raise OSError("Runner event recovery archive must not be a symlink")
+                try:
+                    existing = durable_file.read_bytes(target)
+                except FileNotFoundError:
+                    existing = None
+                if existing is None:
+                    # Separate bounded recovery storage; never rotate away unreviewed evidence.
+                    retained = 0
+                    for path in self.root.glob("local-events-*.archive*"):
+                        if path.is_symlink():
+                            raise OSError("Runner event recovery archive must not be a symlink")
+                        retained += path.stat().st_size
+                    # Allow base64 and the durable-file fallback's encoding overhead.
+                    if retained + len(archive) * 2 > self.max_bytes * 3:
+                        raise OutboxFull("Runner local event recovery archive is full")
+                    durable_file.write_bytes(target, archive)
+                if durable_file.read_bytes(target) != archive:
+                    raise OSError("Runner local event recovery archive verification failed")
+                connection.execute("DELETE FROM packets WHERE ref=?", (ref,))
+                retired += len(rows)
+        return retired
 
     def replay_pending(self, limit=12, after_id=0) -> list[tuple[int, dict]]:
         """Cycle through all retained packets for a Hub without durable ACKs.

@@ -162,13 +162,23 @@
       dock.style.transformOrigin = '';
       dock.style.top = Math.round(y) + 'px';
     }
+    if (typeof clampOverlayPosition === 'function') {
+      const x = edge ? maxX : Math.max(0, Math.min(cfg.dockX, maxX));
+      const pos = clampOverlayPosition(x, y, width, height);
+      if (pos.x !== x || pos.y !== y) {
+        dock.classList.add('floating'); dock.style.right = 'auto';
+        dock.style.left = Math.round(pos.x) + 'px'; dock.style.top = Math.round(pos.y) + 'px';
+        cfg.dockX = Math.round(pos.x); cfg.dockY = Math.round(pos.y);
+        if (typeof saveCfg === 'function') saveCfg();
+      }
+    }
   }
 
   function syncSidebar() {
     const dock = document.getElementById('edgeDock');
     if (!dock) return;
     /* Visibility follows the persisted preference; no temporary override is applied. */
-    if (cfg.dockVisible === false || cfg.tasksOn === false) {
+    if (cfg.dockVisible !== true || cfg.tasksOn === false) {
       // Explicit hiding ends the current gesture and clears pending frames, document listeners, and overlay drag mode.
       if (dragActive) onPointerUp();
       dock.classList.remove('show');
@@ -224,11 +234,14 @@
     document.addEventListener('pointermove', onPointerMove);
     document.addEventListener('pointerup', onPointerUp);
     document.addEventListener('pointercancel', onPointerUp);
+    window.addEventListener('blur', onPointerBlur);
+    if (typeof captureOverlayPointer === 'function') releaseDockPointer = captureOverlayPointer(event, onPointerBlur);
     if (typeof armGrabCursor === 'function' && !event.target.closest('button, a, input')) armGrabCursor(false);
   }
 
   function onPointerMove(event) {
     if (!dragActive || event.pointerId !== dragPointerId) return;
+    if (event.pointerType === 'mouse' && (event.buttons & 1) === 0) { onPointerUp(event); return; }
     const dx = event.clientX - startX, dy = event.clientY - startY;
     const dock = document.getElementById('edgeDock');
     if (!dragMoved) {
@@ -263,6 +276,8 @@
     });
   }
 
+  let releaseDockPointer = null;
+  function onPointerBlur() { onPointerUp(); }
   function onPointerUp(event) {
     if (!dragActive || (event && event.pointerId !== dragPointerId)) return;
     const moved = dragMoved;
@@ -272,6 +287,8 @@
     document.removeEventListener('pointermove', onPointerMove);
     document.removeEventListener('pointerup', onPointerUp);
     document.removeEventListener('pointercancel', onPointerUp);
+    window.removeEventListener('blur', onPointerBlur);
+    if (releaseDockPointer) { releaseDockPointer(); releaseDockPointer = null; }
     if (dragFrame) { cancelAnimationFrame(dragFrame); dragFrame = null; }
     dragW = 0; dragH = 0;
     if (typeof disarmGrabCursor === 'function') disarmGrabCursor();
@@ -310,6 +327,10 @@
   global._syncSidebar = syncSidebar;
   global.setTeamCap = setTeamCap;
   global.updateNoticeBadge = paintDock;
+  global.addEventListener('overlay-displays-changed', () => {
+    const dock = document.getElementById('edgeDock');
+    if (dock && !dragActive) placeDock(dock);
+  });
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', bindDock);

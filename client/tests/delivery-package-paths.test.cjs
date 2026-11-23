@@ -5,6 +5,48 @@ const artifacts = require('../main/conversation/artifact-runtime');
 const packages = require('../main/conversation/delivery-package');
 const outputs = require('../main/pi-session/outputs');
 
+test('decomposed Unicode paths retain original bytes, dependency links and entry names', async t => {
+  const folder = 'cafe\u0301', asset = 'the\u0301me.css';
+  const html = '<html><link href="' + asset + '"><body>Ready</body></html>';
+  const f = await fixture(t, { [folder + '/index.html']: html, [folder + '/' + asset]: 'body{color:red}' });
+  const result = await packages.prepare(f.session, [f.id(folder + '/index.html')], { includeEntries: true });
+  assert.equal(result.manifest.entryPath, folder + '/index.html');
+  assert.deepEqual(result.manifest.files.map(x => x.path), [folder + '/index.html', folder + '/' + asset]);
+  assert.equal(result.entries.find(x => x.name.endsWith('.html')).bytes.toString(), html);
+  assert.equal(result.entries.find(x => x.name.endsWith('.css')).bytes.toString(), 'body{color:red}');
+});
+
+test('canonically equivalent distinct files cannot silently overwrite a delivery', async t => {
+  const f = await fixture(t, { 'caf\u00e9.md': '# First', 'cafe\u0301.md': '# Other' });
+  if ((await fs.readdir(f.cwd)).length !== 2) return t.skip('filesystem aliases Unicode-equivalent names');
+  await assert.rejects(packages.prepare(f.session, [f.id('caf\u00e9.md'), f.id('cafe\u0301.md')]), /冲突/);
+});
+
+test('a normalization-insensitive filesystem may resolve an NFC reference to its NFD spelling', async t => {
+  const decomposed = 'the\u0301me.css', composed = decomposed.normalize('NFC');
+  const html = '<html><link href="' + composed + '"><body>Ready</body></html>';
+  const f = await fixture(t, { 'index.html': html, [decomposed]: 'body{color:red}' });
+  const actual = path.join(await fs.realpath(f.cwd), decomposed);
+  const realpath = fs.realpath.bind(fs), lstat = fs.lstat.bind(fs);
+  // Model only the filesystem's equivalent-name resolution; packaging and
+  // reads still use real files. This is not a native macOS execution claim.
+  const alias = filename => String(filename).endsWith(path.sep + composed) ? actual : filename;
+  t.mock.method(fs, 'realpath', filename => realpath(alias(filename)));
+  t.mock.method(fs, 'lstat', filename => lstat(alias(filename)));
+  const result = await packages.prepare(f.session, [f.id('index.html')], {includeEntries:true});
+  assert.deepEqual(result.entries.map(x => x.name).sort(), ['index.html', composed].sort());
+  assert.equal(result.entries.find(x => x.name === 'index.html').bytes.toString(), html);
+});
+
+test('Unicode-equivalent spelling must not authorize a symbolic link', async t => {
+  const composed = 'caf\u00e9.md', decomposed = 'cafe\u0301.md';
+  const f = await fixture(t, {'index.md': '[Other](' + composed + ')', [decomposed]:'# Original'});
+  try { await fs.lstat(path.join(f.cwd, composed)); return t.skip('filesystem aliases equivalent names'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  await fs.symlink(path.join(f.cwd, decomposed), path.join(f.cwd, composed), 'file');
+  await assert.rejects(packages.prepare(f.session, [f.id('index.md')]), /不支持链接/);
+});
+
 async function fixture(t, files) {
   const parent = path.resolve(os.tmpdir());
   const cwd = await fs.mkdtemp(path.join(parent, 'soduwork-delivery-paths-'));

@@ -76,6 +76,55 @@ class ArtifactVersionGuardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([row.seq for row in rows], [1, 2, 3])
             self.assertEqual([row.state for row in rows], ['superseded', 'superseded', 'candidate'])
 
+    async def test_reassessment_alone_cannot_replace_a_rejected_file_version(self):
+        original = {"name": "delivery.md", "id": "v1-file", "category": "primary", "sha256": "original"}
+        report = {"name": "findings.md", "id": "report", "category": "primary", "sha256": "assessment"}
+        async with self.sessions() as session:
+            task = await session.get(models.Task, 'task')
+            v1, _ = await release_control.ensure_output_candidate(
+                session, task, {"files": [original], "complete": True}, "conversation:example")
+            request = await release_control.ensure_request(session, task, v1, "review")
+            v1.state = request.status = "rejected"
+            await session.commit()
+
+            for files in ([original], [original, report], [report], [{**original, "id": "reupload"}, report]):
+                with self.subTest(files=files), self.assertRaisesRegex(ValueError, "修改原交付"):
+                    await release_control.ensure_output_candidate(session, task, {"files": files, "complete": True})
+            self.assertEqual(await release_control.latest_artifact(session, task.id), v1)
+            self.assertEqual(v1.manifest["files"], [original])
+            self.assertEqual((await session.scalars(select(am.ApprovalRequest))).all(), [request])
+
+            revised = {**original, "id": "corrected", "sha256": "amended"}
+            v2, created = await release_control.ensure_output_candidate(
+                session, task, {"files": [revised, report], "complete": True})
+            self.assertTrue(created)
+            gate = await release_control.ensure_request(session, task, v2, "review")
+            self.assertEqual((v2.seq, gate.status, request.status), (2, "pending", "rejected"))
+            self.assertEqual(v1.manifest["files"], [original])
+
+    def test_file_rework_preserves_real_replacements_and_supporting_changes(self):
+        primary = {"name": "docs/report.md", "category": "primary", "sha256": "old"}
+        asset = {"name": "docs/style.css", "category": "supporting", "sha256": "css"}
+        version = am.ArtifactVersion(manifest={"files": [primary, asset]})
+        for replacement in [
+                {"name": "docs/report-v2.md"}, {"name": "docs/report.html"},
+                {"name": "final.pdf", "replaces": ["docs/report.md"]},
+                {"name": "new-name.csv", "requestedOutput": True}]:
+            with self.subTest(replacement=replacement):
+                guard.require_revised_files(version, {"files": [{**replacement, "sha256": "revised"}]})
+        guard.require_revised_files(version, {"files": [primary, {**asset, "sha256": "new-css"}]})
+        with self.assertRaises(ValueError):
+            guard.require_revised_files(version, {"files": [
+                {**asset, "sha256": "new-css"}, {"name": "findings.md", "sha256": "new"}]})
+        code = am.ArtifactVersion(manifest={"files": [{"name": "total.cjs", "sha256": "old"}]})
+        with self.assertRaises(ValueError):
+            guard.require_revised_files(code, {"files": [{"name": "total.md", "sha256": "review"}]})
+        for replacement in [
+                {"name": "unrelated/report.md"}, {"name": "docs/report-v2.md", "sha256": "old"},
+                {"name": "report.pdf", "replaces": ["unrelated-file.md"]}]:
+            with self.subTest(replacement=replacement), self.assertRaises(ValueError):
+                guard.require_revised_files(version, {"files": [{"sha256": "new", **replacement}]})
+
     async def test_rollback_releases_fence_without_leaking_version_or_gate(self):
         async with self.sessions() as session:
             task = await session.get(models.Task, 'task')

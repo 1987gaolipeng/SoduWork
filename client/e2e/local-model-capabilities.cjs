@@ -34,7 +34,7 @@ if (typeof electron === 'string') {
   const report = { ok: false, cases: [], boundary: 'Production renderer, preload, local IPC, probes and safeStorage. Synthetic loopback vendor and Hub; no production credentials or account.' };
   const vendorRequests = [], hubRequests = [], blocked = [], challenges = new Map();
   const sockets = new Set();
-  let win, server, origin, hold = false, changed = 0;
+  let win, server, origin, hold = false, imageResponse = 'readable', changed = 0;
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   const js = code => win.webContents.executeJavaScript(code, true);
   const record = name => { report.cases.push(name); console.log('PASS ' + name); };
@@ -75,11 +75,18 @@ if (typeof electron === 'string') {
       assert.equal(request.headers.authorization, 'Bearer synthetic-local-key');
       let body = ''; for await (const chunk of request) body += chunk;
       const data = JSON.parse(body); vendorRequests.push(data);
-      assert.equal(data.model, 'synthetic-wire-model');
+      assert.ok(['synthetic-wire-model', 'synthetic-added-model'].includes(data.model));
       if (hold) return; // User cancellation must abort this actual HTTP request.
       const first = data.messages[0].content, result = data.messages.find(message => message.role === 'tool');
       if (result) { complete(response, result.content, data.stream); return; }
-      if (Array.isArray(first)) { complete(response, challenges.get(first.find(part => part.type === 'image_url').image_url.url), data.stream); return; }
+      if (Array.isArray(first)) {
+        const digits = challenges.get(first.find(part => part.type === 'image_url').image_url.url);
+        if (imageResponse === 'rejected') {
+          response.writeHead(400);
+          response.end(JSON.stringify({ error: { code: 'image_not_supported', message: 'Images are not supported.' } }));
+        } else complete(response, imageResponse === 'mismatch' ? 'Unreadable' : digits, data.stream);
+        return;
+      }
       const expected = /(?:Reply only with |with value )([a-f0-9]+)\./.exec(first)?.[1];
       assert.ok(expected, 'The probe must carry a random challenge');
       complete(response, expected, data.stream, Boolean(data.tools));
@@ -150,6 +157,34 @@ if (typeof electron === 'string') {
     assert.equal(await js('_mdMyModels[0].capabilityProfile.imageInput.state'), 'supported');
     assert.match(await js('document.querySelector(".md-model-row").innerText'), /图片输入.*支持/s);
     record('Encrypted evidence restores capability badges after a real window reload');
+    imageResponse = 'mismatch';
+    await click('[data-mdcheck]');
+    await until('[..._mdChecks.values()].some(value=>value.checks?.imageInput?.status==="inconclusive"&&!value.pending)');
+    const imageBadge = 'document.querySelector(".md-model-row .md-cap-badge").textContent';
+    assert.equal(await js(imageBadge), '图片输入支持');
+    assert.match(await js('document.querySelector(".md-cap-report").textContent'), /对话沿用上次通过的结果，你仍可发图。/);
+    assert.match(await js('document.querySelector(".md-cap-report").textContent'), /未收到与图片中六位数字完全一致的回复/);
+    assert.equal(store.get().myModels[0].runtimeRevision, latest.runtimeRevision);
+    await win.loadURL(desk); await until('_mdLoadState==="ready"');
+    await click('[data-mdselect="device:synthetic"]');
+    assert.equal(await js(imageBadge), '图片输入支持');
+    record('An inconclusive image recheck keeps the native image badge and explains the mismatch after reload');
+    imageResponse = 'rejected';
+    await click('[data-mdcheck]');
+    await until('[..._mdChecks.values()].some(value=>value.checks?.imageInput?.status==="unsupported"&&!value.pending)');
+    const imageReport = 'document.querySelector(".md-cap-report").textContent';
+    for (const locale of ['en-US', 'ja-JP', 'ko-KR', 'zh-CN']) {
+      await js('SoduWorkI18n.setLocale(' + JSON.stringify(locale) + ');void 0');
+      await until(imageReport + '.includes(SoduWorkI18n.translateText("服务拒绝了本次图片请求。对话沿用上次通过的结果，你仍可发图。"))');
+    }
+    const rejected = store.get().myModels[0];
+    assert.equal(rejected.capabilityCheck.verifiedChecks.imageInput.checkedAt, latest.capabilityCheck.checks.imageInput.checkedAt);
+    assert.equal(rejected.runtimeRevision, latest.runtimeRevision);
+    await win.loadURL(desk); await until('_mdLoadState==="ready"');
+    await click('[data-mdselect="device:synthetic"]');
+    assert.equal(await js(imageBadge), '图片输入支持');
+    assert.ok((await js(imageReport)).includes('服务拒绝了本次图片请求。对话沿用上次通过的结果，你仍可发图。'));
+    record('An explicitly rejected recheck retains the native route, passing timestamp and localized guidance across reload');
     hold = true;
     await click('[data-mdcheck]');
     await until('[..._mdChecks.values()].some(value=>value.pending&&value.modelRef)');
@@ -205,6 +240,46 @@ if (typeof electron === 'string') {
     assert.equal(store.get().providers[0].name, 'Synthetic local service', 'Editing and cancelling cannot commit the draft');
     assert.equal(changed, 1);
     record('Editing a service during a real HTTP check cancels it before the UI record disappears, and closing preserves prior evidence');
+
+    hold = false;
+    imageResponse = 'rejected';
+    await win.loadURL(desk); await until('_mdLoadState==="ready"');
+    await click('[data-mdselect="device:synthetic"]');
+    await js(`(() => {
+      const key = document.querySelector('[data-pkey]');
+      key.value = 'unsaved-replacement';
+      key.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await click('[data-mdeditor] > summary');
+    await js(`(() => {
+      const name = document.querySelector('[data-padd]');
+      name.value = 'synthetic-added-model';
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+      const claim = document.querySelector('[data-mdfield="imageInput"]');
+      claim.value = 'supported';
+      claim.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    const beforeAdd = vendorRequests.length;
+    await click('[data-madd]');
+    const addedRow = '_mdMyModels.find(row=>row.name==="synthetic-added-model")';
+    await until(addedRow + '?.capabilityCheck?.checks?.streaming?.status==="passed"');
+    const added = store.get().myModels.find(row => row.name === 'synthetic-added-model');
+    assert.equal(await js('document.querySelector("[data-pkey]").value'), 'unsaved-replacement');
+    assert.equal(await js('document.querySelector("#mdSave").disabled'), false);
+    assert.equal(added.capabilityCheck.checks.imageInput.status, 'unsupported');
+    assert.equal(added.capabilityProfile.imageInput.source, 'configured');
+    assert.equal(added.capabilityProfile.imageInput.conflict, true);
+    const addedCalls = vendorRequests.slice(beforeAdd);
+    assert.equal(addedCalls.length, 5, 'Exactly one complete check is expected');
+    assert.ok(addedCalls.every(call => call.model === 'synthetic-added-model'));
+    await win.loadURL(desk); await until('_mdLoadState==="ready"');
+    await click('[data-mdselect="device:synthetic"]');
+    assert.equal(await js(addedRow + '.capabilityProfile.imageInput.conflict'), true);
+    const conflictBadge = await js(`[...document.querySelectorAll('[data-md-model]')].find(row =>
+      JSON.parse(row.dataset.mdModel)[1] === 'synthetic-added-model').querySelector('.md-cap-badge').textContent`);
+    assert.ok(conflictBadge.includes('配置冲突'), conflictBadge);
+    assert.equal(vendorRequests.length, beforeAdd + 5, 'Reload must reuse saved evidence');
+    record('Clicking Add model alone saves the chat model, checks it once and persists the conflict');
 
     assert.deepEqual(blocked, []); assert.deepEqual(await js('errors'), []);
     assert.ok(hubRequests.every(method => method === 'GET'), 'Local probes must not post credentials or checks to the Hub');

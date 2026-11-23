@@ -42,6 +42,7 @@ const KINDS = Object.freeze({
   '.md': 'document',
   '.markdown': 'document',
   '.txt': 'document',
+  '.json': 'file',
 });
 const DIRECT = new Set([
   'document', 'presentation', 'spreadsheet', 'pdf', 'video', 'archive',
@@ -244,7 +245,12 @@ function isProcess(file) {
   // A delivery manifest can still explicitly declare a requested screenshot.
   const verificationShot = kindOf(name) === 'image' &&
     /^(?:verify|verification)[-_.](?:(?:shot|frame)(?:[-_.]?\d+)?|top|bottom|desktop|mobile|after[-_]click)$/i.test(stem);
-  return inProcessDir || configured || verificationShot || isProcessName(stem);
+  const jsonProcess = path.extname(name) === '.json' && (
+    name.startsWith('.') || name === 'npm-shrinkwrap.json' ||
+    /(?:^|[-_.])(?:config|settings|lock|credentials?|secrets?|auth|tokens?|service[-_]account)(?:[-_.]|$)/i.test(stem) ||
+    rel.split('/').slice(0, -1).some(part => part.startsWith('.') || /^(?:cache|config|configs|settings)$/i.test(part))
+  );
+  return inProcessDir || configured || verificationShot || jsonProcess || isProcessName(stem);
 }
 
 function websiteRank(file) {
@@ -286,10 +292,16 @@ function infer(files, cwd) {
     const kind = kindOf(file.name);
     const stem = String(file.name || '').replace(/\.[^.]+$/, '');
     const namedResult = hasWord(stem, FINAL_WORDS);
+    // JSON often holds configuration or source data. Infer only an output
+    // directory or a standalone workspace root result; manifests stay authoritative.
+    const jsonResult = /\.json$/i.test(file.name) && (
+      /(?:^|\/)(?:outputs|deliverables|exports)\//i.test(relative(file.relative)) ||
+      (!project && (namedResult || !relative(file.relative || file.name).includes('/')))
+    );
     // A final-named image next to a website is ambiguous: it may be a browser
     // capture or a page asset. Only a manifest or the media index declares it
     // as a separate deliverable; dependency collection still includes site assets.
-    if (DIRECT.has(kind) ||
+    if (DIRECT.has(kind) || jsonResult ||
         ((kind === 'document' || (kind === 'image' && !sites.length)) && namedResult)) {
       items.push(publicFile(file));
     }

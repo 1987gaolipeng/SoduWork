@@ -75,6 +75,14 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
   const localAction = sharedHistory ? require('./local-history-actions.cjs').create({
     app, session, history: sharedHistory, BrowserWindow, shell, trash }) : async () => null;
   const { authorize } = require('./history-lifecycle.cjs').create({ app, session, accountHistory, BrowserWindow });
+  async function completeDeletion(guard, result, synced = {}) {
+    guard();
+    const sources = [...new Set([...guard.aliasIds, ...(guard.row?.historyAliasIds || []), ...(synced.aliasIds || [])])];
+    const copies = await sharedHistory?.deleteCloudCaches(sources) || [];
+    guard();
+    // These IDs describe this completed deletion, not permanent identity aliases.
+    return guard.complete('delete', result, { ...synced, aliasIds: [...(synced.aliasIds || []), ...copies] });
+  }
   function deletionFailure(guard, result, staged) {
     if (!staged?.found) return result;
     // Keep an actionable archive if local cleanup or the final Hub deletion
@@ -94,7 +102,7 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
       guard();
       if (!cleaned?.ok) return cleaned || { ok: false, reason: '清理会话记录失败，请重试' };
     }
-    return committed?.ok ? guard.complete('delete', result, committed)
+    return committed?.ok ? completeDeletion(guard, result, committed)
       : deletionFailure(guard, committed, staged);
   }
   async function checkMissing(guard, id) {
@@ -213,7 +221,7 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
         if (!checked.ok) return checked;
         if (guard.cacheOnly) {
           if (active?.close) await active.close();
-          return guard.complete('delete', { alreadyDeleted: true, missingContent: true, displayOnly: true });
+          return await completeDeletion(guard, { alreadyDeleted: true, missingContent: true, displayOnly: true });
         }
       }
       const synced = await guard.commit(accountOnly || missingOnly ? 'delete' : 'archive');
@@ -221,7 +229,7 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
       if (!accountOnly && !missingOnly) staged = synced;
       if (accountOnly) {
         if (active?.close) await active.close();
-        return guard.complete('delete', { missingContent: missingOnly }, synced);
+        return await completeDeletion(guard, { missingContent: missingOnly }, synced);
       }
       if (active && typeof active.close === 'function') await active.close();
       guard();
@@ -230,7 +238,7 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
         guard();
         if (!deleted?.ok) return deleted;
         removeTitles(guard.aliasIds);
-        return guard.complete('delete', { ...deleted, missingContent: true }, synced);
+        return await completeDeletion(guard, { ...deleted, missingContent: true }, synced);
       }
       if (switched) {
         // Reuse the archive boundary and multi-segment deletion transaction;
@@ -341,7 +349,7 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
         if (!checked.ok) return checked;
         if (guard.cacheOnly) {
           if (active?.close) await active.close();
-          return guard.complete('delete', { alreadyDeleted: true, missingContent: true, displayOnly: true });
+          return await completeDeletion(guard, { alreadyDeleted: true, missingContent: true, displayOnly: true });
         }
       }
       const synced = await guard.commit(guard.accountOnly || guard.missingContent ? 'delete' : 'archive');
@@ -359,7 +367,7 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
         removeTitles(guard.aliasIds);
       }
       if (guard.missingContent) return result?.ok
-        ? guard.complete('delete', { ...result, missingContent: true }, synced) : result;
+        ? await completeDeletion(guard, { ...result, missingContent: true }, synced) : result;
       return await finishDeletion(guard, result, synced, guard.accountOnly);
     } catch (error) {
       const failed = { ok: false, reason: '彻底删除没有完成：' + String(error && error.message || error) };

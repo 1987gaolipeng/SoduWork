@@ -92,7 +92,7 @@ for (const status of ['done', 'cancel']) {
     const preserved = JSON.stringify({ task: f.task, messages: f.ctx._snap.messages,
       execution: f.ctx._snap.execution });
     f.root.querySelector('#nchatInput').value = 'Keep this unsent draft';
-    for (const id of ['harness2', 'qwen', 'pi', 'harness2']) {
+    for (const id of ['kimi', 'qwen', 'pi', 'kimi']) {
       f.select(id); f.assertBadge(id);
       assert.equal(f.state().adapterId, id);
       assert.equal(f.state().taskRuntime, '');
@@ -102,10 +102,10 @@ for (const status of ['done', 'cancel']) {
       assert.equal(JSON.stringify({ task: f.task, messages: f.ctx._snap.messages,
         execution: f.ctx._snap.execution }), preserved);
     }
-    f.ctx._snap.status = 'streaming'; f.ctx._composerControls.render(); f.assertBadge('harness2');
+    f.ctx._snap.status = 'streaming'; f.ctx._composerControls.render(); f.assertBadge('kimi');
     assert.equal(f.state().busy, true, 'ordinary streaming does not revive a finished task runtime');
     const reopened = fixture(t, status, JSON.parse(JSON.stringify(f.ctx._snap)));
-    reopened.assertBadge('harness2');
+    reopened.assertBadge('kimi');
     assert.equal(reopened.state().taskRuntime, '');
     assert.equal(reopened.ctx._snap.messages[0].sourceAgent.agentId, 'pi');
   });
@@ -113,13 +113,13 @@ for (const status of ['done', 'cancel']) {
 
 test('unfinished controlled review and rework keep their original dispatch identity while idle or running', t => {
   const f = fixture(t, 'doing');
-  f.ctx._snap.adapterId = 'harness2'; f.ctx._snap.displayName = 'Google Harness\u00b2';
+  f.ctx._snap.adapterId = 'kimi'; f.ctx._snap.displayName = 'Kimi Code';
   f.ctx._composerControls.render(); f.assertBadge('pi');
   assert.equal(f.state().taskRuntime, 'pi');
   f.ctx._snap.execution.taskExecutions[0].run.engine = 'qwen';
   for (const status of ['idle', 'streaming']) {
     f.ctx._snap.status = status; f.ctx._composerControls.render(); f.assertBadge('qwen');
-    assert.equal(f.state().adapterId, 'harness2');
+    assert.equal(f.state().adapterId, 'kimi');
     assert.equal(f.state().taskRuntime, 'qwen');
   }
 });

@@ -40,6 +40,7 @@ def main():
         from fastapi import FastAPI
         import uvicorn
         from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+        from app.account_models import EmailRateLimit
         from app.api import admin, client_release_notes, client_updates, download
         from app.auth import hash_password
         from app.db import Base, get_session
@@ -53,7 +54,7 @@ def main():
             async with engine.begin() as conn:
                 await conn.run_sync(lambda c: Base.metadata.create_all(c,
                     tables=[Role.__table__, User.__table__, ClientRelease.__table__, ClientReleaseNote.__table__,
-                            AuditLog.__table__]))
+                            AuditLog.__table__, EmailRateLimit.__table__]))
             async with sessions() as session:
                 session.add(Role(id="publisher-role", name="CI publisher", permissions=["client.update"]))
                 session.add(User(id="publisher-user", username="publisher", display_name="Fixture publisher",
@@ -106,6 +107,7 @@ def main():
             assert server.started
             checkout = root / "checkout"
             for name in ["tools/sign-client-release.mjs", "client/scripts/installer-compatibility-report.cjs",
+                         "client/main/default-hub.cjs",
                          "client/main/client-update-contract.js", "tools/ci/verify-client-publication.cjs",
                          "tools/ci/release-artifacts.cjs", "tools/ci/soduwork-acceptance-baselines.json",
                          "tools/ci/publish-client.cjs", "tools/ci/release-transfer.cjs"]:
@@ -124,6 +126,7 @@ def main():
             environment = {**os.environ, "CI_COMMIT_SHA": "a" * 40, "CI_PIPELINE_ID": "1", "CI_JOB_ID": "2",
                 "CI_COMMIT_REF_PROTECTED": "true", "CI_PIPELINE_CREATED_AT": "2026-10-15T02:00:00Z",
                 "SODUWORK_RELEASE_PLATFORMS": "linux", "SODUWORK_RELEASE_HUB_URL": origin,
+                "SODUWORK_DEFAULT_HUB_URL": origin,
                 "SODUWORK_RELEASE_USER": "publisher", "SODUWORK_RELEASE_PASSWORD": "fixture-password",
                 "SODUWORK_CLIENT_CHANNEL": "stable", "SODUWORK_CLIENT_COMPAT_PREFIX": "SoduWork", "SODUWORK_CLIENT_RELEASE_UPLOAD_TOKEN": "",
                 "SODUWORK_CLIENT_SIGNING_KEY_ID": "pipeline-fixture", "SODUWORK_CLIENT_SIGNING_KEY_FILE": str(key_file),
@@ -165,9 +168,10 @@ def main():
             evidence = checkout / "release-evidence/linux"
             evidence.mkdir(parents=True, exist_ok=True)
             receipt = dict(schema=1, kind="soduwork-native-install-acceptance", ok=True,
+                defaultHubUrl=build["defaultHubUrl"],
                 sourceCommit=build["sourceCommit"], pipelineId=build["pipelineId"], artifacts=build["artifacts"],
-                checks=[dict(name=name, ok=True) for name in
-                    ["ubuntu22-deb", "ubuntu24-deb", "rocky9-rpm", "ubuntu22-tgz"]],
+                checks=[dict(name=name, ok=True, rpmSignatureVerified=name.endswith("-rpm")) for name in
+                    ["ubuntu22-deb", "ubuntu24-deb", "rocky9-rpm", "fedora45-rpm", "ubuntu22-tgz"]],
                 limitations=["Fixture receipt for API orchestration testing; not native installation evidence."])
             receipt_file = evidence / "acceptance.json"
             receipt_file.write_text(json.dumps(receipt))
@@ -176,10 +180,27 @@ def main():
             # Company release tags, distribution baselines and private note-generation
             # pipelines are intentionally not part of the source distribution.
             node(command, "stage", "linux", success=False, extra={"CI_COMMIT_REF_PROTECTED": "false"})
+            assert build["defaultHubUrl"] == origin
+            receipt["defaultHubUrl"] = "https://different.example.test"
+            receipt_file.write_text(json.dumps(receipt))
+            node(command, "stage", "linux", success=False)
+            receipt["defaultHubUrl"] = build["defaultHubUrl"]
             receipt["ok"] = False
             receipt_file.write_text(json.dumps(receipt))
             node(command, "stage", "linux", success=False)
             receipt["ok"] = True
+            complete_checks = receipt["checks"]
+            receipt["checks"] = [check for check in complete_checks if check["name"] != "fedora45-rpm"]
+            receipt_file.write_text(json.dumps(receipt))
+            node(command, "stage", "linux", success=False)
+            receipt["checks"] = complete_checks
+            for check in complete_checks:
+                if not check["name"].endswith("-rpm"):
+                    continue
+                check["rpmSignatureVerified"] = False
+                receipt_file.write_text(json.dumps(receipt))
+                node(command, "stage", "linux", success=False)
+                check["rpmSignatureVerified"] = True
             receipt_file.write_text(json.dumps(receipt))
             node(command, "stage", "linux")
             signed = {file.name: file.read_bytes() for file in (evidence / "staged").glob("*.release.json")}

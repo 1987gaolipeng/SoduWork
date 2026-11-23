@@ -18,14 +18,16 @@
    | macOS | 双击 `start-desktop.command` |
    | Linux 图形桌面 | 在该目录打开终端，运行 `sh start.sh --desktop` |
 
-4. 第一次为账号 `admin` 设置自己的密码，长度 **12–128 个字符**，再输入一次确认。密码输入时没有字符或星号；输入完按回车即可。输错会提示重新输入，不需要关闭窗口。之后启动不会重新设置密码。
-5. 保持窗口打开。启动器自动安装依赖、构建管理页面、准备数据库并打开客户端。首次依赖下载可能耗时数分钟；长步骤每隔约 15 秒显示仍在进行。可以从窗口打印的 `startup.log` 路径查看详情。
+4. 保持窗口打开，等待启动器安装依赖、构建管理页面并准备桌面运行环境。首次下载可能需要几分钟，耗时较长的步骤每隔约 15 秒显示进度。如果准备失败，请查看窗口给出的 `startup.log`，排除故障后重新运行同一条命令。
+5. 准备成功后，为账号 **`admin`** 设置 **12–128 个字符**的密码，再输入一次确认。输入时不会显示字符或星号，每次输完按回车。输错会提示重新输入。随后启动器初始化数据库并打开客户端。账号创建成功后，后续启动沿用这个密码。
 
 不需要手动创建数据库、安装 Docker、安装 Git、准备 `.env` 或分别运行三个工程的安装命令。首次需联网下载依赖，后续复用已安装内容。
 
 启动器会在专用 `venv/` 中安装 Hub 和 Runner 两套依赖，检查 Runner 所需的 Python 模块，并把同一解释器交给桌面端。使用此入口无需另建 `hub-backend/.venv`。如果 Agent 管理提示源码 Runner 环境不完整，请退出源码启动会话后重跑同一入口，保留原数据目录。
 
-Windows 桌面启动还会在本实例的应用副本中准备并校验命令运行环境（PortableGit），供 Agent 使用 Bash、Git 和常用命令。无需单独安装 Git 或配置 WSL。后续启动会保留运行环境和下载缓存，并再次检查可用性；准备失败时查看 `startup.log`，修复网络后重跑同一入口。
+服务端和桌面端准备期间，npm、pip 和 Electron 下载缓存默认分别写入数据目录下的 `cache/npm`、`cache/pip` 和 `cache/electron`。非空的 `npm_config_cache`、`PIP_CACHE_DIR` 和 `electron_config_cache` 设置会保留其显式指定的位置，这些位置可以在数据目录之外。所有平台的准备流程还会创建 `cache/tmp`，并为子进程设置 `TMPDIR`、`TEMP` 和 `TMP`，让下载、解包和构建使用所选磁盘，不再沿用系统临时目录；当前终端的环境变量不变。停止启动器后，备份或迁移时可以跳过可再生的 `cache/`。
+
+Windows 桌面启动还会在本实例的应用副本中准备并校验命令运行环境（PortableGit），供 Agent 使用 Bash、Git 和常用命令。无需单独安装 Git 或配置 WSL。后续启动会保留运行环境和下载缓存，并再次检查可用性；准备失败时查看 `startup.log`，解决日志报告的问题后重跑同一入口。
 
 ## 怎么判断启动成功
 
@@ -112,6 +114,23 @@ Administrator: admin
 .\start.cmd --check --desktop
 ```
 
+`--check` 只读检查依赖和路径风险，不创建探测文件；检查通过不代表后续所有安装步骤都一定成功。随后在 PowerShell 中运行 `.\start.cmd --desktop`；在命令提示符（CMD）中运行 `start.cmd --desktop`。两种终端都可使用，不需要避开 CMD。
+
+路径诊断采用中英双语。重定向输出时保留当前编码；无法表示的字符使用转义形式，避免中断启动，英文处理说明仍然可读。
+
+Git Bash 中的 `sh start.sh --desktop` 并非无效命令，但它通过 `PATH` 查找 Python，与 Windows 入口的选择方式不同。`start.cmd` 在有 Python 启动器 `py` 时先尝试 Python 3.12，再尝试 `py -3`；没有 `py` 时才使用 `PATH` 中的 `python`。安装了 Python 3.13 等受支持版本，不代表两个终端会选中同一个解释器。
+
+提示 Python 版本过低或找不到解释器时，先在原终端查看 `python --version`；装有 `py` 时再查看 `py -0p` 列出的版本和路径。必要时用已安装的原生 Windows Python 3.12+ 的完整路径检查，检查通过后用相同解释器启动（替换示例路径）：
+
+```powershell
+& 'C:\Path\To\Python\python.exe' .\start.py --check --desktop
+& 'C:\Path\To\Python\python.exe' .\start.py --desktop
+```
+
+Microsoft Store 版 Python 是有效的解释器，但 Windows 可能将其数据目录重定向到更深的物理路径。需要长路径时，正式启动会在复制源码、创建虚拟环境和安装依赖之前，通过实际文件操作检查路径是否可用。Windows 的传统 260 字符路径限制不适用于 macOS 和 Linux。
+
+如果启动时提示无法使用长路径，请在 Windows 中启用 **Win32 长路径**，然后重新打开启动程序，使其使用新进程。启动器不会修改这个系统设置。已有数据请保留在原目录；较短的 `--data-dir` 可用于**新建独立实例**，不会迁移原有账号或数据。
+
 ### macOS 打不开启动文件
 
 打开终端，输入 `cd `（末尾留一个空格），把解压后的源码文件夹拖进终端，再按回车。然后执行：
@@ -127,9 +146,15 @@ sh start.sh --desktop
 
 密码不显示字符或星号是正常的，输入完按回车。短于 12 个字符或两次不一致时会重新提示。账号是 `admin`；没有共享默认密码。忘记已有密码时不要删数据库，以免丢失数据。
 
+### 首次设置密码时提示标准输入不是终端
+
+未初始化的实例需要设置管理员密码；默认方式要求 Python 将标准输入识别为交互终端（TTY）。Git Bash 窗口可见，并不保证原生 Windows Python 会将它识别为 TTY；管道、重定向或某些集成终端也可能触发此检查。这与密码输入不显示字符是两种情况。
+
+先在原生 PowerShell 或 CMD 的交互窗口中，从源码目录运行 Windows 入口，不加管道或输入重定向。自动化或确实需要非交互输入时，显式添加 `--password-stdin`，通过受保护的标准输入提供首次密码；该参数不会自动生成密码，也不用于重置已有密码。不要把密码写进命令参数、脚本或日志。保留现有数据目录，无需删除数据库重试。对于首次冷启动安装且依赖下载耗时较长的自动化场景，建议先运行 `--prepare-only` 下载依赖与构建界面，再沿用相同的数据目录和桌面选项，使用 `--password-stdin` 启动，以避免输入管道在长耗时安装过程中被环境提前关闭。
+
 ### 安装很慢、失败或提示网络错误
 
-长步骤的「Still running」表示安装进程尚未结束，并不代表下载已经成功。查看终端打印的 `startup.log`；检查网络、代理及 npm/Python 包下载是否可用，修正后重跑同一入口。不要删除数据目录。首次 Electron 下载也需要联网。
+长步骤的「Still running」表示安装进程尚未结束，并不代表下载已经成功。重试前先查看终端打印的 `startup.log` 中失败的步骤。提示「磁盘空间不足 / Disk full」时，应释放数据目录或显式指定缓存所在磁盘的空间；重复下载不会释放空间。依赖版本不存在、权限不足等错误也需要分别处理，仅在日志报告连接失败时检查网络、代理及包下载访问。修正后重跑同一入口，已完成的步骤会复用。不要删除数据目录。首次 Electron 下载也需要联网。
 
 npm 注册表与二进制下载使用不同的地址。设置 npm 镜像只改变 npm 包的来源，不会同时改变 Electron 或 PortableGit 的下载地址：
 
@@ -138,6 +163,18 @@ npm 注册表与二进制下载使用不同的地址。设置 npm 镜像只改�
 | npm 包 | `npm_config_registry` 或 npm 的 `registry` 配置 |
 | Electron 二进制 | `ELECTRON_MIRROR`，见下面的桌面启动排障 |
 | Windows PortableGit 归档 | `SODUWORK_PORTABLE_GIT_MIRROR`，见下面的镜像与离线说明 |
+
+#### Git 克隆或依赖下载出现证书错误
+
+先区分失败发生在哪一步：
+
+- **`git clone` 报 schannel `0x80092012` / 撤销检查失败**：这是 Git 获取源码时的证书撤销检查问题，发生在启动器运行之前。核对系统时间、可信证书链、代理及证书撤销服务的可达性；受管理的网络应请管理员确认代理证书与访问策略。切换 `sh` / `cmd` 启动入口不能修复克隆失败。不建议设置全局 `http.schannelCheckRevoke=false`，它会关闭撤销检查并影响后续 Git 请求。
+- **Electron 或 PortableGit 下载报 `UNABLE_TO_VERIFY_LEAF_SIGNATURE` 等证书链错误**：检查对应下载地址及代理提供的证书链。企业 TLS 代理需要由管理员提供可信 CA，并按所用 Git / Node 下载工具的方式配置信任；Git 的证书配置不等于 Node 的配置。不要用 `NODE_TLS_REJECT_UNAUTHORIZED=0` 绕过校验；即使某个归档有固定摘要，也不能保护同一安装过程中所有请求。
+- **只看到 `TypeError: fetch failed`**：这是通用网络错误，不足以判断是 GitHub 不可达或证书问题。查看 `startup.log` 中同一失败步骤的底层错误（如 `cause.code`）及下载地址，再分别核查 DNS、代理、超时或 TLS。
+
+网络受限时，按本节的代理说明、[PortableGit 镜像与离线归档](#windows-portablegit-镜像与离线归档)或[Electron 镜像说明](#浏览器能打开桌面端打不开)处理。镜像返回 `404` / `403` 时，先核对具体版本、架构、文件路径及访问权限，不要据此推断所有镜像都不可用。修正配置后保持证书校验开启，重新运行同一入口。
+
+需要求助时，提供失败步骤、终端类型、Python / Node / Git 版本，以及相关错误和底层错误码；先移除日志中的密码、令牌、代理凭据和私有地址。
 
 #### 使用代理下载
 
@@ -164,6 +201,8 @@ sh start.sh --desktop
 启动器检测到 `HTTP_PROXY` 或 `HTTPS_PROXY` 时，会为 Electron 安装子进程自动启用 `ELECTRON_GET_USE_PROXY`。已有的显式设置会保留；设置为 `0`、`false`、`no`、`off` 或空值可关闭 Electron 的代理自动启用。Node 下载脚本按请求读取代理和 `NO_PROXY`，适用于上面要求的 Node.js 22.19+，无需提高最低版本。`ELECTRON_GET_USE_PROXY` 只控制 Electron，不控制 PortableGit 下载。
 
 #### Windows PortableGit 镜像与离线归档
+
+首次下载较慢时可以超过五分钟。安装包每新增 64 KiB，启动器就会重新计算五分钟时限。如果服务器连续 60 秒没有发送数据，下载会超时。可在 `startup.log` 查看已接收的字节数。
 
 PortableGit 默认从官方 Git for Windows 发布地址下载。需要镜像时，设置 `SODUWORK_PORTABLE_GIT_MIRROR` 为镜像根地址，文件按 `<mirrorRoot>/v2.55.0.windows.4/<官方原文件名>` 提供。x64 文件名为 `PortableGit-2.55.0.4-64-bit.7z.exe`，arm64 为 `PortableGit-2.55.0.4-arm64.7z.exe`。请先确认镜像提供固定版本和当前架构的文件；项目不预设 PortableGit 镜像。
 
@@ -231,9 +270,13 @@ start.cmd --desktop
 
 ### Linux 安装与安全登录
 
-使用发行版的软件安装器安装 `.deb` 或 `.rpm`，或通过 `apt install ./安装包.deb`、`dnf install ./安装包.rpm` 安装，让包管理器解析依赖。安装包声明 D-Bus、libsecret，以及 GNOME Keyring / KWallet 服务的替代依赖；已有匹配的服务可以满足依赖，不需要替换用户的密钥环。`tar.gz` 和源码模式不管理系统依赖，需要在已配置这些服务的图形桌面会话中启动。
+使用发行版的软件安装器安装 `.deb` 或 `.rpm`，或通过 `apt install ./安装包.deb`、`dnf install ./安装包.rpm` 安装，让包管理器解析依赖。安装包声明 D-Bus、libsecret，以及 GNOME Keyring / KWallet 服务的替代依赖；已有匹配的服务可以满足依赖，不需要替换用户的密钥环。`tar.gz` 和源码模式不管理系统依赖，需要在图形桌面会话中启动。
 
 请以当前登录桌面的普通用户启动应用。首次访问密钥环可能出现系统创建或解锁提示，应使用受保护的密钥环；不要设置空密码或通过关闭沙箱绕过启动错误。密钥环被锁定或服务暂不可用时，现有设备凭据应予保留，恢复系统服务后完全退出并重新打开应用。不要删除 `device-auth.json`、密钥环项目或把凭据改成明文。
+
+如果当前配置还没有设备凭据，系统密钥环又不可用，可以在启动时选择本地加密凭据库，再照常登录。请另设一个 12–256 个字符的口令并妥善保存。以后每次启动桌面端都要输入它，安装密钥环后也一样。口令仅在本机使用，无法通过 Hub 找回。其他依赖系统密钥环的集成仍需要该服务。
+
+源码启动器的 Linux 桌面模式会提前拒绝 root 用户（包括通过 `sudo` 启动），在创建实例数据或安装依赖前给出提示；`--check --desktop` 和 `--prepare-only --desktop` 也会执行此检查。请在普通用户的图形会话中运行 `sh start.sh --desktop`；服务器只需运行 `sh start.sh`。
 
 Linux 安装验收先检查 `.deb` / `.rpm` 的首次安装是否已提供密钥服务依赖，再使用隔离的真实 GNOME 密钥环检查首次启动、重启和升级后的密文读取。当前升级场景复用首次安装的依赖，不证明旧环境升级时能自动补齐新增依赖；容器验收也不替代 GNOME/KDE、Wayland/X11 的真实桌面登录与解锁验证。
 
@@ -266,7 +309,7 @@ macOS 桌面进程保留当前用户的系统主目录，以便访问默认钥�
 | 不自动打开浏览器 | `sh start.sh --desktop --no-browser` |
 | 指定独立的数据目录 | `sh start.sh --desktop --data-dir "D:/SoduWork-data"` |
 
-准备和启动应使用同一个数据目录。自动化脚本可显式用 `--password-stdin` 从标准输入提供首次密码；不要将密码写进命令参数或脚本。Windows 设置 `SODUWORK_NO_PAUSE=1` 可在失败时直接返回错误码。
+准备和启动应使用同一个数据目录。指定 `--password-stdin` 后，启动器只在准备成功后才从标准输入读取首次密码。请勿将密码写入命令参数或脚本。Windows 在此模式下失败会直接返回错误码。其他无人值守的启动命令可设置 `SODUWORK_NO_PAUSE=1` 跳过失败后的按键等待。
 
 开发者需要分别调试前后端时，见[开发指南](development.md)。Vite 开发代理默认连接 `http://127.0.0.1:9080`，连接本启动器时使用 `SODUWORK_DEV_HUB=http://127.0.0.1:18989`。本指南默认只供当前电脑访问；团队部署见 [Docker 自托管](../ops/self-host/README.zh-CN.md)。
 
@@ -277,6 +320,10 @@ macOS 桌面进程保留当前用户的系统主目录，以便访问默认钥�
 | Windows | `%LOCALAPPDATA%\SoduWork\source-service` |
 | macOS | `~/Library/Application Support/SoduWork/source-service` |
 | Linux | `$XDG_DATA_HOME/soduwork/source-service`，未设置时为 `~/.local/share/soduwork/source-service` |
+
+在 Windows 上，`LOCALAPPDATA` 为空或为相对路径时按未设置处理，回退到 `%USERPROFILE%\AppData\Local`。绝对路径形式的 `LOCALAPPDATA` 保持不变。所选数据目录仍须位于源码目录之外，并且为空或已由此启动器初始化。
+
+在 Linux 上，`XDG_DATA_HOME` 未设置、为空或为相对路径时，回退到 `~/.local/share`。绝对路径（包括含空格的路径）保持不变，显式指定的 `--data-dir` 优先。已有数据不会迁移；如果之前使用相对 XDG 目录保存数据，可通过 `--data-dir` 指定其绝对路径继续使用。源码目录安全检查仍然生效。
 
 也可以明确指定独立目录和端口：
 
@@ -293,6 +340,8 @@ sh start.sh --data-dir "D:/SoduWork-local" --port 18990
 - `venv/`、`application/`：独立依赖与从当前源码同步的运行副本。不要直接编辑这里的代码，业务附件应通过产品管理。
 - `startup.log`：依赖安装、构建、迁移与服务器日志。
 - `desktop.log` 记录联动桌面客户端的日志。桌面账号和会话配置通常位于数据目录下的 `desktop-profile/`。在 macOS 上，若数据目录位于正式客户端的 `SoduWork/` 或 `soduwork/` 内，桌面配置使用 `SoduWork Development/` 下的独立目录。默认数据目录继续使用 `source-service-desktop`；自定义目录使用 `source-service-desktop-<目录标识>`，标识由完整数据路径生成。如果该目录尚不存在，会沿用通过安全检查的既有开发配置 `source-service-desktops/<目录标识>/`；两者都存在时优先标准目录。Hub 数据和账号留在原处，配置文件不会被移动或合并。启动器会在写入前拒绝指回正式客户端配置的输出链接；`--check --desktop` 只读打印所选桌面配置路径。桌面配置同样属于私密数据。
+
+升级旧版 Hub 前，请确认至少有一个管理员账号的密码为 8–128 个字符，且包含非空白字符。旧账号的密码不符合此规则时，请在升级前重设，尤其是只有一位管理员的情况。已验证邮箱的用户也可以通过邮箱重置密码。通过启动器首次设置管理员密码时，长度要求为 12–128 个字符。
 
 更新源码后停止并重新运行同一条命令即可，启动器只更新自己的代码副本并保留数据。更新前应在服务停止时备份**整个数据目录**及单独存放的桌面配置目录；回退时同时恢复匹配版本的源码和数据备份，不能只降低源码版本。
 

@@ -1,6 +1,121 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { attachmentUrl, prepare, request } = require('../main/pi-session/task-input');
+const { attachmentUrl, latestDeliveryAttachments, prepare, request } = require('../main/pi-session/task-input');
+
+test('native prepare distinguishes inferred defaults from legacy manual policy and terminal receipts', async t => {
+ const cases = [
+  [{}, {}, 'infer'],
+  [{executionSubmissionMode:'manual'}, {}, undefined],
+  [{executionSubmissionMode:'manual'}, {submissionMode:''}, 'infer'],
+  [{executionSubmissionChoice:'infer',executionSubmissionMode:'auto'}, {}, undefined],
+  [{}, {submissionMode:'manual'}, undefined],
+  [{}, {dispatchInstructions:{note:'',submissionMode:'default'}}, 'infer'],
+  [{}, {dispatchInstructions:{note:'',submissionMode:'manual'}}, undefined],
+  [{}, {agentId:'runner:r',submissionMode:''}, undefined],
+ ];
+ for (const [routing, requested, expected] of cases) {
+  const calls=[];
+  t.mock.method(global,'fetch',async(url,options)=>{
+   if(url.endsWith('/tasks/t'))return Response.json({id:'t',workRouting:routing});
+   if(url.endsWith('/attachments'))return Response.json([]);
+   const body=JSON.parse(options.body); calls.push(body);
+   return Response.json({turn:{state:'queued'},task:{id:'t',workRouting:{...routing,
+    ...(body.submissionChoice ? {executionSubmissionChoice:body.submissionChoice} : {})}}});
+  });
+  const input=await prepare({hub:'http://fixture'},'t','chat','turn','',requested);
+  await input.beforeTurn();await input.afterTurn('completed');await input.beforeRetry();
+  assert.equal(calls[0].submissionChoice,expected);
+  assert.equal(calls.at(-1).submissionChoice,expected);
+  assert.ok(calls.filter(row=>row.action!=='prepare').every(row=>!Object.hasOwn(row,'submissionChoice')));
+ }
+});
+
+test('explicit inferred choice requires Hub acknowledgement before execution', async t => {
+ const calls=[];
+ t.mock.method(global,'fetch',async(url,options)=>{
+  if(url.endsWith('/tasks/t'))return Response.json({id:'t'});
+  if(url.endsWith('/attachments'))return Response.json([]);
+  calls.push(JSON.parse(options.body));
+  return Response.json({turn:{state:'queued'},task:{id:'t'}});
+ });
+ await assert.rejects(prepare({hub:'http://fixture'},'t','chat','turn','',{submissionMode:''}), /服务端未确认本次提交方式/);
+ assert.deepEqual(calls.map(row=>row.action),['prepare','cancel']);
+});
+
+test('failed durable completion write retries frozen bytes without recapture or changing outcome', async t => {
+ const delivery=require('../main/pi-session/task-delivery.cjs');
+ let captures=0, failed=false; const finishes=[];
+ t.mock.method(delivery,'capture',async()=>{captures++;return {files:[{data:'frozen'}]};});
+ t.mock.method(global,'fetch',async(url)=>Response.json(url.endsWith('/attachments')?[]:
+  url.endsWith('/tasks/t')?{id:'t'}:{turn:{state:'queued'},task:{id:'t'}}));
+ const record=()=>({pending:false});
+ record.finish=async(scope,body,options)=>{
+  finishes.push(structuredClone({scope,body,options}));
+  if(body.action==='complete'&&!failed){failed=true;throw Error('disk temporarily unavailable');}
+  return {pending:false};
+ };
+ const input=await prepare({hub:'http://fixture'},'t','chat','turn','',{},
+  {startReceipts:{forTask:()=>record}});
+ await assert.rejects(input.afterTurn('completed'), /disk temporarily unavailable/);
+ await input.afterTurn('failed');
+ assert.equal(captures,1);
+ assert.deepEqual(finishes.map(row=>row.body.action),['wait','complete','complete']);
+ assert.equal(finishes[0].body.deliveryIssue.code,'capture_pending');
+ assert.deepEqual(finishes[1],finishes[2]);
+});
+
+test('capture failure closes the failed delivery attempt and allows an explicit retry with a new turn', async t => {
+ let captures=0; const finishes=[];
+ let state='', activeTurn=''; const identity={hub:'http://fixture'};
+ t.mock.method(require('../main/pi-session/task-delivery.cjs'),'capture',async()=>{captures++;throw Error('Missing required result');});
+ t.mock.method(global,'fetch',async(url,options)=>{
+  if(url.endsWith('/attachments'))return Response.json([]);
+  if(url.endsWith('/tasks/t'))return Response.json({id:'t'});
+  const body=JSON.parse(options.body);
+  if(body.action==='prepare'){
+   if(['queued','running','waiting'].includes(state))return Response.json({detail:'Turn remains active'},{status:409});
+   state='queued';activeTurn=body.turnId;
+  } else state=({start:'running',wait:'waiting',fail:'failed'})[body.action]||state;
+  return Response.json({turn:{state},task:{id:'t'}});
+ });
+ const record=()=>({pending:false});
+ record.finish=async(scope,body)=>{
+  finishes.push(body);await request(identity,'/tasks/t/conversation-turn',{...scope,...body,executor:'native'});
+  return{pending:false};
+ };
+ const input=await prepare(identity,'t','chat','turn','',{},
+  {startReceipts:{forTask:()=>record}});
+ await input.beforeTurn();
+ await assert.rejects(input.afterTurn('completed'),/Missing required result/);
+ await input.afterTurn('failed');
+ assert.equal(captures,1);
+ assert.deepEqual(finishes.map(row=>[row.action,row.deliveryIssue.code]),
+  [['wait','capture_pending'],['fail','capture_failed']]);
+ await input.beforeRetry();
+ assert.equal(state,'queued');assert.match(activeTurn,/^recovery-/);assert.notEqual(activeTurn,'turn');
+ assert.equal(captures,1,'explicit retry admission does not execute or recapture');
+});
+
+test('a resumed no-file waiting turn captures final output and duplicate completion stays idempotent', async t => {
+ let captures=0, failWrite=true; const finishes=[];
+ t.mock.method(require('../main/pi-session/task-delivery.cjs'),'capture',async()=>++captures===1?null:{files:[{data:String(captures)}]});
+ t.mock.method(global,'fetch',async(url)=>Response.json(url.endsWith('/attachments')?[]:
+  url.endsWith('/tasks/t')?{id:'t'}:{turn:{state:'queued'},task:{id:'t'}}));
+ const record=()=>({pending:false});
+ record.finish=async(_scope,body,options)=>{
+  if(failWrite){failWrite=false;throw Error('Temporary disk failure');}
+  finishes.push({body,options});return{pending:true};
+ };
+ const input=await prepare({hub:'http://fixture'},'t','chat','turn','',{},
+  {startReceipts:{forTask:()=>record}});
+ await assert.rejects(input.afterTurn('waiting'),/Temporary disk failure/);
+ await input.afterTurn('failed');
+ await input.afterTurn('completed');
+ await input.afterTurn('completed');
+ assert.equal(captures,2);
+ assert.deepEqual(finishes.map(row=>row.body.action),['wait','wait','complete']);
+ assert.equal(finishes.at(-1).options.delivery.files[0].data,'2');
+});
 
 test('rework of a dispatched task keeps its Runner workspace even after an old native follow-up', async t => {
  const context = require('../main/conversation/requirement-context');
@@ -63,7 +178,7 @@ test('offline successful execution keeps its result and replays start then compl
  assert.deepEqual(calls, ['prepare', 'start']);
  service.dispose(); online = true;
  const restarted = create(options); t.after(() => restarted.dispose()); await restarted.flush();
- assert.deepEqual(calls, ['prepare', 'start', 'started', 'complete']); assert.equal(state, 'completed');
+ assert.deepEqual(calls, ['prepare', 'start', 'started', 'wait', 'complete']); assert.equal(state, 'completed');
  assert.equal(fs.readdirSync(path.join(root, 'task-start-receipts')).filter(name => name.endsWith('.json')).length, 0);
 });
 
@@ -104,7 +219,7 @@ test('native receipts distinguish queue admission, actual start and a fresh retr
  assert.notEqual(retry,'first'); assert.match(retry,/^recovery-/);
  await input.beforeTurn(); await input.onStarted(); await input.afterTurn('completed');
  const retryCalls=calls.filter(row=>row.turnId===retry);
- assert.deepEqual(retryCalls.map(row=>row.action),['prepare','start','started','complete']);
+ assert.deepEqual(retryCalls.map(row=>row.action),['prepare','start','started','wait','complete']);
  assert.ok(retryCalls.every(row=>row.conversationId==='chat'&&row.executor==='native'));
 });
 
@@ -365,7 +480,31 @@ test('rework turn carries the rejection feedback in the input, plain follow-up s
  assert.match(full.text,/AI味过于强烈，不够直白。/);
 });
 
-test('new rework session loads only the latest delivery batch and preserves attachment IDs', async t => {
+test('later requirement uploads do not replace the current delivery batch', () => {
+ const input = {id:'brief', role:'input', createdAt:'2026-11-18T01:00:00Z'};
+ const output = {id:'current', role:'output', sourceRef:'delivery-1', round:1, createdAt:'2026-11-18T02:00:00Z'};
+ const added = {id:'added', role:'input', createdAt:'2026-11-18T03:00:00Z'};
+ assert.deepEqual(latestDeliveryAttachments([input, output]), [input, output]);
+ assert.deepEqual(latestDeliveryAttachments([input, output, added]), [input, output, added]);
+});
+
+test('undated requirement uploads do not change delivery selection by list position', () => {
+ const old = {id:'old', role:'output', sourceRef:'old-batch', round:5};
+ const current = {id:'current', role:'output', sourceRef:'new-batch', round:1};
+ const added = {id:'added', role:'input'};
+ assert.deepEqual(latestDeliveryAttachments([old, current, added]), [current, added]);
+});
+
+test('unversioned rework attachments retain legacy inputs and outputs', () => {
+ const input = {id:'brief', role:'input', createdAt:300};
+ const output = {id:'legacy-output', role:'output', createdAt:100};
+ const rework = {id:'previous-rework', role:'rework_input', createdAt:400};
+ assert.deepEqual(latestDeliveryAttachments([output, input, rework]), [output, input]);
+ assert.deepEqual(latestDeliveryAttachments([input]), [input]);
+ assert.deepEqual(latestDeliveryAttachments([]), []);
+});
+
+test('new rework session loads the latest delivery and later requirement uploads', async t => {
  const taskRow = {id:'t', title:'T', note:'原需求', ownerClientId:'d', workRouting:{reworkPending:{feedback:'只修正文，不要从头重做。',actor:'验收人'}}};
  const calls=[];
  t.mock.method(global,'fetch',async(url,options)=>{
@@ -378,12 +517,14 @@ test('new rework session loads only the latest delivery batch and preserves atta
     {id:'new-v1',filename:'交付说明.md',size:3,url:'/api/v1/attachments/new-v1?ticket=new-v1',role:'output',sourceRef:'conversation:new',createdAt:300,evidenceMeta:{round:1}},
     {id:'new-v2',filename:'交付说明.md',size:3,url:'/api/v1/attachments/new-v2?ticket=new-v2',role:'output',sourceRef:'conversation:new',createdAt:400,evidenceMeta:{round:2}},
     {id:'new-proof',filename:'验收证据.json',size:3,url:'/api/v1/attachments/new-proof?ticket=new-proof',role:'verification',sourceRef:'conversation:new',createdAt:400,evidenceMeta:{round:2}},
+    {id:'added-brief',filename:'additional-brief.md',size:3,url:'/api/v1/attachments/added-brief?ticket=added-brief',role:'input',createdAt:500},
   ]);
   if(value.includes('/attachments/brief?')) return new Response('brief');
   if(value.includes('/attachments/old?')) return new Response('old');
   if(value.includes('/attachments/new-v1?')) return new Response('new-v1');
   if(value.includes('/attachments/new-v2?')) return new Response('new-v2');
   if(value.includes('/attachments/new-proof?')) return new Response('new-proof');
+  if(value.includes('/attachments/added-brief?')) return new Response('added-brief');
   if(value.includes('/attachments/old-rework?')) return new Response('old-rework');
   if(value.includes('/conversation-turn')) return Response.json({turn:{state:'queued'},task:taskRow});
   return Response.json({});
@@ -394,18 +535,21 @@ test('new rework session loads only the latest delivery batch and preserves atta
    {followUp:false, reworkSession:true},
    {handle:{sessionId:'new-chat'},app:{getPath:()=>require('node:os').tmpdir()}});
  assert.match(input.text,/只修正文，不要从头重做。/);
- assert.deepEqual(input.attachments.map(file=>file.attachmentId),['brief','new-v2','new-proof']);
- assert.deepEqual(input.attachments.map(file=>file.data.toString()),['brief','new-v2','new-proof']);
+ assert.deepEqual(input.attachments.map(file=>file.attachmentId),['brief','new-v2','new-proof','added-brief']);
+ assert.deepEqual(input.attachments.map(file=>file.data.toString()),['brief','new-v2','new-proof','added-brief']);
  assert.ok(calls.some(value => value.includes('/attachments/brief?')));
  assert.ok(calls.some(value => value.includes('/attachments/new-v2?')));
  assert.ok(calls.some(value => value.includes('/attachments/new-proof?')));
+ assert.ok(calls.some(value => value.includes('/attachments/added-brief?')));
  assert.ok(!calls.some(value => value.includes('/attachments/old?')));
+ assert.ok(!calls.some(value => value.includes('/attachments/new-v1?')));
  assert.ok(!calls.some(value => value.includes('/attachments/old-rework?')));
  const attachments=require('../main/pi-session/attachments');
  const staged=await attachments.stage(require('node:os').tmpdir(),input.attachments,{stagingDir:require('node:os').tmpdir() + '/soduwork-rework-test'});
  const prompt=attachments.prompt(staged.files);
  assert.match(prompt,/new-v2/); assert.match(prompt,/new-proof/); assert.match(prompt,/附件 ID: new-v2/);
  assert.match(prompt,/需求素材\.md/); assert.match(prompt,/交付说明\.md/); assert.match(prompt,/验收证据\.json/);
+ assert.match(prompt,/additional-brief\.md/); assert.match(prompt,/附件 ID: added-brief/);
  assert.doesNotMatch(prompt,/old-rework/);
 });
 

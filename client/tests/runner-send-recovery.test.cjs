@@ -4,14 +4,14 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const { createRunnerRuntimeAdapter, getRunnerSessionDetails, _uuidV5 } = require('../main/agent-runtime/runner-adapter');
 const { busy } = require('../main/agent-runtime/switchable-conversation');
 const catalog = require('../main/agent-runtime/runtime-catalog');
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const delay = require('node:timers/promises').setTimeout;
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 async function until(check) { for (let n = 0; n < 200; n++) { if (check()) return; await delay(5); } throw Error('Recovery condition timed out'); }
 
 async function fixture(t, config = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-send-recovery-'));
   const app = config.persist ? { getPath: () => path.join(root, 'profile') } : undefined;
-  const alias = 'send-recovery', ref = _uuidV5('9af442c8-cd1d-4b91-a668-22da2b2635bf', 'chat:' + alias + ':harness2');
+  const alias = 'send-recovery', ref = _uuidV5('9af442c8-cd1d-4b91-a668-22da2b2635bf', 'chat:' + alias + ':kimi');
   const calls = []; let dispatches = 0, comments = 0, status = 'done', read = null;
   const runtime = { async rpc(op, input) {
     calls.push({ op, input });
@@ -27,7 +27,7 @@ async function fixture(t, config = {}) {
       items: status === 'done' ? [{ seq: comments + 1, kind: 'say', text: 'Recovered reply ' + comments }] : [] } };
     throw Error('Unexpected recovery operation: ' + op);
   } };
-  const adapter = createRunnerRuntimeAdapter({ app, runtimeSpec: catalog.runtime('harness2'),
+  const adapter = createRunnerRuntimeAdapter({ app, runtimeSpec: catalog.runtime('kimi'),
     ...(config.realRunner ? {} : { runnerRuntime: runtime }),
     modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'synthetic', key: 'synthetic', baseUrl: 'http://synthetic.invalid' } }) } });
   const session = await adapter.createSession({ identity: {}, native: { runner: { openOptions: { ref: alias, cwd: root } } } });
@@ -106,6 +106,7 @@ test('a definite admission refusal is switchable after settling while generic un
 test('lost dispatch ACK recovers the same active session without replay or resuming dependent input', async t => {
   const ack = deferred(), f = await fixture(t, { dispatch: () => ack.promise });
   const first = f.handle.submit('Hello', []), later = f.handle.submit('Dependent request', []);
+  await until(() => f.dispatches === 1);
   f.setStatus('running'); ack.reject(Error('Runner receipt timed out'));
   const failure = await first.completion;
   assert.equal(failure.ok, false);
@@ -220,6 +221,7 @@ test('passive terminal recovery preserves dependent messages until another expli
   const ack = deferred(), f = await fixture(t, { dispatch: () => ack.promise });
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const first = f.handle.submit('Hello', []), later = f.handle.submit('Dependent request', []);
+  await until(() => f.dispatches === 1);
   ack.reject(Error('Unknown admission')); await first.completion;
   t.mock.timers.tick(10000); await new Promise(setImmediate); await new Promise(setImmediate);
   assert.equal(f.handle.snapshot().execution.recoveryRequired, false);
@@ -227,6 +229,7 @@ test('passive terminal recovery preserves dependent messages until another expli
   assert.deepEqual(f.handle.snapshot().queue.map(row => row.id), [later.queueId]);
   assert.equal(f.comments, 0);
   assert.equal(f.handle.updateQueue('', 'resume').ok, true);
+  await until(() => f.comments === 1);
   t.mock.timers.tick(30); await new Promise(setImmediate); t.mock.timers.tick(30);
   assert.equal((await later.completion).ok, true);
 });
@@ -272,13 +275,14 @@ test('an explicit resume joins an in-flight passive read and releases work only 
   t.mock.timers.enable({ apis: ['setTimeout'] });
   f.setRead(() => read.promise);
   const first = f.handle.submit('Hello', []), later = f.handle.submit('Dependent request', []);
+  await until(() => f.dispatches === 1);
   ack.reject(Error('Unknown admission')); await first.completion;
   t.mock.timers.tick(10000); await new Promise(setImmediate);
   f.handle.updateQueue('', 'resume'); await new Promise(setImmediate);
   assert.equal(f.calls.filter(row => row.op === 'job.session').length, 1);
   assert.equal(f.comments, 0);
   read.resolve({ ok: true, data: { ok: true, ref: f.ref, status: 'done', items: [] } });
-  await new Promise(setImmediate); await new Promise(setImmediate);
+  await until(() => f.comments === 1);
   assert.equal(f.comments, 1, 'the explicit resume still owns release when another read was already pending');
   t.mock.timers.tick(30); await new Promise(setImmediate);
   assert.equal((await later.completion).ok, true);
@@ -348,6 +352,7 @@ test('all 501 recovered events and the native status remain fenced until paginat
     return secondPage.promise;
   });
   const first = f.handle.submit('Hello', []), later = f.handle.submit('Dependent request', []);
+  await until(() => f.dispatches === 1);
   ack.reject(Error('Unknown ACK')); await first.completion;
   f.handle.updateQueue('', 'resume');
   await until(() => reads === 2);

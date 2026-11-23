@@ -1,6 +1,6 @@
 /* Long-lived SoduWork device identity.
-   The renderer never receives the device key. Electron safeStorage protects it
-   with the operating-system credential facility; each Hub origin has its own key. */
+   Each Hub origin has its own device key. The main process protects it with
+   the selected credential store and never exposes it to the renderer. */
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -12,6 +12,29 @@ const _sessions = new Map();
 const _enrollments = new Map();
 const _authVersions = new Map();
 const _authChanges = new Map();
+const _logouts = new Set();
+const _anonymous = new Map();
+const _requestLifetimes = new Map();
+let _onAuthUnavailable = () => {};
+function _cancelRequests(slot) {
+  _requestLifetimes.get(slot)?.abort(new Error(TEXT.changed));
+  _requestLifetimes.delete(slot);
+}
+function _pending(id) {
+  return { ok: true, stored: true, hub: id.hub, clientId: id.clientId,
+    authState: 'pending', activationRequired: true };
+}
+function _block(id) {
+  _cancelRequests(_sessionSlot(id.hub, id.clientId));
+  _anonymous.set(_sessionSlot(id.hub, id.clientId), _pending(id));
+  if (id.hub === _activeHub) _onAuthUnavailable();
+}
+function _signedOut(app, id, value) {
+  const doc = _readDoc(app), row = doc.profiles[_slot(id.hub)];
+  if (!row || row.clientId !== id.clientId || !!row.signedOut === value) return;
+  if (value) row.signedOut = true; else delete row.signedOut;
+  _writeDoc(app, doc);
+}
 const DEVICE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,63}$/;
 const TEXT = {
   badHub: '\u540e\u53f0\u5730\u5740\u5fc5\u987b\u662f\u4e0d\u5e26\u8def\u5f84\u7684 http:// \u6216 https:// \u5730\u5740',
@@ -23,6 +46,8 @@ const TEXT = {
   pending: '\u8fd9\u53f0 SoduWork \u6b63\u5728\u7b49\u5f85\u7ba1\u7406\u5458\u6fc0\u6d3b',
   noSession: '\u540e\u53f0\u6ca1\u6709\u7b7e\u53d1\u8bbe\u5907\u4f1a\u8bdd',
   changed: '账号或服务已变化，请重新打开这条对话',
+  authChanged: '账号或服务已变化，请重新登录',
+  authTransition: '正在完成账号切换，请稍后重试登录',
 };
 
 function _file(app) { return path.join(app.getPath('userData'), 'device-auth.json'); }
@@ -42,6 +67,7 @@ function _activate(hub, previousHub) {
     // or be reused after switching back to the same environment.
     _enrollments.clear();
     _authChanges.clear();
+    for (const slot of _requestLifetimes.keys()) _cancelRequests(slot);
   }
   _activeHub = hub;
 }
@@ -55,6 +81,7 @@ function _current(generation) {
 }
 function _invalidate(id) {
   const slot = _sessionSlot(id.hub, id.clientId);
+  _cancelRequests(slot);
   _authVersions.set(slot, (_authVersions.get(slot) || 0) + 1);
   _sessions.delete(slot);
   _enrollments.delete(slot);
@@ -62,22 +89,28 @@ function _invalidate(id) {
   return _generation(id);
 }
 function _changed(id) {
-  return { ok: false, stored: true, hub: id.hub, clientId: id.clientId, error: TEXT.changed };
+  return { ok: false, stored: true, hub: id.hub, clientId: id.clientId,
+    code: 'STALE_AUTH_OPERATION', error: TEXT.authChanged };
+}
+function _transitionPending(id) {
+  return { ok: false, stored: true, hub: id.hub, clientId: id.clientId,
+    code: 'AUTH_TRANSITION_PENDING', error: TEXT.authTransition };
 }
 function _newDeviceId() { return 'soduwork-' + crypto.randomBytes(12).toString('hex'); }
 function _available() {
   return !!_credentials?.available();
 }
-function _readDoc(app) {
+function _readDoc(app, strict = false) {
   const file = _file(app);
   let unreadable = false;
   for (const candidate of [file, file + '.bak']) {
     try {
       const data = JSON.parse(fs.readFileSync(candidate, 'utf8'));
       if (data && data.v === 1 && data.profiles &&
-          (_credentials?.platform !== 'linux' || typeof data.profiles === 'object' && !Array.isArray(data.profiles))) return data;
+          (!strict && _credentials?.platform !== 'linux' || typeof data.profiles === 'object' && !Array.isArray(data.profiles))) return data;
       unreadable = true;
     } catch (error) { if (error.code !== 'ENOENT') unreadable = true; /* try the recovery copy */ }
+    if (strict && unreadable) throw new Error('原设备凭据无法验证');
   }
   if (unreadable && _credentials?.platform === 'linux')
     throw new Error('设备凭据文件暂时无法读取，原文件已保留，请检查文件权限或恢复备份');
@@ -103,9 +136,9 @@ function _replaceFile(next, file, backup) {
   fs.rmSync(next, { force: true });
   if (backup) { try { fs.rmSync(backup, { force: true }); } catch (_) {} }
 }
-function _writeDoc(app, doc, suffix = '') {
+function _writeDoc(app, doc, suffix = '', atomic = false) {
   const file = _file(app) + suffix, next = file + '.next', backup = file + '.bak';
-  if (_credentials?.platform === 'linux') {
+  if (atomic || _credentials?.platform === 'linux') {
     // Never overwrite a readable identity in-place when Linux persistence fails.
     const temporary = file + '.next-' + crypto.randomUUID();
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -158,6 +191,29 @@ function _writeDoc(app, doc, suffix = '') {
 function _decrypt(app, row) {
   return _credentials.decrypt(_file(app), row);
 }
+
+function migrateLegacy(app, raw) {
+  try {
+    const hub = _origin(raw.hub), {clientId, legacySecret} = raw;
+    if (!_available() || hub === 'https://unassigned-legacy-hub.invalid' ||
+        typeof clientId !== 'string' || !DEVICE_ID.test(clientId) || clientId === 'u-unknown' ||
+        typeof legacySecret !== 'string' || !legacySecret || legacySecret.length > 4096 || legacySecret.trim() !== legacySecret)
+      return {stored:false};
+    const doc = _readDoc(app, true), slot = _slot(hub), existing = doc.profiles[slot];
+    if (Object.hasOwn(doc.profiles, slot)) {
+      if (existing?.hub !== hub || existing.clientId !== clientId || _decrypt(app, existing) !== legacySecret) return {stored:false};
+    } else {
+      doc.profiles[slot] = credentialRow(hub, clientId, legacySecret);
+      _writeDoc(app, doc, '', true);
+    }
+    return {stored:true, hub, clientId};
+  } catch (_) { return {stored:false}; }
+}
+
+function credentialRow(hub, clientId, secret) {
+  return { hub, clientId, cipher: _credentials.encrypt(secret, hub, clientId).toString('base64'),
+    createdAt: new Date().toISOString(), ...(_credentials.platform === 'linux' ? { storage: _credentials.storage || 'electron-safe-storage' } : {}) };
+}
 function _recoverRow(app, hub) {
   /*
    * Restore same-environment backup records only when current safeStorage keys can decrypt
@@ -196,7 +252,8 @@ function _ensure(app, raw, allowLegacy = false) {
   if (!require('./hub-endpoint.cjs').accepts(app, hub)) throw new Error('此客户端使用固定的 SoduWork 服务');
   const requestedId = String(raw && raw.clientId || '').trim();
   if (requestedId && !DEVICE_ID.test(requestedId)) throw new Error(TEXT.badDevice);
-  const doc = _readDoc(app), key = _slot(hub);
+  const preserveLegacy = !!(raw?.legacySecret || raw?.preserveLegacyIdentity);
+  const doc = _readDoc(app, preserveLegacy), key = _slot(hub);
   let row = doc.profiles[key] || null;
   let changed = false;
   let clientId = row && String(row.clientId || '').trim();
@@ -212,6 +269,8 @@ function _ensure(app, raw, allowLegacy = false) {
     return { hub, clientId, secret: legacyKey, pendingMigration: row.cipher };
   }
   let secret = row ? _decrypt(app, row) : '';
+  if (preserveLegacy && Object.hasOwn(doc.profiles, key) &&
+      (row?.hub !== hub || !DEVICE_ID.test(clientId) || !secret)) throw new Error('原设备凭据无法验证，已保留原记录');
   if (row && !DEVICE_ID.test(clientId) && process.platform === 'darwin')
     throw new Error('设备凭据记录无效，已保留原记录，请联系支持人员检查');
   if (row && (!DEVICE_ID.test(clientId) || !secret)) {
@@ -234,6 +293,7 @@ function _ensure(app, raw, allowLegacy = false) {
     changed = true;
   }
   if (!row) {
+    if (raw?.preserveLegacyIdentity && !raw?.legacySecret) throw new Error('原设备凭据尚未迁移，请重试连接');
     const legacy = String(raw && raw.legacySecret || '').trim() ||
       (requestedId ? _legacyRunner(app, hub, requestedId) : '');
     /*
@@ -243,8 +303,7 @@ function _ensure(app, raw, allowLegacy = false) {
     clientId = legacy ? requestedId : _newDeviceId();
     if (!DEVICE_ID.test(clientId)) throw new Error(TEXT.badDevice);
     secret = legacy || crypto.randomBytes(32).toString('base64url');
-    row = { hub, clientId, cipher: _credentials.encrypt(secret).toString('base64'),
-      createdAt: new Date().toISOString(), ...(_credentials.platform === 'linux' ? { storage: 'electron-safe-storage' } : {}) };
+    row = credentialRow(hub, clientId, secret);
     doc.profiles[key] = row;
     changed = true;
   }
@@ -446,8 +505,17 @@ async function _requestEnrollment(id, raw, app = null, generation = _generation(
     let data = {};
     try { data = text ? JSON.parse(text) : {}; } catch (_) {}
     if (!_current(generation)) return _changed(id);
-    if (!res.ok) return { ok: false, stored: true, hub: id.hub, clientId: id.clientId,
-      ..._failure(data, res.status) };
+    if (!res.ok) {
+      const failure = { ok: false, stored: true, hub: id.hub, clientId: id.clientId,
+        ..._failure(data, res.status) };
+      if (cache && [401, 403].includes(res.status) && failure.code !== 'TOKEN_QUOTA_EXCEEDED') {
+        _sessions.delete(_sessionSlot(id.hub, id.clientId));
+        _block(id);
+        Object.assign(failure, { authState: 'pending', activationRequired: true });
+        _anonymous.set(_sessionSlot(id.hub, id.clientId), failure);
+      }
+      return failure;
+    }
     const safe = {
       ok: true, stored: true, hub: id.hub, clientId: id.clientId,
       authState: String(data.authState || ''), activationRequired: !!data.activationRequired,
@@ -457,6 +525,13 @@ async function _requestEnrollment(id, raw, app = null, generation = _generation(
       safe.session = String(data.session);
       safe.expiresIn = Math.max(30, Number(data.expiresIn) || 0);
       const workRoot = _workRoot(raw);
+      const previous = _sessions.get(_sessionSlot(id.hub, id.clientId));
+      const accountId = require('./device-auth-request').accountId;
+      const oldAccount = previous?.user?.id || accountId({ ...id, session: previous?.token });
+      const nextAccount = safe.user?.id || accountId({ ...id, session: safe.session });
+      if (cache && oldAccount && nextAccount && oldAccount !== nextAccount)
+        _cancelRequests(_sessionSlot(id.hub, id.clientId));
+      if (cache) _anonymous.delete(_sessionSlot(id.hub, id.clientId));
       if (cache) _sessions.set(_sessionSlot(id.hub, id.clientId), {
         token: safe.session, expiresAt: Date.now() + safe.expiresIn * 1000,
         localOwner: _advanceOwner(app, _sessions.get(_sessionSlot(id.hub, id.clientId)), id, safe.session),
@@ -466,9 +541,11 @@ async function _requestEnrollment(id, raw, app = null, generation = _generation(
       });
     } else if (cache) {
       _sessions.delete(_sessionSlot(id.hub, id.clientId));
+      if (safe.activationRequired) _block(id);
     }
     return safe;
   } catch (error) {
+    if (!_current(generation)) return _changed(id);
     return { ok: false, stored: true, hub: id.hub, clientId: id.clientId,
       error: error && error.name === 'AbortError' ? TEXT.timeout : String(error.message || error) };
   } finally { clearTimeout(timer); }
@@ -480,7 +557,10 @@ async function enroll(app, raw = {}) {
   catch (error) { return { ok: false, stored: false, error: String(error.message || error) }; }
 
   const slot = _sessionSlot(id.hub, id.clientId);
-  if (_authChanges.has(slot)) return _changed(id);
+  if (_authChanges.has(slot) || _logouts.has(slot)) return _transitionPending(id);
+  if (_readDoc(app).profiles[_slot(id.hub)]?.signedOut) return _pending(id);
+  if (raw.recheckAuth === true) _anonymous.delete(slot);
+  if (_anonymous.has(slot)) return _anonymous.get(slot);
   const current = _validSessionRow(app, id.hub, id.clientId);
   const staleSession = String(raw.staleSession || '');
   const requestedRoot = _workRoot(raw);
@@ -507,7 +587,9 @@ async function login(app, raw = {}, action = 'legacy') {
   let id;
   try { id = _ensure(app, raw, true); }
   catch (error) { return { ok: false, stored: false, error: String(error.message || error) }; }
+  if (_logouts.has(_sessionSlot(id.hub, id.clientId))) return _transitionPending(id);
   const generation = _invalidate(id);
+  _block(id);
   _authChanges.set(generation.slot, generation);
   const ctl = new AbortController();
   let timer;
@@ -555,8 +637,11 @@ async function login(app, raw = {}, action = 'legacy') {
       authState: 'active', activationRequired: false,
       workRoot: _workRoot(raw), user: safe.user, quota: safe.quota,
     });
+    _signedOut(app, id, false);
+    _anonymous.delete(generation.slot);
     return safe;
   } catch (error) {
+    if (!_current(generation)) return _changed(id);
     return { ok: false, stored: true, hub: id.hub, clientId: id.clientId,
       error: error && error.name === 'AbortError' ? TEXT.timeout : String(error.message || error) };
   } finally {
@@ -574,9 +659,10 @@ async function accountAction(app, raw = {}) {
   let id;
   try { id = _ensure(app, raw, true); }
   catch (error) { return { ok: false, error: error.message }; }
+  if (_logouts.has(_sessionSlot(id.hub, id.clientId))) return _transitionPending(id);
   const generation = spec.reset ? _invalidate(id) : _generation(id);
-  if (spec.reset) _authChanges.set(generation.slot, generation);
-  else if (_authChanges.has(generation.slot)) return _changed(id);
+  if (spec.reset) { _block(id); _authChanges.set(generation.slot, generation); }
+  else if (_authChanges.has(generation.slot)) return _transitionPending(id);
   const ctl = new AbortController();
   let timer;
   try {
@@ -605,6 +691,7 @@ async function accountAction(app, raw = {}) {
           expiresIn: Number(data.expiresIn) || 300, retryAfter: Number(data.retryAfter) || 60 }
       : { ok: true, logoutRequired: true };
   } catch (error) {
+    if (!_current(generation)) return _changed(id);
     return { ok: false, error: error.name === 'AbortError' ? TEXT.timeout : String(error.message || error) };
   } finally {
     clearTimeout(timer);
@@ -612,18 +699,28 @@ async function accountAction(app, raw = {}) {
   }
 }
 
-function clearSession(app, raw = {}) {
+function clearSession(app, raw = {}, { matchSession = false } = {}) {
   const id = identity(app, raw.hub || '', raw.clientId || '');
   if (!id) return { ok: true, cleared: false };
+  const slot = _sessionSlot(id.hub, id.clientId);
+  if (matchSession && (!raw.expectedSession || raw.expectedSession !== _sessions.get(slot)?.token ||
+      _authChanges.has(slot) || _logouts.has(slot))) return { ok: true, cleared: false };
   _invalidate(id);
+  if (matchSession) { _block(id); _signedOut(app, id, true); }
   return { ok: true, cleared: true, hub: id.hub, clientId: id.clientId };
 }
 
 async function logout(app, raw = {}) {
   const id = identity(app, raw.hub || '', raw.clientId || '');
   if (!id) return { ok: true, cleared: false };
+  if (_logouts.has(_sessionSlot(id.hub, id.clientId))) return _transitionPending(id);
   const generation = _invalidate(id);
+  _block(id);
+  _signedOut(app, id, true);
   _authChanges.set(generation.slot, generation);
+  // A Hub switch invalidates local results, but an in-flight logout can still
+  // affect that device on its original Hub until the request settles.
+  _logouts.add(generation.slot);
   // Local sign-out is immediate, even when the server has already revoked this
   // account or the logout request cannot reach it. Include the initiating window
   // so no renderer keeps showing authenticated state while the network is pending.
@@ -643,10 +740,12 @@ async function logout(app, raw = {}) {
     if (!res.ok) return { ok: false, ..._failure(data, res.status) };
     return { ok: true, cleared: true, hub: id.hub, clientId: id.clientId, activationRequired: true };
   } catch (error) {
+    if (!_current(generation)) return _changed(id);
     return { ok: false, error: error && error.name === 'AbortError' ?
       TEXT.timeout : String(error.message || error) };
   } finally {
     clearTimeout(timer);
+    _logouts.delete(generation.slot);
     if (_authChanges.get(generation.slot) === generation) _authChanges.delete(generation.slot);
   }
 }
@@ -682,7 +781,7 @@ async function refreshProfile(app) {
   const id = await authenticatedIdentity(app);
   if (!id) return { ok: false, error: '请重新登录' };
   const generation = _generation(id);
-  const response = await fetch(id.hub + '/api/v1/client-auth/me', {
+  const response = await require('./device-auth-request').fetchWithDeviceAuthRetry(id, id.hub + '/api/v1/client-auth/me', {
     headers: { Authorization: 'Device ' + id.session }, signal: AbortSignal.timeout(10000),
   });
   let data = {}; try { data = await response.json(); } catch (_) {}
@@ -710,8 +809,31 @@ function notifySessionChanged(app, sender, result) {
   } catch (_) {}
 }
 
-function install({ app, ipcMain, safeStorage }) {
-  _credentials = require('./device-credential-store.cjs').create({ safeStorage, app });
+function canConnect(app, hub = '', clientId = '') {
+  const id = identity(app, hub, clientId);
+  if (!id) return false;
+  const slot = _sessionSlot(id.hub, id.clientId);
+  return !_anonymous.has(slot) && !_authChanges.has(slot) && !_logouts.has(slot) &&
+    !_readDoc(app).profiles[_slot(id.hub)]?.signedOut;
+}
+
+function requestAdmission(app, previous) {
+  const id = identity(app);
+  const slot = id && _sessionSlot(id.hub, id.clientId);
+  const row = _sessions.get(slot);
+  if (!id || !row || !canConnect(app, id.hub, id.clientId) ||
+      previous.hub !== id.hub || previous.clientId !== id.clientId) throw new Error(TEXT.changed);
+  const accountId = require('./device-auth-request').accountId;
+  if (previous.session && previous.session !== row.token &&
+      (!accountId(previous) || accountId(previous) !== accountId({ ...id, session: row.token }))) throw new Error(TEXT.changed);
+  if (!_requestLifetimes.has(slot)) _requestLifetimes.set(slot, new AbortController());
+  return { identity: { ...id, session: row.token }, signal: _requestLifetimes.get(slot).signal };
+}
+
+function install({ app, ipcMain, safeStorage, credentials, onAuthUnavailable }) {
+  _onAuthUnavailable = onAuthUnavailable || (() => {});
+  _credentials = credentials || require('./device-credential-store.cjs').create({ safeStorage, app });
+  require('./device-auth-request').setRequestAdmission(previous => requestAdmission(app, previous));
   require('./device-auth-request').setIdentityRefresher(async previous => {
     const before = identity(app);
     if (!before || before.hub !== previous.hub || before.clientId !== previous.clientId) return null;
@@ -723,11 +845,13 @@ function install({ app, ipcMain, safeStorage }) {
   });
   ipcMain.handle('device-auth-select-hub', (_event, hub) => selectHub(app, hub));
   ipcMain.handle('device-auth-bootstrap', (_event, raw) => enroll(app, raw || {}));
+  ipcMain.handle('device-auth-migrate-legacy', (event, raw) => require('./access-control/preferences').isTrusted(event)
+    ? migrateLegacy(app, raw) : {stored:false});
   ipcMain.handle('device-auth-login', async (event, raw) => { const result = await login(app, raw || {}); notifySessionChanged(app, event?.sender, result); return result; });
   ipcMain.handle('device-account-action', async (event, raw) => { const result = await accountAction(app, raw || {}); if (!['emailChallenge', 'emailChallengeStatus'].includes(raw?.action)) notifySessionChanged(app, event?.sender, result); return result; });
   ipcMain.handle('account-profile-refresh', () => refreshProfile(app));
   ipcMain.handle('device-auth-logout', (_event, raw) => logout(app, raw || {}));
-  ipcMain.handle('device-auth-clear-session', (_event, raw) => clearSession(app, raw || {}));
+  ipcMain.handle('device-auth-clear-session', (_event, raw) => clearSession(app, raw || {}, { matchSession: true }));
   ipcMain.handle('device-auth-status', (_event, hub, clientId) => {
     const id = identity(app, hub, clientId);
     return { ready: !!id, hub: id ? id.hub : '', clientId: id ? id.clientId : '',
@@ -735,6 +859,6 @@ function install({ app, ipcMain, safeStorage }) {
   });
 }
 
-module.exports = { install, identity, session, localOwner, libraryWorkRoot, profiles, enroll, login, logout, clearSession,
+module.exports = { install, identity, session, localOwner, libraryWorkRoot, profiles, enroll, login, logout, clearSession, canConnect, requestAdmission,
   historyEpoch: id => JSON.stringify(id?.hub && id?.clientId ? _generation(id) : { selection: _selectionVersion }),
   ensureSession, authenticatedIdentity, selectHub, accountAction, refreshProfile };

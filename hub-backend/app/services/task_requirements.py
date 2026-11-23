@@ -300,7 +300,7 @@ async def decorate(session, client, task, api, *, context=None, prepared=None, e
     # Formal reviews may wait while the execution Task still has status=doing.
     # Carry the personal decision capability in the same snapshot as its stage.
     pending_review = False
-    if execution and api.get("requirementStage") == "reviewing":
+    if api.get("requirementStage") == "reviewing":
         from . import requirement_review_access
         reviewable = prepared.reviewable if prepared is not None else None
         if reviewable is None:
@@ -321,7 +321,7 @@ async def decorate(session, client, task, api, *, context=None, prepared=None, e
         prepared=prepared.repository_issues if prepared is not None else None)
 
 
-async def apply(session, client, task, data, *, creating=False):
+async def apply(session, client, task, data, *, creating=False, preserve_title=False):
     """Consume preparation fields. Keep execution updates in task_status.mark."""
     from . import task_access
     edit_facts = None
@@ -334,8 +334,11 @@ async def apply(session, client, task, data, *, creating=False):
     if "priority" in data and data["priority"] not in {"low", "normal", "high", "critical"}:
         raise HTTPException(400, "优先级不正确")
     if "title" in data:
-        data["title"] = str(data["title"] or "").strip()[:200]
-        if not data["title"]:
+        # Legacy PUT replay includes complete saved text, including undo after a
+        # successful DELETE. Never shorten that text while acknowledging a save.
+        title = str(data["title"] or "")
+        data["title"] = title if preserve_title else title.strip()[:200]
+        if not data["title"].strip():
             raise HTTPException(400, "请填写需求标题")
     if not creating and task.status != "todo" and {"kind", "acceptanceCriteria"}.intersection(data):
         raise HTTPException(409, "需求已进入执行，不能更改原完成标准")
@@ -532,8 +535,7 @@ async def prepare_notifications(session, task, clients):
         for tid, data in repository_facts.items()
     }
     from . import requirement_review_access
-    creator = str(getattr(task, "created_by", "") or "")
-    reviewable = await requirement_review_access.pending_task_ids(session, creator, [task.id])
+    reviewable = await requirement_review_access.pending_assignments(session, [task.id])
     scopes, prepared = {}, {}
     for client in clients:
         user = users.get(client.user_ref)
@@ -547,5 +549,5 @@ async def prepare_notifications(session, task, clients):
         }
         prepared[client.id] = _ListRead(
             user, scopes[key], {task.id: list(grants.get(principal, []))}, repository_issues,
-            reviewable if client.user_ref == creator else set())
+            {task.id} if (task.id, client.user_ref) in reviewable else set())
     return prepared

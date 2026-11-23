@@ -23,6 +23,7 @@ from ..services import account_legal, account_privacy, account_security, audit, 
 from .client_auth import _safe_user, _access_error
 from ..services.client_access import ClientAccessError
 from ..services import client_access
+from ..timestamps import iso_utc
 
 log = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ async def devices(client: Client = Depends(authenticated_client), session: Async
     rows = (await session.execute(select(Client).where(Client.user_ref == client.user_ref,
                                                         Client.auth_state == "active"))).scalars().all()
     return {"items": [{"id": row.id, "name": row.name, "platform": row.platform,
-                        "lastSeenAt": row.last_seen_at.isoformat() if row.last_seen_at else None,
+                        "lastSeenAt": iso_utc(row.last_seen_at) if row.last_seen_at else None,
                         "current": row.id == client.id, "active": row.auth_state == "active"} for row in rows]}
 
 
@@ -229,7 +230,7 @@ async def privacy(client: Client = Depends(authenticated_client), session: Async
         AccountPrivacyRequest.user_id == client.user_ref).order_by(AccountPrivacyRequest.created_at.desc())
         .limit(30))).scalars().all()
     return {"consents": [{"document": row.document, "version": row.version,
-                           "acceptedAt": row.accepted_at.isoformat(), **evidence.get((row.document, row.version), {})} for row in consents],
+                           "acceptedAt": iso_utc(row.accepted_at), **evidence.get((row.document, row.version), {})} for row in consents],
             "documents": (await account_legal.documents(session))["documents"],
             "requests": [account_privacy.public_request(row) for row in requests],
             "scopeSummary": account_privacy.SCOPE_SUMMARY,

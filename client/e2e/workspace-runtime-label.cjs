@@ -3,13 +3,13 @@ const electron = require('electron');
 if (typeof electron === 'string') {
   const env = { ...process.env };
   for (const key of ['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'ELECTRON_NO_ATTACH_CONSOLE', 'CHROME_CRASHPAD_PIPE_NAME', 'CHROME_CRASHPAD_PIPE_HANDLE']) delete env[key];
-  const child = require('node:child_process').spawn(electron, [__filename], { env, windowsHide: true, stdio: 'inherit' });
+  const child = require('node:child_process').spawn(electron, [__filename, ...process.argv.slice(2)], { env, windowsHide: true, stdio: 'inherit' });
   const timer = setTimeout(() => { child.kill(); process.exitCode = 1; }, 90000);
   child.on('exit', code => { clearTimeout(timer); process.exitCode = code ?? 1; });
 } else {
   const { app, BrowserWindow } = electron;
   const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), assert = require('node:assert/strict');
-  const client = path.resolve(__dirname, '..'), output = path.resolve(client, '../outputs/workspace-runtime-label');
+  const client = path.resolve(__dirname, '..'), output = process.argv[2] ? path.resolve(process.argv[2]) : path.resolve(client, '../outputs/workspace-runtime-label');
   app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-runtime-label-')));
   fs.mkdirSync(output, { recursive: true });
   const report = { ok: false, boundary: 'Production history reconciliation, icon rendering and styles in isolated Electron with synthetic whole-conversation provenance; network blocked.', cases: [], screenshots: [] };
@@ -47,17 +47,39 @@ if (typeof electron === 'string') {
       {id:'many',title:'多种底座一起完成的长期工作',adapterId:'pi',usedHarnesses:['pi','codex-harness','harness2','codex','claude','qwen','dsh','opencode','pi'],at:600},
     ];
     await js(`list.setChats(${JSON.stringify(saved)});localStorage.setItem('fixture-history',JSON.stringify(ctx.chatItems));void 0;`);
-    assert.deepEqual((await labels()).map(row => row.icons), [['pi','codex-harness','harness2'],['codex'],['codex-harness'],[],['pi','codex-harness','harness2','codex','claude','qwen','dsh','opencode']]);
+    assert.deepEqual((await labels()).map(row => row.icons), [['pi','codex-harness','custom'],['codex'],['codex-harness'],[],['pi','codex-harness','custom','codex','custom','qwen','dsh','opencode']]);
     assert.ok((await labels()).every(row=>row.text===''), 'Harness names are no longer visible text');
     report.cases.push('Whole-conversation provenance renders each canonical harness once and ignores the current unused selection');
     await js(`list.updateChatState({sessionId:'saved-harness',presence:{...ctx.chatItems.find(c=>c.id==='saved-harness'),usedHarnesses:['pi','codex-harness','harness2','qwen']}});localStorage.setItem('fixture-history',JSON.stringify(ctx.chatItems));void 0;`);
-    assert.deepEqual((await labels())[0].icons, ['pi','codex-harness','harness2','qwen']);
+    assert.deepEqual((await labels())[0].icons, ['pi','codex-harness','custom','qwen']);
     assert.match(await js(`document.querySelector('[data-chat-id="saved-harness"]').getAttribute('aria-label')`), /Pi、Codex Harness、Google Harness²、Qwen Code/);
     report.cases.push('A provenance-only live update repaints icons even when title, state and live status are unchanged');
     await setup();
     await js(`list.setChats(JSON.parse(localStorage.getItem('fixture-history')));void 0;`);
-    assert.deepEqual((await labels())[0].icons, ['pi','codex-harness','harness2','qwen']);
+    assert.deepEqual((await labels())[0].icons, ['pi','codex-harness','custom','qwen']);
     report.cases.push('Reload restores the complete saved provenance and keeps native Codex distinct from Codex Harness');
+    await js(`list.upsertChat({id:'automation-draft',title:'8分钟后提醒我',adapterId:'pi',usedHarnesses:[],
+      count:0,workOnly:true,draftAdapterId:'qwen',state:'idle',live:false,at:650});void 0;`);
+    assert.deepEqual((await labels()).find(row=>row.id==='automation-draft').icons, ['qwen']);
+    for (const id of ['codex-harness', 'dsh', 'pi']) {
+      await js(`list.updateChatState({kind:'work-draft-selection-saved',sessionId:'automation-draft',
+        presence:{...ctx.chatItems.find(c=>c.id==='automation-draft'),draftAdapterId:${JSON.stringify(id)}}});void 0;`);
+      const row = (await labels()).find(row=>row.id==='automation-draft');
+      assert.deepEqual(row.icons, [id]);
+      assert.match(row.title, /已选底座/);
+      assert.match(await js(`document.querySelector('[data-chat-id="automation-draft"]').getAttribute('aria-label')`), /已选底座/);
+      assert.deepEqual(await js(`ctx.chatItems.find(c=>c.id==='automation-draft').usedHarnesses`), []);
+    }
+    await js(`localStorage.setItem('fixture-history',JSON.stringify(ctx.chatItems));void 0;`);
+    await setup();
+    await js(`list.setChats(JSON.parse(localStorage.getItem('fixture-history')));void 0;`);
+    assert.deepEqual((await labels()).find(row=>row.id==='automation-draft').icons, ['pi']);
+    report.cases.push('Automation drafts show the selected runtime and repaint repeated selection-only updates; reload preserves the selection without fabricating execution');
+    await js(`list.updateChatState({sessionId:'automation-draft',presence:{id:'automation-draft',
+      title:'8分钟后提醒我',live:true,state:'running',usedHarnesses:['qwen']}});void 0;`);
+    assert.deepEqual((await labels()).find(row=>row.id==='automation-draft').icons, ['qwen']);
+    assert.equal((await labels()).find(row=>row.id==='automation-draft').title, 'Qwen Code');
+    report.cases.push('Execution replaces draft selection with actual runtime provenance and clears the draft marker');
     for (const width of [220, 180, 320]) {
       await js(`document.documentElement.style.setProperty('--ws-side-w','${width}px');void 0;`);
       await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });

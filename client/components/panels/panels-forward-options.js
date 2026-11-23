@@ -1,6 +1,6 @@
 /* Shared execution selector for requirement assignment and creation.
    Classic-script dependencies are declared in index.html and desk.html. */
-const _CLI_CLS = { claude: 'cli-claude', opencode: 'cli-opencode', codex: 'cli-codex', pi: 'cli-pi' };
+const _CLI_CLS = { opencode: 'cli-opencode', codex: 'cli-codex', pi: 'cli-pi' };
 let _fwdTab = 'ai';
 let _fwdTaskId = '';
 let _fwdOptions = null;
@@ -374,7 +374,7 @@ function _fwdLocalModelAllowed(agent) {
   if (agent?.remote === true || agent?.locationMode === 'remote') return false;
   const identity = String(agent?.key || agent?.id || '');
   const cli = String(agent?.cli || identity).replace(/^local:/, '').replace(/^runner:[^:]+:/, '');
-  if (!cli || ['codex', 'claude'].includes(cli)) return false;
+  if (!cli || ['codex'].includes(cli)) return false;
   if (agent?.modelMode === 'account') return false;
   // Device-owned models require a successful probe of the current device.
   // A same-device Runner may carry a runner key; the local conversation probe
@@ -385,7 +385,7 @@ function _fwdLocalModelAllowed(agent) {
 function _fwdCanPickModel(agent) {
   if (!agent) return false;
   const cli = String(agent.cli || agent.key || '').replace(/^local:/, '').replace(/^runner:[^:]+:/, '');
-  if (['codex', 'claude'].includes(cli) || agent.modelMode === 'account') return false;
+  if (['codex'].includes(cli) || agent.modelMode === 'account') return false;
   return agent.modelPick !== false || (_fwdLocalModelAllowed(agent) && agent.localModelPick === true);
 }
 
@@ -416,7 +416,7 @@ function _fwdMergeLocalModelChoices(rows) {
 }
 
 function _fwdDirectModelState(agent, selected) {
-  const account = ['codex', 'claude'].includes(String(agent?.cli || agent?.key || '').replace(/^local:/, '').replace(/^runner:[^:]+:/, '')) || agent?.modelMode === 'account';
+  const account = ['codex'].includes(String(agent?.cli || agent?.key || '').replace(/^local:/, '').replace(/^runner:[^:]+:/, '')) || agent?.modelMode === 'account';
   if (!account && String(selected || '').startsWith('local:') && !_fwdLocalModelAllowed(agent)) {
     return { models: [], labels: {}, value: selected, stale: true };
   }

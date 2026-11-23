@@ -19,7 +19,7 @@
   "fields": [
     {
       "key": "MONGO_HOST",
-      "label": "MongoDB 主机（远程主机强制 TLS；localhost/127.0.0.1/::1 可明文）",
+      "label": "MongoDB 主机",
       "secret": false,
       "required": true,
       "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,252}|::1)$",
@@ -67,8 +67,17 @@
       "example": ""
     },
     {
+      "key": "DISABLE_TLS",
+      "label": "关闭 TLS（明文连接）",
+      "type": "boolean",
+      "secret": false,
+      "required": false,
+      "pattern": "^(true|false)$",
+      "default": "false"
+    },
+    {
       "key": "TLS_CA_PEM",
-      "label": "TLS CA PEM（可选，换行写作\\n；远程连接始终校验证书）",
+      "label": "TLS CA PEM（用于验证证书，换行写作\\n）",
       "secret": false,
       "required": false,
       "example": ""
@@ -190,7 +199,7 @@
   "limitations": [
     "只提供固定 ping/listCollections/find 三个只读操作；不提供 aggregate 管道、runCommand、mapReduce、eval 与任意代码执行。",
     "find 的 filter 使用操作符白名单，$where/$function/$accumulator/$mapReduce 等代码类与 $out/$merge 等写类操作符一律拒绝；未知操作符直接拒绝而非透传。",
-    "远程主机强制 TLS 且始终校验证书（Atlas 等云服务默认满足；自签名请提供 CA PEM）；localhost/127.0.0.1/::1 允许明文本机调试。",
+    "远程连接默认使用 TLS 并校验证书与主机名。数据库未启用 TLS 时，可在高级设置中选择明文连接。",
     "最多 100 条、结果不超过 2 MB；需 Runner 内置 pymongo 驱动（新依赖，版本与许可证见交付报告）。",
     "list_collections 为有界首批读取，has_more 不提供跨调用游标；使用 name_prefix 缩小范围。find 支持 skip/limit 与固定排序，非快照。",
     "使用 pymongo 4.18.3（Apache-2.0）；TLS CA 按驱动要求写入临时证书文件，连接关闭后清理。"

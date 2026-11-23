@@ -96,7 +96,12 @@ async def accept(session, connection, event):
                 if await session.get(im.IMRoute, grant.task_id) is None:
                     raise
         paired = True
-    elif event["text"].startswith("/pair") or not binding or not binding.enabled:
+    elif event["text"].startswith("/pair"):
+        return
+    elif not binding or not binding.enabled:
+        if connection.provider == "wecom" and (connection.config or {}).get("saw_unpaired_message") is not True:
+            connection.config = {**(connection.config or {}), "saw_unpaired_message": True}
+            await session.commit()
         return
     count = await session.scalar(select(func.count()).select_from(im.IMInbox).where(
         im.IMInbox.connection_id == connection.id, im.IMInbox.status.in_(("queued", "sending", "waiting", "uncertain"))))

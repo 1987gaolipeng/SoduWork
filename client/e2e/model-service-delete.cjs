@@ -43,7 +43,8 @@ if (typeof electron === 'string') {
       window.deleteWrites=[];window.failDelete=false;window.holdDelete=false;
       SoduWorkAPI.saveMyModels=async input=>{deleteWrites.push(structuredClone(input));if(holdDelete)await new Promise(resolve=>window.releaseDelete=resolve);
         if(failDelete)throw Object.assign(Error('synthetic write failure'),{detail:'模拟服务暂时不可用，请重试。'});
-        fixture.providers=structuredClone(input.providers);fixture.myModels=structuredClone(input.models);fixture.revision='ui-'+(Number(fixture.revision.split('-')[1])+1);return{ok:true};};
+        assertOwnDeleteInput(input);fixture.providers=fixture.providers.filter(p=>p.personal!==true).concat(structuredClone(input.providers));fixture.myModels=structuredClone(input.models);fixture.revision='ui-'+(Number(fixture.revision.split('-')[1])+1);return{ok:true};};
+      window.assertOwnDeleteInput=input=>{if(input.providers.some(p=>p.personal!==true)||input.models.some(m=>m.providerId==='company'))throw Error('Company data must not be included in a personal deletion');};
       _mdData=structuredClone(fixture);_mdMyModels=_mdData.myModels.slice();_mdOpen='personal';_mdRender();
       window.beforeView=document.querySelector('.cfg-detail-scroll');
     `);
@@ -96,7 +97,12 @@ if (typeof electron === 'string') {
     assert.equal(await js('_mdData.providers.some(p=>p.id==="personal")'),false);
     assert.equal(await js('_mdDrafts.has("personal")'),false);assert.equal(await js('_mdOpen'),'company');
     assert.equal(await js('deleteWrites.length'),2);
-    console.log('PASS busy guard, failure retains service and input, retry commits once and selects adjacent service');
+    assert.equal(await js('deleteWrites.at(-1).providers.some(p=>p.id==="company")'),false);
+    assert.equal(await js('_mdData.providers.some(p=>p.id==="company")'),true);
+    assert.equal(await js('_mdData.revision'),await js('fixture.revision'));
+    assert.equal(await js('_mdManagedNeedsReload'),false);
+    assert.equal(await js('document.querySelector("[data-pdelete]")'),null);
+    console.log('PASS busy guard, failure retains service and input, retry commits once and retains the read-only company service with a usable revision');
 
     await js(`_mdAddService();_mdTouchProvider(_mdNew.id,{name:'Unsaved service'});_mdRender()`);
     await open();assert.equal(await js('document.querySelector("[data-md-delete-confirm]").textContent'),'丢弃服务');

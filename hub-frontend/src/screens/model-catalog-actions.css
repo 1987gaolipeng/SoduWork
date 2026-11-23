@@ -1,10 +1,10 @@
-.app .content .model-provider .model-chips {
+:is(.app .content, .model-provider-dialog) .model-provider .model-chips {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
   gap: 7px;
 }
-.app .content .model-provider .model-chip {
+:is(.app .content, .model-provider-dialog) .model-provider .model-chip {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -14,7 +14,7 @@
   padding: 8px;
   overflow: visible;
 }
-.app .content .model-provider .model-chip.off { opacity: .75; }
+:is(.app .content, .model-provider-dialog) .model-provider .model-chip.off { opacity: .75; }
 .model-chip-identity {
   display: flex;
   min-width: 0;
@@ -22,7 +22,7 @@
   align-items: center;
   gap: 7px;
 }
-.app .content .model-chip-identity .model-kind {
+:is(.app .content, .model-provider-dialog) .model-chip-identity .model-kind {
   align-self: center;
   flex: none;
   padding: 3px 5px;
@@ -30,7 +30,7 @@
   font-size: max(var(--font-min-readable, 14.5px), 12px);
   line-height: 1.4;
 }
-.app .content .model-chip-identity code {
+:is(.app .content, .model-provider-dialog) .model-chip-identity code {
   min-width: 0;
   padding: 0;
   overflow-wrap: anywhere;

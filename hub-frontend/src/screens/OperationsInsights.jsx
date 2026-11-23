@@ -19,7 +19,7 @@ import './operations-insights.css'
 const CATEGORY = localeMap(() => ({
   dev: '研发与交付', office: '办公文稿', research: '信息与研究', errand: '日常零活',
 }))
-const AGENT_NAME = { pi: 'Pi', opencode: 'OpenCode', claude: 'Claude Code', codex: 'Codex', qwen: 'Qwen', dsh: 'DSH' }
+const AGENT_NAME = { pi: 'Pi', opencode: 'OpenCode', codex: 'Codex', qwen: 'Qwen', dsh: 'DSH' }
 
 const dayLabel = (iso) => {
   if (!iso) return '—'
@@ -321,7 +321,7 @@ export default function OperationsInsights() {
             value={item.installed} unit={tx("台")}
             sub={hasAuth ? <>{tx("已登录 ")}<em className="ok">{item.authed}</em>{item.unauthed > 0 && <>{tx(" · 待登录 ")}<em className="warn">{item.unauthed}</em></>}{unknown > 0 && tx(" · 待上报 {0}", [unknown])}</> : tx("已安装")} />
         })}
-        <p className="oi-note"><Icon name="shield" />{tx("Codex / Claude Code 需在对应电脑上完成账号登录。")}</p>
+        <p className="oi-note"><Icon name="shield" />{tx("Codex 需在对应电脑上完成账号登录。")}</p>
       </div>
     </section>
     </div>
@@ -331,7 +331,7 @@ export default function OperationsInsights() {
         <div className="oi-panel-title"><span className="oi-panel-icon"><Icon name="plug" /></span><div><h3>{tx("插件使用")}</h3><p>{used}{tx(" 个近 30 天有使用 / 共 ")}{plugins.length}{tx(" 个插件")}</p></div></div>
         <div className="oi-plugin-tools">
           <FilterInput className="oi-search-field" type="search" placeholder={tx("搜索插件名称或标识")} value={search}
-            onChange={jump((e) => setSearch(e.target.value))} aria-label={tx("搜索插件")} />
+            onChange={jump((e) => setSearch(e.target.value))} aria-label={tx("按名称或标识筛选插件使用列表")} />
           <label className="admin-filter-field oi-plugin-filter"><span>{tx("筛选")}</span><FilterSelect
             value={idleOnly ? 'idle' : category ? `category:${category}` : ''} aria-label={tx("筛选")}
             onChange={jump((e) => {

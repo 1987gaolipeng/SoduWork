@@ -62,8 +62,8 @@ if (typeof electron === 'string') {
     await js(`window.fixtureOwner='cache-owner-a';SoduWorkAPI.taskStorageKey=()=>fixtureOwner;
       window.inventoryRequests=[];
       soduWorkAPI.conversationSession.conversationRuntimes=(ref,options)=>new Promise(resolve=>inventoryRequests.push({ref,force:options?.force===true,resolve}));
-      window.cacheRows=[['pi','Pi','2.5.0'],['codex-harness','Codex Harness','2.5.0'],['opencode','OpenCode','1.18.18'],['codex','Codex','0.164.0'],['qwen','Qwen Code','0.26.1'],['dsh','DeepSeek Harness','0.4.40'],['harness2','Google Harness²','0.1.0']].map(([id,displayName,version],i)=>({id,displayName,version,order:i+1,group:i<2?'recommended':'more',modelMode:id==='codex'?'account':'managed',availability:{ok:true,version}}));
-      window.resolveInventory=(index,rows=cacheRows)=>inventoryRequests[index].resolve({ok:true,checkedAt:Date.now(),runtimes:structuredClone(rows),availableRuntimes:structuredClone(rows),missing:[{id:'claude',displayName:'Claude Code'}]});
+      window.cacheRows=[['pi','Pi','2.5.0'],['codex-harness','Codex Harness','2.5.0'],['opencode','OpenCode','1.18.18'],['codex','Codex','0.164.0'],['qwen','Qwen Code','0.26.1'],['dsh','DeepSeek Harness','0.4.40'],['kimi','Kimi Code','0.1.0']].map(([id,displayName,version],i)=>({id,displayName,version,order:i+1,group:i<2?'recommended':'more',modelMode:id==='codex'?'account':'managed',availability:{ok:true,version}}));
+      window.resolveInventory=(index,rows=cacheRows)=>inventoryRequests[index].resolve({ok:true,checkedAt:Date.now(),runtimes:structuredClone(rows),availableRuntimes:structuredClone(rows),missing:[{id:'custom-offline',displayName:'Offline runtime'}]});
       document.querySelector('#nchatInput').value='Keep the existing draft';
       document.querySelector('#nchatInput').dispatchEvent(new Event('input'));
       controls.render();void 0`);

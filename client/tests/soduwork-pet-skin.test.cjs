@@ -37,7 +37,7 @@ test('SoduWork pet state layer exposes the four stable task states', () => {
   };
   const timers = [];
   const context = {
-    cfg: { _lastSkinId: 'soduwork-signature' },
+    cfg: { _lastSkinId: 'soduwork-signature', petVisible: true },
     document: { getElementById: (id) => id === 'pet' ? pet : null },
     setTimeout: (fn) => { timers.push(fn); return timers.length; },
     clearTimeout: () => {},
@@ -123,7 +123,7 @@ test('SoduWork desktop pet resolves and displays the supplied local action frame
   };
   const timers = [];
   const context = {
-    cfg: { _lastSkinId: 'soduwork-signature' },
+    cfg: { _lastSkinId: 'soduwork-signature', petVisible: true },
     document: {
       baseURI: 'file:///C:/Program%20Files/code/soduwork/client/index.html',
       getElementById: (id) => id === 'pet' ? pet : null,
@@ -177,7 +177,7 @@ test('pending, failed and stale frames never hide a valid frame; hidden pets sto
       decode: () => new Promise(resolve => { decode = resolve; }), decoded: () => decode() };
     images.push(image); return image;
   } };
-  const context = { cfg: { _lastSkinId: 'soduwork-signature' }, document, console,
+  const context = { cfg: { _lastSkinId: 'soduwork-signature', petVisible: true }, document, console,
     setTimeout: fn => { timers.set(++nextTimer, fn); return nextTimer; }, clearTimeout: id => timers.delete(id) };
   context.window = context;
   vm.runInNewContext(read('components/pet/soduwork-pet-skin.js'), context);
@@ -218,7 +218,7 @@ function resumablePet() {
     const image = { setAttribute: (key, value) => values.set(key, value), getAttribute: key => values.get(key) };
     images.push(image); return image;
   } };
-  const context = { cfg: { _lastSkinId: 'soduwork-signature' }, document, console,
+  const context = { cfg: { _lastSkinId: 'soduwork-signature', petVisible: true }, document, console,
     setTimeout: (fn, delay) => { timers.set(++nextTimer, { fn, delay }); return nextTimer; }, clearTimeout: id => timers.delete(id) };
   context.window = context;
   vm.runInNewContext(read('components/pet/soduwork-pet-skin.js'), context);
@@ -230,6 +230,19 @@ function resumablePet() {
     }
   };
 }
+
+test('a missing pet preference does not start animation or frame loading', () => {
+  const f = resumablePet();
+  delete f.context.cfg.petVisible;
+  f.skin.setState('working');
+  assert.equal(f.images.length, 0);
+  assert.equal(f.timers.size, 0);
+  f.context.cfg.petVisible = true;
+  f.skin.sync();
+  assert.equal(f.images.length, 1);
+  assert.equal(f.timers.size, 1);
+  f.skin.destroy();
+});
 
 for (const hiddenBy of ['setting', 'document']) {
   function hide(f, hidden) {

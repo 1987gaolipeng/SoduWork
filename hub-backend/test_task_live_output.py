@@ -29,10 +29,21 @@ class LiveOutputTests(unittest.IsolatedAsyncioTestCase):
     async def test_exact_ref_and_incremental_cursor_survive_read_through(self):
         row = SimpleNamespace(runner_id='runner', engine='pi', model='test')
         session = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalar_one_or_none=Mock(return_value=row))), commit=AsyncMock())
-        with patch.object(tasks, '_view_task', AsyncMock(return_value=SimpleNamespace(id='t'))), patch.object(ai_exec, 'load', AsyncMock(return_value={})), patch.object(ai_exec, 'session_sync', return_value={'ok': True}) as read, patch.object(execution_sessions, 'ingest_live_snapshot', AsyncMock()), patch.object(execution_sessions, 'read_task', AsyncMock(return_value={'ok': True, 'ref': 'r', 'items': []})) as cached:
+        with patch.object(tasks, '_view_task', AsyncMock(return_value=SimpleNamespace(id='t'))), patch.object(ai_exec, 'load', AsyncMock(return_value={})), patch.object(ai_exec, 'read_session', AsyncMock(return_value={'ok': True})) as read, patch.object(execution_sessions, 'ingest_live_snapshot', AsyncMock()), patch.object(execution_sessions, 'read_task', AsyncMock(return_value={'ok': True, 'ref': 'r', 'items': []})) as cached:
             await tasks.ai_session_task(tid='t', ref='r', since=401, client=None, session=session)
-            read.assert_called_once_with({}, 'r', 401)
+            read.assert_awaited_once_with({}, 'r', 401, runner_id='runner', limit=400)
             cached.assert_awaited_once_with(session, 't', 'r', 401, limit=400)
+
+    async def test_legacy_dispatch_uses_durable_execution_owner_before_discovery(self):
+        session = SimpleNamespace(scalar=AsyncMock(return_value=SimpleNamespace(runner_id='original')))
+        with patch.object(tasks, '_view_task', AsyncMock(return_value=SimpleNamespace(id='t'))), \
+                patch.object(ai_exec, 'last_dispatch_event', AsyncMock(return_value=SimpleNamespace(detail={'ref': 'r'}))), \
+                patch.object(ai_exec, 'load', AsyncMock(return_value={})), \
+                patch.object(ai_exec, 'read_session', AsyncMock(return_value={'ok': False})) as read, \
+                patch.object(execution_sessions, 'read_task', AsyncMock(return_value={'ok': True, 'last': 7})):
+            result = await tasks.ai_session_task(tid='t', ref='', since=7, client=None, session=session)
+        read.assert_awaited_once_with({}, 'r', 7, runner_id='original', limit=400)
+        self.assertEqual(result['last'], 7)
 
     def test_pi_tool_identity_error_and_complete_output_are_preserved(self):
         rows = local_stream._items_from({'type': 'tool_execution_end', 'toolCallId': 'call', 'toolName': 'bash', 'isError': True,

@@ -7,7 +7,7 @@ const { install } = require('../main/local-agent-model-ipc.cjs');
 const scope = { hub: 'https://fixture.invalid', clientId: 'device', owner: 'owner-a' };
 const model = 'local:model-0123456789abcdef0123456789abcdef';
 const second = 'local:model-abcdef0123456789abcdef0123456789';
-const managed = ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'harness2', 'codex-harness'];
+const managed = ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'codex-harness'];
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-agent-models-'));
@@ -55,7 +55,7 @@ test('Agent defaults use authenticated Hub/device/account scopes and encrypted a
 
 test('account runtimes, managed names, malformed scopes and stale writes cannot change local defaults', t => {
   fixture(t);
-  for (const id of ['codex', 'claude']) assert.throws(() => store.set({ ...scope, agentId: id, modelName: model }), /账号型/);
+  for (const id of ['codex']) assert.throws(() => store.set({ ...scope, agentId: id, modelName: model }), /账号型/);
   assert.throws(() => store.set({ ...scope, agentId: 'qwen', modelName: 'managed-model' }), /本地模型/);
   assert.throws(() => store.set({ ...scope, hub: 'https://fixture.invalid/private', agentId: 'qwen', modelName: model }), /作用域/);
   assert.throws(() => store.set({ ...scope, owner: '', agentId: 'qwen', modelName: model }), /作用域/);

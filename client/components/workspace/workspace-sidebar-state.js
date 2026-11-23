@@ -202,6 +202,8 @@
       if (row[key] !== undefined) out[key] = row[key];
     }
     if (Array.isArray(row.usedHarnesses)) out.usedHarnesses = unique(row.usedHarnesses);
+    if (typeof row.workOnly === 'boolean') out.workOnly = row.workOnly;
+    if (typeof row.draftAdapterId === 'string') out.draftAdapterId = row.draftAdapterId.slice(0, 160);
     return out;
   }
   function sourceOwner(key) {

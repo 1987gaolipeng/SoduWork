@@ -6,6 +6,8 @@ Command examples use `sh start.sh` on macOS/Linux. On Windows, use `.\start.cmd`
 
 Hub provides identity, authorization, execution governance, plugins, shared materials, and desktop connectivity. It uses FastAPI and asynchronous SQLAlchemy with PostgreSQL; local development can use SQLite.
 
+The first-chat checklist combines the available model catalog with the signed-in administrator’s latest desktop report. The device sends two readiness flags for its runtime and model selection. After five minutes without a fresh report, the Hub shows those steps as awaiting the desktop.
+
 ## Start locally
 
 For a first session, use `sh start.sh` from the repository root; it creates an isolated database, environment, and administrator.
@@ -35,7 +37,45 @@ Direct development uses local configuration and data; keep it separate from real
 
 API documentation: **http://127.0.0.1:9080/docs**. Health check: `GET /healthz`.
 
+## Diagnosing queued dispatches
+
+When the Runner first accepts a dispatch, its log records the execution reference and queue position.
+While it is queued, `GET /api/v1/tasks/{tid}/ai-status` can return `runner.waitReason`.
+`resource_pressure` means the Runner's resource budget is blocking new starts.
+`execution_slot` means all slots available to this work are occupied.
+The field is optional. Poll the same task to see the current reason or its transition to running.
+
+## Desktop-local Runner event recovery
+
+Desktop-local Runner executions persist their event destination separately from the
+conversation alias. Their history does not enter Hub task delivery, and Hub outbox
+pressure does not block local work; CPU, memory and execution concurrency still apply.
+Queued desktop turns display queue wording instead of model-processing wording.
+
+On upgrade, Runner recognizes old local chat streams only when their alias, runtime
+and deterministic execution reference agree. Recovery persists confirmed local routing;
+ambiguous records retain their original routing metadata. Confirmed local packets are copied to
+private `local-events-*.archive` recovery files before removal from the active outbox;
+Windows payloads retain DPAPI protection. Collection marks are preserved. Ambiguous
+streams and real Hub events remain untouched, and NACK is never treated as ACK.
+Recovery files are bounded to three times the configured outbox byte budget, including
+encoding overhead. Archive failures retain the original packets and emit a diagnostic;
+unrelated Hub delivery and collection continue subject to actual outbox capacity.
+Keep these recovery files private and retain them until their contents have been reviewed.
+Run `python3 -m unittest test_runner_event_scope test_runner_event_delivery` to verify
+routing, restart recovery, interrupted archive writes, and Hub delivery preservation.
+
 ## Managed Pi execution
+
+Agent discovery searches bounded npm-prefix, Homebrew and nvm locations, including installations absent from a desktop process's inherited PATH. A selected executable's version, Node engine and DeepSeek adapter metadata must belong to that installation; unrelated private packages cannot supply those values. Windows Codex discovery continues after an excluded WindowsApps candidate. Explicit Agent overrides, managed runtime ownership and native dependency checks remain enforced. The DeepSeek desktop application alone does not provide the ACP adapter required by the Runner.
+
+Recognized npm JavaScript Agents use the same validated Node and package entry for version probes and execution. A shim's adjacent Node cannot override that selection. Node candidates must satisfy the selected package and host minimum versions; DeepSeek boot checks and their cache also track the selected Node and entry. Native executables and custom wrappers retain their explicit commands.
+
+DeepSeek native packages follow the selected Node's platform, architecture and Linux libc, including Rosetta and mixed-runtime installations. Unknown Node identities fail closed. Launch and version-probe child processes inherit the selected Node directory without modifying the Runner's global PATH; quoted Windows PATH entries retain their priority.
+
+Model capability report v3 tests streaming continuation after a synthetic tool result, with tools retained and no extra user message. Existing v2 tool successes require rechecking; independent evidence remains available. Deploy the matching desktop update. Model refusals include an opaque `soduwork-trace` marker shared by JSON and SSE errors and the transport log; validated upstream request IDs remain correlation metadata, never error-classification input. Generic 403 guidance does not infer credential permissions from the status alone.
+
+Model transport refusal logs distinguish recognized rate limits, billing failures and unclassified 429 responses without recording provider bodies. Numeric and HTTP-date `Retry-After` values pass through the existing JSON/SSE error contract; waits above one day are bounded to one day, already beyond the desktop retry budget. Billing errors omit retry hints. The Hub does not add a retry loop; the matching desktop update honors the provider wait only within its existing per-turn budget.
 
 Managed Pi execution binds each Runner execution record to its own configuration and session directory under the Runner data root. Startup and follow-up turns use the same explicit path, independent of inherited desktop Pi settings or the operating system home-directory lookup. Model files contain an environment-variable reference for the credential; missing model configuration or failed file publication stops execution before Pi starts. Personal Pi and desktop-local model files are not modified. On upgrade, only the exact native session identified by the Runner record and matching workspace can be copied into the private directory; its original file remains unchanged. Established follow-up turns require an existing session rather than silently starting a new one.
 
@@ -43,7 +83,19 @@ After a Runner restart, recovery terminals bind the same owned history without r
 
 To verify this path with a real Runner and Pi subprocess against a disposable authenticated Hub and loopback model, install the client dependencies and run `python3 e2e_pi_dispatch_config.py --output /absolute/evidence/directory` from the backend test environment. The check covers dispatch, follow-up, output files, native terminal recovery after restart, and preservation of personal model configuration. It does not exercise a production model or native desktop UI.
 
+## Concurrent Runner conversations
+
+Desktop-private and Hub RPCs use bounded work, read, discovery and control lanes. A slow discovery or history read cannot occupy the workers reserved for stopping another conversation. Mutations of one execution reference remain ordered across both transports; stopping it invalidates older requests that have not reached durable admission. Requests rejected for transport capacity are explicitly unaccepted and may be retried with the same business ID. This does not change account authorization, local-model privacy or the adaptive CPU/memory execution budget.
+
+Process creation runs outside the shared session lock. Cancellation retains the exact launch identity until process-tree cleanup is confirmed; an unconfirmed exit does not free its execution slot or authorize a replacement. Event-retention failures preserve the unsaved batch and retry it before resuming Hub-bound admission. An empty current snapshot or an unrelated acknowledgement cannot discard that batch. Desktop-local admission remains independent of Hub event retention.
+
+Model metadata carries its privacy classification from snapshot capture to remote projection. Switching to a Hub model while a read is pending cannot expose an older local model identity or its token counts. Attachment reads and follow-up workers also retain cancellation ownership until the underlying operation finishes.
+
+Run `python3 -m unittest test_runner_local_rpc test_runner_remote_rpc test_runner_event_delivery test_runner_usage_receipts test_runner_input_cleanup test_local_process_cleanup test_task_goal_stop_races` in the backend test environment. The private-pipe test uses a real Runner process and durable queue with synthetic discovery; process-cleanup tests use isolated operating-system children. These checks do not establish real-provider or Windows acceptance when run on another platform.
+
 ## Offline quality gate
+
+Native requirement preparation can save `executionSubmissionChoice` independently of the effective `executionSubmissionMode`. For the `infer` choice, completed and validated primary artifacts resolve the mode to automatic review submission; explicit manual and ambiguous legacy manual values retain their behavior. Review remains a human action owned by the requirement creator. Current-turn delivery issues expose interrupted capture, invalid output or an unavailable creator without changing approval permissions. Upgrade desktop and Hub together for the new choice acknowledgment and issue receipts.
 
 Use the dedicated test environment, not a production service environment:
 
@@ -56,33 +108,185 @@ python3 quality_gate.py --profile extended --scope all
 
 The manifest in `quality_manifest.py` registers checks and their profiles. Unregistered checks block the gate. `live` checks connect to real Hubs, Runners, providers, or business data; they are not part of default offline acceptance.
 
+Manual acceptance submission commits its review request and notification job together. The HTTP receipt does not wait for device notification delivery, so slow connections cannot leave a successfully submitted requirement looking retryable. The existing notification worker retries failed delivery and projects each recipient's current permissions. Run `python3 -m unittest test_local_requirement_delivery` for receipt, idempotency and transaction rollback regressions.
+
+From `client/`, run `node e2e/run-requirements-isolated.cjs /absolute/evidence/directory /path/to/test/python requirements-manual-submit-race` for an isolated Electron/HTTP check using the production client timeout and synthetic slow notification recipients. The fixture has its own database and files; it does not use real accounts or send remote messages.
+
+Offline checks own their subprocess trees and finish cleanup before returning, including when a command exits before its descendants. On Windows, the gate uses the repository's Windows PowerShell Job helper and releases the command only after Job assignment succeeds. Output is captured in a private temporary file so inherited output handles cannot extend a timeout indefinitely; failure reports retain output produced before the timeout. Run `python3 -m unittest test_quality_gate_cleanup` for real process cleanup regressions on the current platform.
+
+Permission-controlled turns confirm that their execution host has exited before settlement or a replacement turn. A reliable Agent exit receipt allows up to 30 seconds for normal host cleanup, such as a frozen executable removing its extraction directory; cancellation and permission changes retain the shorter stop deadline. If termination cannot be confirmed, the original process remains tracked and blocks replacement. An answer or a successful kill request alone does not establish successful completion. Run `python3 -m unittest test_local_process_cleanup` to verify delayed shutdown and failed-termination behavior with isolated subprocesses.
+
 Smoke checks live in [`smoke/`](smoke/). To run one directly, use its module from the `hub-backend/` directory, for example `python3 -m smoke.smoke_capabilities`. The quality gate selects the appropriate registered modules. Unit tests and `tests/` integration helpers keep their existing locations.
 
-## Harness² planning recovery
+## DeepSeek Harness turn completion
 
-Harness² completes seven tool-free planning stages before native execution. If a
-complete provider response explicitly reaches its output-token limit, the whole
-turn permits one retry of that same stage with up to 16,384 output tokens, capped
-by the configured model output limit, instead of doubling the small initial
-planning allowance. Both attempts
-retain their reported usage and share the existing turn deadline and token budget.
-The client receives a retry progress message. Successful recovery headroom is reused
-for all later planning stages within the configured cap, without more retries.
-Increasing the model's maximum output gives recovery more room up to 16,384 tokens;
-it does not increase the seven-stage count, turn deadline, or total token budget.
-Partial plans are discarded; broken
-streams, HTTP failures and native execution are not retried by this recovery path.
-Persistent truncation or a lower configured cap still fails before execution.
+DeepSeek runtime preflight checks the archive-locked sharp, koffi and ripgrep
+packages for Windows, macOS and Linux on x64/arm64. macOS/Linux also require
+libvips; Linux selects the glibc or musl binaries. Missing manifests, mismatched
+versions and missing critical loaders/binaries prevent stage activation and
+invalidate cached readiness. Failed repair leaves the active runtime intact.
+Run `python3 -m smoke.smoke_dsh_runtime` for the offline platform matrix and
+activation/cache regressions. These static checks do not certify arbitrary binary
+corruption or macOS Gatekeeper acceptance; native ACP and tool execution still
+require validation on the target platform.
 
-Native Harness² model requests connect directly to the configured endpoint. Each
-request has a 120-second network idle timeout and a 300-second total deadline.
-The SSE transport and the assembled output have separate size limits.
+DeepSeek ACP adapters 0.4.40 and 0.4.41 can return while their child agents are
+still running. SoduWork's host-only preload waits for progressing descendants
+through the native `waitForChildren` service, then rechecks the parent's idle
+state and session sequence. Child results can wake another parent turn; its
+latest output limit or error is preserved. Cancellation stops waiting, while
+idle resident children do not keep a completed prompt open.
 
-DeepSeek Harness can continue once within the same native session when the model
-reports `max_tokens` and tool activity has settled. It asks the model to finish
-from the saved tool results. A second output limit is reported as incomplete.
+The preload applies an in-memory compatibility fix to the adapter's reviewed
+prompt and tool-preview blocks on macOS, Linux and Windows. Installed packages and native session
+files are not rewritten. Unknown adapter versions or changed reviewed blocks fail
+with an update instruction instead of silently using the affected behavior.
+The loader is included in source and frozen Runner packages.
+
+Run `node --test client/tests/dsh-acp-settlement.test.cjs` from the root for
+offline lifecycle and loader regressions. From `hub-backend`, run
+`python3 e2e_dsh_subagent_settlement.py --adapter-entry /absolute/npm/root/@openma/deepseek-harness-acp/dist/bin.js --runtime-root /absolute/runner/data/agent-runtimes/dsh-host --node /absolute/path/to/node --output /absolute/evidence/directory`
+for isolated acceptance against an explicitly selected installed adapter and a
+synthetic loopback model. This does not exercise a production model or desktop UI.
+
+On `max_tokens`, the reviewed adapter marks only native pending tool previews as
+not executed before clearing them. DSH discards these calls before execution;
+started tools remain unsettled until their real result arrives. The host preserves
+this distinction through live and archived tool cards, including a later failure.
+
+Once tool activity has settled, DeepSeek Harness can continue within the same
+native session from saved results using smaller calls. Recovery is bounded to
+one continuation, plus one more only after successful native compaction. If the
+limit persists, the turn is reported as incomplete with retained progress instead
+of a protocol error. Successful continuation clears the earlier truncation;
+protocol and host-cleanup failures retain priority.
+
+For managed model routes, SoduWork explicitly enables and budgets DeepSeek's
+native automatic compaction. It runs between tool steps within the current turn.
+Its threshold is the smaller of 80% of the
+model context window and the space left after reserving the current output and
+summary budgets. Summary output stays within the model's configured output cap;
+it no longer inherits the native 65,536-token reservation. Ordinary output caps
+are preserved; a cap that would consume almost the whole window is reduced to
+leave input space. Native compaction keeps the existing session, tool results,
+permissions and cancellation ownership, without requiring a new user message.
+This does not turn a provider's individual output limit into a context overflow
+or remove the bounded output recovery described above.
+
+Run `python3 -m unittest test_dsh_gateway test_context_recovery
+test_acp_error_messages test_local_turn_outcome` for model budgets and recovery
+regressions. Configured or inferred context sizes still need to match the actual
+provider; a window too small for the native instructions and tools cannot be made
+usable by compression alone.
+
+For a real native-process check, run `python3 e2e_dsh_auto_compaction.py` with
+the same explicit `--adapter-entry`, `--runtime-root`, `--node` and `--output`
+paths as the lifecycle check above. A synthetic loopback provider drives a 64k
+window through repeated compression in one user prompt. The check compares the
+old provider-only bundle, verifies durable checkpoints and completed tools, and
+requires lower native usage receipts after compaction. This is not a production
+model or desktop UI acceptance test.
+
+Managed Kimi and Qwen also receive the selected model's context window instead
+of inheriting a larger native default. Kimi receives an explicitly configured
+output cap; Qwen retains the operator's sampling and output parameters. Both use
+their own between-step compression. Managed Codex Harness receives the model
+window and an 80% automatic-compaction threshold. Personal-account Codex keeps
+its native model settings, while OpenCode already receives context/output limits
+and retains native automatic compaction. Run `python3 -m unittest
+test_kimi_runtime test_qwen_runtime test_acp_permission_inputs
+test_codex_account_acp` for these configuration and isolation boundaries.
+
+## Other harness terminal outcomes
+
+Managed installs and updates use reviewed versions: DeepSeek ACP 0.4.41,
+Kimi Code 2.6.2 and Qwen Code 0.27.4. Version checks refer to those targets,
+including when the locally installed package is newer. SoduWork updates the
+pins after compatibility validation; discovery does not replace installed software.
+
+Kimi Code 2.6.2 and Qwen Code 0.27.4 can also translate a native output limit
+into a successful ACP response. Host-only preloads preserve their native final
+outcome, verify the complete reviewed source hashes, and reject unknown versions
+with an update instruction. The preloads never change installed packages or tool
+execution. They are packaged for macOS, Linux and Windows; Qwen now requires
+Node 22.15 or later for the host loader, even if an older package declares a lower
+engine requirement.
+
+Kimi preserves the final provider stop reason across tool validation and rejects
+native failed turns. Qwen retains its own bounded output recovery and propagates
+recovery errors; its separate session-input budget is not relabeled as an output
+limit. SoduWork's invocation-local Qwen settings select native
+`model.loopProtection = "stop"`, so a detected repeated failure stops instead of
+only warning. This overrides `warn`/`off` for the managed invocation without
+changing operator files or lowering the general task budget. Neither harness
+receives an additional host retry for exhausted output recovery.
+
+Codex ACP negotiates its versioned `sessionFailure` capability and reads the
+current prompt's typed failure before accepting `end_turn`; error prose alone is
+not completion evidence. Invalid typed failures also stop settlement. The v1
+capability also changes tool reports: omitted approval fields are restored only
+from the same live tool call, and bounded terminal deltas and result snapshots
+remain available in completed tool cards. Native subagent-session capabilities
+are not enabled by this negotiation. Pi,
+OpenCode, DeepSeek, Kimi and Qwen preserve a real later error over an earlier
+truncation, while successful recovery clears the old truncation state.
+
+Run `python3 -m unittest test_kimi_runtime test_qwen_runtime test_codex_acp_outcome
+test_acp_error_messages test_local_turn_outcome` in the backend test environment.
+The standalone `e2e_kimi_outcome.py`, `e2e_qwen_turn_outcome.py` and
+`e2e_codex_acp_outcome.py` fixtures use
+explicitly selected installed runtimes and isolated loopback providers; see their
+`--help` for required paths. Codex acceptance also checks real permission
+approvals/denials and command output. They do not exercise paid model services.
+
+## Task text compatibility
+
+Task creation with `POST /api/v1/tasks` and fields explicitly supplied to `PATCH`
+or batch updates validate titles up to 200 characters and sources up to 120;
+longer input returns 422 before writes. Reading historical records and updating
+unrelated fields retain their original text.
+
+`PUT /api/v1/tasks/{id}` is the desktop's idempotent synchronization and undo
+contract. It accepts complete historical text because an unsent legacy task and
+a task restored after deletion have no existing server row to identify them.
+This compatibility endpoint intentionally does not enforce the POST/PATCH text
+limits; account ownership and managed-source restrictions still apply.
+
+Migration `0092_task_text_storage` widens PostgreSQL task text columns without
+truncation, including adoption of unversioned databases. Existing SQLite tables
+need no rebuild. Deploy the Hub migration before the updated desktop. The desktop
+preserves full text and retries a queued PUT blocked solely by the old length
+validation once; another rejection remains blocked for explicit review. Downgrade
+refuses to narrow columns while overlong data exists. Back up the database and
+matching application before upgrading.
 
 ## Database configuration
+
+Domain ordering accepts signed 32-bit integers and legacy decimal strings.
+Malformed values, booleans, fractions and overflow return HTTP 400 before any
+record is changed. Omitting a rank or sending null keeps the existing rank on
+PATCH; creation retains its zero default. Schedule numeric fields and client
+update progress use the same integer validation, with their existing clamping
+and optional-field defaults. New schedule timezone values must name a valid
+IANA zone; omitted values keep the previous configuration, while null or empty
+text selects the existing default. Historical invalid zones remain readable
+through the default timezone fallback.
+
+Migration `0091_domain_sort_validation` repairs historical SQLite domain ranks
+whose stored type or range is invalid. Valid ranks, domain IDs and associations
+are preserved. Repaired entries are placed after valid ranks when space remains;
+if the maximum rank is exhausted, entries tie at that maximum and are ordered
+by creation time and ID. Each repair first records
+the original storage type, lossless original value and replacement in a
+`domain.sort_repair` audit entry in the same transaction. The repair also runs
+when adopting a pre-Alembic database and is idempotent. PostgreSQL domain data
+is unchanged. Back up the database before upgrading; downgrade does not restore
+invalid values. Administrators can review the audit entries and adjust ordering.
+
+Offline regressions: `python3 -m unittest test_api_integer_validation
+test_domain_sort_validation test_domain_sort_migration
+test_schedule_update_input_validation`. These suites are registered in the
+release quality gate.
 
 Set `DATABASE_URL` in private configuration when overriding the SQLite default:
 
@@ -102,11 +306,27 @@ Later administrator opt-outs persist across restarts, and new bundled skills
 default to available. Personal choices and imported-package approval remain
 independent. See the [skill loading guide](../skills/README.md).
 
+## OpenCode data isolation and existing conversations
+
+Managed OpenCode keeps its database, data, state and cache under the Runner data root's `agents/opencode/` directory. Inherited `OPENCODE_DB` and XDG paths cannot redirect managed execution into a personal OpenCode installation. The parent Runner and standalone ACP bridge select the same private database; the user's home directory and injected model configuration remain unchanged.
+
+Before starting either a new or resumed session, managed execution rejects child paths that escape this private directory and hard links on the database or its SQLite sidecars. An explicitly redirected Runner root and links that stay within its OpenCode directory remain supported. Fix the directory layout before retrying; rejected layouts never launch OpenCode or substitute a new session.
+
+When an archived SoduWork conversation resumes, its recorded native session ID and workspace identify the history to recover. Compatible v1 session, message, part and todo records are imported from a stable, read-only file snapshot into the private database, together with related child sessions. Personal accounts, credentials and project permissions are not imported, and the original database and sidecars are not modified. A missing session, unsupported v2 history in the selected session or its children, active revert or remote workspace binding stops recovery with an explanation; it never silently starts a blank replacement session or downgrades the personal database. This also detects v2 history when the database still contains v1 tables, without blocking unrelated v1 sessions. If the personal database is changing during the snapshot, close personal OpenCode and retry. Existing conversation archives and native IDs remain available.
+
+If an empty private session already exists, recoverable evidence of original history blocks continuing that empty session without replacing it. Legitimate private sessions remain resumable when personal storage is missing or unavailable. Canceling during compaction settles the stopped turn even if history recovery also fails, and a retired recovery cannot overwrite a newer turn.
+
+Run `SODUWORK_TEST_OPENCODE_BIN=/absolute/path/to/opencode python3 -m unittest test_opencode_native_config` with the pinned managed binary and prepared SDK dependencies for native/ACP isolation and resume checks against a loopback model. These checks use synthetic databases and do not access personal history or a production model.
+
 ## OpenCode turn completion
 
 Native and ACP OpenCode executions preserve the current turn's provider finish reason. An output-token limit is reported as incomplete even when partial text exists and the native process exits successfully; existing progress and the session remain available for manual continuation. The ACP adapter observes only native session/turn identifiers and stop reasons through an invocation-local plugin, and rejects missing completion evidence without retrying tools or changing permissions. Run `python3 e2e_opencode_turn_outcome.py --binary /path/to/opencode` for isolated loopback-provider acceptance using an explicitly selected installed binary.
 
 ## OpenCode installation and network diagnostics
+
+Runner archive downloads, model-gateway reachability checks and secure control connections share one TLS configuration on macOS, Windows and Linux. By default, MIT-licensed `truststore` uses the installed operating system's trust: Security framework on macOS, CryptoAPI on Windows, and the system CA store through OpenSSL on Linux. No packaged public CA bundle is added. Missing native verification support or a rejected certificate fails without retrying under another trust policy. Certificate chains and hostnames remain verified. This does not change external native harnesses' own HTTPS configuration.
+
+Nonempty `SSL_CERT_FILE` or `SSL_CERT_DIR` values explicitly replace default system trust with the configured CA file or OpenSSL hashed CA directory. A missing or invalid path fails without falling back to system or bundled roots. Supply the complete required trust set when configuring this override. Empty values select default system trust. HTTP clients load trust only for HTTPS requests, including redirects from HTTP; plain HTTP does not depend on certificate configuration. Existing download proxy selection and direct model-gateway routing are unchanged.
 
 The managed installer tries an explicitly configured mirror, the connected Hub, then the official release. On macOS, archive downloads through the Python installer merge system HTTP/HTTPS proxy settings with environment overrides by scheme on every attempt. An explicitly empty proxy variable disables that scheme's system proxy. System-sourced proxies retain their system bypass rules alongside `NO_PROXY`; an empty `NO_PROXY` does not cancel the system exceptions. Explicit proxy overrides retain standard environment bypass behavior, and requests to the exact connected Hub origin stay direct. TLS certificate verification and pinned SHA-256 verification remain enabled. These download rules do not change npm dependency installation or model-gateway routing.
 
@@ -120,17 +340,39 @@ The script verifies the pinned SHA-256 before publishing files under `downloads/
 
 For failed attempts, inspect the local Runner's `runner.log` for structured network diagnostics and the failed stage. A successful metadata request, partial download, checksum check or `--version` probe alone is not a completed installation: download, integrity check, extraction, executable version check, execution-dependency preparation and activation must all succeed. Model execution needs its own subsequent verification. Keep credentials and raw proxy configuration out of shared diagnostics; repair trusted certificate configuration rather than disabling TLS checks.
 
+Verify the production network modules with real loopback HTTPS and a frozen PyInstaller probe in a dedicated environment containing `requirements-runner-build.txt` dependencies:
+
+```sh
+python3 e2e_runner_tls.py --output /absolute/evidence/directory
+```
+
+The check verifies the packaged native verifier, real TLS with a disposable trust anchor, strict explicit overrides, and rejection of untrusted or mismatched certificates. It does not modify the machine's trust store. `--source-only` exercises the same paths without freezing. These fixtures do not replace full desktop, production model or other operating-system verification.
+
 ## API and trust boundaries
+
+When posting usage to `POST /api/v1/usage/events`, omit `occurredAt` to use the time the Hub receives the event. Supply an ISO 8601 timestamp to report an earlier instant. The Hub interprets a timestamp without an offset as UTC. If an event has an invalid timestamp, the Hub returns HTTP 422 before recording any event in the batch.
 
 - Devices enroll with `POST /api/v1/clients/enroll`, then use a short-lived device session. Device long-term keys remain in the Electron main process; Hub stores only their digest.
 - Business requests use `Authorization: Device <session>`. WebSocket connectivity uses the same short-lived session at `/api/v1/ws`.
-- Tasks use `/api/v1/tasks`, task-specific operations, batch updates, completed-task clearing, and agent run/retry/takeover routes. Configuration uses `/api/v1/config`.
-- Administrators sign in at `/api/v1/admin/login` and use bearer tokens for administrator APIs, including clients, tasks, and dispatch.
+- Tasks use `/api/v1/tasks`, task-specific operations, batch updates, completed-task clearing, and agent run/retry/takeover routes. Device preferences use `GET /api/v1/config?withRevision=true`. Send edited fields and the returned `_configRevision` to `PUT /api/v1/config`. The versioned response lists writable fields in `_configKeys`. Unknown fields and invalid values return 422, a stale revision returns 409, and replacing a previously saved value without a revision returns 428.
+- Administrators sign in at `/api/v1/admin/login` and use bearer tokens for administrator APIs, including clients, tasks, and dispatch. After 10 failed sign-ins for one account or 30 from one IP address within a five-minute window, the Hub returns HTTP 429 with the remaining wait in the `Retry-After` header (seconds). The database stores the counters across Hub workers. Failed attempts appear in the audit log as `admin.login.failed`.
 - Long-term device keys must not enter renderers, logs, or URLs. Server state is authoritative; offline client caches must not overwrite it.
+
+Disabling an account invalidates its existing device sessions and AI/tool tickets, returns devices to pending sign-in, and closes their event, terminal and Runner channels. Device keys, configuration and historical ownership are retained. Another active account can sign in on the same device; re-enabling the original account requires a new sign-in and never restores old sessions. Explicit administrator device bans remain revoked and block every account. Devices already revoked by older account-disable behavior require an administrator to review and activate them; account re-enablement does not automatically lift device bans.
 
 Account conversation directory and source projections include `contentLocation`: `hub` for legacy Hub content, `source` for content retained by the original endpoint, `replica` for a valid migrated copy at the current source revision, or `unknown` when the reference cannot be established. The field does not expose private replica identifiers or grant access; clients must retain existing account, Hub, and execution checks. An unknown location must not be used to discard a potentially independent local copy.
 
 See [OAuth deployment and validation](CONNECTOR_OAUTH.en.md) for connector credentials and authorization.
+
+### Listing records
+
+Under `/api/v1`, `admin/users`, `admin/orgs`, `admin/roles`, `admin/domains`, `tasks` and `schedules` return their existing arrays when called without pagination. Supply `limit` (1–200) or `offset` (zero-based) to receive `{items, total}`. With only an offset, the page size defaults to 50. The total counts visible records before pagination. An offset past the end returns an empty page.
+
+`GET /api/v1/admin/ai-schedules/{sid}/runs` returns up to 20 recent runs by default. Pass an integer `limit` from 1 to 200. Values outside this range return HTTP 422.
+
+Use `GET /api/v1/admin/client-inventory` for an object containing `items`, `total`, `counts`, `page`, `pageSize` and `offset` on every call. Choose `page` and `pageSize` (1–100, default 25), or `offset` and `limit`. Existing callers of `admin/clients` can still request the legacy array or use `paged=1` for an object.
+
+The library uses the same optional limit and offset across folders first, then files. Its existing `folders` and `items` arrays remain separate, and the paginated response includes their combined `total`. Approvals and deliveries accept a positive limit and a zero-based offset.
 
 ## Requirement migration and access
 
@@ -153,6 +395,20 @@ The second command creates and tears down an isolated local PostgreSQL instance.
 
 See [release scope](../docs/release-scope.en.md) for distribution boundaries.
 
+## Non-Pi task continuation
+
+Codex, Codex Harness, OpenCode, DeepSeek Harness, Kimi and Qwen use a Runner-owned task controller when goal mode is selected or a desktop message explicitly requests continuous completion. Pi's existing controller is unchanged. Ordinary questions and instructions without this request keep their existing turn behavior.
+
+Output truncation, context recovery and task completion remain separate decisions. Only typed output-limit receipts can trigger output recovery; authentication, transport, permission and unknown tool outcomes cannot. Goal-owned DeepSeek turns disable the bridge's inner output retry loop so a new process cannot multiply retries. The task record retains at most two output recoveries, with new successful tool progress required for the second. Context recovery retains its own counters and may compact or relay the native session while retaining the SoduWork conversation and workspace.
+
+After a successful work turn, a separate review turn checks actual artifacts and verification results. A fresh structured receipt, successful tool evidence from that review and any declared output checks are required before completion. The receipt is a model-assisted review, not a proof of arbitrary business requirements. Missing, malformed or unsupported evidence pauses the task. Two turns without new successful tool progress also pause it. Original permissions and approval requirements still apply.
+
+The default goal budget is 240 minutes and 1,000 tool steps. Elapsed active time, tool steps, review state and recovery counters persist through internal continuations and Runner restart. Pausing does not consume active time; resuming does not replenish budgets. User messages take precedence at native turn boundaries. Stop and disable controls prevent automatic restart, including while the host is settling. Closing goal mode preserves the files and permits ordinary conversation.
+
+Run `python3 -m unittest test_local_task_goal test_local_task_goal_integration test_context_recovery test_acp_error_messages` for the controller and boundary regressions. These checks use synthetic receipts and isolated processes; they do not establish completion quality for every real model.
+
+With an existing compatible DeepSeek installation, run `python3 e2e_task_goal_dsh.py --adapter-entry /absolute/adapter/dist/bin.js --runtime-root /absolute/runner/data/agent-runtimes/dsh-host --node /absolute/path/to/node --output /absolute/evidence/directory`. This runs the installed adapter, runtime, real file tools and production stream/controller/resume code. A loopback model and a process-scheduling callback are test substitutes. It requires truncation recovery followed by file verification in the same native session, unchanged existing files and no repeated write. It neither installs dependencies nor uses production credentials.
+
 ## OpenCode model selection on resume
 
 Managed native OpenCode turns pass the current model explicitly. ACP turns select the exact advertised model before prompting, using the existing session ID and history. Updating the injected default alone does not change the model retained by a native session. Missing routes or an unconfirmed model change stop the turn; the adapter does not restore old credentials, rename models, or create a replacement session.
@@ -173,6 +429,14 @@ Codex Harness, Qwen, Kimi and DeepSeek Harness use private state directories und
 
 `python3 -m unittest test_acp_home_isolation` checks real file collisions, injected permission failures, and Runner admission through a real subprocess/ACP bridge with a synthetic vendor. It verifies that failed preparation launches no executor and that a repaired directory permits execution. This does not establish real-provider or native-platform acceptance.
 
+## ACP file and Kimi question contracts
+
+ACP `fs/read_text_file` returns the complete UTF-8 file when `limit` is omitted, preserving line endings. Explicit positive `line`/`limit` values select a range. Files over the 4 MB host limit fail explicitly; the bridge never returns a silently truncated file that a native edit could write back.
+
+Kimi's `AskUserQuestion` permission fallback is presented as answer choices. The selected `optionId` travels through the desktop and Runner unchanged; full access still waits for a human answer, and cancelling does not grant or deny subsequent tool operations. This fallback retains Kimi's first-question, single-choice behavior; the client does not advertise elicitation forms. A managed Kimi model explicitly marked `localOnly: true` may omit its API key: the launch environment receives a fixed non-secret placeholder required by Kimi, without changing saved credentials or remote-model validation.
+
+Offline regressions run with `python3 -m smoke.smoke_acp_runtime`, `python3 -m smoke.smoke_access_policy`, and `python3 -m unittest tests.test_cli_runtime_compatibility`. They cover whole-file edit/append, question selection/cancellation and local model environment construction. Real Kimi Code 2.6.2 was also checked against a loopback model fixture; this verifies the native ACP behavior, not acceptance by an external model provider.
+
 ## Private DeepSeek Harness probe
 
 Private model tests isolate writable DSH state and temporary files while resolving `DSH_PATH` from the Runner's installed runtime directory. Relocating test state must not relocate installed code. The private job and its raw provider output remain unavailable through Hub job APIs.
@@ -188,3 +452,7 @@ python3 e2e_dsh_private_probe.py \
 ```
 
 This explicit check uses the production private-probe job and ACP bridge, the installed adapter and host, and a synthetic loopback model. It first reproduces the old incorrect installation path, then requires a real model request and the expected Agent response with the corrected path. It uses disposable home, state and temporary directories, blocks non-loopback Node connections and cleans up its subprocesses. It does not install or update dependencies, use real credentials, or verify desktop UI, production Hub or provider behavior. Run it separately from the offline quality gate because it requires an existing native installation.
+
+## Model provider deletion
+
+With `integration.manage`, request `GET /api/v1/admin/model-providers/{id}/deletion-impact`. The result includes the provider and impact revisions, child models, and visible saved model selections. Member names require `user.manage` and issue titles require `task.view`; department visibility still applies. Submit the revisions as `expectedRevision` and `expectedImpact` plus the exact ID as `confirmId` to the existing `DELETE /api/v1/admin/model-providers/{id}`. Older delete requests without the preview return HTTP 428. On HTTP 409, retrieve a fresh preview and confirm again. Built-in services cannot be deleted.

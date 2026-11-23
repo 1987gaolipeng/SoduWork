@@ -25,6 +25,7 @@ class _Replies:
         self.streams: dict[str, tuple[str, bool]] = {}
         self.failure = ""
         self.pi_failure = ""
+        self.native_failure = ""
         self.pi_message = 0
         self.claude_message = ""
         self.ordinal = 0
@@ -69,6 +70,13 @@ class _Replies:
             self.failure = str(event.get("result") or details or self.failure or "模型调用失败")
         if kind == "auto_retry_end" and event.get("success") is False:
             self.failure = str(event.get("finalError") or "模型重试失败")
+        if kind == "step_finish" and not event.get("contextOnly"):
+            reason = (event.get("part") or {}).get("reason")
+            if reason in {"length", "max_tokens"}:
+                self.native_failure = "模型输出达到上限、被截断或拒绝，本轮未完成（%s）" % reason
+            elif reason == "stop":
+                # Clear only the native truncation recovered in this process.
+                self.native_failure = ""
         if kind == "message_start":
             if (event.get("message") or {}).get("role") == "assistant":
                 self.pi_message += 1
@@ -131,7 +139,8 @@ class _Replies:
 def _responses(output: str) -> tuple[list[str], str]:
     replies, plain, structured = _Replies(), [], False
     malformed = False
-    for line in str(output or "").splitlines():
+    # Unicode separators are legal inside JSON strings, not record boundaries.
+    for line in re.split(r"\r\n?|\n", str(output or "")):
         line = _clean(line).lstrip("\ufeff").strip()
         if not line:
             continue
@@ -154,12 +163,15 @@ def _responses(output: str) -> tuple[list[str], str]:
     if structured and malformed and not replies.failure:
         replies.failure = "CLI 输出协议 JSON 不完整或格式无效，请检查 CLI 版本与适配器"
     answers = [_clean(value) for value, done in replies.streams.values() if done]
-    return (answers if structured else ["\n".join(plain)]), replies.failure or replies.pi_failure
+    return (answers if structured else ["\n".join(plain)]), replies.failure or replies.pi_failure or replies.native_failure
 
 
 def probe_succeeded(output: str, code: int, token: str) -> bool:
     answers, failure = _responses(output)
-    return code == 0 and not failure and any(token in value for value in answers)
+    # Allow whitespace inside a standalone marker without combining replies.
+    return code == 0 and not failure and any(
+        token in value or "".join(value.split()) == token for value in answers
+    )
 
 
 _ERR_FIELD = re.compile(r'"(?:finalError|errorMessage|error_message)"\s*:\s*"([^"]{2,200})"')

@@ -1,7 +1,6 @@
 '''Truthful local login-state probes for account-owned agent CLIs.'''
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from collections.abc import Callable
@@ -46,28 +45,13 @@ def probe(
     '''Prefer each CLI local status command; return empty for legacy fallback.'''
     key = str(key or '')
     run = runner or (lambda executable, args: _run(executable, args, env=env))
-    args = (
-        ['auth', 'status', '--json']
-        if key == 'claude'
-        else ['login', 'status']
-        if key == 'codex'
-        else []
-    )
+    args = ['login', 'status'] if key == 'codex' else []
     result = run(executable, args) if args else None
     if result is None:
         return '', ''
 
     code, output = result
     lowered = output.lower()
-    if key == 'claude':
-        try:
-            state = json.loads(output)
-        except (ValueError, TypeError):
-            state = {}
-        if state.get('loggedIn') is True:
-            return 'authed', '已用自己的 Anthropic 账号登录'
-        if state.get('loggedIn') is False or 'not logged in' in lowered:
-            return 'unauthed', '还没登录：在这台机器上运行 claude auth login'
 
     if key == 'codex':
         if code == 0 and 'logged in' in lowered and 'not logged in' not in lowered:

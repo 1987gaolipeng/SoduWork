@@ -115,12 +115,12 @@ function fixture(t, initial = {}) {
 
 test('available and missing runtime marks share the Agent management identity', async t => {
   const f = fixture(t), pending = f.click(); await settle();
-  f.calls[0].resolve(inventory('harness2', { missing: [{ id: 'codex', displayName: 'Codex' }] }));
+  f.calls[0].resolve(inventory('kimi', { missing: [{ id: 'codex', displayName: 'Codex' }] }));
   await pending;
   assert.deepEqual(f.pop.querySelectorAll('[data-runtime]').map(row => {
     const mark = row.querySelector('img') || row.querySelector('.agent-monogram');
     return mark.tagName.toLowerCase() === 'img' ? mark.attributes.src : mark.textContent;
-  }), ['assets/agent-brands/pi.svg', 'assets/agent-brands/google.svg']);
+  }), ['assets/agent-brands/pi.svg', 'assets/agent-brands/kimi.svg']);
   const missing = f.pop.querySelector('#nchatRuntimeMissing');
   assert.equal(missing.querySelector('img').attributes.src, 'assets/agent-brands/codex.svg');
   assert.equal(missing.querySelector('.agent-brand').attributes['aria-label'], 'Codex');

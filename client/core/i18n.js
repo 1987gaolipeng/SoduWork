@@ -91,6 +91,19 @@
       'group.preferences': '偏好', 'rail.more': '更多', 'rail.home': '主页',
       newChat: '新对话', pinned: '置顶', recentChats: '最近聊天', recentTasks: '最近需求',
       connected: '已连接 SoduWork 服务', connecting: '服务连接中',
+      'models.pi.hubOffline': 'Hub 模型清单暂时无法读取',
+      'models.pi.unknown': '暂时无法确认可选的对话模型',
+      'models.pi.retry': '重新读取模型清单',
+      'models.pi.count': '本地 Pi 可选的对话模型：{count} 个',
+      'models.pi.ready': '在本地 Pi 新对话的模型选择器中选择此服务的模型。',
+      'models.pi.protocol': '请使用支持此协议的 Agent，或为 Pi 配置 OpenAI 兼容服务。',
+      'models.pi.managed': '请联系管理员检查此服务的凭据并启用对话模型。',
+      'models.pi.credentials': '请先保存服务地址和凭据，或确认本机服务无需密钥。',
+      'models.pi.empty': '服务已保存。添加一个对话模型后，即可在本地 Pi 对话中选择。',
+      'models.pi.finishEdit': '请先完成或取消当前模型编辑，再添加对话模型。',
+      'models.pi.review': '已有对话模型尚未出现在选择器中，请检查模型配置。',
+      'models.pi.reviewAction': '查看已有对话模型',
+      'models.pi.add': '添加对话模型',
       'models.available': '{count} 个可选模型', 'models.types': '{chat} 个聊天 · {image} 个图片 · {video} 个视频',
       'models.providers': '{count} 家服务已配置 · {personal} 个使用个人额度',
       'models.count': '{count} 模型', 'models.itemCount': '{count} 个',
@@ -168,6 +181,19 @@
       'group.preferences': 'Preferences', 'rail.more': 'More', 'rail.home': 'Home',
       newChat: 'New chat', pinned: 'Pinned', recentChats: 'Recent chats', recentTasks: 'Recent issues',
       connected: 'Connected to SoduWork', connecting: 'Connecting to service',
+      'models.pi.hubOffline': 'Hub model catalog is unavailable',
+      'models.pi.unknown': 'Chat model availability is unknown',
+      'models.pi.retry': 'Reload model catalog',
+      'models.pi.count': 'Selectable chat models for local Pi: {count}',
+      'models.pi.ready': 'Choose a model from this service in a new local Pi conversation.',
+      'models.pi.protocol': 'Use an agent that supports this protocol, or configure an OpenAI-compatible service for Pi.',
+      'models.pi.managed': 'Ask your administrator to check the service credentials and enable a chat model.',
+      'models.pi.credentials': 'Save the endpoint and credentials, or confirm that the local service needs no key.',
+      'models.pi.empty': 'Service saved. Add a chat model to select it in a local Pi conversation.',
+      'models.pi.finishEdit': 'Finish or cancel the current model edit before adding a chat model.',
+      'models.pi.review': 'A configured chat model is missing from the picker. Check its configuration.',
+      'models.pi.reviewAction': 'Review existing chat model',
+      'models.pi.add': 'Add chat model',
       'models.available': 'Available models: {count}', 'models.types': '{chat} chat · {image} image · {video} video',
       'models.providers': '{count} providers configured · {personal} using personal quota',
       'models.count': 'Models: {count}', 'models.itemCount': '{count}',
@@ -187,24 +213,13 @@
      they are gradually migrated to data-i18n keys.  It deliberately only matches
      complete, known UI phrases so user supplied task and chat content is untouched. */
   const EN_TEXT = global.SoduWorkLocaleMessages?.['en-US'] || {};
-  const diagnosticTemplates = new Set([
-    'Google Harness² {stage}（{phase}）失败：{detail}',
-    'Google Harness² {stage}失败：{detail}',
-    '模型请求失败（HTTP {status}）：{detail}',
-  ]);
-  // Only finite backend-owned diagnostics may translate their nested fields.
-  // Other templates keep user names, provider output and tool text verbatim.
-  const diagnosticParts = Object.fromEntries(['stage', 'phase', 'detail'].map(kind => [kind,
-    new Map(Object.keys(EN_TEXT).filter(key => key.startsWith('harness2.' + kind + '.'))
-      .map(key => [key.slice(('harness2.' + kind + '.').length), key]))]));
   const templates = Object.entries(EN_TEXT).filter(([source]) => /\{\w+\}/.test(source)).sort(([a], [b]) => b.replace(/\{\w+\}/g, '').length - a.replace(/\{\w+\}/g, '').length).map(([source, target]) => {
     const names = [];
     const pattern = source.split(/(\{\w+\})/).map(part => {
       if (/^\{\w+\}$/.test(part)) { names.push(part.slice(1, -1)); return '([\\s\\S]*?)'; }
       return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }).join('');
-    return { expression: new RegExp('^' + pattern + '$'), names, target, source,
-      diagnostic: diagnosticTemplates.has(source) };
+    return { expression: new RegExp('^' + pattern + '$'), names, target, source };
   });
   let currentLocale = initialLocale();
   let windowTitle = global.__soduworkWindowTitle || null;
@@ -241,7 +256,7 @@
     windowTitle = { label, detail };
     if (global.document) global.document.title = 'SoduWork' + (label ? ' · ' + translateText(label) : '') + (detail ? ' · ' + detail : '');
   }
-  function translateText(value, target = read(), diagnosticDepth = 0) {
+  function translateText(value, target = read()) {
     const text = String(value == null ? '' : value);
     if (target === SOURCE_LOCALE) return text;
     const trimmed = text.trim().replace(/\s+/g, ' ');
@@ -262,21 +277,6 @@
         const match = template.expression.exec(text.trim());
         if (!match) continue;
         const params = Object.fromEntries(template.names.map((name, i) => [name, match[i + 1]]));
-        if (template.diagnostic) {
-          if (diagnosticDepth > 1 || Object.values(params).some(value => value.length > 512)) return text;
-          for (const [name, value] of Object.entries(params)) {
-            if (name === 'status' && /^[1-5]\d{2}$/.test(value)) continue;
-            const key = diagnosticParts[name]?.get(value);
-            if (key) params[name] = selectedCatalog[key] ?? fallbackCatalog[key] ?? value;
-            else if (name === 'detail' && value.startsWith('模型请求失败（HTTP ')) {
-              params[name] = translateText(value, target, diagnosticDepth + 1);
-              if (params[name] === value) return text;
-            } else return text;
-          }
-          const localized = selectedCatalog[template.source] ?? template.target;
-          entry = localized.replace(/\{(\w+)\}/g, (all, name) => params[name] ?? all);
-          break;
-        }
         // Guard: a slot that swallowed a whole clause (sentence-final punctuation
         // inside, or an implausibly long capture) means the template only aligned
         // by accident; reordering that would scramble the sentence. Skip and let
@@ -372,8 +372,24 @@
   if (global.document?.readyState === 'loading') global.addEventListener('DOMContentLoaded', ready, { once: true });
   else ready();
   global.addEventListener('storage', event => {
-    if (event.key === 'soduwork_work_cfg_v5_locale' && event.newValue) setLocale(event.newValue, { persist: false, broadcast: false });
+    if (event.key !== 'soduwork_work_cfg_v5_locale' || !event.newValue) return;
+    // Queued events can contain an older choice. Read the current mirror so
+    // receiving a notification cannot write stale values back to other windows.
+    let latest = event.newValue;
+    try { latest = global.localStorage.getItem('soduwork_work_cfg_v5_locale'); } catch (_) {}
+    if (latest) setLocale(latest, { persist: false, broadcast: false });
   });
-  global.soduWorkAPI?.onLocaleChange?.(value => setLocale(value, { persist: false, broadcast: false }));
+  global.soduWorkAPI?.onLocaleChange?.(value => {
+    // Renderers save explicit choices before sending IPC. A delayed native echo
+    // must not replace that choice; other windows publish theirs to the same mirror.
+    let latest = value;
+    try {
+      if (global.localStorage.getItem('soduwork_work_cfg_v5_locale_explicit') === '1') {
+        const chosen = global.localStorage.getItem('soduwork_work_cfg_v5_locale');
+        if (LOCALES[chosen]) latest = chosen;
+      }
+    } catch (_) {}
+    setLocale(latest, { persist: false, broadcast: false });
+  });
   setLocale(currentLocale, { persist: false, initial: true });
 })(window);

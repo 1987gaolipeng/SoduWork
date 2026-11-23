@@ -65,6 +65,10 @@ def start(state, port, password=None, *, desktop=False):
     # .env can redirect the child service to a real database/model/storage.
     env = dict(os.environ, DATABASE_URL="postgresql://must-never-connect.invalid/soduwork",
                OPENAI_API_KEY="fixture-must-not-inherit", MINIO_ENDPOINT="must-never-connect.invalid")
+    # Exercise the launcher's defaults, independent of the verifier's cache choices.
+    for key in list(env):
+        if key.lower() in {'npm_config_cache', 'pip_cache_dir', 'electron_config_cache', 'pip_no_cache_dir'}:
+            del env[key]
     options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
                else {"start_new_session": True})
     child = subprocess.Popen(command, cwd=ROOT, env=env, stdin=subprocess.PIPE,
@@ -107,7 +111,15 @@ def stop(child, base):
     raise AssertionError("Hub is still serving after the launcher exited")
 
 
-def desktop_ready(child, state, previous_pid=None):
+def desktop_run_ids(state):
+    journal = desktop_profile(state) / 'diagnostics/lifecycle.jsonl'
+    if not journal.is_file():
+        return set()
+    entries = [json.loads(line) for line in journal.read_text(encoding='utf-8').splitlines() if line]
+    return {row['runId'] for row in entries if row.get('runId')}
+
+
+def desktop_ready(child, state, previous_runs=()):
     journal = desktop_profile(state) / 'diagnostics/lifecycle.jsonl'
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
@@ -115,12 +127,12 @@ def desktop_ready(child, state, previous_pid=None):
             raise AssertionError(f'Desktop session stopped; see {child.launcher_log} and {state / "desktop.log"}')
         if journal.is_file():
             entries = [json.loads(line) for line in journal.read_text(encoding='utf-8').splitlines() if line]
-            # Read only events after the previous launch, including when older PIDs are reused.
-            previous = [index for index, row in enumerate(entries)
-                        if row['event'] == 'ready' and row.get('pid') == previous_pid]
-            current = entries[previous[-1] + 1:] if previous else entries
+            # The caller snapshots run IDs before starting the new desktop. PIDs
+            # can be reused, and readiness may be logged before this wait begins.
+            current = [row for row in entries if row.get('runId')
+                       and row['runId'] not in previous_runs]
             ready = [row for row in current if row['event'] == 'ready'
-                     and row.get('pid') != previous_pid and process_alive(row['pid'])]
+                     and process_alive(row['pid'])]
             if ready:
                 latest = ready[-1]
                 assert not any(row['event'] in ('uncaught-exception-monitor', 'unhandled-rejection')
@@ -162,26 +174,39 @@ def desktop_stopped(pid):
     raise AssertionError('Electron was left running after the source launcher stopped')
 
 
-def verify(*, desktop=False):
-    state = Path(tempfile.mkdtemp(prefix="soduwork-source-live-"))
+def install_cache_sizes(state: Path, *, desktop: bool) -> dict[str, int]:
+    sizes = {}
+    for name in ('npm', 'pip', 'electron') if desktop else ('npm', 'pip'):
+        sizes[name] = sum(path.stat().st_size for path in (state / 'cache' / name).rglob('*') if path.is_file())
+        assert sizes[name] > 0, f'{name} install cache is missing from the data directory'
+    assert (state / 'cache/tmp').is_dir(), 'Preparation temporary directory was not created'
+    return sizes
+
+
+def verify(*, desktop=False, temp_root: Path | None = None):
+    state = Path(tempfile.mkdtemp(prefix="soduwork-source-live-", dir=temp_root))
     port = free_port()
     base = f"http://127.0.0.1:{port}"
     password = secrets.token_urlsafe(24)
     checks = []
+    cache_sizes = {}
     child = output = None
     print(f"Isolated verification directory: {state}\nURL: {base}", flush=True)
     if desktop and sys.platform == 'darwin':
         print('Desktop fixture uses a mock native Keychain; real Keychain access is not verified.', flush=True)
     try:
-        # The launcher must survive incomplete first setup without a default account.
-        failed, failed_log = start(state, port, "short")
-        assert failed.wait(timeout=30) == 1
-        failed_log.close()
+        # Cold preparation completes before the first password is validated.
+        begin = time.monotonic()
+        child, output = start(state, port, "short", desktop=desktop)
+        assert child.wait(timeout=1200) == 1
+        assert "Choose an administrator password of 12-128" in Path(child.launcher_log).read_text(
+            encoding="utf-8", errors="replace")
+        output.close()
+        child = output = None
         assert not (state / "soduwork.db").exists()
         checks.append("failed-first-password-resumes")
 
         child, output = start(state, port, password, desktop=desktop)
-        begin = time.monotonic()
         wait_ready(child, base, state)
         checks.append("clean-venv-npm-build-migrations-ready")
         desktop_pid = desktop_ready(child, state) if desktop else None
@@ -189,6 +214,8 @@ def verify(*, desktop=False):
             checks.append('native-electron-ready-with-isolated-local-hub-profile')
             endpoint = json.loads((desktop_profile(state) / 'hub-endpoint.json').read_text())
             assert endpoint['hub'] == base
+        cache_sizes = install_cache_sizes(state, desktop=desktop)
+        checks.append('install-caches-inside-data-directory')
         print(f"Clean startup: {time.monotonic() - begin:.1f}s", flush=True)
         page = request(base, "/", raw=True)
         assert b"<html" in page.lower()
@@ -250,11 +277,12 @@ def verify(*, desktop=False):
             assert db.execute("SELECT COUNT(*) FROM app_user").fetchone()[0] == 1
             assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
 
+        previous_runs = desktop_run_ids(state) if desktop else ()
         child, output = start(state, port, desktop=desktop)
         begin = time.monotonic()
         wait_ready(child, base, state, timeout=90)
         if desktop:
-            desktop_pid = desktop_ready(child, state, previous_pid=desktop_pid)
+            desktop_pid = desktop_ready(child, state, previous_runs=previous_runs)
         print(f"Repeat startup: {time.monotonic() - begin:.1f}s", flush=True)
         assert request(base, "/api/v1/admin/me", token=token)["id"] == login["user"]["id"]
         assert request(base, "/api/v1/admin/tasks/" + task["id"], token=token)["title"] == task["title"]
@@ -283,15 +311,18 @@ def verify(*, desktop=False):
             stop(child, base)
         if output is not None:
             output.close()
-        report = {"ok": len(checks) == (14 if desktop else 12), "checks": checks, "dataDir": str(state), "url": base,
+        report = {"ok": len(checks) == (15 if desktop else 13), "checks": checks, "dataDir": str(state), "url": base,
+                  "installCacheBytes": cache_sizes,
                   "nativeKeychain": "mocked" if desktop and sys.platform == 'darwin' else "not-verified"}
         (state / "verification.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(json.dumps(report, indent=2), flush=True)
-    assert len(checks) == (14 if desktop else 12)
+    assert len(checks) == (15 if desktop else 13)
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--desktop', action='store_true', help='Also verify native Electron readiness and cleanup (requires a graphical desktop)')
-    verify(desktop=parser.parse_args().desktop)
+    parser.add_argument('--temp-root', type=Path, help='Existing parent directory for the fresh isolated instance (for example, on another volume)')
+    args = parser.parse_args()
+    verify(desktop=args.desktop, temp_root=args.temp_root)

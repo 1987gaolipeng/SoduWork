@@ -6,7 +6,7 @@ For local use, see [startup](getting-started.en.md); for changes, see [developme
 
 ## Configure your services
 
-The desktop defaults to `http://127.0.0.1:18989`. Source and packaged clients allow selecting and saving a Hub URL on the login screen. Accounts and device credentials remain separate for each service.
+When no Hub URL is saved, source runs default to `http://127.0.0.1:18989`, while packaged and official clients default to `https://service.soduwork.ai`. Source and packaged clients allow selecting and saving a Hub URL on the login screen. Saved addresses take precedence over defaults. Accounts and device credentials remain separate for each service.
 
 Templates contain no usable passwords or tokens. Generate and protect credentials at deployment time. Exclude environment files, databases, uploads, device credentials, and dependency caches from source archives.
 

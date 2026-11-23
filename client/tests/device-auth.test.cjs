@@ -22,6 +22,156 @@ function windowsFixture(t) {
   return fixture();
 }
 
+test('offline legacy import preserves Hub selection and other identities and rejects conflicts', async t => {
+  const f = accountTransitionFixture(t);
+  const good = {hub:'https://former.invalid', clientId:'former-device', legacySecret:'fixture-former-key'};
+  const file = path.join(f.root, 'device-auth.json');
+  const calls = [];
+  t.mock.method(global, 'fetch', async (url, options) => {
+    calls.push({url, options});
+    return f.enrolled();
+  });
+  const active = await f.invoke('bootstrap');
+  const before = JSON.parse(fs.readFileSync(file));
+  const frame = {}, sender = {mainFrame:frame, isDestroyed:()=>false,
+    getURL:()=>require('node:url').pathToFileURL(path.resolve(__dirname, '../desk.html')).href};
+  const handler = f.handlers.get('device-auth-migrate-legacy');
+  assert.deepEqual(handler({}, good), {stored:false});
+  const migrate = input => handler({sender, senderFrame:frame}, input);
+  for (let n = 0; n < 2; n++) assert.deepEqual(migrate(good), {stored:true, hub:good.hub, clientId:good.clientId});
+  assert.equal(migrate({...good, legacySecret:'different-key'}).stored, false);
+  assert.equal(migrate({...good, clientId:'another-device'}).stored, false);
+  const after = JSON.parse(fs.readFileSync(file));
+  assert.equal(before.activeHub, after.activeHub);
+  for (const [id, row] of Object.entries(before.profiles)) assert.deepEqual(after.profiles[id], row);
+  assert.equal(f.deviceAuth.identity(f.app).clientId, active.clientId);
+  assert.equal(calls.length, 1);
+  assert.ok(!JSON.stringify(after).includes(good.legacySecret));
+  await f.deviceAuth.enroll(f.app, {hub:good.hub});
+  assert.equal(calls.at(-1).options.headers['X-Device-Key'], good.legacySecret);
+  assert.equal(JSON.parse(calls.at(-1).options.body).device, good.clientId);
+  await f.invoke('bootstrap');
+  assert.equal(f.deviceAuth.identity(f.app).clientId, active.clientId);
+  fs.writeFileSync(file, 'interrupted credential document');
+  assert.equal(migrate({...good, hub:'https://third.invalid'}).stored, false);
+  assert.equal((await f.deviceAuth.enroll(f.app, good)).stored, false);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'interrupted credential document');
+  fs.unlinkSync(file);
+  fs.writeFileSync(file + '.bak', 'unreadable backup');
+  assert.equal(migrate(good).stored, false);
+  assert.equal(fs.existsSync(file), false);
+  assert.equal(fs.readFileSync(file + '.bak', 'utf8'), 'unreadable backup');
+});
+
+function accountTransitionFixture(t) {
+  const f = fixture();
+  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  const file = require.resolve('../main/device-auth');
+  delete require.cache[file];
+  const deviceAuth = require(file);
+  deviceAuth.install({ ...f });
+  const hub = 'https://account-transition.fixture.invalid';
+  const invoke = (action, payload = {}) => f.handlers.get('device-auth-' + action)({ sender: { id: 1 } }, { hub, ...payload });
+  const login = (payload = {}) => invoke('login', { account: 'fixture-owner', password: 'fixture-only', ...payload });
+  const response = data => ({ ok: true, status: 200, text: async () => JSON.stringify(data) });
+  return { ...f, deviceAuth, hub, invoke, login, response,
+    enrolled: () => response({ authState: 'pending', activationRequired: true }),
+    session: token => response({ session: token, expiresIn: 300, user: { id: 'fixture-owner' } }) };
+}
+
+test('late session clears cannot cancel a newer login or remove its token', async t => {
+  const f = accountTransitionFixture(t);
+  let finishLogin, beginLogin;
+  const started = new Promise(resolve => { beginLogin = resolve; });
+  let token = 'previous-session';
+  t.mock.method(global, 'fetch', async url => {
+    if (url.endsWith('/clients/enroll')) return f.enrolled();
+    assert.ok(url.endsWith('/client-auth/login'));
+    if (token) return f.session(token);
+    return new Promise(resolve => { finishLogin = resolve; beginLogin(); });
+  });
+  const first = await f.login();
+  assert.equal(first.ok, true);
+  const { clientId, session: expectedSession } = first;
+  token = '';
+  const signingIn = f.login();
+  await Promise.race([started, signingIn.then(row => assert.fail('Login returned before the HTTP response: ' + row.code))]);
+  const id = f.deviceAuth.identity(f.app);
+  const generation = f.deviceAuth.historyEpoch(id);
+  const status = f.handlers.get('device-auth-status')({}, f.hub, clientId);
+  assert.equal(status.ready, true);
+  assert.equal(status.sessionReady, false);
+  assert.equal((await f.invoke('bootstrap', { clientId })).code, 'AUTH_TRANSITION_PENDING');
+  assert.equal((await f.invoke('clear-session', { clientId, expectedSession })).cleared, false);
+  assert.equal((await f.invoke('clear-session', { clientId })).cleared, false);
+  assert.equal(f.deviceAuth.historyEpoch(id), generation);
+  finishLogin(f.session('new-session'));
+  const signedIn = await signingIn;
+  assert.equal(signedIn.ok, true);
+  assert.equal((await f.invoke('clear-session', { clientId, expectedSession })).cleared, false);
+  assert.equal((await f.invoke('clear-session', { clientId, expectedSession: '' })).cleared, false);
+  assert.equal(f.deviceAuth.session(f.app), 'new-session');
+  assert.equal((await f.invoke('clear-session', { clientId, expectedSession: signedIn.session })).cleared, true);
+  assert.equal(f.deviceAuth.session(f.app), '');
+});
+
+test('same-device bootstrap and login can retry after logout, including a Hub round trip', async t => {
+  const f = accountTransitionFixture(t), requests = [];
+  let finishLogout;
+  t.mock.method(global, 'fetch', async url => {
+    requests.push(url);
+    if (url.endsWith('/clients/enroll')) return f.enrolled();
+    if (url.endsWith('/client-auth/login')) return f.session('session-' + new URL(url).hostname);
+    assert.ok(url.endsWith('/client-auth/logout'));
+    return new Promise(resolve => { finishLogout = resolve; });
+  });
+  const first = await f.login();
+  assert.equal(first.ok, true);
+  const { clientId } = first;
+  const exiting = f.invoke('logout', { clientId });
+  assert.equal(f.deviceAuth.session(f.app), '', 'Local sign-out takes effect before the Hub reply');
+  let count = requests.length;
+  for (const action of ['bootstrap', 'login', 'logout']) {
+    const result = await f.invoke(action, { clientId });
+    assert.equal(result.code, 'AUTH_TRANSITION_PENDING');
+    assert.match(result.error, /重试登录/);
+  }
+  assert.equal(requests.length, count, 'Blocked operations never reach the Hub');
+  const otherHub = 'https://independent-transition.fixture.invalid';
+  assert.equal(f.deviceAuth.selectHub(f.app, otherHub).ok, true);
+  assert.equal((await f.login({ hub: otherHub })).ok, true, 'Another Hub owns its own transition');
+  assert.equal(f.deviceAuth.selectHub(f.app, f.hub).ok, true);
+  count = requests.length;
+  assert.equal((await f.login()).code, 'AUTH_TRANSITION_PENDING');
+  assert.equal(requests.length, count);
+  finishLogout(f.response({ ok: true }));
+  assert.equal((await exiting).code, 'STALE_AUTH_OPERATION');
+  assert.equal((await f.login()).ok, true);
+  assert.match(f.deviceAuth.session(f.app), /account-transition/);
+});
+
+test('logout timeout releases the device transition for a retried login', async t => {
+  const f = accountTransitionFixture(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let logoutSignal;
+  t.mock.method(global, 'fetch', async (url, options) => {
+    if (url.endsWith('/clients/enroll')) return f.enrolled();
+    if (url.endsWith('/client-auth/login')) return f.session('fixture-session');
+    assert.ok(url.endsWith('/client-auth/logout'));
+    logoutSignal = options.signal;
+    return new Promise((_resolve, reject) => logoutSignal.addEventListener('abort', () => reject(logoutSignal.reason), { once: true }));
+  });
+  assert.equal((await f.login()).ok, true);
+  const exiting = f.invoke('logout');
+  t.mock.timers.tick(7999);
+  assert.equal(logoutSignal.aborted, false);
+  assert.equal((await f.login()).code, 'AUTH_TRANSITION_PENDING');
+  t.mock.timers.tick(1);
+  assert.equal(logoutSignal.aborted, true);
+  assert.equal((await exiting).ok, false);
+  assert.equal((await f.login()).ok, true);
+});
+
 for (const [name, previousUser, nextUser, migrate] of [
   ['same account legacy fingerprint', 'alice', 'alice', true],
   ['device rebound to a different account', 'alice', 'bob', false],

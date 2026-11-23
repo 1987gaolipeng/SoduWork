@@ -29,6 +29,7 @@ if (typeof electron === 'string') {
       await new Promise(resolve => setTimeout(resolve, 60));
     };
     await win.webContents.insertCSS(':root{--line:#dde2e8;--ink:#232b35;--ink-2:#303946;--ink-3:#66717f;--bg-0:#fff;--bg-1:#f6f7f9;--accent:#387eed;--font-ui:system-ui}body{font:15px system-ui;margin:20px;background:var(--bg-0);color:var(--ink)}body.dark{--line:#414a56;--ink:#e9eef5;--ink-2:#d5dde8;--ink-3:#b3bdcc;--bg-0:#1c2028;--bg-1:#242b36;--accent:#8bb8ff}.nchat{max-width:560px;margin:auto}textarea{box-sizing:border-box;width:100%;margin-top:24px}');
+    await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../components/panels/panels-library.css'), 'utf8'));
     await win.webContents.insertCSS(fs.readFileSync(path.resolve(__dirname, '../components/panels/chat-deliveries.css'), 'utf8'));
     const nativeIcon = await app.getFileIcon(path.resolve(__dirname, '../desk.html'));
     await js('window.soduWorkAPI={fileTypeIcon:async()=>({ok:true,dataUrl:' + JSON.stringify(nativeIcon.toDataURL()) + '})};void 0;');
@@ -173,6 +174,14 @@ if (typeof electron === 'string') {
       fs.writeFileSync(path.join(output, 'group-' + (dark ? 'dark-' : '') + width + '.png'), (await win.webContents.capturePage()).toPNG());
     }
     report.cases.push('Actual native file icons and combined delivery groups fit light/dark 900 px and 360 px widths');
+    await js(fs.readFileSync(path.resolve(__dirname, '../components/panels/library-file-icons.js'), 'utf8'));
+    await js(`soduWorkAPI.fileTypeIcon=async()=>({ok:false});currentRef='fallback-package';render(base,[site]);
+      window.fallbackApi={inspectDelivery:async()=>({ok:true,manifest:{files:[{path:'index.html',size:1},{path:'style.css',size:1}]}})};
+      ChatDeliveries.hydrate(messages,{api:fallbackApi,ref:currentRef,snapshot:{status:'idle'}});`);
+    for (let tries=0;tries<40&&!await js('!!messages.querySelector("[data-native-file-icon=zip]")');tries++) await new Promise(resolve=>setTimeout(resolve,20));
+    assert.equal(await js('(()=>{const node=messages.querySelector("[data-native-file-icon=zip]"),svg=node?.querySelector(".library-file-fallback svg");return !!svg&&svg.checkVisibility()&&node.textContent===""&&svg.getBoundingClientRect().width<=18})()'), true,
+      'a delivery becoming a ZIP must retain a bounded SVG when native lookup fails');
+    report.cases.push('Late ZIP package metadata retains the shared SVG fallback without extension text');
     report.ok = true; fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report)); win.destroy(); app.quit();
   }).catch(error => { report.error = error.stack; fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2)); console.error(error); app.exit(1); });

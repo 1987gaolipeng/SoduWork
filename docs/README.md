@@ -4,13 +4,16 @@
 
 | Your goal | Start here |
 | --- | --- |
+| Install the desktop client and start a conversation | [Desktop quickstart](desktop-quickstart.en.md) |
 | Run the desktop and management UI for the first time | [Run from source](getting-started.en.md) |
 | Configure a model endpoint or investigate billing/protocol errors | [Model services](model-services.en.md) |
+| Connect CodeBuddy Code with your own account | [Local ACP setup](codebuddy-acp.en.md) |
 | Understand the layout and change code | [Developer guide](development.en.md) |
 | Submit a change or translation | [Contributing](../CONTRIBUTING.md) |
 | Deploy for a team | [Docker self-hosting](../ops/self-host/README.md) |
 | Build a plugin or application | [Extension development](development.en.md#skills-and-plugins); [plugin protocol](plugin-authoring.en.md) |
 | Check what the release contains | [Release scope](release-scope.en.md) |
+| Verify Linux installer signatures | [Linux download verification](linux-package-verification.en.md) |
 | Export source and prepare a public repository | [Source distribution](open-source.en.md) |
 | Report a security issue | [Security reporting](../SECURITY.md) |
 | Read component and integration contracts | [Desktop](../client/README.md), [backend](../hub-backend/README.md), [management UI](../hub-frontend/README.md), [H5 SDK](../client/sdk/README.md), [OAuth](../hub-backend/CONNECTOR_OAUTH.en.md) |

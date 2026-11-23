@@ -150,8 +150,7 @@ def _available_agents(live_agents):
             "ready": ready,
             "version": str(current.get("version") or "")[:80],
             "reason": "请在云端电脑上完成此底座的登录" if current and not ready else "",
-            "installable": (install.get("installer") in {"npm", "managed", "native"}
-                            or key == "harness2" and install.get("installer") == "bundled"),
+            "installable": (install.get("installer") in {"npm", "managed"}),
             "installer": install.get("installer") or "",
             "adapter": runner.get("adapter") or "",
         })
@@ -169,7 +168,7 @@ def public(row, live, *, can_manage=True):
         "missing_capabilities": "能力未就绪", "missing_agent": "缺少 Agent",
         "auth_required": "需要登录", "at_capacity": "负载已满", "service_unavailable": "服务异常"}
     action = (conversation_handoffs._TARGET_REASONS.get(status) or ("", "check_connection"))[1]
-    agents = (live.agents if live else row.agents) or []
+    agents = runner_hub.clean_agent_inventory(live.agents if live else row.agents)
     return {"id": row.id, "name": row.enroll_name or row.host or row.id,
         "host": live.host if live else row.host, "os": live.os if live else row.os,
         "online": live is not None, "status": status, "statusText": labels.get(status, "待检查"),

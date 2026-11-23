@@ -24,6 +24,7 @@ import uuid
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--root", required=True)
+parser.add_argument("--user-journeys", action="store_true")
 args = parser.parse_args()
 root = Path(args.root).resolve()
 if root.parent != Path(tempfile.gettempdir()).resolve() or not root.name.startswith("soduwork-account-five-"):
@@ -113,6 +114,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from app import models
+from app import automation_models as am
 from app.db import SessionLocal, engine, init_db
 from app.mail_models import MailOutbox
 from app.account_models import EmailChallenge
@@ -126,6 +128,7 @@ trusted = ssl.create_default_context(cafile=str(smtp.cert))
 original_context = account_mail.ssl.create_default_context
 account_mail.ssl.create_default_context = lambda *a, **k: trusted
 request_log = []
+logout_requests = []
 model_calls = []
 sock = socket.socket()
 sock.bind(("127.0.0.1", 0))
@@ -164,6 +167,16 @@ async def lifespan(app):
             base_url=f"http://127.0.0.1:{port}/__fixture__/provider/v1", api_key=provider_key, enabled=True))
         session.add(models.ModelDef(id="fixture:fixture-chat", provider_id="fixture", name="fixture-chat",
             label="本地 Mock 对话模型", enabled=True, ctx_window=32768, config={"maxOutputTokens": 4096}))
+        if args.user_journeys:
+            session.add(am.Plugin(id="journey-plugin", key="journey-catalog", name="旅程目录示例",
+                                  org_id="fixture-default-org", enabled=True))
+            session.add(am.PluginVersion(id="journey-version", plugin_id="journey-plugin", version="1.0.0",
+                        checksum="fixture-catalog-v1", enabled=True, trust_state="approved",
+                        manifest={"name": "旅程目录示例", "entrypoints": {"task": True}}))
+            for member in ("ready", "unavailable"):
+                session.add(models.User(id="journey-mate-" + member, username="journey-mate-" + member,
+                            display_name="Journey " + member, org_id="fixture-default-org", role_id="fixture-normal-role"))
+            session.add(models.Client(id="journey-mate-device", user_ref="journey-mate-ready", auth_state="active"))
         await session.commit()
         await client_access.update_policy(session, {"defaultOrgId": "fixture-default-org", "defaultRoleId": "fixture-normal-role"})
         await account_legal.save_settings(session, {"operatorName": "本地隔离验收环境", "contactEmail": "privacy@example.test"})
@@ -194,9 +207,11 @@ async def lifespan(app):
 
 
 app = FastAPI(title="SoduWork isolated desktop acceptance", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["null"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["null", "file://"], allow_methods=["*"], allow_headers=["*"])
 # Production router implementations, without production worker/bootstrap imports.
 router_names = (
+    "legal_documents", "account_conversations", "conversation_projects", "desktop_capabilities",
+    "personal_conversation_relay", "remote_screen",
     "account_profile", "client_email_auth", "client_auth", "clients", "tasks", "task_options",
     "aidesk", "config", "model_runtime", "model_capabilities", "work_catalog", "identity", "capabilities",
     "approvals", "delivery", "deliveries", "environments", "repomap", "repositories", "repository_issues",
@@ -217,8 +232,13 @@ for module_name in router_names:
 async def record_requests(request: Request, call_next):
     response = await call_next(request)
     if not request.url.path.startswith("/__fixture__/"):
-        request_log.append({"method": request.method, "path": request.url.path, "status": response.status_code})
+        entry = {"method": request.method, "path": request.url.path, "status": response.status_code}
+        request_log.append(entry)
         del request_log[:-2000]
+        # Background polling can evict early logout calls from the bounded log.
+        # Preserve this exact lifecycle evidence for the full five-account run.
+        if request.method == "POST" and request.url.path.endswith("/client-auth/logout"):
+            logout_requests.append(entry)
     return response
 
 
@@ -273,7 +293,8 @@ async def summary(x_fixture_key: str = Header(default="")):
             "visibility": "organization" if t.shared_org_id else "related", "sharedOrgId": t.shared_org_id}
             for t in tasks],
         "clients": [{"id": c.id, "userId": c.user_ref} for c in clients],
-        "modelCalls": model_calls, "requests": request_log, "blockedOutbound": blocked_outbound}
+        "modelCalls": model_calls, "requests": request_log, "logoutRequests": logout_requests,
+        "blockedOutbound": blocked_outbound}
 
 
 def message_text(content):

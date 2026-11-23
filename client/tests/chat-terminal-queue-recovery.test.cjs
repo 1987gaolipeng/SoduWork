@@ -124,7 +124,7 @@ test('the Agent picker explains unknown execution instead of asking users to wai
   const globals = {AbortController, document:{createElement:() => element(), addEventListener() {}}, addEventListener() {}};
   globals.window = globals;
   vm.runInNewContext(fs.readFileSync(require.resolve('../components/panels/chat-runtime-picker.js'), 'utf8'), globals);
-  const state = {ref:'chat-a', adapterId:'harness2', busy:true, recoveryRequired:true,
+  const state = {ref:'chat-a', adapterId:'kimi', busy:true, recoveryRequired:true,
     recoveryReason:'执行机无法连接，请先核实执行状态'};
   globals.ChatRuntimePicker.create({querySelector:selector => selector === '#nchatRuntime' ? button : null},
     {state:() => state, say:value => notices.push(value)});
@@ -160,7 +160,7 @@ test('the production NativeChat send button submits the retained first message a
   const {makeGlobals, stubGlobals} = require('./fixture/chat-draft-harness.cjs');
   const f = makeGlobals(), sent = []; let onEvent;
   const initial = {status:'idle', messages:[], tools:[], execution:{running:false, recoveryRequired:false}};
-  const api = {open:async () => ({ok:true, ref:'ref-a', sessionId:'archive-a', adapterId:'harness2', snapshot:initial}),
+  const api = {open:async () => ({ok:true, ref:'ref-a', sessionId:'archive-a', adapterId:'kimi', snapshot:initial}),
     onEvent:handler => { onEvent = handler; return () => {}; },
     history:async () => ({ok:true, chats:[]}), outputs:async () => ({ok:true, items:[]}), release:async () => ({ok:true}),
     send:async (...args) => { sent.push(args); return {ok:true}; }};
@@ -172,9 +172,9 @@ test('the production NativeChat send button submits the retained first message a
     vm.runInContext(fs.readFileSync(require.resolve('../components/panels/' + file + '.js'), 'utf8'), f.g);
   const chat = f.g.NativeChat;
   t.after(() => chat.reset());
-  chat.prepare({adapterId:'harness2'});
+  chat.prepare({adapterId:'kimi'});
   const input = f.document.getElementById('nchatInput'); input.focus = () => {};
-  assert.equal(await chat.enter('你好', '', {adapterId:'harness2'}), true);
+  assert.equal(await chat.enter('你好', '', {adapterId:'kimi'}), true);
   assert.equal(sent.length, 1);
   onEvent({ref:'ref-a', kind:'error', reason:'Runner refused this submission', snapshot:await failedSnapshot(false)});
   assert.equal(input.value, '你好');

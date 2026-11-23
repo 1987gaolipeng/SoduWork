@@ -18,10 +18,10 @@ def main():
     binary = str(Path(parser.parse_args().binary).resolve(strict=True))
     reports = []
     with tempfile.TemporaryDirectory(prefix='soduwork-opencode-outcome-e2e-') as folder:
-        root = Path(folder)
+        root = Path(folder).resolve()
         os.environ['SODUWORK_DATA_ROOT'] = str(root / 'parent')
         os.environ['DATABASE_URL'] = 'sqlite+aiosqlite:///:memory:'
-        from app.services import acp_bridge, local_base, local_stream, local_turn_outcome
+        from app.services import acp_bridge, agent_setup_probe, local_base, local_stream, local_turn_outcome
 
         class Model(BaseHTTPRequestHandler):
             def do_POST(self):
@@ -30,7 +30,7 @@ def main():
                 step = self.server.step
                 self.server.step += 1
                 compact = self.server.compact
-                delta = {'role': 'assistant', self.server.content_key: 'A partial fixture response'}
+                delta = {'role': 'assistant', self.server.content_key: 'SODUWORK _ AG ENT _OK'}
                 finish = self.server.reason
                 if compact and step == 0:
                     delta = {'role': 'assistant', 'tool_calls': [{'index': 0, 'id': 'fixture-write', 'type': 'function',
@@ -40,7 +40,7 @@ def main():
                 elif compact and step == 1:
                     finish = 'stop'
                 frames = [{'choices': [{'index': 0, 'delta': {'role': 'assistant', self.server.content_key:
-                           'A partial fixture response'}, 'finish_reason': None}]},
+                           'SODUWORK _ AG ENT _OK'}, 'finish_reason': None}]},
                           {'choices': [{'index': 0, 'delta': {}, 'finish_reason': finish}],
                            'usage': {'prompt_tokens': 124000 if compact and step == 0 else 1,
                                      'completion_tokens': 3, 'total_tokens': 124003 if compact and step == 0 else 4}}]
@@ -121,6 +121,8 @@ def main():
                             raise AssertionError('Isolated native OpenCode timed out')
                         assert 'SODUWORK_OPENCODE_OUTCOME:' not in stdout + stderr
                         assert 'synthetic-e2e-key' not in stdout + stderr
+                        probe_ok = agent_setup_probe.probe_succeeded(stdout, process.returncode, 'SODUWORK_AGENT_OK')
+                        assert probe_ok == (reason == 'stop'), (name, reason, stdout, stderr)
                         events = [json.loads(line) for line in stdout.splitlines() if line.startswith('{')]
                         current_sid = next((event['sessionID'] for event in events if event.get('sessionID')), '')
                         assert current_sid and (not sid or sid == current_sid), (name, reason, events, stderr)

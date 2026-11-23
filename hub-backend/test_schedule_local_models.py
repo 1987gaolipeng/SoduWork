@@ -50,7 +50,7 @@ class ScheduleLocalModelTests(unittest.IsolatedAsyncioTestCase):
     async def test_readiness_rejects_private_references_without_echoing_them(self):
         for model in ("local:model-" + "b" * 32,
                       "image::device:provider::local:model-private"):
-            for kind in ("local:pi", "local:qwen", "local:harness2", "local:codex"):
+            for kind in ("local:pi", "local:qwen", "local:kimi", "local:codex"):
                 with self.subTest(model=model, kind=kind), \
                         patch("app.services.model_catalog.choices", new=AsyncMock()) as catalog:
                     result = await _schedule_model_readiness(None, None, {}, kind, model)
@@ -83,7 +83,7 @@ class ScheduleLocalModelTests(unittest.IsolatedAsyncioTestCase):
                         await validate_selected_model(None, schedule)
 
     async def test_account_runtimes_reject_device_source_even_with_blank_name(self):
-        for agent in ("codex", "claude"):
+        for agent in ("codex",):
             with self.subTest(agent=agent):
                 schedule = models.AiSchedule(title="automation", assignee_id="local:" + agent)
                 with self.assertRaises(HTTPException) as error:

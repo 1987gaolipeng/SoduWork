@@ -12,8 +12,8 @@ function element(dataset = {}) {
     setAttribute(name, value) { attributes.set(name, String(value)); },
     getAttribute(name) { return attributes.get(name) ?? null; },
     removeAttribute(name) { attributes.delete(name); },
-    appendChild() {}, addEventListener(name, callback) { listeners.set(name, callback); },
-    fire(name) { return listeners.get(name)?.({ preventDefault() {} }); },
+    appendChild() {}, addEventListener(name, callback) { listeners.set(name, [...(listeners.get(name) || []), callback]); },
+    fire(name) { return (listeners.get(name) || []).map(callback => callback({ preventDefault() {} })).at(-1); },
     classList: { add(name) { classes.add(name); }, remove(name) { classes.delete(name); }, toggle(name, on) { if (on) classes.add(name); else classes.delete(name); },
       contains(name) { return classes.has(name) || node.className.split(' ').includes(name); } } };
   return node;
@@ -49,7 +49,7 @@ function view() {
   const form = gate.querySelector('form'), submit = gate.querySelector('[type="submit"]');
   form.querySelectorAll = () => [...nodes.values()]; submit.querySelector = () => gate.querySelector('submit-label');
   const localeListeners = new Map();
-  const calls = [], window = { AccountUI: { ...uiContext.window.AccountUI, bindPassword() {}, legal() {} } };
+  const calls = [], successes = [], window = { AccountUI: { ...uiContext.window.AccountUI, bindPassword() {}, legal() {} } };
   window.addEventListener = (type, listener) => {
     if (!localeListeners.has(type)) localeListeners.set(type, new Set());
     localeListeners.get(type).add(listener);
@@ -72,8 +72,8 @@ function view() {
     setTimeout: (fn, delay) => addTimer(fn, delay), clearTimeout: id => timers.delete(id),
     setInterval: (fn, delay) => addTimer(fn, delay, true), clearInterval: id => timers.delete(id) };
   vm.runInNewContext(source, context);
-  const mounted = window.EmailAuth.mount(gate, { api: () => api, retry() { retries++; }, success() {} });
-  return { gate, mounted, calls, api, window, context, advance, flush, timers, retries: () => retries,
+  const mounted = window.EmailAuth.mount(gate, { api: () => api, retry() { retries++; }, success(result) { successes.push(result); } });
+  return { gate, mounted, calls, successes, api, window, context, advance, flush, timers, retries: () => retries,
     setLocale(locale) { window.SoduWorkI18n.setLocale(locale, { persist: false, broadcast: false }); },
     switchHub() { hub = 'http://second.invalid'; }, switchDevice() { clientId = 'device-b'; }, switchUser() { user = { id: 'second-user' }; },
     mode: name => modes.find(row => row.dataset.authMode === name).fire('click') };
@@ -222,6 +222,77 @@ test('non-credential sign-in failures keep form feedback and do not mark either 
   }
 });
 
+for (const change of ['switchHub', 'switchDevice', 'switchUser']) {
+  test(`a failed login in an abandoned ${change} scope clears only its own form lock`, async () => {
+    const f = view();
+    let reject;
+    f.api.clientLogin = () => new Promise((_, done) => { reject = done; });
+    f.mounted.accountInput.value = 'fixture-user';
+    f.mounted.passwordInput.value = 'fixture-only';
+    f.mounted.passwordInput.type = 'text';
+    const pending = f.mounted.form.fire('submit');
+    assert.equal(f.mounted.submitButton.disabled, true);
+    f[change]();
+    reject(Object.assign(Error('Late private response'), { code: 'STALE_TASK_SCOPE' }));
+    await pending;
+    assert.equal(f.mounted.submitButton.disabled, false);
+    assert.equal(f.mounted.submitButton.classList.contains('is-busy'), false);
+    assert.equal(f.mounted.passwordInput.value, '');
+    assert.equal(f.mounted.passwordInput.type, 'password');
+    assert.equal(f.mounted.statusNode.textContent, '');
+    assert.equal(f.successes.length, 0);
+  });
+}
+
+for (const outcome of ['success', 'failure']) {
+  test(`superseded login ${outcome} cannot clear, unlock or complete a replacement form`, async () => {
+    const f = view(), replies = [];
+    f.api.clientLogin = () => new Promise(resolve => replies.push(resolve));
+    f.mounted.accountInput.value = 'fixture-user';
+    f.mounted.passwordInput.value = 'fixture-only-first';
+    f.mounted.passwordInput.type = 'text';
+    const old = f.mounted.form.fire('submit');
+    f.mounted.invalidate();
+    assert.equal(f.mounted.submitButton.disabled, false);
+    assert.equal(f.mounted.passwordInput.value, '');
+    assert.equal(f.mounted.passwordInput.type, 'password');
+    f.mounted.passwordInput.value = 'fixture-only-next';
+    f.mounted.passwordInput.type = 'text';
+    const next = f.mounted.form.fire('submit');
+    replies[0](outcome === 'success' ? { ok: true, user: { id: 'superseded' } } : { ok: false, error: 'Stale reply' });
+    await old;
+    assert.equal(f.mounted.submitButton.disabled, true);
+    assert.equal(f.mounted.passwordInput.value, 'fixture-only-next');
+    assert.equal(f.mounted.passwordInput.type, 'text');
+    assert.equal(f.mounted.statusNode.textContent, '');
+    assert.equal(f.successes.length, 0);
+    replies[1]({ ok: false, code: 'PASSWORD_INCORRECT' });
+    await next;
+    assert.equal(f.mounted.submitButton.disabled, false);
+    assert.equal(f.mounted.passwordInput.value, '');
+    assert.equal(f.mounted.passwordInput.type, 'password');
+    assert.equal(f.mounted.passwordInput.getAttribute('aria-invalid'), 'true');
+  });
+}
+
+test('login transition failures have actionable feedback and leave credentials ready for re-entry', async () => {
+  const f = view();
+  f.mounted.accountInput.value = 'fixture-user';
+  for (const [error, message] of [
+    [{ code: 'AUTH_TRANSITION_PENDING', error: 'Internal state' }, '正在完成账号切换，请稍后重试登录。'],
+    [{ code: 'STALE_AUTH_OPERATION', error: 'Internal state' }, '账号或服务已变化，请重新登录。'],
+    [{ error: '账号或服务已变化，请重新打开这条对话' }, '账号或服务已变化，请重新登录。'],
+  ]) {
+    f.api.clientLogin = async () => ({ ok: false, ...error });
+    f.mounted.passwordInput.value = 'fixture-only';
+    await f.mounted.form.fire('submit');
+    assert.equal(f.mounted.submitButton.disabled, false);
+    assert.equal(f.mounted.accountInput.value, 'fixture-user');
+    assert.equal(f.mounted.passwordInput.value, '');
+    assert.equal(f.mounted.statusNode.textContent, message);
+  }
+});
+
 test('old Hub policy explains version incompatibility and retains a password path', async () => {
   const f = view(); f.mounted.setBusy(true);
   f.mounted.setPolicy({ allowSelfRegistration: true, tokenLimit: 1000, passwordMinLength: 8 });
@@ -242,17 +313,137 @@ function bootView() {
   f.mounted.dispose();
   const query = f.gate.querySelector;
   f.gate.querySelector = selector => ['.soduwork-auth-connection', '.soduwork-auth-first summary'].includes(selector) ? null : query(selector);
-  f.api.registerClient = () => new Promise(resolve => { f.finishEnrollment = resolve; });
+  f.api.registerClient = () => new Promise((resolve, reject) => { f.finishEnrollment = resolve; f.failEnrollment = reject; });
+  f.api.clientAuthMe = async () => ({});
   f.api.clientAuthPolicy = () => new Promise((resolve, reject) => f.policyRequests.push({ resolve, reject }));
   f.window.SoduWorkAPI = f.api;
   const body = element(); body.appendChild = () => {};
+  const listeners = new Map();
+  let created = 0;
   const document = { readyState: 'loading', documentElement: element(), body,
-    createElement: () => f.gate, querySelectorAll: () => [], addEventListener() {} };
+    createElement: () => { created++; const next = created === 1 ? f.gate : element(); if (created === 2) f.restoringNode = next; if (created === 4) f.restoringMessage = next; return next; },
+    querySelectorAll: () => [], addEventListener(name, listener) { listeners.set(name, listener); },
+    getElementById() { return null; } };
   const authSource = fs.readFileSync(path.join(__dirname, '../components/client-auth/client-auth.js'), 'utf8')
-    .replace('global.ClientAuth = {', 'global.ClientAuth = { bootForTest: boot, loadPolicyForTest: loadPolicy,');
+    .replace('global.ClientAuth = {', 'global.ClientAuth = { bootForTest: boot, loadPolicyForTest: loadPolicy, connectForTest: switchConnection,');
   vm.runInNewContext(authSource, { ...f.context, document, Intl });
+  f.document = document;
+  f.init = () => listeners.get('DOMContentLoaded')();
   return f;
 }
+
+test('initial restoration keeps the authentication boundary until a verified active result', async () => {
+  const f = bootView(), startup = f.window.ClientAuth.bootForTest();
+  assert.equal(f.gate.getAttribute('aria-labelledby'), 'soduWorkAuthRestoringTitle');
+  assert.equal(f.restoringNode.hidden, false);
+  assert.equal(f.document.documentElement.classList.contains('soduwork-auth-pending'), true);
+  assert.equal(f.mounted.submitButton.disabled, true);
+  f.finishEnrollment({ ok: true, user: { id: 'restored-user' } }); await startup;
+  assert.equal(f.gate.hidden, true);
+  assert.equal(f.restoringNode.hidden, true);
+  assert.equal(f.document.documentElement.classList.contains('soduwork-auth-pending'), false);
+  assert.equal(f.window.ClientAuth.snapshot().user.id, 'restored-user');
+});
+
+test('pending enrollment reveals sign-in without exposing private content', async () => {
+  const f = bootView(), startup = f.window.ClientAuth.bootForTest();
+  f.finishEnrollment({ ok: true, activationRequired: true }); await startup;
+  assert.equal(f.gate.hidden, false);
+  assert.equal(f.restoringNode.hidden, true);
+  assert.equal(f.gate.getAttribute('aria-labelledby'), 'soduWorkAuthTitle');
+  assert.equal(f.document.documentElement.classList.contains('soduwork-auth-pending'), true);
+  assert.equal(f.mounted.submitButton.disabled, false);
+});
+
+test('an active event may complete restoration before its bootstrap response', async () => {
+  const f = bootView(); f.init();
+  assert.equal(f.restoringNode.hidden, false);
+  f.switchUser();
+  f.window.dispatchEvent({ type: 'soduwork-device-auth', detail: { state: 'active', user: { id: 'second-user' } } });
+  assert.equal(f.gate.hidden, true);
+  assert.equal(f.restoringNode.hidden, true);
+  assert.equal(f.document.documentElement.classList.contains('soduwork-auth-pending'), false);
+  f.finishEnrollment({ ok: true, user: { id: 'second-user' } }); await f.flush();
+  assert.equal(f.gate.hidden, true);
+  assert.equal(f.window.ClientAuth.snapshot().user.id, 'second-user');
+});
+
+test('neutral restoration uses the current locale without revealing the login form', () => {
+  const f = bootView(); f.init();
+  assert.equal(f.restoringMessage.textContent, '正在加载…');
+  f.setLocale('en-US');
+  assert.equal(f.restoringMessage.textContent, 'Loading…');
+  assert.equal(f.restoringNode.hidden, false);
+  assert.equal(f.document.documentElement.classList.contains('soduwork-auth-pending'), true);
+});
+
+test('failed restoration reveals actionable login and retry still requires a verified identity', async () => {
+  const f = bootView(), startup = f.window.ClientAuth.bootForTest();
+  f.failEnrollment(Error('Connection refused')); await startup;
+  assert.equal(f.restoringNode.hidden, true);
+  assert.equal(f.gate.hidden, false);
+  assert.equal(f.mounted.submitButton.disabled, false);
+  assert.match(f.mounted.statusNode.textContent, /检查网络后重试/);
+  assert.equal(f.document.documentElement.classList.contains('soduwork-auth-pending'), true);
+  const retry = f.window.ClientAuth.bootForTest();
+  assert.equal(f.mounted.submitButton.disabled, true);
+  assert.equal(f.document.documentElement.classList.contains('soduwork-auth-pending'), true);
+  f.finishEnrollment({ ok: true, user: { id: 'retry-user' } }); await retry;
+  assert.equal(f.gate.hidden, true);
+  assert.equal(f.document.documentElement.classList.contains('soduwork-auth-pending'), false);
+});
+
+test('remembered account is filled only after restored service enrollment completes', async () => {
+  const f = bootView(), read = [];
+  f.api.rememberedLoginAccount = () => { const hub = f.api.hubBase(); read.push(hub); return hub.includes('second') ? 'second-account' : 'first-account'; };
+  const startup = f.window.ClientAuth.bootForTest();
+  assert.deepEqual(read, []);
+  f.switchHub(); f.finishEnrollment({ ok: true, activationRequired: true });
+  await startup;
+  assert.deepEqual(read, ['http://second.invalid']);
+  assert.equal(f.mounted.accountInput.value, 'second-account');
+  assert.equal(f.mounted.passwordInput.value, '');
+});
+
+test('the same service preserves account edits until sign-out, while changing services uses its own remembered account', async () => {
+  const f = bootView();
+  f.api.rememberedLoginAccount = () => f.api.hubBase().includes('second') ? 'second-account' : 'first-account';
+  f.init(); f.finishEnrollment({ ok: true, activationRequired: true }); await f.flush();
+  assert.equal(f.mounted.accountInput.value, 'first-account');
+  f.mounted.accountInput.value = ''; f.mounted.accountInput.fire('input');
+  f.window.dispatchEvent({ type: 'soduwork-client-auth-required', detail: { state: 'pending' } });
+  assert.equal(f.mounted.accountInput.value, '', 'Empty is an intentional edit');
+  f.mounted.accountInput.value = 'user-edit'; f.mounted.accountInput.fire('input');
+  f.mounted.passwordInput.value = 'fixture-only';
+  f.window.dispatchEvent({ type: 'soduwork-client-auth-required', detail: { state: 'pending', code: 'LOGOUT' } });
+  assert.equal(f.mounted.accountInput.value, 'first-account');
+  assert.equal(f.mounted.passwordInput.value, '');
+  f.mounted.accountInput.value = 'old-hub-draft'; f.mounted.accountInput.fire('input');
+  f.switchHub(); f.window.dispatchEvent({ type: 'soduwork-data-scope-changed' });
+  assert.equal(f.mounted.accountInput.value, 'second-account');
+  assert.equal(f.mounted.passwordInput.value, '');
+});
+
+test('scope invalidation does not unlock ongoing enrollment or service selection', async () => {
+  const f = bootView();
+  f.api.rememberedLoginAccount = () => f.api.hubBase().includes('second') ? 'second-account' : 'first-account';
+  f.init();
+  f.mounted.passwordInput.value = 'fixture-only';
+  f.window.dispatchEvent({ type: 'soduwork-data-scope-changed' });
+  assert.equal(f.mounted.submitButton.disabled, true);
+  assert.equal(f.mounted.passwordInput.value, '');
+  f.finishEnrollment({ ok: true, activationRequired: true }); await f.flush();
+  assert.equal(f.mounted.submitButton.disabled, false);
+  let fail;
+  f.api.connectHub = () => new Promise((_, reject) => { fail = reject; });
+  const connection = f.window.ClientAuth.connectForTest('development', 'http://second.invalid');
+  f.switchHub(); f.window.dispatchEvent({ type: 'soduwork-data-scope-changed' });
+  assert.equal(f.mounted.submitButton.disabled, true);
+  assert.equal(f.mounted.accountInput.value, '', 'A pending service switch cannot display the old account');
+  fail(Error('Connection did not finish')); await connection;
+  assert.equal(f.mounted.submitButton.disabled, false);
+  assert.equal(f.mounted.accountInput.value, 'second-account');
+});
 
 test('first device enrollment cannot strand the registration code button when mail policy returns later', async () => {
   const f = bootView();

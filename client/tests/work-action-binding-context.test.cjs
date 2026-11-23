@@ -151,7 +151,10 @@ test('blank compose passes the actual chosen adapter and independent engineering
   const start = source.indexOf('  async function makeDraft()');
   const end = source.indexOf('  function _openCreatedTask', start);
   assert(start >= 0 && end > start);
-  vm.createContext(c); vm.runInContext(source.slice(start, end), c);
+  vm.createContext(c); vm.runInContext(read('compose-directory-preferences'), c);
+  const preferenceStart = source.indexOf('  async function _readyDirectoryPreferences()');
+  vm.runInContext(source.slice(preferenceStart, source.indexOf('  /* Synchronize manual directory', preferenceStart)), c);
+  vm.runInContext(source.slice(start, end), c);
   await c.makeDraft();
   assert.equal(c._menuSelectionSeq, 1, 'submission invalidates a pending plugin menu selection');
   assert.deepEqual(clone(received.bindingContext), { repoId: 'repo-compose', projectId: 'project-compose', adapterId: 'codex-harness' });

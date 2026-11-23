@@ -15,23 +15,24 @@ const ARCHIVE = /\.soduwork-plugin$/i;
 const SKILL_ARCHIVE = /\.skill$/i;
 const skillPackages = require('./skill-package-candidate');
 const metadataCache = new Map();
+const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+const revisionOf = signatures => hash(JSON.stringify(signatures));
 
 function parseJson(bytes) {
   // Windows shell writers commonly include a UTF-8 BOM.
   return JSON.parse(String(bytes).replace(/^\uFEFF/, ''));
 }
 
-function metadata(file, stat, archive = false) {
-  const key = file + ':' + stat.mtimeMs + ':' + stat.ctimeMs + ':' + stat.size;
+function metadata(file, bytes, digest, archive) {
+  const key = file + ':' + digest;
   if (metadataCache.has(key)) return metadataCache.get(key);
   let body = null;
-  if (stat.size <= MAX_BYTES) {
+  if (bytes) {
     try {
       if (SKILL_ARCHIVE.test(file)) {
-        const skill = skillPackages.read(fs.readFileSync(file));
+        const skill = skillPackages.read(bytes);
         body = { name: skill.name, key: skill.name, skillPackage: true };
       } else {
-        const bytes = fs.readFileSync(file);
         const parsed = archive
           ? require('../plugin-package-reader.cjs').readPersonalArchive(bytes)
           : parseJson(bytes.toString('utf8'));
@@ -40,12 +41,12 @@ function metadata(file, stat, archive = false) {
           body = Object.fromEntries(['name', 'key', 'version', 'template', 'description', 'instructions']
             .map(key => [key, typeof parsed[key] === 'string' ? parsed[key].slice(0, 256) : '']));
           body.resourcePaths = !archive && Array.isArray(parsed.resources) && parsed.resources.length <= resources.MAX_FILES
-            ? parsed.resources.map(item => item?.path).filter(value => typeof value === 'string' && value.length <= 240) : [];
+            ? parsed.resources.filter(item => item && !Object.hasOwn(item, 'content')).map(item => item.path).filter(value => typeof value === 'string' && value.length <= 240) : [];
           const skill = skillPackages.legacy(parsed, undefined, archive ? bytes : undefined);
           if (skill) Object.assign(body, { name: skill.name, key: skill.name, skillPackage: true });
         }
       }
-    } catch (_) { /* Validate malformed drafts on click. */ }
+    } catch (_) { /* Keep malformed drafts discoverable for host validation and diagnostics. */ }
   }
   if (metadataCache.size >= 64) metadataCache.delete(metadataCache.keys().next().value);
   const result = body && !Array.isArray(body) && typeof body === 'object' ? body : null;
@@ -53,9 +54,10 @@ function metadata(file, stat, archive = false) {
   return result;
 }
 
-function revision(cwd, target, stat, body, at) {
+function revision(cwd, target, digest, body, at) {
   let updatedAt = Number(at) || 0;
-  const signatures = [[stat.mtimeMs, stat.ctimeMs, stat.size]];
+  const signatures = [digest];
+  let remaining = resources.MAX_BYTES;
   // Resource-only repairs belong to their own completed turn. Keep the manifest's
   // ownership boundary unchanged so a new chat cannot inherit another chat's draft.
   for (const value of body?.resourcePaths || []) {
@@ -65,11 +67,14 @@ function revision(cwd, target, stat, body, at) {
       resources.assertNoLinks(path.resolve(cwd), file);
       const current = fs.statSync(file);
       if (!current.isFile()) continue;
-      signatures.push([relative, current.mtimeMs, current.ctimeMs, current.size]);
+      const permitted = current.size <= Math.min(resources.MAX_FILE_BYTES, remaining);
+      remaining = Math.max(0, remaining - current.size);
+      signatures.push([relative, permitted
+        ? crypto.createHash('sha256').update(resources.readSized(file, current.size)).digest('hex') : ['oversized', current.size]]);
       updatedAt = Math.max(updatedAt, Math.round(current.mtimeMs), Math.round(current.ctimeMs));
     } catch (_) { signatures.push([value, 'unavailable']); }
   }
-  return { pluginRevision: crypto.createHash('sha256').update(JSON.stringify(signatures)).digest('hex'),
+  return { pluginRevision: revisionOf(signatures), pluginManifestDigest: digest,
     pluginRevisionAt: updatedAt };
 }
 
@@ -80,19 +85,30 @@ function describe(cwd, file) {
   const archive = ARCHIVE.test(name);
   const skillArchive = SKILL_ARCHIVE.test(name);
   if (!canonical && !archive && !skillArchive && name.toLowerCase() !== 'plugin.json') return null;
-  let stat;
+  let stat, fileIdentity;
   try {
     resources.assertNoLinks(path.resolve(cwd), target);
-    stat = fs.statSync(target);
-    if (!stat.isFile()) return null;
+    const actual = fs.statSync(target, { bigint: true });
+    if (!actual.isFile()) return null;
+    stat = { size: Number(actual.size), mtimeMs: Number(actual.mtimeNs) / 1e6 };
+    fileIdentity = actual.ino ? actual.dev + ':' + actual.ino + ':' + actual.birthtimeNs : '';
   } catch (_) { return null; }
-  const body = metadata(target, stat, archive);
+  let bytes;
+  try { bytes = stat.size <= MAX_BYTES ? resources.readSized(target, stat.size) : null; }
+  catch (error) {
+    if (error.code === 'ENOENT' || !(canonical || archive || skillArchive)) return null;
+    return { ...file, path: target, name, relative: path.relative(cwd, target).split(path.sep).join('/'),
+      at: Math.round(stat.mtimeMs), pluginRevision: 'unreadable:' + stat.size + ':' + stat.mtimeMs,
+      pluginDraft: true, pluginPackage: archive, skillPackage: skillArchive, unavailable: true };
+  }
+  const digest = bytes ? hash(bytes) : 'oversized:' + stat.size;
+  const body = metadata(target, bytes, digest, archive);
   if (!canonical && !archive && !skillArchive && !(body && ['method', 'connector', 'workflow'].includes(body.template) &&
       ['name', 'description', 'instructions'].every(key => typeof body[key] === 'string' && body[key].trim()))) return null;
-  return { ...file, path: target, name,
+  return { ...file, path: target, name, fileIdentity,
     relative: path.relative(cwd, target).split(path.sep).join('/'),
     size: stat.size, at: file.at == null ? Math.round(stat.mtimeMs) : file.at,
-    ...revision(cwd, target, stat, body, file.at == null ? Math.round(stat.mtimeMs) : file.at),
+    ...revision(cwd, target, digest, body, file.at == null ? Math.round(stat.mtimeMs) : file.at),
     pluginDraft: true, pluginPackage: archive, skillPackage: skillArchive || body?.skillPackage === true,
     pluginName: body && typeof body.name === 'string' ? body.name.trim().slice(0, 120) : '',
     pluginKey: body && typeof body.key === 'string' ? body.key.trim().slice(0, 64) : '',
@@ -103,7 +119,9 @@ function describe(cwd, file) {
 function withinSnapshot(file, snapshot) {
   const since = Number(snapshot && (snapshot.pluginSince ?? snapshot.since)) || 0;
   if (!since) return true;
-  try { return fs.statSync(file.path).mtimeMs >= since; } catch (_) { return false; }
+  // Match the output inventory's millisecond precision so an indexed boundary
+  // draft cannot disappear before validation. Recheck the actual file time.
+  try { return Math.round(fs.statSync(file.path).mtimeMs) >= since; } catch (_) { return false; }
 }
 
 function sessionSince(manager) {
@@ -120,6 +138,25 @@ function sessionSince(manager) {
   return 0;
 }
 
+function packageName(name) {
+  return DRAFT_NAMES.includes(name.toLowerCase()) || name.toLowerCase() === 'plugin.json' ||
+    ARCHIVE.test(name) || SKILL_ARCHIVE.test(name);
+}
+
+// A truncated display index cannot determine whether a later directory has a draft.
+function collectOverflow(dir, depth, files) {
+  if (depth > 6) return;
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') || entry.name.startsWith('~$')) continue;
+    const target = path.join(dir, entry.name);
+    if (entry.isFile() && packageName(entry.name)) files.push({ path: target });
+    if (entry.isDirectory() && !['skills', 'node_modules', '__pycache__', 'node-compile-cache'].includes(entry.name))
+      collectOverflow(target, depth + 1, files);
+  }
+}
+
 function collect(cwd, snapshot) {
   const got = snapshot || {};
   const files = [...(got.delivery && got.delivery.items || []), ...(got.files || [])];
@@ -130,6 +167,7 @@ function collect(cwd, snapshot) {
     for (const name of [...DRAFT_NAMES, 'plugin.json']) files.push({ path: path.join(cwd, name) });
   }
   const found = new Map();
+  if (cwd && got.truncated) collectOverflow(cwd, 0, files);
   for (const file of files) {
     const key = file && file.path ? path.resolve(file.path) : '';
     if (!key || found.has(key)) continue;
@@ -137,6 +175,21 @@ function collect(cwd, snapshot) {
     if (item && withinSnapshot(item, got)) found.set(key, item);
   }
   return mergePluginCandidates([...found.values()]);
+}
+
+async function collectAsync(cwd, snapshot = {}) {
+  const indexed = new Map();
+  for (const file of [...(snapshot.delivery?.items || []), ...(snapshot.files || [])]) {
+    if (file?.path && packageName(path.basename(file.path)) && !indexed.has(path.resolve(file.path)))
+      indexed.set(path.resolve(file.path), file);
+  }
+  const files = [...indexed.values()].map(({ path, at }) => ({ path, at }));
+  if (!files.length && !snapshot.truncated && snapshot.pluginSince === undefined &&
+      Array.isArray(snapshot.files) && Number.isFinite(snapshot.since)) return [];
+  const candidates = await require('../app-resource-cache.cjs').request({ action: 'draft-candidates', cwd,
+    snapshot: { files, since: snapshot.since, pluginSince: snapshot.pluginSince, truncated: snapshot.truncated } })
+    .catch(error => { throw Object.assign(error, { retryable: true }); });
+  return candidates.map(file => ({ ...indexed.get(file.path), ...file }));
 }
 
 /* Conversation cards speak the user's unit — one plugin — while discovery
@@ -213,5 +266,5 @@ function mergePluginCandidates(rows) {
   return kept;
 }
 
-module.exports = { DRAFT_NAME, MAX_BYTES, ARCHIVE, SKILL_ARCHIVE, parseJson, describe, collect, withinSnapshot, sessionSince,
+module.exports = { DRAFT_NAME, MAX_BYTES, ARCHIVE, SKILL_ARCHIVE, parseJson, hash, revisionOf, describe, collect, collectAsync, withinSnapshot, sessionSince,
   mergePluginCandidates, slugName, packageSlug, candidateIdentity };

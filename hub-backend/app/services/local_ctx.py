@@ -9,6 +9,9 @@ import time
 import uuid
 from pathlib import Path
 
+from .opencode_runtime_config import OpenCodeEnvironmentError
+from .opencode_session_migration import OpenCodeSessionMigrationError
+
 from .local_base import (_COMPACT_AT, _CTX_WINDOW_DEFAULT, _LOCK, _MEM_LINES, _PROFILES,
                          _RUNS, _WIN, _append_events)
 from .local_base import _env_for, _opencode_bin
@@ -44,6 +47,10 @@ def _oc_compact(run: dict) -> bool:
     env = _env_for(_PROFILES["opencode"], run.get("cfg") or {})
     srv = None
     try:
+        from .opencode_session_migration import migrate_session
+        migrate_session(env, sid, run["ws"], exe)
+        if run.get("stopping"):
+            return False
         srv = subprocess.Popen([exe, "serve", "--port", str(port), "--hostname", "127.0.0.1"],
                                cwd=run["ws"], env=env, stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL,
@@ -67,6 +74,8 @@ def _oc_compact(run: dict) -> bool:
             headers={"Content-Type": "application/json"}, method="POST")
         with opener.open(req, timeout=120) as r:
             return r.status == 200
+    except (OpenCodeSessionMigrationError, OpenCodeEnvironmentError):
+        raise
     except Exception as e:  # noqa: BLE001
         log.warning("压缩上下文失败 %s: %s", (run.get("cliSid") or "")[:12], type(e).__name__)
         return False
@@ -95,48 +104,66 @@ def _note(ref: str, text: str, kind: str = "sys") -> None:
     _append_events(ref, [it])
 
 
-def _cancelled(ref: str) -> bool:
+def _same_execution(ref: str, run: dict, worker) -> bool:
+    """Check a captured preparation owner while the run lock is held."""
+    return _RUNS.get(ref) is run and run.get("_workerIdentity") is worker
+
+
+def _cancelled(ref: str, expected_run: dict | None = None, worker=None) -> bool:
     with _LOCK:
+        if expected_run is not None and not _same_execution(ref, expected_run, worker):
+            return True
         run = _RUNS.get(ref)
         return not run or bool(run.get("stopping")) or run.get("state") == "stopped"
 
 
-def _settle_cancel(ref: str) -> bool:
-    if not _cancelled(ref):
-        return False
+def _settle_cancel(ref: str, expected_run: dict | None = None, worker=None) -> bool:
     with _LOCK:
+        # A retired preparation ends without settling or persisting its successor.
+        if expected_run is not None and not _same_execution(ref, expected_run, worker):
+            return True
         run = _RUNS.get(ref)
+        if run and not run.get("stopping") and run.get("state") != "stopped":
+            return False
         if run:
             run.update(state="stopped", stopping=False, ended=time.time(),
                        contextCompacting=False, error="你把它叫停了", cfg={})
-    _save_meta(ref)
+            _save_meta(ref)
     return True
 
 
-def _try_compact(ref: str, why: str) -> bool:
+def _try_compact(ref: str, why: str, expected_run: dict | None = None, worker=None) -> bool:
     with _LOCK:
+        if expected_run is not None and not _same_execution(ref, expected_run, worker):
+            return False
         run = _RUNS.get(ref)
         prof = _PROFILES.get((run or {}).get("cli") or "")
         if not run or not prof or not prof.get("compact") or run.get("stopping"):
             return False
+        worker = run.get("_workerIdentity")
         run["contextCompacting"] = True
-    _note(ref, f"上下文{why}，正在自动压缩…")
+        _note(ref, f"上下文{why}，正在自动压缩…")
     ok = False
     try:
         ok = bool(prof["compact"](run))
+    except (OpenCodeSessionMigrationError, OpenCodeEnvironmentError):
+        raise
     except Exception as e:
         log.warning("压缩失败 %s: %s", ref[:8], type(e).__name__)
     finally:
         with _LOCK:
-            run["contextCompacting"] = False
-    if ok and not _cancelled(ref):
-        with _LOCK:
+            if _same_execution(ref, run, worker):
+                run["contextCompacting"] = False
+    with _LOCK:
+        if not _same_execution(ref, run, worker):
+            return False
+        if ok and not _cancelled(ref, run, worker):
             run["compacted"] = int(run.get("compacted") or 0) + 1
             # Watermark is unknown until the next measured step; do not present
             # the previous full context as the post-compaction measurement.
             run["tokens"] = {}
-        _note(ref, "上下文已压缩，继续当前工作。")
-    _save_meta(ref)
+            _note(ref, "上下文已压缩，继续当前工作。")
+        _save_meta(ref)
     return ok
 
 
@@ -192,7 +219,7 @@ def _relay(ref: str, prompt: str) -> bool:
     if _cancelled(ref):
         return False
     with _LOCK:
-        if run.get("stopping"):
+        if run.get("stopping") or _goal_recovery_blocked(run):
             return False
         old_sid = run.get("cliSid") or (ref if prof.get("own_session") else "")
         run.setdefault("contextSegments", []).append({"sid": old_sid, "segment": run.get("segment", 1)})
@@ -227,9 +254,14 @@ def prepare_resume(ref: str, text: str, cfg: dict | None, *, recovery: bool = Fa
         run = _RUNS.get(ref)
         if not run:
             return {"ok": False, "error": "这个本地会话已经不在了"}
+        if run.get('_hostCleanup'):
+            return {"ok": False, "error": "The previous execution host is still stopping"}
         if recovery and (run.get("_accessTransition") or {}).get("cancelled"):
             return {"ok": False, "error": "Permission change cancelled"}
         prof = _PROFILES.get(run["cli"])
+        if not prof:
+            return {"ok": False, "code": "AGENT_UNAVAILABLE",
+                    "error": "原执行底座已不可用，请选择其他底座；原会话历史已保留"}
         from . import access_policy
         fresh = dict(cfg or {})
         if not recovery:
@@ -238,6 +270,20 @@ def prepare_resume(ref: str, text: str, cfg: dict | None, *, recovery: bool = Fa
             fresh.setdefault("_inputImages", [])
             fresh.setdefault("images", [])
             cfg = fresh
+        from . import local_task_goal
+        new_goal = fresh.pop("taskGoal", None)
+        goal_control = fresh.pop("taskGoalControl", None)
+        if not recovery and run.get("cli") != "pi":
+            if new_goal is not None and not local_task_goal.normalize(new_goal):
+                return {"ok": False, "error": "任务目标或预算无效，请检查后重试"}
+            if goal_control not in (None, "continue", "disable"):
+                return {"ok": False, "error": "无效的任务控制操作"}
+        if recovery and run.get("goalContract") and run.get("cli") != "pi":
+            if (not local_task_goal.active(run) or run.get("goalUserPending")
+                    or run.get("queue") or run.get("stopping")
+                    or run.get("permissionDenied") or run.get("permissionWaiting")
+                    or run.get("pendingPermissions") or local_task_goal.budget_reason(run)):
+                return {"ok": False, "error": "任务自动续跑已暂停"}
         from . import skill_read_scope
         scoped = dict(run)
         try:
@@ -286,6 +332,25 @@ def prepare_resume(ref: str, text: str, cfg: dict | None, *, recovery: bool = Fa
                 run.update(ctxWindow=win, ctxWindowKnown=known)
         for key in ("skillSelection", "_skillReadScope", "_resourceReadScope"):
             run[key] = scoped.get(key)
+        if not recovery and run.get("cli") != "pi":
+            if new_goal is not None:
+                if not local_task_goal.initialize(run, new_goal):
+                    return {"ok": False, "error": "请先完成或关闭当前目标，再设置新目标"}
+            elif goal_control:
+                controlled = local_task_goal.control(run, goal_control)
+                if not controlled.get("ok"):
+                    return controlled
+            elif local_task_goal.active(run):
+                # A human steering message supersedes an outstanding audit.
+                controlled = local_task_goal.control(run, "continue")
+                if not controlled.get("ok"):
+                    return controlled
+            if run.get("goalUserPending") == str((cfg or {}).get("_admissionKey") or ""):
+                run.pop("goalUserPending", None)
+            if local_task_goal.active(run):
+                text = local_task_goal.work_prompt(run, text)
+            for key in ("taskGoal", "taskGoalControl"):
+                (run.get("cfg") or {}).pop(key, None)
         if not recovery:
             # Preserve the previous boundary if a new turn wins the race with metadata saving.
             from .local_base import _record_terminal
@@ -299,25 +364,33 @@ def prepare_resume(ref: str, text: str, cfg: dict | None, *, recovery: bool = Fa
             from . import turn_correlation
             run["admissionKey"] = turn_correlation.key((cfg or {}).get("_admissionKey"))
         started = run.get("started") if recovery and run.get("_accessTransition") else time.time()
+        if local_task_goal.enabled(run):
+            # Capture turn ownership before releasing the preparation lock;
+            # a concurrent disable must not turn an automatic launch into an
+            # ordinary unguarded launch.
+            run["goalTurnOwned"] = local_task_goal.active(run)
         run.update(state="running", started=started or time.time(), ended=None, error="",
                    turnCompleted=False, terminal={}, permissionDenied=False)
         for key in ("failureKind", "failurePath", "gitDelivery"):
             run.pop(key, None)
         run.setdefault("firstStarted", run["started"])
+        worker = run.get("_workerIdentity")
     exe = prof and prof["bin"]()
     if not exe:
         with _LOCK:
+            if _settle_cancel(ref, run, worker):
+                return {"ok": True, "stopped": True}
             run.update(state="failed", error="CLI 不见了")
-        _save_meta(ref)
+            _save_meta(ref)
         return {"ok": False, "error": "CLI 不见了"}
     try:
         from .local_base import ctx_pct
         near_full = run.get("ctxWindowKnown") and ctx_pct(run) >= _COMPACT_AT * 100
         if not recovery and near_full:
-            if not _try_compact(ref, "接近上限") and not _cancelled(ref):
+            if not _try_compact(ref, "接近上限", run, worker) and not _cancelled(ref, run, worker):
                 if _relay(ref, text):
                     return {"ok": True}
-        if _settle_cancel(ref):
+        if _settle_cancel(ref, run, worker):
             return {"ok": True, "stopped": True}
         start = run.pop("_executionStart", None)
         if start:
@@ -327,12 +400,6 @@ def prepare_resume(ref: str, text: str, cfg: dict | None, *, recovery: bool = Fa
                    start["prompt"], run["ws"], ref, run.get("cfg") or {}, prof)
             return {"ok": True}
         sid = run.get("cliSid") or (ref if prof.get("own_session") else "")
-        if run.get("cli") == "harness2" and sid and not sid.startswith("h2_"):
-            # Carry the existing Runner history into the independent executor.
-            # Never launch the former agent or discard the archived segment.
-            if _relay(ref, text):
-                return {"ok": True}
-            raise RuntimeError("无法迁移 Harness² 会话上下文；原历史已保留，请重试")
         # An overflow before the first session-id event is also recoverable.
         if not sid:
             if _relay(ref, text):
@@ -344,30 +411,51 @@ def prepare_resume(ref: str, text: str, cfg: dict | None, *, recovery: bool = Fa
         return {"ok": True}
     except Exception as error:
         with _LOCK:
-            run.update(state="failed", error="上下文恢复失败：" + type(error).__name__)
-        _save_meta(ref)
-        return {"ok": False, "error": run["error"]}
+            if _settle_cancel(ref, run, worker):
+                return {"ok": True, "stopped": True}
+            message = (str(error) if isinstance(error, (OpenCodeSessionMigrationError, OpenCodeEnvironmentError))
+                       else "上下文恢复失败：" + type(error).__name__)
+            run.update(state="failed", error=message)
+            _save_meta(ref)
+        return {"ok": False, "error": message}
+
+
+def _goal_recovery_blocked(run: dict) -> bool:
+    from . import local_task_goal
+    if not local_task_goal.enabled(run) or not run.get("goalTurnOwned"):
+        return False
+    return bool(not local_task_goal.active(run) or run.get("goalUserPending")
+                or run.get("queue") or local_task_goal.budget_reason(run)
+                or run.get("permissionWaiting") or run.get("permissionDenied")
+                or run.get("pendingPermissions"))
 
 
 def _recover_overflow(ref: str) -> bool:
     with _LOCK:
         run = _RUNS.get(ref)
-        if not run or run.get("stopping"):
+        if not run or run.get("stopping") or _goal_recovery_blocked(run):
             return False
         tried = int(run.get("overflowTried") or 0)
         run["overflowTried"] = tried + 1
         prompt = run.get("contextRequest", run.get("lastPrompt", ""))
+        worker = run.get("_workerIdentity")
     if tried >= 2:
         _note(ref, "本轮自动压缩仍未能满足模型限制。历史已保留，可以调整模型或继续发送新消息。")
         return False
     try:
-        if tried == 0 and _try_compact(ref, "已满"):
-            if _settle_cancel(ref):
+        if tried == 0 and _try_compact(ref, "已满", run, worker):
+            if _settle_cancel(ref, run, worker):
                 return True
             return bool(prepare_resume(ref, prompt, None, recovery=True).get("ok"))
-        if _settle_cancel(ref):
+        if _settle_cancel(ref, run, worker):
             return True
         return _relay(ref, prompt)
+    except (OpenCodeSessionMigrationError, OpenCodeEnvironmentError) as error:
+        with _LOCK:
+            if _settle_cancel(ref, run, worker):
+                return True
+            _note(ref, str(error))
+        return False
     except Exception as error:
         log.warning("上下文恢复失败 %s: %s", ref[:8], type(error).__name__)
         return False

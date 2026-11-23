@@ -99,6 +99,12 @@ async function main() {
     assert.equal(report.runtimeStart.version, expectedVersion, 'Running application version differs');
     assert.equal(path.resolve(report.runtimeStart.profile).toLowerCase(), path.resolve(profile).toLowerCase(), 'Application ignored profile isolation');
     assert.equal(report.runtimeStart.packaged, true, 'Expected the actual installed application');
+    if (expectedVersion === require('../../client/package.json').version) {
+      report.defaultHubUrl = await evaluateMain("(()=>{const {app}=process.mainModule.require('electron');" +
+        "return process.mainModule.require(app.getAppPath()+'/main/distribution.cjs').current().hubOrigin})()");
+      assert.equal(report.defaultHubUrl, require('../../client/main/default-hub.cjs').buildDefaultHub(),
+        'Installed candidate default Hub differs from the build request');
+    }
     phase('secure-storage');
     report.secureStorage = await evaluateMain('(' + secureStorageProbe.toString() + ')(' +
       JSON.stringify(profile) + ',' + JSON.stringify(markerMode) + ')');

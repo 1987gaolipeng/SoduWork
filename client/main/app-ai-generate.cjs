@@ -30,8 +30,12 @@ function payload(model, params) {
   const max = Math.min(params.maxOutputTokens, require('./conversation/model-selection').outputLimit(model));
   const wireModel = model.localOnly ? model.wireModelId : model.id;
   if (typeof wireModel !== 'string' || !wireModel.trim()) throw Error('Model request identity is unavailable');
+  // Capability probes establish the accepted wire parameter independently of
+  // model names or reasoning support. Use that evidence as the runtime does.
+  const tokenField = require('./model-capability-contract.cjs').compatibility(model.compatibility).maxTokensField ||
+    (thinking.reasoning && thinking.format === 'openai' ? 'max_completion_tokens' : 'max_tokens');
   const body = { model: wireModel, stream: false,
-    [thinking.reasoning && thinking.format === 'openai' ? 'max_completion_tokens' : 'max_tokens']: max,
+    [tokenField]: max,
     messages: [{ role: 'system', content: params.instructions }, { role: 'user', content: params.input }] };
   // Match the supported off mappings in the bundled Pi completion transport.
   // An always-thinking model is never forced off or silently replaced.
@@ -72,10 +76,11 @@ async function soleModel(identity, fetchImpl, signal) {
   return names.size === 1 ? [...names][0] : '';
 }
 function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.fetch,
-  resolveModel = modelConfig.fetchModel }) {
+  resolveModel = modelConfig.fetchModel, useModelOutputLimit = false }) {
   const receipts = new WeakMap(), active = new Map();
   return async function generate(item, raw, assertCurrent = () => {}) {
     const params = normalize(raw);
+    const modelBudgetRequested = useModelOutputLimit && raw.maxOutputTokens == null;
     let requestedModel = String(params.model || '').trim();
     const explicitModel = Boolean(requestedModel);
     let localRequested = requestedModel.startsWith('local:');
@@ -97,7 +102,7 @@ function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.
     const rows = receipts.get(item) || new Map(); receipts.set(item, rows);
     // Scope is part of the key: a later account must never receive an old result.
     const key = JSON.stringify([owner, identity.hub, identity.clientId, params.requestId]);
-    const fingerprint = crypto.createHash('sha256').update(JSON.stringify(params)).digest('hex');
+    const fingerprint = crypto.createHash('sha256').update(JSON.stringify([params, modelBudgetRequested])).digest('hex');
     const prior = rows.get(key);
     if (prior) {
       if (prior.fingerprint !== fingerprint) return failure('APP_AI_REQUEST_CONFLICT', '请求编号已用于其他内容');
@@ -128,7 +133,8 @@ function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.
         let selection = await resolveModel(identity, requestedModel, 8000, fetchImpl,
           false, 'pi', { app, allowLocal: true });
         await current();
-        if (!explicitModel && !selection?.ok && selection?.code !== 'LOCAL_AGENT_DEFAULT_UNAVAILABLE' && !controller.signal.aborted) {
+        if (!explicitModel && !selection?.ok && !selection?.providerPinned &&
+            selection?.code !== 'LOCAL_AGENT_DEFAULT_UNAVAILABLE' && !controller.signal.aborted) {
           const single = await soleModel(identity, fetchImpl, controller.signal);
           await current();
           if (single) {
@@ -152,7 +158,11 @@ function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.
         }
         await current();
         if (controller.signal.aborted) return;
-        const body = payload(model, params);
+        // Only a trusted native caller can choose the local model's budget.
+        // Public app requests retain their bounded default and explicit limits.
+        const generationParams = modelBudgetRequested && model.localOnly === true
+          ? { ...params, maxOutputTokens: require('./conversation/model-selection').outputLimit(model) } : params;
+        const body = payload(model, generationParams);
         dispatched = true;
         const response = await fetchImpl(model.baseUrl.replace(/\/+$/, '') + '/chat/completions', {
           method: 'POST', redirect: 'error', signal: controller.signal,
@@ -161,15 +171,16 @@ function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.
         await current();
         if (!response.ok) {
           await response.body?.cancel();
-          return failure(response.status === 429 ? 'APP_AI_RATE_LIMITED' : 'APP_AI_PROVIDER_ERROR',
-            '模型服务暂不可用（HTTP ' + response.status + '），本次未获得结果');
+          return { ...failure(response.status === 429 ? 'APP_AI_RATE_LIMITED' : 'APP_AI_PROVIDER_ERROR',
+            '模型服务暂不可用（HTTP ' + response.status + '），本次未获得结果'), httpStatus: response.status };
         }
         const result = await boundedJSON(response);
         await current();
         const choice = result?.choices?.[0];
         const text = choice?.message?.content;
         if (typeof text !== 'string' || !text.trim() || text.length > 262144)
-          return failure('APP_AI_EMPTY_RESULT', '模型未返回可用文字，请调整提示词或模型');
+          return { ...failure('APP_AI_EMPTY_RESULT', '模型未返回可用文字，请调整提示词或模型'),
+            ...(choice?.finish_reason === 'length' ? { finishReason: 'length' } : {}) };
         const usage = {};
         for (const [key, source] of [['inputTokens', 'prompt_tokens'], ['outputTokens', 'completion_tokens'], ['totalTokens', 'total_tokens']])
           if (Number.isSafeInteger(result.usage?.[source]) && result.usage[source] >= 0) usage[key] = result.usage[source];

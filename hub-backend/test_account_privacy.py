@@ -16,7 +16,7 @@ from PIL import Image
 from fastapi import Depends
 from sqlalchemy import delete, event, select, update
 from sqlalchemy.orm import Session
-from app.account_models import EmailChallenge
+from app.account_models import EmailChallenge, EmailRateLimit
 from app.account_privacy_models import AccountActionGrant, AccountPrivacyRequest
 from app.api import account_profile, admin as admin_api
 from app.auth import verify_password
@@ -552,6 +552,42 @@ class AccountPrivacyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current.json()["user"]["id"], self.uid)
         async with SessionLocal() as session:
             self.assertEqual((await session.get(User, self.uid)).username, "person@example.test")
+
+    async def test_admin_login_charges_only_failures_and_honors_shared_budgets(self):
+        account_key = email_auth._digest("account-rate\0admin-login-account:id:" + self.uid)
+        peer_key = email_auth._digest("account-rate\0admin-login-ip:127.0.0.1")
+        path = "/api/v1/admin/login"
+        credentials = {"user": "PERSON@example.test", "pass": "Original-password-123"}
+        response = await self.http.post(path, json=credentials)
+        self.assertEqual(response.status_code, 200)
+        async with SessionLocal() as session:
+            self.assertIsNone(await session.get(EmailRateLimit, account_key))
+            self.assertIsNone(await session.get(EmailRateLimit, peer_key))
+
+        response = await self.http.post(path, json={**credentials, "pass": "mistyped"})
+        self.assertEqual(response.status_code, 401)
+        async with SessionLocal() as session:
+            self.assertEqual((await session.get(EmailRateLimit, account_key)).count, 1)
+            self.assertEqual((await session.get(EmailRateLimit, peer_key)).count, 1)
+            entry = await session.scalar(select(AuditLog).where(AuditLog.action == "admin.login.failed"))
+            self.assertEqual(entry.target_id, self.uid)
+
+        # Seed a full budget to exercise admission without generating login traffic.
+        for key, limit in ((account_key, 10), (peer_key, 30)):
+            async with SessionLocal() as session:
+                row = await session.get(EmailRateLimit, key)
+                row.count = limit
+                row.expires_at = email_auth.now() + timedelta(minutes=5)
+                await session.commit()
+            with patch.object(admin_api, "verify_password", side_effect=AssertionError("throttled")):
+                denied = await self.http.post(path, json=credentials)
+            self.assertEqual(denied.status_code, 429)
+            self.assertGreater(int(denied.headers["Retry-After"]), 0)
+            async with SessionLocal() as session:
+                row = await session.get(EmailRateLimit, key)
+                row.expires_at = email_auth.now() - timedelta(seconds=1)
+                await session.commit()
+            self.assertEqual((await self.http.post(path, json=credentials)).status_code, 200)
 
     async def test_admin_legacy_usernames_keep_exact_case_and_whitespace_matching(self):
         async with SessionLocal() as session:

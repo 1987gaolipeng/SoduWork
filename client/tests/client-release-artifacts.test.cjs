@@ -65,6 +65,8 @@ function fixture(t, version = '9.9.1') {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const scripts = path.join(root, 'tools/ci'), dist = path.join(root, 'client/dist');
   fs.mkdirSync(scripts, { recursive: true }); fs.mkdirSync(dist, { recursive: true });
+  fs.mkdirSync(path.join(root, 'client/main'));
+  fs.copyFileSync(path.join(repo, 'client/main/default-hub.cjs'), path.join(root, 'client/main/default-hub.cjs'));
   for (const name of ['release-artifacts.cjs', 'publish-client.cjs', 'merge-macos.cjs', 'soduwork-acceptance-baselines.json'])
     fs.copyFileSync(path.join(repo, 'tools/ci', name), path.join(scripts, name));
   fs.writeFileSync(path.join(root, 'client/package.json'), JSON.stringify({ version, productName: 'SoduWork' }));
@@ -252,9 +254,10 @@ for (const platform of ['linux', 'macos']) {
   test(`first ${platform} release receipt accepts reinstall evidence without claiming an upgrade`, t => {
     const f = fixture(t, '1.13.15');
     f.run('inventory', platform);
-    const names = platform === 'linux' ? ['ubuntu22-deb', 'ubuntu24-deb', 'rocky9-rpm', 'ubuntu22-tgz']
+    const names = platform === 'linux' ? ['ubuntu22-deb', 'ubuntu24-deb', 'rocky9-rpm', 'fedora45-rpm', 'ubuntu22-tgz']
       : ['arm64-dmg', 'x64-dmg'];
     const checks = names.map(name => ({ name, ok: true, reinstalled: true, upgraded: false, oldVersion: '',
+      ...(name.endsWith('-rpm') ? { rpmSignatureVerified: true } : {}),
       ...(platform === 'macos' ? { freshInstalled: true, restarted: true, uninstalled: true, userDataPreserved: true } : {}) }));
     f.acceptance(platform, checks);
     const receipt = JSON.parse(fs.readFileSync(path.join(f.root, 'release-evidence', platform, 'acceptance.json')));
@@ -262,6 +265,17 @@ for (const platform of ['linux', 'macos']) {
     assert.equal(receipt.ok, true);
   });
 }
+
+test('Linux release rejects missing Fedora checks and unverified RPM signatures', t => {
+  const f = fixture(t);
+  f.run('inventory', 'linux');
+  const checks = ['ubuntu22-deb', 'ubuntu24-deb', 'rocky9-rpm', 'fedora45-rpm', 'ubuntu22-tgz']
+    .map(name => ({ name, ok: true, rpmSignatureVerified: name.endsWith('-rpm') }));
+  f.acceptance('linux', checks.filter(row => row.name !== 'fedora45-rpm'), false);
+  for (const name of ['rocky9-rpm', 'fedora45-rpm'])
+    f.acceptance('linux', checks.map(row => row.name === name ? { ...row, rpmSignatureVerified: false } : row), false);
+  f.acceptance('linux', checks);
+});
 
 for (const version of [undefined, '1.13.14', '1.13.16', '9.9.1']) {
   test(`Windows acceptance ${version ?? 'without a version'} requires a SoduWork upgrade`, () => {

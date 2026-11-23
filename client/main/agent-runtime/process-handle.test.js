@@ -190,6 +190,17 @@ test('interruption consistently stops local execution while retaining unconfirme
   assert.equal(snapshot.completion.retryable, false);
 });
 
+test('worker loss during an admitted turn preflight remains an interrupted execution', () => {
+  const f = fixture();
+  f.state.execution.turnQueue.activeQueueId = 'accepted-preflight';
+  f.publish();
+  assert.equal(f.handle.inFlight(), false);
+  f.interrupted(Error('Worker lost before SDK execution'));
+  assert.equal(f.handle.snapshot().runtimeFailure.interrupted, true);
+  assert.equal(f.handle.status(), 'failed');
+  assert.equal(f.handle.historyRow().state, 'failed');
+});
+
 test('synchronous compatibility output reads scan the local workspace without invoking execution', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-process-handle-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

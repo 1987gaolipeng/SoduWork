@@ -71,7 +71,7 @@ export default {
   "统一管理项目责任、代码仓库、AI 研发规则与交付准备。": "Manage project ownership, repositories, AI engineering rules and delivery readiness in one place.",
   "从企业仓库目录选择真实代码资产，并为当前项目绑定明确的工作分支。": "Choose real code assets from the enterprise catalog and bind an explicit work branch to this project.",
   "从派活、执行到审阅和上线，每一步都有清晰状态、可靠证据和人在关键处把关。": "From dispatch to execution, review and release, every step has clear status, reliable evidence and human oversight.",
-  "职业画像描述员工长期擅长什么；工作场景描述一类任务应该用哪些能力、流程和交付标准。它们都不等于权限，也不绑定 Pi、OpenCode、Claude Code 或 Codex。": "Role profiles describe what an employee is good at over time; work scenarios describe the capabilities, flows and delivery standards a class of work needs. They do not grant permissions or bind to a specific coding agent.",
+  "职业画像描述员工长期擅长什么；工作场景描述一类任务应该用哪些能力、流程和交付标准。它们都不等于权限，也不绑定 Pi、OpenCode 或 Codex。": "Role profiles describe what an employee is good at over time; work scenarios describe the capabilities, flows and delivery standards a class of work needs. They do not grant permissions or bind to a specific coding agent.",
   "客户端制作与试用 → 提交审核 → 管理员审核并上架。静态预检已完成；核对用途、权限与使用范围后确认一次即可。": "Build and test in the client → submit for review → an administrator reviews and lists it. Static checks are complete; confirm after reviewing purpose, permissions and scope.",
   "插件内容在客户端工坊或代码仓库中编写和测试；管理端只接收不可变版本，负责预检、评测、审批、发布与回滚。": "Write and test plugin content in the client workshop or a code repository; the admin console receives immutable versions and handles checks, evaluation, approval, release and rollback.",
   "连接企业知识、网页与 Office 工具，按标准方法完成研究、分析、撰写、校验与多格式交付。": "Connect enterprise knowledge, web and Office tools to complete research, analysis, writing, validation and multi-format delivery with a standard method.",

@@ -55,20 +55,39 @@ def temp_dir(root: str, task_id: str) -> str:
     return d
 
 
+class InvalidRepositoryDirectory(ValueError):
+    """A repository-relative path cannot be used on an execution device."""
+
+
+def validate_repo_local_dir(value) -> str:
+    """Validate before normalization using the same portable contract on every host."""
+    sub = str(value or "").strip().replace("\\", "/")
+    if not sub:
+        return ""
+    parts = sub.split("/")
+    if (sub.startswith("/") or any(
+            part in (".", "..") or part != part.rstrip(" .")
+            or re.search(r'[<>:"|?*\x00-\x1f]', part) for part in parts)):
+        raise InvalidRepositoryDirectory(
+            "localDir must be relative to the work root, without drive prefixes, "
+            "absolute paths or traversal / 子目录必须位于工作目录内，不能包含盘符、绝对路径或 ..")
+    return "/".join(part for part in parts if part)
+
+
 def repo_dir(root: str, repo) -> str:
     """Resolve a repository beneath the work root using its relative directory or a sanitized name
     fallback.
     """
-    if not root:
-        return ""
-    sub = str(getattr(repo, "local_dir", "") or "").strip()
+    sub = validate_repo_local_dir(getattr(repo, "local_dir", ""))
     if not sub:
         sub = _safe_seg(getattr(repo, "name", "") or getattr(repo, "id", ""))
-    # Allow relative subdirectories but reject traversal outside the root.
-    sub = sub.replace("\\", "/").strip("/")
-    if ".." in sub.split("/"):
-        sub = _safe_seg(sub)
-    return os.path.normpath(os.path.join(root, *sub.split("/")))
+    if not root:
+        return ""
+    target = os.path.normpath(os.path.join(root, *sub.split("/")))
+    resolved_root, resolved_target = os.path.realpath(root), os.path.realpath(target)
+    if os.path.normcase(os.path.commonpath((resolved_root, resolved_target))) != os.path.normcase(resolved_root):
+        raise InvalidRepositoryDirectory("Repository directory resolves outside the work root")
+    return target
 
 
 def _git(cwd: str | None, args: list[str], env: dict | None = None) -> tuple[int, str]:
@@ -111,7 +130,12 @@ def plan(work_root: str, repo, task_id: str, device_path: str = "",
     if repo is None:
         return {"ok": True, "dir": temp_dir(work_root, task_id), "cloned": False,
                 "detail": "临时活，单开一个工作目录"}
-    target = (device_path or "").strip() or repo_dir(work_root, repo)
+    # An explicitly authorized device path has its own permission semantics.
+    # Relative catalog paths, including historical rows, must fail before mkdir/git.
+    try:
+        target = (device_path or "").strip() or repo_dir(work_root, repo)
+    except ValueError as exc:
+        return {"ok": False, "dir": "", "cloned": False, "detail": str(exc)}
     prepared = ensure_repo(target, repo, git_creds)
     if not prepared.get("ok") or not str(execution_key or "").strip():
         return prepared

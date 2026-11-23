@@ -22,17 +22,17 @@ app.whenReady().then(async () => {
     window.esc=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
     window.petSay=()=>{};
     SoduWorkAPI.localAgentSetup=async()=>({modelCount:1,models:[],machines:[{runnerId:'fixture-local',scope:'current-instance',label:'保存',env:{ok:true},agents:[
-      {key:'claude',name:'Claude Code CLI',installed:true,present:true,setupState:'unauthed',state:'unauthed',modelPick:false,
+      {key:'codex',name:'Codex',installed:true,present:true,setupState:'unauthed',state:'unauthed',modelPick:false,
        accountSetup:{shell:'PowerShell',command:'fixture account login 保存 {sender}'},
        why:'请先连接当前执行环境的账号。',whyMessage:{key:'agent.auth.required',fallback:'请先连接当前执行环境的账号。'},
-       blurb:'Anthropic 官方 Claude Code，通过 ACP 适配器接入；使用自己的 Anthropic 账号。'},
+       blurb:'OpenAI 官方 CLI。用它自己的账号（ChatGPT 登录或 OpenAI key），不吃 SoduWork 这边的模型配置。'},
       {key:'kimi',name:'Kimi Code CLI',installed:false,setupState:'missing',state:'missing',
        blurb:'Kimi 官方编码助手，通过 ACP 接入，使用已授权的企业模型。'}]}]});
     SoduWorkAPI.agentSetup=SoduWorkAPI.localAgentSetup;openAgentsPanel();void 0;`);
   await tick();
-  await js(`_agJobs['fixture-local~claude']={key:'fixture-local~claude',action:'repair',state:'done',ok:false,
+  await js(`_agJobs['fixture-local~codex']={key:'fixture-local~codex',action:'repair',state:'done',ok:false,
     detail:'fixture detail <fixture>',lines:['\u4fee\u590d\u672a\u5b8c\u6210','custom diagnostic <fixture>']};`);
-  await js(`document.querySelector('[data-atoggle="fixture-local~claude"]').click()`);
+  await js(`document.querySelector('[data-atoggle="fixture-local~codex"]').click()`);
   await js(read('components/panels/panels-chat-status.js'));
   await js(`window.runtimeNotice='当前会话没有授权：浏览网页。请新建会话并开启对应能力后再使用这个插件';
     const notice=document.createElement('span');notice.dataset.runtimeNotice=runtimeNotice;notice.setAttribute('translate','no');
@@ -48,8 +48,9 @@ app.whenReady().then(async () => {
     if(locale==='ja-JP')assert.ok(runtimeNotice.includes('ウェブを閲覧'));
     if(locale==='ko-KR')assert.ok(runtimeNotice.includes('웹 탐색'));
     const text = await js('document.querySelector("#agDrawerWrap").innerText');
-    assert.ok(text.includes('Claude Code'));
-    assert.ok(!text.includes('Claude Code CLI'));
+    assert.ok(text.includes('Codex'));
+    assert.ok((await js(`document.querySelector('[data-ak="fixture-local~kimi"]').innerText`)).includes('Kimi Code'));
+    assert.ok(!(await js(`document.querySelector('[data-ak="fixture-local~kimi"]').innerText`)).includes('Kimi Code CLI'));
     assert.ok(text.includes('fixture account login 保存 {sender}'));
     assert.ok(text.includes(await js('SoduWorkI18n.t("agent.auth.required")')), locale + ' drawer status');
     const repairLabel = await js("SoduWorkI18n.translateText('\u4fee\u590d\u672a\u5b8c\u6210')");

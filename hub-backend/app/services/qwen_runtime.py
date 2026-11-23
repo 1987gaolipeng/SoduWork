@@ -16,8 +16,9 @@ import sys
 import tempfile
 
 try:
-    from . import runtime_images
+    from . import context_window, runtime_images
 except ImportError:  # Direct script entry used by the source Runner bridge.
+    import context_window
     import runtime_images
 
 SETTINGS_ENV = "QWEN_CODE_SYSTEM_SETTINGS_PATH"
@@ -25,6 +26,16 @@ DEFAULTS_ENV = "QWEN_CODE_SYSTEM_DEFAULTS_PATH"
 MODEL_LABEL_ENV = "SODUWORK_QWEN_MODEL_LABEL"
 MODEL_LABEL = "SoduWork managed model"
 _JSON_COMMENTS = re.compile(r'("(?:\\.|[^"\\])*")|//[^\r\n]*|/\*[\s\S]*?\*/')
+
+
+def apply_env(env: dict) -> None:
+    """Bind only the reviewed host preload; native tools never inherit it."""
+    loader = Path(__file__).with_name("qwen_acp_outcome.mjs")
+    if not loader.is_file():
+        raise RuntimeError("Qwen Code 任务结算组件缺失，请更新 SoduWork")
+    env.pop("NODE_OPTIONS", None)
+    env["SODUWORK_QWEN_ACP_OUTCOME"] = "1"
+    env["NODE_OPTIONS"] = "--import=" + loader.resolve().as_uri()
 
 
 def system_settings_path(env: dict) -> Path:
@@ -88,7 +99,13 @@ def settings(llm: dict, operator: dict, inherited_generation: dict | None = None
     # Native settings can otherwise retain a model selected by an earlier turn.
     model["name"] = llm["model"]
     model["baseUrl"] = "$OPENAI_BASE_URL"
+    # The native default only warns about repeated failed tools and can keep
+    # consuming model calls. Stop at Qwen's own loop decision in managed runs,
+    # without imposing a smaller general task budget or editing user settings.
+    model["loopProtection"] = "stop"
     generation = model.setdefault("generationConfig", {})
+    window = context_window.resolve(llm)["contextWindow"]
+    generation["contextWindowSize"] = window
     generation.setdefault("modalities", {})["image"] = image
     generation["splitToolMedia"] = True
     providers = result.setdefault("modelProviders", {})
@@ -104,6 +121,9 @@ def settings(llm: dict, operator: dict, inherited_generation: dict | None = None
 
     existing = next((row for row in rows if current_route(row)), {})
     entry_generation = copy.deepcopy(existing.get("generationConfig", inherited_generation or generation))
+    # Provider entries are sealed, so the native compactor cannot inherit the
+    # selected model's window from the top-level generation settings.
+    entry_generation["contextWindowSize"] = window
     entry_generation.setdefault("modalities", {})["image"] = image
     entry_generation["splitToolMedia"] = True
     entry = {**existing, "id": model_id, "name": MODEL_LABEL, "envKey": "OPENAI_API_KEY",

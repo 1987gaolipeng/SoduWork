@@ -54,7 +54,22 @@ async function fixtureServer() {
             usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }));
           return;
         }
-        const runId = JSON.stringify(latest?.content).match(/BENCH_RUN:([a-z0-9-]+)/)?.[1];
+        // The SDK compacts the synthetic long history in a separate model call.
+        // Its transcript can contain old BENCH_RUN markers.
+        const text = content => typeof content === 'string' ? content :
+          Array.isArray(content) ? content.filter(part => part.type === 'text').map(part => part.text).join('') : '';
+        const instruction = text(latest?.content);
+        const summarizesHistory = instruction.startsWith('<conversation>') && instruction.includes('</conversation>');
+        const summarizesTurn = instruction.startsWith('# Conversation\n') && instruction.includes('\n\n# Instructions\n');
+        if (parsed.messages.length === 2 && ['system', 'developer'].includes(parsed.messages[0].role) &&
+            text(parsed.messages[0].content).startsWith('You are a context summarization assistant.') &&
+            (summarizesHistory || summarizesTurn)) {
+          response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          frame(response, { role: 'assistant', content: 'Summary of the isolated benchmark history.' });
+          frame(response, {}, 'stop'); response.end('data: [DONE]\n\n');
+          process.send({ type: 'summary' }); return;
+        }
+        const runId = instruction.match(/BENCH_RUN:([a-z0-9-]+)/)?.[1];
         assert.ok(runId, 'only benchmark instructions may invoke this fixture: ' + JSON.stringify(latest?.content).slice(0, 200));
         const sent = [];
         response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
@@ -85,7 +100,7 @@ async function runElectron(electron, mode, output, nodeExe) {
   fs.mkdirSync(profile); fs.mkdirSync(cwd); app.setPath('userData', profile); app.disableHardwareAcceleration();
   app.on('window-all-closed', () => {});
   const legacyTransport = process.argv.includes("--legacy-transport");
-  const report = { ok: false, mode, legacyTransport, transportDelayMs: legacyTransport ? 100 : 16, root, runs: [], source: { chunks: CHUNKS, intervalMs: INTERVAL, runsPerLoad: RUNS },
+  const report = { ok: false, mode, legacyTransport, transportDelayMs: legacyTransport ? 100 : 16, root, runs: [], summaryRequests: 0, source: { chunks: CHUNKS, intervalMs: INTERVAL, runsPerLoad: RUNS },
     boundary: 'Fresh isolated Electron/real Pi SDK and native session, independent loopback Node SSE, real BrowserWindow DOM and requestAnimationFrame acknowledgement. Native 50 ms snapshot batching and the production one-frame IPC stream scheduler are included. Minimal thinking view, not the full product renderer; rAF does not prove physical screen paint.' };
   let server, runtime, bridge, win, heartbeat;
   const source = new Map(), active = new Map(), fixtureErrors = [], heartbeatGaps = [];
@@ -114,6 +129,7 @@ async function runElectron(electron, mode, output, nodeExe) {
     server.on('message', value => {
       if (value.type === 'ready') hub = value.hub;
       else if (value.type === 'stream') source.set(value.runId, value);
+      else if (value.type === 'summary') report.summaryRequests++;
       else if (value.type === 'fixture-error') fixtureErrors.push(value.message);
     });
     await check(() => hub, 'independent fixture server');

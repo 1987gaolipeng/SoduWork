@@ -158,14 +158,29 @@ class RequirementProjectSelectionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(changed.status_code, 200, changed.text)
                 self.assertEqual(changed.json()["projectId"], pid)
                 self.assertEqual(changed.json()["repoId"], "legacy-repository")
+        async with self.sessions() as session:
+            session.add_all([models.Repo(id="second-own-repo", project_id="own", name="Another repository"),
+                             models.Repo(id="inactive-repo", project_id="retired", name="Archived project"),
+                             models.Repo(id="restricted-repo", project_id="own", org_id="other", name="Restricted")])
+            await session.commit()
         for path in ("tasks", "tasks/offline-synthetic"):
+            method = "POST" if path == "tasks" else "PUT"
+            for invalid in ("missing", "other-repo", "inactive-repo", "restricted-repo"):
+                denied = await self.call(method, path, json={"title": "Invalid repo", "repoId": invalid})
+                self.assertEqual(denied.status_code, 404, denied.text)
             created = await self.call("POST" if path == "tasks" else "PUT", path,
-                json={"title": "Legacy repo-only", "repoId": "legacy-repository"})
+                json={"title": "Legacy repo-only", "repoId": " own-repo "})
             self.assertEqual(created.status_code, 200, created.text)
             self.assertIsNone(created.json()["projectId"])
-            changed = await self.call("PATCH", "tasks/" + created.json()["id"], json={"repoId": "other-legacy-repository"})
+            self.assertEqual(created.json()["repoId"], "own-repo")
+            route = "tasks/" + created.json()["id"]
+            for invalid in ("missing", "other-repo"):
+                denied = await self.call("PATCH", route, json={"repoId": invalid})
+                self.assertEqual(denied.status_code, 404, denied.text)
+                self.assertEqual((await self.call("GET", route)).json()["repoId"], "own-repo")
+            changed = await self.call("PATCH", route, json={"repoId": "second-own-repo"})
             self.assertEqual(changed.status_code, 200, changed.text)
-            self.assertEqual(changed.json()["repoId"], "other-legacy-repository")
+            self.assertEqual(changed.json()["repoId"], "second-own-repo")
         async with self.sessions() as session:
             imported = await tasks.create_task(session, "owner", {"title": "Administrative dispatch", "projectId": "foreign"},
                                                origin="dispatch", creator=("outsider", "Synthetic administrator"))

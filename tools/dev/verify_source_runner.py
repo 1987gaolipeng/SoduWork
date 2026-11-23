@@ -232,7 +232,7 @@ def verify():
             'assert "additional_headers" in p and "proxy" in p; '
             'print(json.dumps({"cryptography":cryptography.__version__,"websockets":websockets.__version__}))'], text=True)
         report['dependencies'] = json.loads(versions)
-        assert report['dependencies']['cryptography'] == '49.0.0'
+        assert report['dependencies']['cryptography'] == '50.0.2'
         login = request(base, '/api/v1/admin/login', {'user': 'admin', 'pass': password})
         tasks = request(base, '/api/v1/admin/tasks', token=login['token'])
         assert not (tasks.get('items', tasks.get('tasks', [])) if isinstance(tasks, dict) else tasks)

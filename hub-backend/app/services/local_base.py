@@ -24,6 +24,8 @@ _ANSI = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 _IDLE_LIMIT_S = int(os.environ.get("SODUWORK_LOCAL_IDLE_LIMIT_S") or 15 * 60)
 _HARD_LIMIT_S = int(os.environ.get("SODUWORK_LOCAL_HARD_LIMIT_S") or 8 * 3600)
 _TIMEOUT_S = _HARD_LIMIT_S          # Compatibility alias for older callers.
+_LAUNCH_TREE_UNCONFIRMED = "execution_launch_cleanup_unconfirmed"
+_LAUNCH_TREE_UNCONFIRMED_ERROR = "执行主进程已退出，但子进程清理仍未确认，请检查这条会话的剩余执行进程"
 
 # Use a configurable context-window estimate when the gateway cannot report the real limit.
 # Label estimates in the UI and replace them with observed limits when overflow errors provide one.
@@ -64,67 +66,61 @@ _MEM_LINES = 4000               # Bound in-memory events; events.jsonl retains t
 _WIN = os.name == "nt"
 
 
-def _npm_root() -> str:
-    """Locate global npm packages using standard Windows and POSIX installation directories."""
-    if _WIN:
-        prefix = str(os.environ.get("npm_config_prefix") or os.environ.get("NPM_CONFIG_PREFIX") or "").strip()
-        if prefix:
-            return os.path.join(os.path.abspath(prefix), "node_modules")
-        from .agent_npm_runtime import configured_global_root
-        configured = configured_global_root()
-        if configured:
-            return configured
-        return os.path.join(os.environ.get("APPDATA", ""), "npm", "node_modules")
-    home = os.path.expanduser("~")
-    # npm may be installed under a private Runner prefix (for example
-    # /opt/soduwork-node-current).  Looking only in /usr/local made the Runner
-    # discover the wrong global tree: the package was installed successfully,
-    # but Codex's platform dependency could not be found afterwards.  Prefer
-    # the configured/inferred npm prefix before the system fallbacks.
+def _npm_roots() -> list[str]:
+    """Enumerate package trees; an unrelated first tree cannot hide an Agent."""
+    from .agent_npm_runtime import configured_global_root
+    from .agent_installation import known_bin_dirs
     candidates = []
-    for name in ("NPM_CONFIG_PREFIX", "npm_config_prefix"):
+    for name in ("npm_config_prefix", "NPM_CONFIG_PREFIX"):
         prefix = str(os.environ.get(name) or "").strip()
         if prefix:
-            candidates.append(os.path.join(prefix, "lib", "node_modules"))
-    try:
-        npm = shutil.which("npm") or shutil.which("npm.cmd")
+            candidates.append(os.path.join(os.path.abspath(prefix),
+                              *(("node_modules",) if _WIN else ("lib", "node_modules"))))
+    configured = configured_global_root()
+    if configured:
+        candidates.append(configured)
+    if _WIN:
+        candidates.append(os.path.join(os.environ.get("APPDATA", ""), "npm", "node_modules"))
+    else:
+        directories = []
+        npm = shutil.which("npm")
         if npm:
-            raw_path = os.path.abspath(npm)
-            candidates.append(os.path.join(
-                os.path.dirname(os.path.dirname(raw_path)), "lib", "node_modules"))
-            # npm's launcher is often a symlink into <prefix>/lib/node_modules.
-            # Resolve that layout without treating the npm package directory
-            # itself as the prefix.
-            real_path = os.path.realpath(raw_path)
+            directories.append(os.path.dirname(os.path.abspath(npm)))
+            real = os.path.realpath(npm)
             marker = os.sep + "lib" + os.sep + "node_modules" + os.sep
-            if marker in real_path:
-                prefix = real_path.split(marker, 1)[0]
-                candidates.append(os.path.join(prefix, "lib", "node_modules"))
-    except OSError:
-        pass
-    candidates.extend(("/usr/local/lib/node_modules", "/usr/lib/node_modules",
-                       os.path.join(home, ".npm-global", "lib", "node_modules"),
-                       os.path.join(home, ".nvm", "versions")))
-    seen = set()
-    for p in candidates:
-        if p in seen:
-            continue
-        seen.add(p)
-        if os.path.isdir(p):
-            return p
-    return ""
+            if marker in real:
+                candidates.append(real.split(marker, 1)[0] + marker.rstrip(os.sep))
+        directories.extend(known_bin_dirs())
+        candidates.extend(os.path.join(os.path.dirname(p), "lib", "node_modules") for p in directories)
+    return list(dict.fromkeys(candidates))
 
 
-def _real_bin(cands: list[str], names: list[str]) -> str | None:
+def _npm_root() -> str:
+    roots = _npm_roots()
+    if _WIN:
+        return next(iter(roots), "")
+    return next((root for root in roots if os.path.isdir(root)), "")
+
+
+def _real_bin(cands: list[str], names: list[str], *, exclude=None) -> str | None:
     """Find the real executable in known locations before searching PATH. Avoid Windows .cmd and
     .ps1 shims that can reparse multiline prompts; POSIX npm symlinks are safe to resolve
     normally.
     """
+    def rejected(path):
+        return bool((exclude and exclude(path)) or
+                    (_WIN and path.lower().endswith((".ps1", ".cmd", ".bat"))))
+
     for p in cands:
-        if p and os.path.isfile(p):
+        if p and os.path.isfile(p) and not (exclude and exclude(p)):
             return p
+    from .agent_installation import path_directories
+    directories = path_directories(windows=_WIN)
     for n in names:
-        w = shutil.which(n)
+        w = shutil.which(n, path=os.pathsep.join(directories)) if _WIN else shutil.which(n)
+        if not w or rejected(w):
+            w = next((hit for directory in directories
+                      if (hit := shutil.which(n, path=directory)) and not rejected(hit)), None)
         if not w:
             continue
         if _WIN and w.lower().endswith((".ps1", ".cmd", ".bat")):
@@ -133,10 +129,6 @@ def _real_bin(cands: list[str], names: list[str]) -> str | None:
     return None
 
 
-def _claude_bin() -> str | None:
-    # Native install, account probing and ACP execution resolve the same file.
-    from .agent_native_install import active_binary
-    return active_binary(_data_root()) or None
 
 
 def _opencode_bin() -> str | None:
@@ -196,9 +188,10 @@ def _pi_cli_js() -> str | None:
         return bundled
     root = _npm_root()
     from . import agent_npm_runtime
-    entry = agent_npm_runtime.package_entry("@earendil-works/pi-coding-agent", "pi", root)
-    if entry:
-        return entry
+    for candidate in dict.fromkeys([root, *_npm_roots()]):
+        entry = agent_npm_runtime.package_entry("@earendil-works/pi-coding-agent", "pi", candidate)
+        if entry:
+            return entry
     if not root:
         return None
     p = os.path.join(root, "@earendil-works", "pi-coding-agent", "dist", "cli.js")
@@ -209,9 +202,24 @@ def _pi_bin() -> str | None:
     """Return Node only when both Node and Pi's cli.js are available; the profile supplies cli.js
     as the first argument.
     """
-    if not _pi_cli_js():
+    entry = _pi_cli_js()
+    if not entry:
         return None
-    return _bundled_pi_node() or shutil.which("node") or shutil.which("node.exe")
+    bundled = _bundled_pi_node()
+    if bundled:
+        return bundled
+    from . import agent_npm_runtime
+    from .agent_installation import selected_manifest
+    manifest = selected_manifest("@earendil-works/pi-coding-agent", entry)
+    engine = ""
+    if manifest:
+        try:
+            with open(manifest, encoding="utf8") as stream:
+                engine = str((json.load(stream).get("engines") or {}).get("node") or "")
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+    node = agent_npm_runtime.node_env("pi", engine=engine)
+    return node.get("nodePath") if node.get("ok") else None
 
 
 def _codex_bin() -> str | None:
@@ -226,7 +234,7 @@ def _codex_bin() -> str | None:
     suffix = {"win32": "-pc-windows-msvc", "linux": "-unknown-linux-musl", "darwin": "-apple-darwin"}.get(system)
     if arch and suffix:
         triple = ("x86_64" if arch == "x64" else "aarch64") + suffix
-        for root in package_roots(_npm_root()):
+        for root in dict.fromkeys([*package_roots(_npm_root()), *_npm_roots()]):
             package = os.path.join(root, "@openai", "codex")
             try:
                 with open(os.path.join(package, "package.json"), encoding="utf-8") as stream:
@@ -240,13 +248,22 @@ def _codex_bin() -> str | None:
             native = os.path.join("@openai", f"codex-{system}-{arch}")
             cands.extend(os.path.join(base, "vendor", triple, "bin", exe) for base in (
                 os.path.join(package, "node_modules", native), os.path.join(root, native), package))
-    found = _real_bin(cands, [exe, "codex"])
-    # Codex desktop may add an internal WindowsApps resource directory to PATH.
-    # Ordinary backend processes may lack permission to execute that bundled binary.
-    # Exclude it while retaining the independently installed npm platform executable.
-    if _WIN and found and "\\windowsapps\\openai.codex_" in found.lower():
-        return None
-    return found
+    selected = _real_bin(cands, [exe, "codex"], exclude=lambda path:
+                     _WIN and "\\windowsapps\\openai.codex_" in os.path.normpath(path).replace("/", "\\").lower())
+    if selected or system != "darwin":
+        return selected
+    # macOS GUI processes can inherit a PATH without the standalone CLI's bin directory.
+    from .agent_installation import known_bin_dirs
+    directories = list(known_bin_dirs())
+    home = os.path.expanduser("~")
+    if os.path.isabs(home):
+        pnpm = os.path.join(home, "Library", "pnpm")
+        directories.extend([os.path.join(pnpm, "bin"), pnpm, os.path.join(home, ".bun", "bin")])
+    for directory in directories:
+        candidate = os.path.join(directory, exe)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
 
 
 def _codex_args(sid: str, mode: str, ws: str | None, cfg: dict | None = None,
@@ -371,26 +388,6 @@ _NATIVE_PROFILES = {
         "session_flag": ["--session"],
         "compact": lambda run: _compact_opencode(run),
     },
-    "claude": {
-        "name": "Claude Code",
-        "bin": _claude_bin,
-        "needs_llm": False,
-        "own_session": True,        # SoduWork assigns this runtime's session ID before execution.
-        "start": lambda sid, mode, ws, cfg=None: [
-            "-p", "--session-id", sid, "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-            # Planning uses the CLI's native plan mode.
-            # Working mode uses acceptEdits rather than bypassPermissions.
-            "--permission-mode", "plan" if mode == "plan" else "acceptEdits",
-        ],
-        "resume": lambda sid, mode, ws, cfg=None: [
-            "-p", "--resume", sid, "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-            "--permission-mode", "plan" if mode == "plan" else "acceptEdits",
-        ],
-        # Claude resumes the same session with --resume; omitting -p opens its interactive interface.
-        "session_flag": ["--resume"],
-        # Let Claude manage its own context compaction.
-        "compact": None,
-    },
 
 
 
@@ -451,9 +448,6 @@ _NATIVE_PROFILES = {
 from ..agent_catalog import AGENTS as _AGENT_CATALOG
 from . import acp_agents as _acp_agents
 from . import codex_account_acp as _account_acp
-from . import harness2_runtime as _harness2_runtime
-
-_NATIVE_PROFILES["harness2"] = _harness2_runtime.profile()
 
 _PROFILES = {
     key: (_acp_agents.profile(key) if row["runner"]["adapter"] == "acp" else {
@@ -517,8 +511,10 @@ _PERSIST_KEYS += ("stream", "terminal", "contextSegments", "compacted", "context
 _PERSIST_KEYS += ("executionStartedAt",)
 _PERSIST_KEYS += ("accessPolicy", "nextAccessPolicy", "appliedAccessPolicy", "skillSelection")
 _PERSIST_KEYS += ("conversationMode", "turnStartSeq", "admissionKey", "reasoningEffort", "codexTransport")
+_PERSIST_KEYS += ("goalContract", "goalState", "goalUserPending", "goalTurnOwned")
 _PERSIST_KEYS += ("turnEndIdentity", "admissionStartSeq")
 _PERSIST_KEYS += ("usageReceipts", "modelLocalOnly", "activeUsageOwner")
+_PERSIST_KEYS += ("eventDestination",)
 
 
 def _save_meta(ref: str) -> None:
@@ -534,6 +530,8 @@ def _save_meta(ref: str) -> None:
         if run.get("cli") == "codex":
             run["codexTransport"] = (run.get("cfg") or {}).get(_account_acp.TRANSPORT_KEY, run.get("codexTransport") or "")
         data = {k: run.get(k) for k in _PERSIST_KEYS}
+        if "eventDestination" not in run:
+            data.pop("eventDestination", None)
         # Keep snapshot and replacement in one ordered critical section.
         data["ref"] = ref
         try:
@@ -770,6 +768,10 @@ def _reclaim_missing() -> dict:
         except Exception:  # noqa: BLE001
             continue
         run = {k: meta.get(k) for k in _PERSIST_KEYS}
+        if "eventDestination" not in meta:
+            run.pop("eventDestination", None)
+        from .runner_event_scope import restore_destination
+        restored_destination = restore_destination(run, ref)
         # Older archives seeded this exact placeholder before the first request.
         if run.get("tokens") == {"input": 0, "output": 0, "total": 0}:
             run["tokens"] = {}
@@ -803,6 +805,15 @@ def _reclaim_missing() -> dict:
             if ref in _RUNS:
                 continue
             _RUNS[ref] = run
+        if restored_destination:
+            _save_meta(ref)
+        if run.get('state') == 'running' and run.get('failureKind') == _LAUNCH_TREE_UNCONFIRMED:
+            # A dead host cannot prove that its previously unverified children
+            # exited. Restart must retain this session's admission fence.
+            run.update(detached=True, stopping=True, error=_LAUNCH_TREE_UNCONFIRMED_ERROR)
+            n_live += 1
+            _save_meta(ref)
+            continue
         if run.get("state") == "running" and run.get("accessPolicy"):
             # The approval token and session grants deliberately die with the
             # Runner. Stop this new-contract process before offering resume;
@@ -914,6 +925,21 @@ def _prepare_codex_home(env: dict) -> None:
     _codex_runtime_home.clean_skills(env)
 
 
+def bind_command_environment(env: dict, argv: list[str]) -> dict:
+    """Bind child Node lookup to this launch's command, without rediscovery."""
+    from .agent_installation import prepend_node_path
+    command = argv
+    # Only unwrap our bridge. A custom wrapper may use the same option names
+    # while owning its environment and launch semantics itself.
+    if (len(argv) > 2 and argv[0] == sys.executable
+            and argv[1] in ("--acp-bridge", _acp_agents._bridge_path())
+            and "--" in argv):
+        command = argv[argv.index("--") + 1:]
+    if command and os.path.basename(command[0]).lower() in ("node", "node.exe"):
+        prepend_node_path(env, command[0])
+    return env
+
+
 def _env_for(prof: dict, cfg: dict, runtime_ref: str = "", *, require_model: bool = True,
              runtime_root: str | None = None) -> dict:
     """Build the child environment; native recovery terminals may omit model admission.
@@ -926,7 +952,7 @@ def _env_for(prof: dict, cfg: dict, runtime_ref: str = "", *, require_model: boo
     if cfg.get(runtime_images.CFG_KEY):
         if not runtime_ref:
             raise runtime_images.ImageInputError("图片附件缺少会话归属，请重新发送")
-        if (prof.get("acp_key") or prof is _PROFILES.get("opencode") or prof is _PROFILES.get("harness2")) and not runtime_images.transport_supported(cfg.get("llm")):
+        if (prof.get("acp_key") or prof is _PROFILES.get("opencode")) and not runtime_images.transport_supported(cfg.get("llm")):
             raise runtime_images.ImageInputError("当前所选模型未启用图片输入，请手动选择支持图片的模型后重试；原图已保留，未自动更换模型")
         env[runtime_images.ENV_KEY] = runtime_images.environment(cfg, os.path.join(_store_dir(runtime_ref), "inputs"))
     # Agent skills may launch Python subprocesses. Keep their text boundary
@@ -982,10 +1008,6 @@ def _env_for(prof: dict, cfg: dict, runtime_ref: str = "", *, require_model: boo
     # Add repository hosts to NO_PROXY while preserving system proxies for other requests.
     # Set this before the needs_llm early return so agents using native accounts also inherit it.
     _git_host_no_proxy(env, str((cfg or {}).get("repoGitUrl") or ""))
-    if prof is _PROFILES.get("harness2"):
-        return _no_proxy_for(_harness2_runtime.environment(env, cfg, runtime_ref=runtime_ref,
-                             **({"artifact_root": runtime_root} if runtime_root else {})),
-                             str((cfg.get("llm") or {}).get("base") or ""))
     if not prof.get("needs_llm"):
         if prof.get("acp_key"):
             _acp_agents.home_env(prof["acp_key"], env, runtime_root or _data_root())
@@ -1131,7 +1153,7 @@ def _friendly(msg: str) -> str:
     if not m:
         return ""
     if "Not logged in" in m or "authentication_failed" in m or "/login" in m:
-        return ("本机的 claude 没有可用凭据（CLI 报 Not logged in）。"
+        return ("当前执行底座没有可用凭据（CLI 报 Not logged in）。"
                 "要么在这台机器上先把 CLI 登录好，要么给它配 API Key / 共享模型服务——"
                 "这一步得由人来定，SoduWork 不替你存密钥。")
     if "Incorrect API key" in m or "invalid_api_key" in m:

@@ -105,6 +105,12 @@ test('built-in app developer inherits the current plugin contract and exact publ
   assert.ok(entryGuide.replace(/\r\n/g, '\n').length < 1600, 'entrypoint stays concise');
   assert.match(entryGuide,/references\/host-sdk\.md/);
   const workflow = fs.readFileSync(path.join(folder, 'references/development-workflow.md'), 'utf8');
+  const deliveryContext = personal.resolve(f.app, [personal.APP_DEVELOPER_ID], { cwd: f.root });
+  const supplied = require('../main/pi-session/plugin-context').compact(deliveryContext.items)[0].context;
+  assert.match(supplied, /交付回复开头必须先给验证清单/);
+  for (const stage of ['静态检查', '开发预览', '原生安装', '真实 AI/业务', '关窗任务', '未测项']) assert.ok(supplied.includes(stage));
+  assert.match(supplied, /不为凑齐清单擅自调用收费模型或扩大授权/);
+  assert.match(workflow, /具体交互、原因和下一步/);
   const design = fs.readFileSync(path.join(folder, 'references/design-quality.md'), 'utf8');
   const structure = fs.readFileSync(path.join(folder, 'references/local-app-structure.md'), 'utf8');
   assert.deepEqual(fs.readFileSync(path.join(folder, 'references/local-files.md')),

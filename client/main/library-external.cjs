@@ -26,12 +26,13 @@ function targetRoot(itemId, digest) {
 function materialize(payload) {
   const itemId = String((payload && payload.itemId) || '');
   if (!ITEM_ID.test(itemId)) throw new Error('资料条目标识无效，请刷新资料库后重试');
-  const data = String((payload && payload.data) || '');
-  if (!data) throw new Error('文件内容为空，请重新打开或重新入库');
+  if (!payload || typeof payload.data !== 'string') throw new Error('文件内容缺失，请重新打开或重新入库');
+  const data = payload.data;
   if (data.length > MAX_BASE64) throw new Error('文件超过 64MB，请下载后使用');
   let bytes;
   try { bytes = Buffer.from(data, 'base64'); } catch (_) { throw new Error('文件内容解码失败，请重新打开'); }
-  if (!bytes.length || bytes.length > MAX_BYTES) throw new Error('文件超过 64MB，请下载后使用');
+  if (data.length && !bytes.length) throw new Error('文件内容解码失败，请重新打开');
+  if (bytes.length > MAX_BYTES) throw new Error('文件超过 64MB，请下载后使用');
   const filename = safeFilename((payload && payload.filename) || '', 'library-file');
   const digest = crypto.createHash('sha256').update(bytes).digest('hex');
   const dir = targetRoot(itemId, digest);

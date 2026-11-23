@@ -27,17 +27,20 @@ test('closing a preview releases connections with unfinished request headers', {
   assert.equal(runtime._records.size, 0);
 });
 
-function request(url) {
+function request(url, options = {}) {
   return new Promise((resolve, reject) => {
-    http.get(url, (response) => {
+    const req = http.get(url, options, (response) => {
       const chunks = [];
       response.on('data', (chunk) => chunks.push(chunk));
       response.on('end', () => resolve({
         status: response.statusCode,
         headers: response.headers,
         body: Buffer.concat(chunks).toString('utf8'),
+        bytes: Buffer.concat(chunks),
       }));
+      response.on('error', reject);
     }).on('error', reject);
+    req.setTimeout(5000, () => req.destroy(new Error('Preview request timed out')));
   });
 }
 
@@ -209,6 +212,113 @@ test('video artifacts stream from an opaque loopback URL and honor byte ranges',
     assert.equal(ranged.headers['content-type'], 'video/mp4');
     assert.equal(ranged.body.toString(), '45678');
   } finally { runtime.closeAll(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('video suffix ranges return the requested tail without changing explicit or open-ended ranges', async context => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-video-suffix-'));
+  context.after(() => { runtime.closeRef('video-suffix'); fs.rmSync(root, { recursive: true, force: true }); });
+  const bytes = Buffer.from('0123456789abcdef');
+  fs.writeFileSync(path.join(root, 'demo.mp4'), bytes);
+  const snapshot = outputs.scan(root, 0, Date.now() - 5000);
+  const session = { cwd: root, outputSnapshot: () => snapshot };
+  const artifact = snapshot.delivery.items.find(item => item.kind === 'video');
+  const launched = await runtime.preview(session, 'video-suffix', artifact.artifactId);
+  assert.equal(launched.ok, true);
+  for (const [range, start, end] of [
+    ['bytes=-1', 15, 15], ['bytes=-3', 13, 15], ['bytes=-8', 8, 15], ['bytes=-9', 7, 15],
+    ['bytes=-16', 0, 15], ['bytes=-20', 0, 15], ['bytes=-0003', 13, 15],
+    ['bytes=-9007199254740993', 0, 15], ['bytes=-' + '9'.repeat(400), 0, 15],
+    ['bytes=4-8', 4, 8], ['bytes=4-', 4, 15], ['bytes=4-99', 4, 15], ['bytes=4-' + '9'.repeat(400), 4, 15],
+  ]) {
+    await context.test(range, async () => {
+      const response = await request(launched.url, { headers: { Range: range } });
+      assert.equal(response.status, 206);
+      assert.equal(response.headers['content-range'], `bytes ${start}-${end}/${bytes.length}`);
+      assert.equal(response.headers['content-length'], String(end - start + 1));
+      assert.equal(response.headers['accept-ranges'], 'bytes');
+      assert.equal(response.body, bytes.subarray(start, end + 1).toString());
+    });
+  }
+  for (const range of ['bytes=-0', 'bytes=-000', 'bytes=16-', 'bytes=4-3', 'bytes=-', 'bytes=0-1,3-4',
+    'bytes=' + '9'.repeat(400) + '-', 'bytes=-abc']) {
+    await context.test('reject ' + range, async () => {
+      const response = await request(launched.url, { headers: { Range: range } });
+      assert.equal(response.status, 416);
+      assert.equal(response.headers['content-range'], 'bytes */16');
+      assert.equal(response.body, '');
+    });
+  }
+});
+
+test('zero-length suffix ranges are also rejected for a one-byte video', async context => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-video-zero-suffix-'));
+  context.after(() => { runtime.closeRef('video-zero-suffix'); fs.rmSync(root, { recursive: true, force: true }); });
+  fs.writeFileSync(path.join(root, 'one.mp4'), 'x');
+  const snapshot = outputs.scan(root, 0, Date.now() - 5000);
+  const session = { cwd: root, outputSnapshot: () => snapshot };
+  const artifact = snapshot.delivery.items.find(item => item.kind === 'video');
+  const launched = await runtime.preview(session, 'video-zero-suffix', artifact.artifactId);
+  assert.equal(launched.ok, true);
+  const valid = await request(launched.url, { headers: { Range: 'bytes=-1' } });
+  assert.equal(valid.status, 206);
+  assert.equal(valid.body, 'x');
+  for (const range of ['bytes=-0', 'bytes=-000']) {
+    await context.test(range, async () => {
+      const response = await request(launched.url, { headers: { Range: range } });
+      assert.equal(response.status, 416);
+      assert.equal(response.headers['content-range'], 'bytes */1');
+      assert.equal(response.body, '');
+    });
+  }
+});
+
+test('video full reads and HEAD keep complete representation headers', async context => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-video-head-'));
+  context.after(() => { runtime.closeRef('video-head'); fs.rmSync(root, { recursive: true, force: true }); });
+  const bytes = Buffer.from(Array.from({ length: 256 }, (_, index) => index));
+  const file = path.join(root, 'binary.mp4');
+  fs.writeFileSync(file, bytes);
+  const launched = await runtime.previewInput({ cwd: root }, 'video-head', file);
+  assert.equal(launched.ok, true);
+  const full = await request(launched.url);
+  assert.equal(full.status, 200);
+  assert.equal(full.headers['content-length'], String(bytes.length));
+  assert.equal(full.headers['content-range'], undefined);
+  assert.deepEqual(full.bytes, bytes);
+  const tail = await request(launched.url, { headers: { Range: 'bytes=-9' } });
+  assert.equal(tail.status, 206);
+  assert.deepEqual(tail.bytes, bytes.subarray(-9));
+  for (const range of ['', 'bytes=-3', 'bytes=-0', 'bytes=4-8', 'bytes=900-', 'bytes=0-1,3-4', 'bytes=invalid']) {
+    await context.test('HEAD ' + (range || 'without Range'), async () => {
+      const response = await request(launched.url, { method: 'HEAD', headers: range ? { Range: range } : {} });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers['content-length'], String(bytes.length));
+      assert.equal(response.headers['content-range'], undefined);
+      assert.equal(response.headers['content-type'], 'video/mp4');
+      assert.equal(response.headers['accept-ranges'], 'bytes');
+      assert.equal(response.bytes.length, 0);
+    });
+  }
+});
+
+test('empty video representations ignore Range and return zero bytes', async context => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-video-empty-'));
+  context.after(() => { runtime.closeRef('video-empty'); fs.rmSync(root, { recursive: true, force: true }); });
+  const file = path.join(root, 'empty.mp4');
+  fs.writeFileSync(file, '');
+  const launched = await runtime.previewInput({ cwd: root }, 'video-empty', file);
+  assert.equal(launched.ok, true);
+  for (const method of ['GET', 'HEAD']) {
+    for (const range of ['', 'bytes=-3', 'bytes=-0', 'bytes=0-', 'bytes=0-1,3-4', 'bytes=invalid']) {
+      await context.test(method + ' ' + (range || 'without Range'), async () => {
+        const response = await request(launched.url, { method, headers: range ? { Range: range } : {} });
+        assert.equal(response.status, 200);
+        assert.equal(response.headers['content-length'], '0');
+        assert.equal(response.headers['content-range'], undefined);
+        assert.equal(response.bytes.length, 0);
+      });
+    }
+  }
 });
 
 test('output snapshots identify files changed in the active turn', () => {

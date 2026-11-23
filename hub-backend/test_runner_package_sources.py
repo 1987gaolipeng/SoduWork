@@ -1,4 +1,5 @@
 """Isolated packaging checks: no local executable, database or user files used."""
+import ast
 import os
 from pathlib import Path
 import tempfile
@@ -78,7 +79,8 @@ class RunnerPackageSourcesTest(unittest.TestCase):
         self.assertTrue(runner_enroll.packages_info()["windows"]["stale"])
 
     def test_dsh_adapter_resources_require_a_fresh_runner(self):
-        for name in ("dsh_session_storage.mjs", "dsh_gateway_bundle/package.json",
+        for name in ("dsh_session_storage.mjs", "dsh_acp_settlement.mjs",
+                     "dsh_gateway_bundle/package.json",
                      "dsh_gateway_bundle/cordis.patch.yml"):
             with self.subTest(resource=name):
                 source = self.write("hub-backend/app/services/" + name, "adapter fixture")
@@ -91,22 +93,10 @@ class RunnerPackageSourcesTest(unittest.TestCase):
                 runner_sources._STAMP_CACHE.clear()
                 self.assertTrue(runner_enroll.packages_info()["windows"]["stale"])
 
-    def test_harness2_notices_are_exported_and_invalidate_runner_freshness(self):
-        for name in ("LICENSE", "UPSTREAM.md"):
-            with self.subTest(resource=name):
-                source = self.write("hub-backend/app/services/harness2_vendor/" + name, "upstream notice")
-                inputs = runner_sources.build_inputs(self.backend, self.project)
-                self.assertIn(source, inputs)
-                self.assertIn(source, runner_enroll._src_sources())
-                for item in inputs:
-                    os.utime(item, (1000, 1000))
-                os.utime(self.binary, (2000, 2000))
-                os.utime(source, (3000, 3000))
-                runner_sources._STAMP_CACHE.clear()
-                self.assertTrue(runner_enroll.packages_info()["windows"]["stale"])
 
     def test_source_archive_refreshes_each_changed_dsh_resource(self):
-        for name in ("dsh_session_storage.mjs", "dsh_gateway_bundle/package.json",
+        for name in ("dsh_session_storage.mjs", "dsh_acp_settlement.mjs",
+                     "dsh_gateway_bundle/package.json",
                      "dsh_gateway_bundle/cordis.patch.yml"):
             with self.subTest(resource=name):
                 relative = "hub-backend/app/services/" + name
@@ -143,6 +133,23 @@ class RunnerPackageSourcesTest(unittest.TestCase):
                 self.assertIn("app.services.access_policy", hidden)
                 self.assertIn("app.db", excluded)
                 self.assertEqual("winpty" in excluded, platform != "win32")
+
+    def test_current_recipe_embeds_dsh_loaders_in_the_service_package(self):
+        recipe = ast.parse((Path(__file__).parent / "runner.spec").read_text(encoding="utf-8"))
+        analysis = next(node for node in ast.walk(recipe)
+                        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id == "Analysis")
+        resources = next(keyword.value for keyword in analysis.keywords if keyword.arg == "datas")
+        embedded = []
+        for node in ast.walk(resources):
+            if isinstance(node, ast.Tuple) and len(node.elts) == 2:
+                source, destination = node.elts
+                if isinstance(source, ast.Call) and isinstance(destination, ast.Constant):
+                    parts = [arg.value for arg in source.args if isinstance(arg, ast.Constant)]
+                    embedded.append((parts, destination.value))
+        for name in ("dsh_session_storage.mjs", "dsh_acp_settlement.mjs"):
+            with self.subTest(resource=name):
+                self.assertIn((["app", "services", name], "app/services"), embedded)
 
     def test_recipe_expressions_cannot_execute_code(self):
         marker = self.project / "must-not-exist"

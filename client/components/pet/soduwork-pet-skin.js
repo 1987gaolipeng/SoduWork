@@ -37,7 +37,7 @@
 
   function visible() {
     const pet = petElement();
-    return isActive() && cfg.petVisible !== false && !document.hidden && pet && pet.isConnected !== false;
+    return isActive() && cfg.petVisible === true && !document.hidden && pet && pet.isConnected !== false;
   }
 
   function cancelPendingFrame() {

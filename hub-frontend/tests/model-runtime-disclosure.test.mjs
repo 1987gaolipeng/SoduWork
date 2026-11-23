@@ -22,7 +22,7 @@ async function mountRuntime(t) {
   t.mock.method(globalThis, 'clearInterval', (timer) => timers.delete(timer))
   const props = {
     providers: [], models: [],
-    catalogActions: React.createElement('button', { 'data-catalog-action': true }, '组织默认调用'),
+    catalogActions: React.createElement('button', { 'data-catalog-action': true }, '接一个服务'),
   }
   const dependencies = {
     '../api.js': { api: { modelRuntime() {
@@ -77,6 +77,55 @@ function assertDisclosure(page, expanded, expectedId) {
   return body.props.id
 }
 const toggle = (page) => page.act(() => byClass(page, 'model-runtime-services-head').props.onClick())
+
+test('overview starts compact while catalog actions and truthful live counts remain visible', async t => {
+  const page = await mountRuntime(t)
+  page.render({ ...page.props, catalogCounts: { providers: 11, models: 1 }, catalogSummary: React.createElement('section', null, '目录配置') })
+  const button = () => byClass(page, 'model-runtime-overview-toggle')
+  const body = () => byClass(page, 'model-runtime-overview-body')
+  assert.equal(button().props['aria-expanded'], false)
+  assert.equal(body().props.hidden, true)
+  assert.equal(button().props['aria-controls'], body().props.id)
+  assert.equal(contains(body(), byClass(page, 'model-runtime-actions')), false)
+  assert.equal(contains(body(), byClass(page, 'model-runtime-quick-stats')), false)
+  assert.match(textOf(byClass(page, 'model-runtime-quick-stats')), /服务总数11模型总数1正在生成—排队等待—/)
+  page.requests[0].resolve(runtimeData())
+  await page.flush()
+  assert.match(textOf(byClass(page, 'model-runtime-quick-stats')), /正在生成2排队等待1/)
+  page.act(() => button().props.onClick())
+  const id = body().props.id
+  assert.equal(body().props.hidden, false)
+  assert.equal(button().props['aria-expanded'], true)
+  const polling = page.poll()
+  page.requests[1].resolve(runtimeData(7))
+  await polling; await page.flush()
+  assert.equal(body().props.id, id)
+  assert.equal(body().props.hidden, false)
+  assert.match(textOf(byClass(page, 'model-runtime-quick-stats')), /正在生成7/)
+  page.act(() => button().props.onClick())
+  assert.equal(body().props.hidden, true)
+  assert.equal(capacityButton(page).props.disabled, false)
+})
+
+test('collapsed overview keeps failures and retry visible without hiding stale-data warnings', async t => {
+  const page = await mountRuntime(t)
+  page.requests[0].resolve(runtimeData())
+  await page.flush()
+  const polling = page.poll()
+  page.requests[1].reject(new Error('fixture refresh failed'))
+  await polling; await page.flush()
+  const body = byClass(page, 'model-runtime-overview-body')
+  assert.equal(body.props.hidden, true)
+  const alert = byClass(page, 'model-runtime-state')
+  assert.equal(contains(body, alert), false)
+  assert.match(textOf(alert), /刷新失败/)
+  assert.match(textOf(byClass(page, 'model-runtime-quick-stats')), /正在生成2/)
+  retry(page)
+  page.requests[2].resolve(runtimeData(3))
+  await page.flush()
+  assert.equal(byClass(page, 'model-runtime-state'), undefined)
+  assert.equal(byClass(page, 'model-runtime-overview-body').props.hidden, true)
+})
 
 function descendants(value, predicate) {
   if (Array.isArray(value)) return value.flatMap(child => descendants(child, predicate))

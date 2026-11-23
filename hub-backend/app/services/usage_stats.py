@@ -10,6 +10,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am, models
+from ..timestamps import iso_utc
 
 _NUM_KEYS = ("input", "output", "total", "turns", "steps")
 
@@ -63,8 +64,8 @@ def _session_brief(row: am.ExecutionSession) -> dict:
     return {
         "ref": row.ref, "runnerId": row.runner_id or "", "host": row.host or "",
         "cli": row.engine or "", "model": row.model or "", "state": row.state or "",
-        "startedAt": row.started_at.isoformat() if row.started_at else "",
-        "finishedAt": row.finished_at.isoformat() if row.finished_at else "",
+        "startedAt": iso_utc(row.started_at) if row.started_at else "",
+        "finishedAt": iso_utc(row.finished_at) if row.finished_at else "",
         "durationMs": _duration_ms(row), "usage": dict(meta.get("usage") or {}),
     }
 
@@ -164,7 +165,7 @@ async def runner_usage(session: AsyncSession, days: int = 30, *,
             "host": item["host"] or (node.host if node else ""),
             "online": rid in online or rid == "backend-local",
             "dispatchMode": node.dispatch_mode if node else "",
-            "lastSeenAt": node.last_seen_at.isoformat() if node and node.last_seen_at else "",
+            "lastSeenAt": iso_utc(node.last_seen_at) if node and node.last_seen_at else "",
         })
         out.append(item)
     out.sort(key=lambda x: (not x["online"], -(x["usage"].get("total") or

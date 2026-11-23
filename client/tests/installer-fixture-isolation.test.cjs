@@ -288,6 +288,7 @@ test('real NSIS compiles the unique prepackaged launcher and legacy gap only tar
   await fs.mkdir(path.join(f.root, 'build'));
   await fs.copyFile(path.resolve(__dirname, '../build/launcher.nsi'), path.join(f.root, 'build/launcher.nsi'));
   await fs.copyFile(path.resolve(__dirname, '../build/launcher-progress.nsh'), path.join(f.root, 'build/launcher-progress.nsh'));
+  await fs.copyFile(path.resolve(__dirname, '../build/install-context.nsh'), path.join(f.root, 'build/install-context.nsh'));
   await fs.copyFile(path.resolve(__dirname, '../icon.ico'), path.join(f.root, 'icon.ico'));
   await f.prepareFixtureLauncher(f.root, { guid, ...names });
   assert.ok((await fs.stat(path.join(f.root, '.runtime/installer/SoduWorkLauncher.exe'))).size > 0);

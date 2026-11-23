@@ -18,13 +18,13 @@
 <script>
 window.errors=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
 window.locale='zh-CN';window.SoduWorkI18n={translateText:text=>locale==='en-US'?(SoduWorkLocaleMessages['en-US'][text]||text):text};
-window.runtimes=[['pi','Pi'],['codex-harness','Codex Harness'],['opencode','OpenCode'],['codex','Codex'],['qwen','Qwen Code'],['dsh','DeepSeek Harness'],['harness2','Google Harness²'],['kimi','Kimi Code']].map(([id,displayName])=>({id,displayName,modelMode:id==='codex'?'account':'managed'}));
+window.runtimes=[['pi','Pi'],['codex-harness','Codex Harness'],['opencode','OpenCode'],['codex','Codex'],['qwen','Qwen Code'],['dsh','DeepSeek Harness'],['kimi','Kimi Code']].map(([id,displayName])=>({id,displayName,modelMode:id==='codex'?'account':'managed'}));
 runtimes.find(row=>row.id==='dsh').availability={ok:true,detectedVersion:'@openma/deepseek-harness-acp 0.4.40'};
 window.state={ref:'same-conversation',adapterId:'pi',displayName:'Pi',selection:{name:'a',model:{id:'a',label:'模型 A'}}};
 window.calls=[];window.notices=[];window.fail=false;window.modelGate=null;window.switchGate=null;window.agentManagementOpened=0;
 window.openAgentsEntry=()=>{agentManagementOpened++;};
 window.SoduWorkAPI={myModels:async()=>{if(modelGate)await modelGate;return{usable:[{name:'a',label:'模型 A'},{name:'b',label:'模型 B'}]}}};
-window.soduWorkAPI={conversationSession:{runtimes:async()=>({ok:true,runtimes,availableRuntimes:runtimes,missing:[{id:'claude',displayName:'Claude Code'}]}),conversationRuntimes:async()=>({ok:true,runtimes,availableRuntimes:runtimes,missing:[{id:'claude',displayName:'Claude Code'}]}),
+window.soduWorkAPI={conversationSession:{runtimes:async()=>({ok:true,runtimes,availableRuntimes:runtimes,missing:[{id:'custom-offline',displayName:'Offline runtime'}]}),conversationRuntimes:async()=>({ok:true,runtimes,availableRuntimes:runtimes,missing:[{id:'custom-offline',displayName:'Offline runtime'}]}),
   selectAgent:async(ref,agentId)=>{calls.push({ref,agentId});if(switchGate)await switchGate;return fail?{ok:false,reason:'此 Agent 暂不可用'}:{ok:true,adapterId:agentId,displayName:runtimes.find(r=>r.id===agentId).displayName}},
   selectModel:async(ref,name)=>{calls.push({ref,name});return{ok:true,selection:{name,model:{id:name,label:'模型 '+name.toUpperCase()}}}}}};
 WorkComposer.upgradeChat(document.querySelector('#old'));

@@ -71,6 +71,12 @@ async def owned(session, client, connection_id):
     return connection
 
 
+def unpaired_observation(connection):
+    if connection.provider == "wecom" and connection.enabled and (connection.config or {}).get("saw_unpaired_message") is True:
+        return {"sawUnpairedMessage": True}
+    return {}
+
+
 def public(connection):
     try:
         webhook_url = callback(connection.id)
@@ -80,7 +86,8 @@ def public(connection):
         webhook_url = ""
     return {"id": connection.id, "provider": connection.provider, "name": connection.name,
             "enabled": connection.enabled, "webhookUrl": webhook_url,
-            "botUsername": (connection.config or {}).get("bot_username", ""), "credentialsConfigured": bool(connection.credentials)}
+            "botUsername": (connection.config or {}).get("bot_username", ""), "credentialsConfigured": bool(connection.credentials),
+            **unpaired_observation(connection)}
 
 
 async def create(session, client, body):

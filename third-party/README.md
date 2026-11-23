@@ -15,6 +15,15 @@ This directory retains verified license texts and source evidence. Project MIT t
 - Runner retains dependency metadata and wheel-provided licenses. Hub retains this directory and the project license. Bundled skills include project-owned guides and the reviewed upstream development skills declared in `tools/distribution/PUBLIC-SOURCE.json`. Each imported skill retains its original license, fixed-version provenance, and any adaptation notes; see [skill notices](../skills/THIRD-PARTY.md).
 - These checks do not constitute a complete SBOM, vulnerability scan, or legal certification.
 
+## Runner certificate bundle
+
+The standalone Runner ships the unmodified Mozilla CA bundle from
+[`certifi` 2026.10.23](https://pypi.org/project/certifi/2026.10.23/) (MPL-2.0).
+`runner.spec` preserves its original distribution license and `cacert.pem`.
+macOS WSS connections add this bundle to the default trust context, retaining
+explicitly configured private CAs and hostname verification. Public Mac builds
+check both isolated TLS handshakes and the CA data/loader in the frozen Runner.
+
 ## Python dependencies in the Hub image
 
 The Hub image installs its Python dependencies with pip from `hub-backend/requirements.txt`. Each dependency's original license files stay in its `*.dist-info` directory under the image's Python `site-packages`.

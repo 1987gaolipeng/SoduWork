@@ -1,5 +1,6 @@
 """Domain invalidations preserve committed API responses and release DB before fanout."""
 import asyncio
+import copy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -8,7 +9,7 @@ from sqlalchemy import event
 from test_model_runtime import IsolatedDatabase
 from app.models import Client, ModelDef, ModelProvider, User
 from app.api import admin, config, personal_models, agents, model_capabilities
-from app.services import client_domain_events as events, model_config_guard
+from app.services import client_domain_events as events, model_catalog, model_config_guard
 
 
 class ClientDomainEventsTests(IsolatedDatabase):
@@ -21,7 +22,10 @@ class ClientDomainEventsTests(IsolatedDatabase):
             session.add_all([
                 User(id="alice", username="fixture-alice", is_active=True),
                 User(id="bob", username="fixture-bob", is_active=True),
-                Client(id="one", user_ref="alice", auth_state="active", model_keys={"provider": "personal-fixture"}),
+                Client(id="one", user_ref="alice", auth_state="active", model_keys={"custom-personal": "personal-fixture"},
+                       config={"modelProviders": [{"id": "custom-personal", "name": "Personal",
+                                                    "baseUrl": "https://personal.invalid/v1", "personal": True}]},
+                       models=[{"providerId": "custom-personal", "name": "personal-model"}]),
                 Client(id="two", user_ref="alice", auth_state="active"),
                 Client(id="other", user_ref="bob", auth_state="active"),
                 Client(id="revoked", user_ref="alice", auth_state="revoked"),
@@ -37,7 +41,7 @@ class ClientDomainEventsTests(IsolatedDatabase):
         with patch.object(events.native_discovery, "wake", new_callable=AsyncMock) as wake:
             async with self.sessions() as session:
                 client = await session.get(Client, "one")
-                result = await personal_models.put_my_models({"keys": {"provider": "replacement-fixture"}}, client, session)
+                result = await personal_models.put_my_models({"keys": {"custom-personal": "replacement-fixture"}}, client, session)
                 self.assertEqual(set(result), {"ok", "usable", "mediaUsable"})
                 await agents.put_agent_model({"key": "pi", "model": "model"}, client, session)
                 self.assertEqual(await config.put_config({"theme": "dark", "modelProviders": []}, client, session), {"theme": "dark"})
@@ -45,6 +49,52 @@ class ClientDomainEventsTests(IsolatedDatabase):
             await events.flush_for_test(self.sessions)
             self.assertEqual({call.args for call in wake.await_args_list},
                              {("one", "alice", "models"), ("one", "alice", "config")})
+
+    async def test_personal_model_add_can_request_its_committed_revision(self):
+        async with self.sessions() as session:
+            client = await session.get(Client, "one")
+            before = model_config_guard.revision(client)
+            result = await personal_models.put_my_models({
+                "models": [*client.models, {"providerId": "custom-personal", "name": "added-model"}],
+                "expectedRevision": before, "returnRevision": True,
+            }, client, session)
+        async with self.sessions() as session:
+            saved = await session.get(Client, "one")
+            self.assertIn("added-model", [row["name"] for row in saved.models])
+            self.assertNotEqual(before, result["revision"])
+            self.assertEqual(result["revision"], model_config_guard.revision(saved))
+
+    async def test_personal_add_target_revision_belongs_to_the_write_even_after_a_concurrent_edit(self):
+        model = {"providerId": "custom-personal", "name": "added-model"}
+        media = [{"providerId": "custom-personal", "name": f"added-{kind}", "modality": kind, "label": "First"}
+                 for kind in ("image", "video")]
+        targets = []
+        async with self.sessions() as session:
+            client = await session.get(Client, "one")
+            commit = session.commit
+
+            async def commit_then_edit():
+                await commit()
+                async with self.sessions() as other:
+                    writer = await other.get(Client, "one")
+                    choices = await model_catalog.usable(other, writer)
+                    targets.append(next(row["configRevision"] for row in choices if row["name"] == model["name"]))
+                    newer = await personal_models.put_my_models({
+                        "expectedRevision": model_config_guard.revision(writer),
+                        "models": [{**model, "ctxWindow": 96000}] + [{**row, "label": "Second"} for row in media],
+                    }, writer, other)
+                    targets.append(next(row["configRevision"] for row in newer["usable"] if row["name"] == model["name"]))
+
+            with patch.object(session, "commit", commit_then_edit):
+                saved = await personal_models.put_my_models({
+                    "expectedRevision": model_config_guard.revision(client), "returnRevision": True, "models": [model, *media],
+                }, client, session)
+        self.assertNotEqual(targets[0], targets[1])
+        self.assertEqual(next(row["configRevision"] for row in saved["usable"] if row["name"] == model["name"]), targets[0])
+        for row in media:
+            with self.subTest(modality=row["modality"]):
+                choices = saved["mediaUsable"][row["modality"]]
+                self.assertEqual(next(item["label"] for item in choices if item["name"] == row["name"]), "First")
 
     async def test_catalog_edits_coalesce_for_every_active_device(self):
         with patch.object(events.native_discovery, "wake", new_callable=AsyncMock) as wake, patch.object(admin.audit, "log", new_callable=AsyncMock):
@@ -54,7 +104,10 @@ class ClientDomainEventsTests(IsolatedDatabase):
                 model = await session.get(ModelDef, "provider:model")
                 await admin.put_model_def({"providerId": "provider", "name": "model", "expectedRevision": model_config_guard.revision(model), "label": "Updated"}, None, session)
                 await admin.del_model_def("provider:model", model_config_guard.revision(model), None, session)
-                await admin.del_model_provider("provider", model_config_guard.revision(provider), None, session)
+                actor = await session.get(User, "alice")
+                preview = await admin.model_provider_deletion_impact("provider", actor, session)
+                await admin.del_model_provider("provider", model_config_guard.revision(provider), actor, session,
+                                               confirmId="provider", expectedImpact=preview["impactRevision"])
             wake.assert_not_awaited()
             await events.flush_for_test(self.sessions)
             self.assertEqual({call.args for call in wake.await_args_list},
@@ -66,12 +119,13 @@ class ClientDomainEventsTests(IsolatedDatabase):
                 patch.object(model_capabilities.probe, "run", new_callable=AsyncMock,
                              return_value={"checks": {"imageInput": {"status": "passed"}}}):
             async with self.sessions() as session:
-                await model_capabilities.check_saved(body, session, await session.get(Client, "one"))
+                await model_capabilities.check_saved({**body, "providerId": "custom-personal", "model": "personal-model"},
+                                                    session, await session.get(Client, "one"))
             await events.flush_for_test(self.sessions)
             self.assertEqual([call.args for call in wake.await_args_list], [("one", "alice", "models")])
             wake.reset_mock()
             async with self.sessions() as session:
-                await model_capabilities.check_saved(body, session, await session.get(Client, "two"))
+                await model_capabilities.check_saved(body, session)
             await events.flush_for_test(self.sessions)
             self.assertEqual(len(wake.await_args_list), 3)
 
@@ -154,6 +208,7 @@ class ClientDomainEventsTests(IsolatedDatabase):
     async def test_admin_cannot_push_local_model_configuration(self):
         with patch.object(admin, "_assert_client_in_scope", new_callable=AsyncMock):
             async with self.sessions() as session:
+                before = copy.deepcopy((await session.get(Client, "one")).config)
                 with self.assertRaises(HTTPException) as raised:
                     await admin.client_push(
                         "one",
@@ -165,7 +220,7 @@ class ClientDomainEventsTests(IsolatedDatabase):
                 self.assertEqual(raised.exception.status_code, 403)
                 self.assertIn("本地模型配置", str(raised.exception.detail))
                 client = await session.get(Client, "one")
-                self.assertNotIn("modelProviders", client.config or {})
+                self.assertEqual(client.config, before)
 
     async def test_personal_model_read_purges_legacy_local_state(self):
         async with self.sessions() as session:

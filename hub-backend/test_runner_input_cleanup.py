@@ -1,6 +1,7 @@
 """Runner upload cleanup uses private directories and never launches an Agent."""
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 import threading
@@ -132,6 +133,37 @@ class RunnerInputCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events, ["dispatch", "cleanup"])
         self.assertFalse(upload.exists())
         self.assertEqual(self.machine._dispatching_refs, set())
+
+    async def test_slow_input_reads_do_not_block_private_control_ping(self):
+        loop = asyncio.get_running_loop()
+        for reader in ("_read_packet", "_read_local_files"):
+            with self.subTest(reader=reader):
+                entered, release, expired = asyncio.Event(), threading.Event(), threading.Event()
+
+                def read(*_args):
+                    loop.call_soon_threadsafe(entered.set)
+                    if not release.wait(3):
+                        expired.set()
+                    return []
+
+                message = self.message("", admitted=True)
+                if reader == "_read_local_files":
+                    message.update(_localParent=True, localFiles=[{"path": "fixture-input"}])
+                with patch.dict(ai_local._RUNS, {}, clear=True), \
+                     patch.object(runner_main, reader, side_effect=read), \
+                     patch.object(ai_local, "dispatch_sync", return_value={"ok": True, "issueId": "fixture-ref"}):
+                    dispatch = asyncio.create_task(self.machine._job(message))
+                    try:
+                        await asyncio.wait_for(entered.wait(), 5)
+                        ping = await self.machine._local_rpc_dispatch({"op": "runtime.ping"})
+                        self.assertTrue(ping["ok"])
+                        self.assertFalse(expired.is_set(), "input reading blocked the event loop")
+                        self.assertFalse(dispatch.done())
+                    finally:
+                        release.set()
+                        result = await dispatch
+                    self.assertTrue(result["ok"])
+                    self.assertEqual(self.machine._dispatching_refs, set())
 
     async def test_preflight_failure_still_deduplicates_cleanup_and_releases_fence(self):
         upload = self.upload("a" * 32)

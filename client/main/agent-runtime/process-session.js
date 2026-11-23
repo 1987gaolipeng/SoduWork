@@ -52,22 +52,23 @@ function createProcessSession(options = {}) {
       for (const value of previous) retired.delete(value);
     } finally { clearTimeout(timer); }
   }
-  async function host(app, identity) {
+  async function host(app, identity, validate) {
     if (disposed) throw Error('Agent Runtime is closed');
     if (!app?.getPath) throw TypeError('Agent Runtime requires a trusted application context');
     const key = path.resolve(app.getPath('userData')), nextScope = scope(identity);
     for (;;) {
-      let row = hosts.get(key);
-      if (row && (row.host.isDead() || (nextScope && row.scope && nextScope !== row.scope))) {
-        retire(row, key); hosts.delete(key);
-      }
+      validate?.();
       await waitForRetired(key);
+      // Ownership must be checked synchronously with retirement and assignment.
+      validate?.();
       if (disposed) throw Error('Agent Runtime is closed');
       if ([...retired].some(value => retiredProfiles.get(value) === key)) continue;
       // A concurrent request may have opened or retired a host while cleanup
       // was pending. Recheck before assigning this profile a new generation.
-      row = hosts.get(key);
-      if (row && (row.host.isDead() || (nextScope && row.scope && nextScope !== row.scope))) continue;
+      let row = hosts.get(key);
+      if (row && (row.host.isDead() || (nextScope && row.scope && nextScope !== row.scope))) {
+        retire(row, key); hosts.delete(key); continue;
+      }
       if (!row) {
         // Host injection is constructor-only trusted test infrastructure;
         // renderer/open arguments never select a host factory or transport.
@@ -149,8 +150,23 @@ function createProcessSession(options = {}) {
   };
   for (const method of ['history', 'archivedHistory', 'historyEntry', 'archiveHistory', 'restoreHistory',
     'permanentlyDeleteHistory', 'loadSdk', 'prewarm', 'prewarmResources', 'probe']) {
-    api[method] = async (app, ...args) => (await host(app, method === 'prewarm' ? args[0] : undefined))
-      .call('module', [method, [app, ...args]], { timeoutMs: ['prewarm', 'prewarmResources'].includes(method) ? 60000 : 30000 });
+    api[method] = async (app, ...args) => {
+      const validate = method === 'prewarm' ? () => {
+        // An enrollment-only or stale warmup must never retire another account's worker.
+        const current = (options.identityOf || (target => require('../conversation/requirement-context').cachedIdentity(target)))(app);
+        try {
+          const ownership = require('../platform-connections/runtime.cjs');
+          ownership.scope(args[0]); ownership.scope(current);
+          if (scope(args[0]) !== scope(current)) throw Error('Identity changed');
+        } catch (_) {
+          throw Object.assign(Error('账号或服务已变化，请先登录后再准备会话'), { code: 'RUNTIME_IDENTITY_CHANGED' });
+        }
+      } : null;
+      const selected = await host(app, method === 'prewarm' ? args[0] : undefined, validate);
+      validate?.();
+      return selected.call('module', [method, [app, ...args]],
+        { timeoutMs: ['prewarm', 'prewarmResources'].includes(method) ? 60000 : 30000 });
+    };
   }
   return api;
 }

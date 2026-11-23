@@ -109,11 +109,20 @@ chk("左侧菜单使用高频优先的信息架构与克制字重",
     all(label in shell_js for label in ("新对话", "自动化", "插件", "通知", "需求池", "团队", "AI 团队", "简报", "Agent 管理"))
     and "['', ['schedules', 'skills', 'library', 'notices']]" in shell_js
     and 'wsSideScroll' in shell_js and 'ws-new-chat' in shell_js
-    and "['协作', ['history', 'aidesk'], 'collaboration']" in shell_js
+    and "['协作', ['history'], 'collaboration']" in shell_js
     and "['工作内容', ['archive']]" in shell_js
     and "font-weight:700" not in nav_css and ".ws-nav-item.active" in nav_css
     and "font-size:14.5px" in nav_css and "font-weight:420" in nav_css
     and "width:15px;height:15px" in nav_css and "font-size:14.5px" in nav_css)
+navigation_groups = [
+    shell_file.split(f"const {name} = [", 1)[1].split("\n  ];", 1)[0]
+    for name in ("HOME_GROUPS", "SETTINGS_GROUPS", "RAIL_ITEMS", "RAIL_MORE_ITEMS")
+]
+chk("AI 团队暂时隐藏菜单并保留已有页面注册",
+    all("'aidesk'" not in group for group in navigation_groups)
+    and "['memory', '记忆', 'memory']" in navigation_groups[-1]
+    and "aidesk: 'aiDeskPanel'" in boot
+    and "aidesk:    role('workspace'" in specs)
 chk("客户端统一使用 Codex 式可变字体与开源中文字体，且不再回退微软雅黑",
     '"Segoe UI Variable Text"' in theme_css and '"Noto Sans SC"' in theme_css
     and "Microsoft YaHei" not in theme_css

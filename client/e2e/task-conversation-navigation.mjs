@@ -47,7 +47,8 @@ try{
  assert.equal(await p.run(()=>NativeChat.isBusy()),false);
  await p.call('Emulation.setDeviceMetricsOverride',{width:1680,height:1050,deviceScaleFactor:1,mobile:false});
  const baseline=(await p.run(()=>soduWorkAPI.conversationSession.history())).chats.map(x=>x.id);
- await click('.ws-nav-item[data-view="aidesk"]');await click('[data-office-enter-task="'+taskId+'"]');
+ assert.equal(await p.run(()=>!!document.querySelector('.ws-nav-item[data-view="aidesk"]')),false);
+ await p.run(()=>WorkspaceHost.open('aidesk'));await click('[data-office-enter-task="'+taskId+'"]');
  await sameChat('AI workbench task card -> exact existing ordinary chat after source restart');await shot('navigation-01-workbench-chat');
  await openTaskJourney();
  await click('#aisGo');await sameChat('Requirement pool -> requirement summary -> task details -> existing conversation');

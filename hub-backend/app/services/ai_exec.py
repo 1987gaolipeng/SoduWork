@@ -704,6 +704,25 @@ def runner_info_sync(ctx: dict, ref: str) -> dict:
         return {}
 
 
+async def read_session(ctx: dict, ref: str, since: int = 0, *, runner_id: str = "", limit: int = 400) -> dict:
+    """HTTP reads use durable routing, not synchronous cross-machine discovery."""
+    import asyncio
+    from . import ai_remote
+    try:
+        if runner_id and runner_id != "backend-local":
+            return await ai_remote.read_session(ref, since, limit, runner_id=runner_id)
+        if runner_id != "backend-local" and ref not in getattr(_ai_local, "_RUNS", {}):
+            # Older dispatches without a durable route retain async discovery.
+            remote = await ai_remote.read_session(ref, since, limit)
+            if remote.get("ok"):
+                return remote
+        # Also retain archived backend-local sessions after a Hub restart.
+        return await asyncio.to_thread(_ai_local.session_sync, _cfg_of(ctx, _ai_local), ref, since, limit)
+    except Exception as exc:  # Cancellation must propagate to the underlying RPC.
+        log.warning("取执行会话失败: %s", type(exc).__name__)
+        return {"ok": False, "items": [], "error": "会话拿不到"}
+
+
 def session_sync(ctx: dict, ref: str, since: int = 0) -> dict:
     """Read optional live execution activity, including messages, commands, and file changes,
     through the provider's read-only interface.

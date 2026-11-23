@@ -46,6 +46,8 @@ control_key = secrets.token_urlsafe(32)
 password = secrets.token_urlsafe(24)
 platform_key = secrets.token_urlsafe(24)
 personal_key = secrets.token_urlsafe(24)
+rotating_key = secrets.token_urlsafe(24)
+rotated_key = secrets.token_urlsafe(24)
 requests = []
 http_receipts = []
 provider_release = asyncio.Event()
@@ -71,7 +73,7 @@ async def receipt(request, call_next):
 
 @provider.get("/v1/models")
 async def list_models():
-    return {"data": [{"id": name} for name in ("platform-model", "personal-model", "keyless-model")]}
+    return {"data": [{"id": name} for name in ("platform-model", "personal-model", "keyless-model", "rotating-model")]}
 
 
 @provider.post("/v1/chat/completions")
@@ -80,6 +82,8 @@ async def completions(request: Request):
     auth = request.headers.get("authorization", "")
     key_kind = ("platform" if auth == "Bearer " + platform_key else
                 "personal" if auth == "Bearer " + personal_key else
+                "personal-original" if auth == "Bearer " + rotating_key else
+                "personal-rotated" if auth == "Bearer " + rotated_key else
                 "none" if auth in ("", "Bearer soduwork-local-no-key") else "unexpected")
     if key_kind == "unexpected":
         raise HTTPException(401, "Unexpected fixture credential")
@@ -222,6 +226,7 @@ async def main():
     hub = await serve(app)
     ready = {"hub": hub, "provider": provider_url, "controlKey": control_key, "account": "quota-fixture",
              "password": password, "userId": user_id, "personalKey": personal_key,
+             "rotatingKey": rotating_key, "rotatedKey": rotated_key,
              "adminToken": sign_token("quota-fixture-admin"), "foreignToken": foreign_token}
     (root / "ready.json").write_text(json.dumps(ready), encoding="utf-8")
     print("PERSONAL_QUOTA_FIXTURE_READY", flush=True)

@@ -46,6 +46,20 @@ test('shared local reader opens native text without starting any account runtime
   assert.equal((await f.history.projectRows([f.row])).length, 0);
   assert.equal(await f.history.open('one'), null);
 });
+
+test('account switching during automatic cloud cache cleanup preserves both accounts data', async t => {
+  const f = setup(t), original = { id: 'cloud-cleanup', cloud: true, locationMode: 'remote' };
+  await f.history.capture({ historyRow: () => original, snapshot: () => ({ messages: [] }) }, f.identityOf());
+  const copy = (await f.history.page()).chats[0], sourceCopies = f.store.sourceCopies.bind(f.store);
+  let entered, release;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  f.store.sourceCopies = async ids => { const rows = sourceCopies(ids); entered();
+    await new Promise(resolve => { release = resolve; }); return rows; };
+  const deleting = f.history.deleteCloudCaches([original.id]);
+  await waiting; f.switch(identity('two')); release();
+  await assert.rejects(deleting, /切换/);
+  assert.equal(f.store.get(copy.id).deleted, false);
+});
 test('logout during a protected native transcript page cancels the read before returning local content', async t => {
   const f = setup(t);
   const metadata = path.join(f.root, 'requirement-session-context', require('node:crypto').createHash('sha256').update(f.row.id).digest('hex') + '.json');

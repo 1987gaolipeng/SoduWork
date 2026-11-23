@@ -23,8 +23,8 @@ if (typeof electron === 'string') {
   if (process.platform === 'darwin') app.commandLine.appendSwitch('use-mock-keychain');
   let win, server, hub, ref, catalogScenario = 'mixed';
   const currentDevice = 'fixture-current-device', otherDevice = 'fixture-other-device', account = 'fixture-owner';
-  const managedAgents = ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'harness2', 'codex-harness'];
-  const accountAgents = ['codex', 'claude'], rows = [], requests = [], privatePreflights = [], fixtureErrors = [];
+  const managedAgents = ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'codex-harness'];
+  const accountAgents = ['codex'], rows = [], requests = [], privatePreflights = [], fixtureErrors = [];
   const managedModel = { name: 'managed-model', label: 's1', providerId: 'fixture-managed', keyFrom: 'org' };
   const options = { substrates: managedAgents.concat(accountAgents).map(cli => ({
     key: 'local:' + cli, cli, name: cli, modelMode: accountAgents.includes(cli) ? 'native' : 'managed',

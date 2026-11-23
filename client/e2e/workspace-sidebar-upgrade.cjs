@@ -102,7 +102,7 @@ if (typeof electron === 'string') {
         assert.equal(await js('document.querySelector("#wsChats").textContent.includes("账号 A")'), false);
         await js('pendingHistory[1].resolve({ok:true,chats:[{id:"private-b",title:"账号 B 的当前对话",usedHarnesses:["claude"]}]});void 0;');
         await until('document.querySelector("#wsChats").textContent.includes("账号 B 的当前对话")');
-        assert.deepEqual(await js('[...document.querySelectorAll("#wsChats [data-agent-brand]")].map(node=>node.dataset.agentBrand)'), ['claude']);
+        assert.deepEqual(await js('[...document.querySelectorAll("#wsChats [data-agent-brand]")].map(node=>node.dataset.agentBrand)'), ['custom']);
         const stableB = await js('localStorage.getItem(WorkspaceSidebarState.accountOptions({storage:localStorage,api:SoduWorkAPI}).key)');
         assert.doesNotMatch(stableB || '', /private-a|账号 A/);
         await shot('account-b-rejects-late-history');

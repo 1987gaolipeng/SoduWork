@@ -51,8 +51,17 @@ for (const [database,key,expected] of [['postgres','PG_PORT','5432'],['mysql','M
   assert.ok(basic.includes('data-connector-field="'+key+'"'));
   assert.equal(f.nodes.get('field:'+key).value,expected);
 });
-test('Redis preserves custom ports, masked ACL credentials and explicit local TLS choices on retry',async()=>{
- const env={REDIS_HOST:'localhost',REDIS_PORT:'16379',REDIS_USER:'reader',REDIS_PASSWORD:'••••••••',REDIS_TLS:'false',REDIS_DB:'0'};
+for (const [database,prefix] of [['postgres','PG'],['mysql','MYSQL'],['mongodb','MONGO']]) test(database+' saves and restores the per-connection TLS opt-out',async()=>{
+ const env={[`${prefix}_HOST`]:'db.example.invalid',[`${prefix}_DATABASE`]:'fixture',[`${prefix}_USER`]:'reader',[`${prefix}_PASSWORD`]:'••••••••'};
+ const initial={id:'db',name:database,templateKey:'connector-'+database,type:'stdio',env};
+ const f=setup(initial,{database});
+ assert.equal(f.nodes.get('field:DISABLE_TLS').checked,false);
+ f.change('field:DISABLE_TLS',true);await f.click('#capMcpSave');
+ assert.equal(f.saved[0].env.DISABLE_TLS,'true');
+ f.reopen(f.saved[0]);assert.equal(f.nodes.get('field:DISABLE_TLS').checked,true);
+});
+test('Redis preserves custom ports, masked ACL credentials and explicit remote TLS choices on retry',async()=>{
+ const env={REDIS_HOST:'cache.example.invalid',REDIS_PORT:'16379',REDIS_USER:'reader',REDIS_PASSWORD:'••••••••',REDIS_TLS:'false',REDIS_DB:'0'};
  const f=setup({id:'local',name:'Cache',templateKey:'connector-redis',type:'stdio',env},{database:'redis'});
  assert.equal(f.nodes.get('field:REDIS_TLS').checked,false);
  await f.click('#capMcpSave');for(const [key,value] of Object.entries(env))assert.equal(f.saved[0].env[key],value);
@@ -60,9 +69,9 @@ test('Redis preserves custom ports, masked ACL credentials and explicit local TL
 test('invalid Redis settings block probes, while an empty port restores the visible catalog default',async()=>{
  const f=setup(null,{database:'redis'}); f.change('field:REDIS_HOST','cache.example.invalid');
  f.change('field:REDIS_PORT','65536');await f.click('#capMcpCheck');assert.equal(f.calls.preflight,0);
- f.change('field:REDIS_PORT','');f.change('field:REDIS_TLS',false);await f.click('#capMcpCheck');assert.equal(f.calls.probe,0);
+ f.change('field:REDIS_PORT','');f.change('field:REDIS_TLS',false);f.change('field:REDIS_CA_PEM','ca');await f.click('#capMcpCheck');assert.equal(f.calls.probe,0);
  assert.equal(f.nodes.get('field:REDIS_PORT').value,'6379');
- f.change('field:REDIS_HOST','::1');f.change('field:REDIS_USER','reader');await f.click('#capMcpCheck');assert.equal(f.calls.probe,0);
+ f.change('field:REDIS_CA_PEM','');f.change('field:REDIS_USER','reader');await f.click('#capMcpCheck');assert.equal(f.calls.probe,0);
  f.change('field:REDIS_USER','');await f.click('#capMcpSave');assert.equal(f.saved[0].env.REDIS_TLS,'false');assert.equal(f.saved[0].env.REDIS_PORT,'6379');
 });
 

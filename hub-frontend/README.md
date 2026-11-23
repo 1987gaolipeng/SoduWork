@@ -8,6 +8,40 @@ React + Vite application for Hub administration. Entry point: `src/main.jsx`; ro
 
 Manage organizations, accounts, clients, execution networks, models, capabilities, tasks, approvals, plugins, and release configuration. Hub enforces authorization; hiding a button is not an access check.
 
+Copy a management page's address to share it or open it in another tab. For example, `/#/identity` opens Identity for accounts with access. Use the browser's Back and Forward buttons to revisit pages. On the Users page, reloading restores the current administrator's search and department filters in that tab. Copied links open the page with fresh filters.
+
+The model catalog starts with a compact service/model and live-load summary. Expand the overview for configuration, hourly metrics and request distribution; service and concurrency actions stay available while it is collapsed. Enabled services stay ahead of disabled ones, with custom services first within each group. A newly created service is temporarily brought into view; reopening restores that stable group order.
+
+Before deleting a custom model service, review its model list and the visible members and open issues with matching shared-model selections. Model selections stored by name can match more than one service. Enter the exact service ID to delete it. A changed preview requires confirmation again.
+
+Service cards adapt from one to four columns according to the available content width. View opens model details in a dialog without resizing or rearranging the service grid. Add, discover and configure actions remain visible; enable/disable and deletion are in the More popover, with the existing deletion confirmation retained.
+
+## Handling approvals and failed runs
+
+In Operations, open the pending human review count to see the requests in your scope. The queue shows how long each request has waited and, when your role allows, its requirement, version and remaining reviewers. A request is marked overdue at its deadline or after 24 hours if it has no deadline. An assigned reviewer can vote or transfer an eligible assignment with permission for that gate. Request and requirement creators with approval permission can withdraw pending requests. Super administrators can manage withdrawals and transfers. Withdrawing a request stops the linked gate and requires a fresh approval before work can continue. Delivery acceptance stays with the requirement creator.
+
+Open a recent failure to inspect its requirement or the failed node's logs. After correcting the cause, operators with run permission can retry an eligible node. AI nodes using the shared model gateway can retry with another available organization model. The original attempt stays in the run history.
+
+## Setting up your first chat
+
+Administrators with integration management access can open the **First chat checklist** on the governance overview. Connect a model service, then select the service to add or discover a chat model. The last two links open the desktop runtime and model settings. Sign in to the desktop with the same account so its readiness appears here. Choose **Check again** to refresh progress. **Skip checklist** hides it for your account in this browser, and **Show first chat checklist** brings it back.
+
+## Reviewing Skill access
+
+In the capability catalog, bundled Skills show a summary in the interface language. Expand a summary to read the author's original description. Use the switch to stage a policy change. **Save access policy** lists the Skills to add and remove. It estimates the impact from active devices' Skill selections and their owners' departments. A device matching several changes counts once. Confirm to apply the policy on the next execution, or cancel to return to the draft.
+
+## Investigating usage and cost
+
+On **Usage and Cost**, open the anomaly count to see the original record IDs and exact token counts, including records older than the latest 30. The dashboard flags daily ledger records above one billion tokens. Exclude those records to compare the remaining trend and usage by scenario.
+
+Open the unpriced records to check the affected models. Enter the highest applicable provider rate in USD per million tokens to estimate the cost of that usage. With a budget for the selected period, the calculator shows the share that priced USD usage and the estimated amount would consume together. The calculation is local to the page.
+
+## Automation template dates
+
+Templates default to **No date limits**. Clear this option to set a start date, an end date, or both. Dates are inclusive and use the template's time zone (Asia/Shanghai by default); the existing hourly, daily or weekly rhythm determines execution times within that range. Invalid dates and reversed ranges are rejected before saving.
+
+The desktop copies these defaults into a new automation, where the user can adjust them before creation. Updating a template does not change existing automations. After the end date, no further recurring occurrences or retries are scheduled; the final eligible occurrence retains the scheduler's existing one-poll grace period. Existing tasks and records are retained. Extend an automation's own date range to resume future runs; extend the template separately for future users. Templates remain available until explicitly disabled.
+
 ## Develop
 
 The simplest setup is to run `sh start.sh` at the repository root in one terminal, then start Vite in another.
@@ -41,3 +75,5 @@ npm run build
 ```
 
 The build generates `dist/`, served by Hub or the deployment environment. Do not commit generated output, dependencies, or private configuration. Browser checks have separate scripts under `tests/`; distinguish fixtures from actual service or provider acceptance.
+
+After building, run `node tests/run-model-catalog-layout-browser.cjs /absolute/evidence/directory` for the model catalog's four-language layout, disclosure, polling and reload-order checks. Install the client Electron dependency or set `SODUWORK_ADMIN_TEST_ELECTRON` to its executable. This uses synthetic local responses, not a real Hub or provider.

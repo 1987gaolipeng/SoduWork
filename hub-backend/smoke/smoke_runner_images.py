@@ -29,11 +29,18 @@ def fake_agent():
             result = {"protocolVersion": 1, "agentCapabilities": {
                 "loadSession": True, "promptCapabilities": {"image": os.environ.get("FIXTURE_IMAGES") != "no"}}}
         elif method in ("session/new", "session/load"):
+            if "--fake-opencode" in sys.argv:
+                from tests.opencode_peer_session import create_session, require_session
+                if method == "session/new":
+                    create_session(os.environ, "fixture-image-session", message["params"]["cwd"])
+                else:
+                    require_session(os.environ, message["params"]["sessionId"], message["params"]["cwd"])
+            session_method = method
             result = {"sessionId": "fixture-image-session"}
         elif method == "session/prompt":
             native_outcome.begin("fixture-image-session")
             content = message["params"]["prompt"]
-            report = {"types": [row["type"] for row in content],
+            report = {"types": [row["type"] for row in content], "sessionMethod": session_method,
                       "pixels": [row["data"] for row in content if row["type"] == "image"],
                       "mimes": [row["mimeType"] for row in content if row["type"] == "image"],
                       "privateEnvRemoved": "SODUWORK_RUNNER_INPUT_IMAGES" not in os.environ}
@@ -178,12 +185,16 @@ class ImageHandoffTests(unittest.TestCase):
                 ("opencode", "codex-harness", "qwen"), (False, True), formats):
             with self.subTest(agent=agent, resume=resume, mime=mime):
                 cfg, root = self.stage(pixels, name, mime)
-                env = {**os.environ, images.ENV_KEY: images.environment(cfg, root), "PYTHONUTF8": "1"}
+                from tests.opencode_peer_session import environment
+                env = {**environment(self.root / "runtime" / agent / name),
+                       images.ENV_KEY: images.environment(cfg, root), "PYTHONUTF8": "1"}
                 args = [sys.executable, "-B", str(ROOT / "app/services/acp_bridge.py"), "--cwd", str(self.root),
                         "--agent-name", agent, "--permission", "readonly"]
                 if resume:
                     args += ["--session", "fixture-image-session"]
                 args += ["--", sys.executable, "-B", str(Path(__file__).resolve()), "--fake-agent"]
+                if agent == "opencode":
+                    args += ["--fake-opencode"]
                 result = subprocess.run(args, input="describe uploaded image", text=True, encoding="utf-8", capture_output=True, env=env, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
                 events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
@@ -192,6 +203,7 @@ class ImageHandoffTests(unittest.TestCase):
                 self.assertEqual(base64.b64decode(content["pixels"][0]), pixels)
                 self.assertEqual(content["mimes"], [mime])
                 self.assertTrue(content["privateEnvRemoved"])
+                self.assertEqual(content["sessionMethod"], "session/load" if resume else "session/new")
 
     def test_agent_without_image_capability_fails_before_prompt(self):
         cfg, root = self.stage()

@@ -1,0 +1,1423 @@
+{
+  "version": 1,
+  "apiFamily": "chat-completions",
+  "policy": {
+    "maxRequests": 7,
+    "maxNegotiations": 2,
+    "timeoutMs": 30000,
+    "totalMs": 120000,
+    "maxResponseBytes": 262144,
+    "toolChoice": "auto",
+    "tool": {
+      "type": "function",
+      "function": {
+        "name": "soduwork_capability_echo",
+        "description": "Return a supplied capability-test value without side effects.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "toolPrompt": "Call soduwork_capability_echo with value {{value}}. This is a capability check. After the tool responds, reply only with the tool result value.",
+    "receiptPrompt": "Reply only with the tool result value.",
+    "followupStream": true,
+    "followupTools": true,
+    "followupToolChoice": "omitted"
+  },
+  "cases": [
+    {
+      "name": "canonical",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "passed",
+        "stage": "tool_result",
+        "requestCount": 2
+      }
+    },
+    {
+      "name": "auto-only-gateway",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "passed",
+        "stage": "tool_result",
+        "requestCount": 2
+      },
+      "requireAuto": true
+    },
+    {
+      "name": "usage-only-frame",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":7,\"total_tokens\":19}}\n\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "passed",
+        "stage": "tool_result",
+        "requestCount": 2
+      }
+    },
+    {
+      "name": "usage-empty-choices",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[],\"usage\":{\"total_tokens\":19,\"completion_tokens_details\":{\"reasoning_tokens\":4}}}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "passed",
+        "stage": "tool_result",
+        "requestCount": 2
+      }
+    },
+    {
+      "name": "heartbeat-and-split-utf8",
+      "check": "toolCalling",
+      "initialChunks": [
+        "event: ping\ndata: {\"type\":\"ping\"}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"synthetic thought\"},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "passed",
+        "stage": "tool_result",
+        "requestCount": 2
+      },
+      "replayedReasoning": "synthetic thought",
+      "byteChunkSize": 1
+    },
+    {
+      "name": "split-tool-fragments",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_\",\"arguments\":\"{\\\"value\\\":\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"fixture\",\"function\":{\"name\":\"capability_echo\",\"arguments\":\"\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "passed",
+        "stage": "tool_result",
+        "requestCount": 2
+      }
+    },
+    {
+      "name": "plain-text-instead-of-tool",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"I can call tools.\"},\"finish_reason\":\"stop\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "tool_call_count_mismatch"
+      }
+    },
+    {
+      "name": "malformed-metadata",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"usage\":{\"total_tokens\":\"19\"}}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "invalid_stream_shape"
+      }
+    },
+    {
+      "name": "unknown-envelope",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"unrecognized\":true}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "invalid_stream_shape"
+      }
+    },
+    {
+      "name": "error-inside-usage",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"usage\":{\"total_tokens\":19},\"error\":{\"message\":\"synthetic private response\"}}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "multiple-calls",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}},{\"index\":1,\"id\":\"other\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "tool_call_count_mismatch"
+      }
+    },
+    {
+      "name": "nonzero-tool-index",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "tool_call_count_mismatch"
+      }
+    },
+    {
+      "name": "wrong-tool-name",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"unrequested_function\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "tool_call_invalid"
+      }
+    },
+    {
+      "name": "missing-tool-id",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "tool_call_invalid"
+      }
+    },
+    {
+      "name": "malformed-arguments",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "tool_arguments_invalid"
+      }
+    },
+    {
+      "name": "wrong-argument-value",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"other\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "tool_arguments_invalid"
+      }
+    },
+    {
+      "name": "extra-argument",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\",\\\"execute\\\":true}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "tool_arguments_invalid"
+      }
+    },
+    {
+      "name": "boolean-choice-index",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":false,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "invalid_stream_shape"
+      }
+    },
+    {
+      "name": "multiple-choices",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"text\"}},{\"index\":1,\"delta\":{}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "invalid_stream_shape"
+      }
+    },
+    {
+      "name": "wrong-tool-finish",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "tool_finish_reason_mismatch"
+      }
+    },
+    {
+      "name": "truncated-tool",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "unfinished-tool",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "tool_finish_reason_mismatch"
+      }
+    },
+    {
+      "name": "unterminated-frame",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: {\"choices\":[]"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "delta-after-finish",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"orphan\"},\"finish_reason\":null}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "invalid_stream_shape"
+      }
+    },
+    {
+      "name": "data-after-done",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"orphan\"},\"finish_reason\":null}]}\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1,
+        "detailCode": "invalid_stream_shape"
+      }
+    },
+    {
+      "name": "stream-error",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "event: error\ndata: {\"message\":\"synthetic private response\"}\n\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_call",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "receipt-mismatch",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "unrelated response"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_result",
+        "requestCount": 2,
+        "detailCode": "tool_receipt_mismatch"
+      }
+    },
+    {
+      "name": "receipt-finish-mismatch",
+      "check": "toolCalling",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{\\\"value\\\":\\\"{{value}}\\\"}\"}}]},\"finish_reason\":null}]}\r\n\r\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\r\n\r\n",
+        "data: [DONE]\r\n\r\n"
+      ],
+      "followup": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{{receipt}}"
+            },
+            "finish_reason": "tool_calls"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "stage": "tool_result",
+        "requestCount": 2,
+        "detailCode": "tool_result_finish_reason_mismatch"
+      }
+    }
+  ],
+  "failureCases": [
+    {
+      "name": "tools-refused",
+      "check": "toolCalling",
+      "status": 400,
+      "error": {
+        "code": "unsupported_tools"
+      },
+      "expect": {
+        "status": "unsupported",
+        "code": "capability_not_supported"
+      }
+    },
+    {
+      "name": "tool-control-is-not-tool-refusal",
+      "check": "toolCalling",
+      "status": 400,
+      "error": {
+        "code": "unsupported_tools",
+        "param": "tool_choice"
+      },
+      "expect": {
+        "status": "inconclusive",
+        "code": "parameter_not_supported"
+      }
+    },
+    {
+      "name": "stream-control-is-not-stream-refusal",
+      "check": "streaming",
+      "status": 400,
+      "error": {
+        "code": "streaming_not_supported",
+        "message": "stream_options is not supported"
+      },
+      "expect": {
+        "status": "inconclusive",
+        "code": "parameter_not_supported"
+      }
+    },
+    {
+      "name": "image-code",
+      "check": "imageInput",
+      "status": 422,
+      "error": {
+        "code": "vision_not_supported"
+      },
+      "expect": {
+        "status": "unsupported",
+        "code": "capability_not_supported"
+      }
+    },
+    {
+      "name": "tools-param",
+      "check": "toolCalling",
+      "status": 400,
+      "error": {
+        "code": "unsupported_parameter",
+        "param": "tools"
+      },
+      "expect": {
+        "status": "unsupported",
+        "code": "capability_not_supported"
+      }
+    },
+    {
+      "name": "tools-explicit-text",
+      "check": "toolCalling",
+      "status": 400,
+      "error": {
+        "message": "Tool calling is not supported by this model."
+      },
+      "expect": {
+        "status": "unsupported",
+        "code": "capability_not_supported"
+      }
+    },
+    {
+      "name": "output-control",
+      "check": "connection",
+      "status": 400,
+      "error": {
+        "code": "unsupported_parameter",
+        "param": "max_tokens"
+      },
+      "expect": {
+        "status": "inconclusive",
+        "code": "parameter_not_supported"
+      }
+    },
+    {
+      "name": "generic-bad-request",
+      "check": "toolCalling",
+      "status": 400,
+      "error": {
+        "message": "invalid model request"
+      },
+      "expect": {
+        "status": "inconclusive",
+        "code": "request_not_accepted"
+      }
+    },
+    {
+      "name": "quota",
+      "check": "toolCalling",
+      "status": 429,
+      "error": {
+        "code": "insufficient_quota"
+      },
+      "expect": {
+        "status": "failed",
+        "code": "billing_unavailable"
+      }
+    },
+    {
+      "name": "billing-disabled",
+      "check": "connection",
+      "status": 400,
+      "error": {
+        "code": "billing_not_active"
+      },
+      "expect": {
+        "status": "failed",
+        "code": "billing_unavailable"
+      }
+    },
+    {
+      "name": "authentication",
+      "check": "connection",
+      "status": 401,
+      "error": {},
+      "expect": {
+        "status": "failed",
+        "code": "credentials_or_access"
+      }
+    },
+    {
+      "name": "missing-model",
+      "check": "connection",
+      "status": 404,
+      "error": {},
+      "expect": {
+        "status": "failed",
+        "code": "model_or_endpoint_missing"
+      }
+    },
+    {
+      "name": "upstream-timeout",
+      "check": "connection",
+      "status": 504,
+      "error": {},
+      "expect": {
+        "status": "inconclusive",
+        "code": "timeout"
+      }
+    },
+    {
+      "name": "upstream-error",
+      "check": "toolCalling",
+      "status": 503,
+      "error": {},
+      "expect": {
+        "status": "inconclusive",
+        "code": "temporarily_unavailable"
+      }
+    },
+    {
+      "name": "generic-forbidden-is-not-credential-proof",
+      "check": "toolCalling",
+      "status": 403,
+      "error": {},
+      "expect": {
+        "status": "inconclusive",
+        "code": "request_rejected"
+      }
+    },
+    {
+      "name": "forbidden-explicit-billing-keeps-priority",
+      "check": "toolCalling",
+      "status": 403,
+      "error": {
+        "code": "insufficient_quota"
+      },
+      "expect": {
+        "status": "failed",
+        "code": "billing_unavailable"
+      }
+    }
+  ],
+  "outputCases": [
+    {
+      "name": "connection-content",
+      "check": "connection",
+      "initialResponse": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "Meaningful text."
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "passed",
+        "code": "verified",
+        "stage": "output",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "connection-reasoning_content",
+      "check": "connection",
+      "initialResponse": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "reasoning_content": "Meaningful text."
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "passed",
+        "code": "verified",
+        "stage": "output",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "connection-reasoning",
+      "check": "connection",
+      "initialResponse": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "reasoning": "Meaningful text."
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "passed",
+        "code": "verified",
+        "stage": "output",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "connection-thinking",
+      "check": "connection",
+      "initialResponse": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "thinking": "Meaningful text."
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "passed",
+        "code": "verified",
+        "stage": "output",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "connection-empty",
+      "check": "connection",
+      "initialResponse": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "  "
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "code": "expected_output_missing",
+        "stage": "output",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "connection-multiple-choices",
+      "check": "connection",
+      "initialResponse": {
+        "choices": [
+          {
+            "message": {
+              "content": "OK"
+            }
+          },
+          {
+            "message": {
+              "content": "OK"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "code": "invalid_response",
+        "stage": "output",
+        "requestCount": 1,
+        "detailCode": null
+      }
+    },
+    {
+      "name": "connection-bool-index",
+      "check": "connection",
+      "initialResponse": {
+        "choices": [
+          {
+            "index": false,
+            "message": {
+              "content": "OK"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "code": "invalid_response",
+        "stage": "output",
+        "requestCount": 1,
+        "detailCode": null
+      }
+    },
+    {
+      "name": "stream-content",
+      "check": "streaming",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Meaningful text.\"},\"finish_reason\":\"stop\"}]}\n\n"
+      ],
+      "expect": {
+        "status": "passed",
+        "code": "verified",
+        "stage": "stream",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "stream-reasoning_content",
+      "check": "streaming",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"Meaningful text.\"},\"finish_reason\":\"stop\"}]}\n\n"
+      ],
+      "expect": {
+        "status": "passed",
+        "code": "verified",
+        "stage": "stream",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "stream-reasoning",
+      "check": "streaming",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"Meaningful text.\"},\"finish_reason\":\"stop\"}]}\n\n"
+      ],
+      "expect": {
+        "status": "passed",
+        "code": "verified",
+        "stage": "stream",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "stream-thinking",
+      "check": "streaming",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"thinking\":\"Meaningful text.\"},\"finish_reason\":\"stop\"}]}\n\n"
+      ],
+      "expect": {
+        "status": "passed",
+        "code": "verified",
+        "stage": "stream",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "stream-metadata-only",
+      "check": "streaming",
+      "initialChunks": [
+        "data: {\"usage\":{\"total_tokens\":2}}\n\n",
+        "data: [DONE]\n\n"
+      ],
+      "expect": {
+        "status": "inconclusive",
+        "code": "expected_output_missing",
+        "stage": "stream",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "stream-empty",
+      "check": "streaming",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"  \"},\"finish_reason\":\"stop\"}]}\n\n"
+      ],
+      "expect": {
+        "status": "inconclusive",
+        "code": "expected_output_missing",
+        "stage": "stream",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "stream-missing-finish",
+      "check": "streaming",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n"
+      ],
+      "expect": {
+        "status": "inconclusive",
+        "code": "stream_incomplete",
+        "stage": "stream",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "stream-content-filter",
+      "check": "streaming",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"content_filter\"}]}\n\n"
+      ],
+      "expect": {
+        "status": "inconclusive",
+        "code": "content_filtered",
+        "stage": "stream",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "stream-tool-only",
+      "check": "streaming",
+      "initialChunks": [
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"soduwork_capability_echo\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"
+      ],
+      "expect": {
+        "status": "inconclusive",
+        "code": "expected_output_missing",
+        "stage": "stream",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "image-exact",
+      "check": "imageInput",
+      "initialResponse": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "582941"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "passed",
+        "code": "verified",
+        "stage": "output",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "image-whitespace",
+      "check": "imageInput",
+      "initialResponse": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": " 582941\n"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "passed",
+        "code": "verified",
+        "stage": "output",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "image-prose",
+      "check": "imageInput",
+      "initialResponse": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "The digits are 582941."
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "code": "expected_output_missing",
+        "stage": "output",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "image-wrong",
+      "check": "imageInput",
+      "initialResponse": {
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "582942"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "code": "expected_output_missing",
+        "stage": "output",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "connection-missing-finish",
+      "check": "connection",
+      "initialResponse": {
+        "choices": [
+          {
+            "message": {
+              "content": "OK"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "code": "invalid_response",
+        "stage": "output",
+        "requestCount": 1,
+        "detailCode": null
+      }
+    },
+    {
+      "name": "stream-done-without-finish",
+      "check": "streaming",
+      "initialChunks": [
+        "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\n",
+        "data: [DONE]\n\n"
+      ],
+      "expect": {
+        "status": "inconclusive",
+        "code": "invalid_response",
+        "stage": "stream",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "stream-malformed-token-details",
+      "check": "streaming",
+      "initialChunks": [
+        "data: {\"choices\":[],\"usage\":{\"total_tokens\":3,\"completion_tokens_details\":0}}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\n"
+      ],
+      "expect": {
+        "status": "inconclusive",
+        "code": "invalid_response",
+        "stage": "stream",
+        "requestCount": 1
+      }
+    },
+    {
+      "name": "connection-malformed-tool-call",
+      "check": "connection",
+      "initialResponse": {
+        "choices": [
+          {
+            "message": {
+              "content": "OK",
+              "tool_calls": [
+                null
+              ]
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expect": {
+        "status": "inconclusive",
+        "code": "invalid_response",
+        "stage": "output",
+        "requestCount": 1,
+        "detailCode": null
+      }
+    },
+    {
+      "name": "stream-malformed-legacy-call",
+      "check": "streaming",
+      "initialChunks": [
+        "data: {\"choices\":[{\"delta\":{\"content\":\"OK\",\"function_call\":42},\"finish_reason\":\"stop\"}]}\n\n"
+      ],
+      "expect": {
+        "status": "inconclusive",
+        "code": "invalid_response",
+        "stage": "stream",
+        "requestCount": 1
+      }
+    }
+  ]
+}

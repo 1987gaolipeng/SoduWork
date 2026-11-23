@@ -8,14 +8,14 @@ import unittest
 from unittest.mock import patch
 
 from app.agent_catalog import AGENTS
-from app.services import acp_agents, claude_runtime, local_base, agent_setup, agent_shell
+from app.services import acp_agents, local_base, agent_setup, agent_shell
 from app.services.acp_access import BridgeAccess, AccessError
 from app.services.acp_bridge import AcpBridge
 
 
 class CliRuntimeCompatibilityTests(unittest.TestCase):
     def test_permission_inputs_are_bound_to_the_exact_live_cli_tool_call(self):
-        for key in ['kimi', 'claude']:
+        for key in ['kimi']:
             access = BridgeAccess(json.dumps({'url': 'http://127.0.0.1:1', 'policy': {'mode': 'standard'}}), agent_name=key)
             requests = []
             access.call = lambda path, value: requests.append(value) or {'decision': 'deny'}
@@ -52,12 +52,51 @@ class CliRuntimeCompatibilityTests(unittest.TestCase):
             self.assertEqual(env['KIMI_MODEL_PROVIDER_TYPE'], kind)
             self.assertNotIn('KIMI_MODEL_HEADERS', env)
 
+    def test_kimi_anonymous_local_model_uses_a_non_secret_credential_placeholder(self):
+        for kind in ('openai', 'anthropic'):
+            for missing_key in ('', '   '):
+                with self.subTest(kind=kind, key=missing_key):
+                    llm = {'base': 'http://127.0.0.1:11434/v1', 'model': 'local-model',
+                           'key': missing_key, 'kind': kind, 'localOnly': True}
+                    original = dict(llm)
+                    env = {'KIMI_MODEL_API_KEY': 'inherited-personal-key',
+                           'KIMI_MODEL_HEADERS': 'inherited-personal-headers'}
+                    acp_agents.inject_llm_env('kimi', env, llm)
+                    self.assertEqual(env['KIMI_MODEL_API_KEY'], 'soduwork-anonymous-local')
+                    self.assertEqual(env['KIMI_MODEL_BASE_URL'], llm['base'])
+                    self.assertEqual(env['KIMI_MODEL_NAME'], 'local-model')
+                    self.assertEqual(env['KIMI_MODEL_PROVIDER_TYPE'], kind)
+                    self.assertNotIn('KIMI_MODEL_HEADERS', env)
+                    self.assertEqual(llm, original, 'The placeholder is process-local, not saved model configuration')
+
+    def test_kimi_placeholder_requires_explicit_local_model_and_preserves_supplied_keys(self):
+        for local_only in (False, None, 'true', 1):
+            with self.subTest(local_only=local_only):
+                env = {}
+                acp_agents.inject_llm_env('kimi', env, {
+                    'base': 'https://model.invalid/v1', 'model': 'remote-model',
+                    'localOnly': local_only})
+                self.assertEqual(env, {}, 'An unauthenticated remote model must not acquire a placeholder')
+        env = {}
+        acp_agents.inject_llm_env('kimi', env, {
+            'base': 'http://127.0.0.1:11434/v1', 'model': 'local-model',
+            'key': 'explicit-local-key', 'localOnly': True})
+        self.assertEqual(env['KIMI_MODEL_API_KEY'], 'explicit-local-key')
+
+    def test_kimi_placeholder_does_not_change_other_agents_anonymous_model_contract(self):
+        env = {'OPENAI_API_KEY': 'inherited-personal-key'}
+        acp_agents.inject_llm_env('qwen', env, {
+            'base': 'http://127.0.0.1:11434/v1', 'model': 'local-model', 'localOnly': True})
+        self.assertNotIn('OPENAI_API_KEY', env)
+        self.assertNotIn('KIMI_MODEL_API_KEY', env)
+        self.assertEqual(env['OPENAI_MODEL'], 'local-model')
+
     def test_bundled_shell_replaces_stale_paths_without_requiring_global_git(self):
         with tempfile.TemporaryDirectory() as folder:
             shell = Path(folder) / 'bin' / 'bash.exe'
             shell.parent.mkdir()
             shell.touch()
-            for key, variable in [('kimi', 'KIMI_SHELL_PATH'), ('claude', 'CLAUDE_CODE_GIT_BASH_PATH')]:
+            for key, variable in [('kimi', 'KIMI_SHELL_PATH')]:
                 env = {'PATH': '', 'SODUWORK_BUNDLED_SHELL': folder, variable: 'other-client/missing-bash.exe'}
                 agent_shell.apply(env, key)
                 self.assertEqual(env[variable], str(shell.resolve()))
@@ -65,27 +104,16 @@ class CliRuntimeCompatibilityTests(unittest.TestCase):
                 agent_shell.apply(env, key)
                 self.assertEqual(env[variable], str(shell.resolve()))
 
-    def test_native_login_command_quotes_paths_and_uses_the_execution_account_home(self):
-        with tempfile.TemporaryDirectory(prefix="runner's space ") as folder:
-            native = str(Path(folder) / 'claude.exe')
-            with patch.object(claude_runtime.agent_native_install, 'active_binary', return_value=native):
-                windows = claude_runtime.account_setup(folder, windows=True)
-                unix = claude_runtime.account_setup(folder, windows=False)
-            self.assertIn("runner''s space", windows['command'])
-            self.assertIn('CLAUDE_CONFIG_DIR=', windows['command'])
-            self.assertTrue(windows['command'].endswith(' auth login'))
-            import shlex
-            self.assertEqual(shlex.split(unix['command'])[1:], [native, 'auth', 'login'])
 
     def test_cli_titles_and_shared_transport(self):
-        for key in ('kimi', 'claude'):
+        for key in ('kimi',):
             self.assertNotIn('CLI', AGENTS[key]['displayName'])
             self.assertEqual(local_base._PROFILES[key]['acp_key'], key)
             self.assertFalse(local_base._PROFILES[key]['own_session'])
 
     def test_node_entry_avoids_windows_shims_and_keeps_arguments_separate(self):
-        for key, command in [('kimi', ['acp']), ('claude', [])]:
-            with (patch.object(acp_agents.agent_npm_runtime, 'package_entry', return_value='space dir/entry.js'),
+        for key, command in [('kimi', ['acp'])]:
+            with (patch('app.services.agent_installation.selected_node_entry', return_value=('space dir/entry.js', '>=22.19.0')),
                   patch.object(acp_agents.agent_npm_runtime, 'node_env', return_value={'ok': True, 'nodePath': 'node dir/node.exe'})):
                 argv = acp_agents.command_argv(key, 'unsafe shim.cmd',
                     acp_agents.run_args('previous-session', 'work'), '.', {'requiredCapabilities': ['terminal']})
@@ -94,7 +122,7 @@ class CliRuntimeCompatibilityTests(unittest.TestCase):
             self.assertIn('--terminal', argv)
 
     def test_all_access_modes_are_acknowledged_before_prompt(self):
-        for key, modes in {'kimi': ['default', 'plan', 'yolo'], 'claude': ['default', 'plan', 'bypassPermissions']}.items():
+        for key, modes in {'kimi': ['default', 'plan', 'yolo']}.items():
             for mode, native in zip(['standard', 'readonly', 'full'], modes):
                 requests = []
                 access = BridgeAccess(json.dumps({'url': 'http://127.0.0.1:1', 'policy': {'mode': mode}}), agent_name=key)
@@ -106,34 +134,7 @@ class CliRuntimeCompatibilityTests(unittest.TestCase):
                 with self.assertRaises(AccessError):
                     access.apply(bridge, {'modes': {'availableModes': []}})
 
-    def test_claude_account_probe_and_execution_share_private_home(self):
-        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': 'other-client', 'CLAUDECODE': '1'}):
-            with patch.object(local_base, '_data_root', return_value=folder):
-                env = local_base._env_for(local_base._PROFILES['claude'], {})
-                self.assertEqual(env['CLAUDE_CONFIG_DIR'], str(Path(folder).resolve() / '.claude'))
-                self.assertNotIn('CLAUDECODE', env)
-                with patch.object(agent_setup, '_account_auth_probe', return_value=('unauthed', '')) as probe:
-                    with patch.object(agent_setup, '_data_root', return_value=folder):
-                        agent_setup._auth_probe('claude')
-                self.assertEqual(probe.call_args.kwargs['env']['CLAUDE_CONFIG_DIR'], env['CLAUDE_CONFIG_DIR'])
 
-    def test_claude_resume_receives_only_host_selected_configuration(self):
-        bridge = AcpBridge(['unused'], '.', 'claude', 'workspace', session_id='previous-session')
-        calls = []
-        def request(method, params):
-            calls.append((method, params))
-            if method == 'initialize':
-                return {'protocolVersion': 1, 'agentCapabilities': {'sessionCapabilities': {'resume': {}}}}
-            if method == 'session/prompt':
-                return {'stopReason': 'end_turn'}
-            return {}
-        with (patch.object(bridge, 'start'), patch.object(bridge, 'request', side_effect=request),
-              patch.object(bridge.access, 'apply'), patch.object(bridge.transition, 'complete', return_value=False)):
-            self.assertEqual(bridge.run('Continue with the previous result'), 0)
-        resume = next(params for method, params in calls if method == 'session/resume')
-        self.assertEqual(resume['sessionId'], 'previous-session')
-        self.assertEqual(resume['_meta']['claudeCode']['options'], {'settingSources': [], 'strictMcpConfig': True})
-        self.assertFalse(any(method == 'session/new' for method, _ in calls))
 
 
 if __name__ == '__main__':

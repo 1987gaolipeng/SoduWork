@@ -1,0 +1,1157 @@
+{
+  "version": "1.13.18",
+  "previousTag": "v1.13.17",
+  "sourceCommit": "80b49f72858530fb3c2fb30a106c023300f84a41",
+  "previousCommit": "3bc79e0a5f564169b265f6cc848a8eb9cff326ca",
+  "locales": {
+    "zh-CN": {
+      "summary": "改善对话设置、自动化和任务交付体验。",
+      "sections": [
+        {
+          "id": "features",
+          "title": "功能更新",
+          "items": [
+            {
+              "id": "directory-preferences",
+              "text": "按工作目录记住可用的底座和模型，同一目录新建对话时自动恢复选择。"
+            },
+            {
+              "id": "automation-drafts",
+              "text": "自动化支持“五分钟后”等相对时间，并可继续对话修改、确认或取消草稿。"
+            }
+          ]
+        },
+        {
+          "id": "fixes",
+          "title": "问题修复",
+          "items": [
+            {
+              "id": "sign-in-recovery",
+              "text": "修复重新打开工作区时登录表单和语言闪动的问题，保留已登录状态与显示偏好。"
+            },
+            {
+              "id": "runner-queue",
+              "text": "任务状态显示排队位置和等待时间，并修复多个对话并发时取消操作与执行状态相互干扰的问题。"
+            },
+            {
+              "id": "requirement-delivery",
+              "text": "修复需求完成后验收未提交、交付附件遗漏和中间稿混入最终成果的问题。"
+            }
+          ]
+        }
+      ]
+    },
+    "en-US": {
+      "summary": "Improved conversation settings, automations and task delivery.",
+      "sections": [
+        {
+          "id": "features",
+          "title": "Feature updates",
+          "items": [
+            {
+              "id": "directory-preferences",
+              "text": "Working folders remember available runtimes and models, restoring the selection when a new chat starts in the same folder."
+            },
+            {
+              "id": "automation-drafts",
+              "text": "Automations accept relative times such as “in five minutes,” and drafts can be revised, confirmed or cancelled through conversation."
+            }
+          ]
+        },
+        {
+          "id": "fixes",
+          "title": "Bug fixes",
+          "items": [
+            {
+              "id": "sign-in-recovery",
+              "text": "Fixed sign-in form and language flicker when reopening the workspace, preserving the signed-in state and display preferences."
+            },
+            {
+              "id": "runner-queue",
+              "text": "Task status shows queue position and wait time, and concurrent chats no longer interfere with each other’s cancellation or execution status."
+            },
+            {
+              "id": "requirement-delivery",
+              "text": "Fixed completed requirements missing acceptance submission or attachments, and intermediate drafts appearing in final deliverables."
+            }
+          ]
+        }
+      ]
+    },
+    "ja-JP": {
+      "summary": "会話設定、自動化、タスクの成果物提出を改善しました。",
+      "sections": [
+        {
+          "id": "features",
+          "title": "機能更新",
+          "items": [
+            {
+              "id": "directory-preferences",
+              "text": "作業フォルダーごとに利用可能な実行エンジンとモデルを記憶し、同じフォルダーで新しいチャットを始めると選択を復元します。"
+            },
+            {
+              "id": "automation-drafts",
+              "text": "自動化で「5分後」などの相対時刻を指定でき、会話を続けて下書きの変更、確認、取り消しができます。"
+            }
+          ]
+        },
+        {
+          "id": "fixes",
+          "title": "不具合修正",
+          "items": [
+            {
+              "id": "sign-in-recovery",
+              "text": "作業画面を開き直したときのログインフォームや言語表示のちらつきを修正し、ログイン状態と表示設定を保持します。"
+            },
+            {
+              "id": "runner-queue",
+              "text": "タスク状態に待ち順と待ち時間を表示し、複数のチャットを同時実行した際にキャンセル操作や実行状態が互いに干渉する問題を修正しました。"
+            },
+            {
+              "id": "requirement-delivery",
+              "text": "要件の完了後に検収依頼が提出されない問題、添付ファイルの欠落、途中の下書きが最終成果物に混ざる問題を修正しました。"
+            }
+          ]
+        }
+      ]
+    },
+    "ko-KR": {
+      "summary": "대화 설정, 자동화와 작업 결과물 제출을 개선했습니다.",
+      "sections": [
+        {
+          "id": "features",
+          "title": "기능 업데이트",
+          "items": [
+            {
+              "id": "directory-preferences",
+              "text": "작업 폴더별로 사용 가능한 실행 엔진과 모델을 기억하고 같은 폴더에서 새 대화를 시작하면 선택을 복원합니다."
+            },
+            {
+              "id": "automation-drafts",
+              "text": "자동화에 “5분 후” 같은 상대 시간을 지정하고 대화를 이어 가며 초안을 수정, 확인하거나 취소할 수 있습니다."
+            }
+          ]
+        },
+        {
+          "id": "fixes",
+          "title": "버그 수정",
+          "items": [
+            {
+              "id": "sign-in-recovery",
+              "text": "작업 공간을 다시 열 때 로그인 양식과 언어 표시가 깜빡이는 문제를 수정하고 로그인 상태와 표시 설정을 유지합니다."
+            },
+            {
+              "id": "runner-queue",
+              "text": "작업 상태에 대기 순서와 대기 시간을 표시하고 여러 대화를 동시에 실행할 때 취소 동작과 실행 상태가 서로 간섭하는 문제를 수정했습니다."
+            },
+            {
+              "id": "requirement-delivery",
+              "text": "요구사항 완료 후 검수 요청이 제출되지 않거나 첨부 파일이 누락되고 중간 초안이 최종 결과물에 섞이는 문제를 수정했습니다."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "sectionId": "features",
+      "itemId": "directory-preferences",
+      "commits": [
+        "05f996b7cfd8755f4fa3b7146a6a39cfdf81fd45",
+        "56aed7b5fffaafa419019118706c72f6cbe44278",
+        "d5ffdb7407e0e471423fecc9949aa5c460d33995"
+      ]
+    },
+    {
+      "sectionId": "features",
+      "itemId": "automation-drafts",
+      "commits": [
+        "64b2cbed2f16e0ebf612a1b139eca1559c86437e",
+        "e50c647f4a153b10b4bdeddc89fbfd42b1bd99e1",
+        "f7c782064c3793ff614efab5725105673edac93e",
+        "9b13e2d9049612caf7f2550ceff8fe8d25ab742b"
+      ]
+    },
+    {
+      "sectionId": "fixes",
+      "itemId": "sign-in-recovery",
+      "commits": [
+        "10bd5ffb40eff3cdb2cdfc2684a210107db935c0",
+        "2ae69b7a381bfa000233804ed35a8d0611343e0d",
+        "2e5db00e73d8458d60bdc0bfe5f933db9c2e4b59"
+      ]
+    },
+    {
+      "sectionId": "fixes",
+      "itemId": "runner-queue",
+      "commits": [
+        "05b54356eb09efe2e0a33f16cced84da27843511",
+        "79f7560a3aa687dc7e688f34726d5c18effc8fcf",
+        "88c76824825ce3cfedbc661002a14a4844576656",
+        "56d61e8fd55bb54ff16771a498de9f8e4b841da3"
+      ]
+    },
+    {
+      "sectionId": "fixes",
+      "itemId": "requirement-delivery",
+      "commits": [
+        "672dc9f4af1b8e0209c5bdc89b1d060b6a8d4169",
+        "7f75e3a1d15b2e91ea5e1267de8f561994b0d9f8",
+        "138464d3829eb4a1f06a430bcff7002a92f50369",
+        "ac73639fd9e646c88528586889b646041c493dac",
+        "6ef9e98e68a32126b86b8eb38c84d541d6d0ca11",
+        "4e7b2feb96398e36e2e4170936a4d655824333f7",
+        "ff55c40e4292a6d985a7a7b154d7f820b0d51676"
+      ]
+    }
+  ],
+  "omitted": [
+    {
+      "commit": "ba35a53cde8467ca859525d687013882acc98bca",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "ce60392f886d39592ea3941caa3564f062b6222d",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "b4a6193e5e3f5ac9fd6f89a9ee490efee347cb62",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "184638edc418424777b016fe6870dd4701bcce65",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "8b53f2983d18d0cc2a97ed0689ab0bbadee78d32",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "596f7541d653a622989dc2bd0ac62b4e5a03eee5",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "7020ebd590a09125a02a200bb38f21b1170f3811",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "3807cd75106733e1ebd3c1ddda7439ed8fb460bc",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "cbf4607ba9bd2d2d7473e22c2aec277492afdedf",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "12051917ddc4983c77a1103da87afd96429e1b90",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "339cb15885984f3505f8f5e48459ebc6c918443b",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "882a6016c88e06ac5168abafa827a21715d7f69b",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "a1bdec87d41214b934f59cf24374023495a5f53f",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "30b0a372c6be005a711204a4ec48da7307a4ba09",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "9d295b2cb2a00a557b103f9ec4e2ab294204d2d0",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "b2af2678a5f81f223169e7122a156f138d68d711",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "1b8dd1b1b7d20ec48d0fb2d521edaa684f569918",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "20976c14acaa9f8bd5cc06e8a3b46bd7a5e7c8be",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "0a7bdc9af4975555243bb40dc1bc6d40dbd69830",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "13347195e2ffd7b5750afd676d58eabcbba9b3e0",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "66ddf6abe0be5892b8a1d229faaddef783f99be0",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "3c39b7fa9b485b52486604173687a924278e116b",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "0801506e9ab38cdda7396914dc058a127f8c390e",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "1991b92b7bd31eef72dd0d71fd2474ab4bfbbea5",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "e0dcbff30dd3a417b858e579f9dc05cf44abdb71",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "e64927ddabb123e2e3fffcfc3b9dbbdcf1797530",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "ca7ee9091c1553a6ac7708ab0b171f25f843f0b8",
+      "reason": "reverted"
+    },
+    {
+      "commit": "bac7da07626efc9a9339de0b8914a5d60eb469b9",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "173ef7f57d16b0e7e0ff648cf62a1ab480d00c3b",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "9dec9f44c263bb3300f83cba6464562f34075a8f",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "36f30e599056244113865d59b238633f7f14bffc",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "744f67d948c5fad6ab8e44c204d7da02fe93febf",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "249413b868656ccfa76fdbccd0c65f93d5980801",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "95aefaaba0cf2293e75729a56cfc2194efd5ade2",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "423e2567a13f238fe91502acba5669832080483f",
+      "reason": "reverted"
+    },
+    {
+      "commit": "1af0d3dad75fc67f60fa24e6d6b61993b6d85f0a",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "8cdc03f4ce6febed7f5a2bbdfcc64bd1844a79e7",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "af364aa01c4e71e6f5dcd43a4901862704efabd0",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "f416d5e1a4fffc2861b5742c23da7e5a09cdc77b",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "3742e0e5ec6ba11f19daced7c49a5f00a5a47f54",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "4d1cf1266c9ae3c6c06ef53b96d8edbf38ebf4cc",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "c623ac8a1f32a10493e924fafe9363313dc5b608",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "d761b00585a89be0baaab40907aec647aa51f93f",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "77079a2ecf28f0801e4eea558eec21656627246a",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "c3487b971bd5c00836aaeea1ea90b76f81f55d1b",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "a4d19040ca3b7462b489869d683f898d6fcf4221",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "f1317d628acfc9712517a2204f7de8d114ce95d5",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "dbdf82f6a986445b47ea7a66fd9d878dfcaab85c",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "ee7771a8faaaac354366fa422ef406b8e6747eb7",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "ae54db9a5f86b065986342d7358c0124646b2392",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "4415ad5bae49443b48819a12428137cade7c0495",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "d65168ff679a7c33817febd4b626a13b4f09d4ab",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "1830ffd34cd8fdae708782670348b10b37e97234",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "b32ab091eac48085784ab27622591d85adfd4937",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "11e509a739b50239193d1ebc7679740d4a609f99",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "ab67199ed6553d4b794e1146565e9029cadc3ebf",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "d3a5dc416a7b39fb18b2ee781f4f5f13a12b0e2a",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "2216a66d22ae8c1a2202cca9b9954c3221b4cdba",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "fad84057c7190cea030f062337275b02f5686878",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "115a5aac08d207e051cee220d5c2e191a187cb2d",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "1759aba904ee812b317cb6951afc6249b49995f9",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "a835716b3feb7efdb2a4259f1f259e46220d344d",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "a232b0228fc55bb12f41a6e297ce3d31764b936b",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "394f465dcf42167489f52e020d2283936da55270",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "07d402f89b0c73e38129adb024f65e930189104d",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "d047a2128482857c26c44c979efade9289cc3d59",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "42c33da70b8d257210a33884fad5b2825ca75ff5",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "f4b558c34e52596bad7a19b56b5a3e187dd316fa",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "565de3cd029a8ee1b9d3079b07d3a2517354e379",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "cf08c30c876a786e03205bcc4aa4a100106f3414",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "8fb80800915f35e8876800feaee9224f1d403af7",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "faa2bfaf8f961405a9ad8ccff14180cbfcb2e601",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "93e0bfd219f34df2310a2a3336c97e97374f0b11",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "6488f0bec4a0cdb5eda989c7f453b978b50e9de3",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "f5d0448a27860e66ad287714688d590f05612745",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "c1dc9aa59feb33e0f929e82d05680f23f1c655d9",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "9edf94567118e9d3887e268802bed2be51df555c",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "1dee1131c499f3c59ea5dd69b8bb2e2e0dac849b",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "c2d41311d3b912657e0a1335d1c304511a788751",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "52264c08267f113da2b61f77a0c5da23dcc117de",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "3e7550190c798ccb2b3f4cbb95ad493cae047987",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "8458cc4b92c06319c8a261ef0c705f1267e5bd9b",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "a6aa6ff971be4a59d056027058e6a358e6c86d13",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "91593a87eded9c46185a143a74b4b2ff7cfec6de",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "8394dc1823e5f5ea6a09a2e0c6add1de88353d4c",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "04457b5bd846f916550ad3056bee858e4b0036d1",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "249c2115899c2aae047dd3e1d39ff9d50f5a5784",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "5770333d33d83ebc5ce0a918b5932bd7ec2ef3bc",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "b7bfed6ffb2800023f025dac30647662548ed272",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "0176a32aff3e68bc9a1cdb8b5670d5cd53ea6e14",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "79ccd857481eec12c986f4031bc85d3fffcfafdd",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "749d62b7aac0acce7453dfccc9705b56b1072013",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "15f36192753eaaa4e6163c7558c38c4c6164ae00",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "9799e9f788c154452032d71a98a3d9bb45234c4c",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "9005c12cac2eaa8a3b16e1f15b79c48e7aefffa8",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "bd7376e8cf6c7a93134108991186239acf49a9f7",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "840cc097b7b3b889e454cbe2320c365fca0e30c0",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "8ceb8154b57b2c8f5c4247398f1b44481ff5ba84",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "6554242b438fa52135e617811d5344dab7c6c400",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "1f174c4e9df1f6232a9d7edb2f3cd18fedc87786",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "5f82e502262deef61605fccea313dc5fbfac73a2",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "906f5c76b3837190f58797e1bad2ead8aab5fefa",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "f6498a1bf3d283fdd6fe469363f84318916a7331",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "aeafa5ac62c5c2524600fd5844403f8d07a8f74d",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "50c2afdb655ad1da11c75e1d44b0c96b12cf418d",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "ea126974c1957c94777db7a9ceb6527664447f7e",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "7ff3b345fd2d3d09ebce4e62aa02f8c590f1dad8",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "797e31141fb01179face35d69878789eb57bd0a1",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "c762fdd8d415803f216037b484a579d0450fb7ce",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "87e832a06df84c912cdd19c3eea7a2dbbf28635c",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "b935cccfddc9dd095f97b0dcef259d8e38568974",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "f9f40a5887ec2e2bd6c8623e7f525bb4d107b84e",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "9818c578c5b434c418e36ece24e80b476db0b823",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "1c2248f9222a364e82b3e5a95791c2f709b703cc",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "d3e3a882024d30b1344ced8fc526b35f166cea7d",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "b6bb8c4db121a7310d6e240ef72bd00079e7f471",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "a1d600afc4c260d557795710c50e50127dcc5323",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "a610d94ac5f38d3c0059f1edbad29359caf5922a",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "d8dd74281ca3a807154e2ed55515323ded799d6c",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "d8e120292ac93a43906a7584bbd14814728d11cd",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "26f9440be10164bc8be543a2ada44558368eacd0",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "6f294e070f95fa53b6c356eaab01db92f1d3449a",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "1af07ff73f640eefe5b14840a7f478242b431363",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "9fb2d2e7e48c834002b716feb511e10cc41732e0",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "65cc47a557a557a3023dc67c8ad0f60802b20d15",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "1d0e3e0bf07d2103dcf86e8e315613d3c8473fbb",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "fafca0d136840c1fef1b16832a0735441afd1198",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "ef36576982dcc12922b3a7ace97558c062000e51",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "7d15641a47076bd171f5531c1ee346a749909e4f",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "a6e835fee2b95724a919c4576e9eccda1b81c908",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "2561cd1f6fad515a939467029971e768156a3772",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "e9f1610ea954b55f79f9c0317092f98038e0df93",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "76af276f6ccad7c7abbbe71ca6671b1f2dd5d89d",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "1be22877a7ea927b59b028b164353b84cc7b9590",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "9ba99e1a84d8b2faf67997bbbd9fde580d6b05f1",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "0789f16864d4f118024307a1eed2babb5938b9f7",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "ea05d814df00057fe27209cefce0cc9fd4d5cd64",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "1c822f5a386ec73167cd116c8d5272de44c4e3d0",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "2407f4bb3de11c3f99b7c4df373614b4a643795c",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "5cafed11df8628c7c2e02c15530fb57bd60a64a3",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "893bae0597993283dd1c51c7971fab0d25930f2e",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "f6ec7a55a572258a5d7297f8aeb4cad7f494c863",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "dcfc2d11b6bc3937d00403a93c35fd5f9eaa74f9",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "21b0a2d4def3e607c5f96fdfe8f2ae838887e856",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "eb8a01a28d1a82dfab100b0168f8fef7e8daa7e9",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "e44164c2d9508e996cfc97653df043f978d7dc38",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "dbae843bf9395f8758468db32a4ecc410bb4b8c5",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "935eda35cc13c54c6f44af795e9c04f0a701e8b9",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "b0711a348decefec339ed7554136eb36b7b56d4e",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "244b8fe55eaf47111e568d566311e543ae4d60fa",
+      "reason": "maintenance"
+    },
+    {
+      "commit": "6691fa5b4ece4d21bc868e57e0d43b409582d927",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "1a36734a96c4c83ec34ee431cc24440b5866dbf9",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "7cc1103920b8484990fb3b6c4ef513ad1e605af0",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "de129ef4d7e5936eb3dd418fbf5c6a4f46f7582d",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "d0b4e679e0bef3e7bc93859f4b7a3a1fdfe356d1",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "243877a86202fad2470950ca0515d3c735ccce87",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "329087a456efc1391e22dc4989550bafb80b9159",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "1a90fd14357c2ac180014ddc3dc34ffccec84179",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "336e808aab58e44544eacb4327bdc20cd792dbe2",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "e1c9ac40b44ae1bcdd9410d01236af059debe073",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "e6676ce05c171a7bcf455e4302b69bcb6aac8fa7",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "475d907c0a2802755fcae78dcc7864ba8f972afe",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "7fb1c66f7f97a94b66a96e3ea87ef32f0eaf1874",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "570bc0450a870c79180eb582b157bab71e46359a",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "6d493a85cfb93a831f51205fac8588d779993a3c",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "3d5490ab072744f4e76fe1e2b2f06aa544acab56",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "f7bbc2a37ce96052e8fd416e38aa98021ae67fdd",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "7f243928a2016bfc5686d95e72a5fa112778f1e8",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "30abb8a7d3de5e9efcaa3bce4db87ff9a3f1ca2d",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "10d3f39b00424de7f50e0edfd2235987953c0fdb",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "7853e45446df618abda1dee18e19bd8bd84f7cd9",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "ff1be34a9c7c6d1f40f556573f9743416e92fc20",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "0c31ef0ec5e92b974b676ee9788b9fa04fc1a233",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "010010756f7f2bd539b329f175d8b2a0e375b46e",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "2890f97bbc47897c5d3951ded9c304053bea7d00",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "ac504133d03c215e1ca05d9bbb2e16e0c682b145",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "23d617e36d14011459aea096ffac67585a238542",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "9236d3b6a063137c41fc3ef10ca8528eb89a842c",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "4998a56dce23751c7c3ad9e3a886defca0262881",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "99be17d37314f14dc474cbd8dceb11b126cc72c8",
+      "reason": "not-highlighted"
+    },
+    {
+      "commit": "11fa69f2b8e725fa1502d561c3718265e836dd89",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "cc320375ea0929824848836a048d45ca3f8632a7",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "3eb7b6bbfd4ee5259fe3428cd4f4fb2bddf2ec95",
+      "reason": "duplicate"
+    },
+    {
+      "commit": "80b49f72858530fb3c2fb30a106c023300f84a41",
+      "reason": "duplicate"
+    }
+  ],
+  "schema": 1,
+  "repository": "mdiri-ai/SoduWork",
+  "channel": "stable",
+  "commits": [
+    "ba35a53cde8467ca859525d687013882acc98bca",
+    "ce60392f886d39592ea3941caa3564f062b6222d",
+    "b4a6193e5e3f5ac9fd6f89a9ee490efee347cb62",
+    "184638edc418424777b016fe6870dd4701bcce65",
+    "8b53f2983d18d0cc2a97ed0689ab0bbadee78d32",
+    "596f7541d653a622989dc2bd0ac62b4e5a03eee5",
+    "7020ebd590a09125a02a200bb38f21b1170f3811",
+    "3807cd75106733e1ebd3c1ddda7439ed8fb460bc",
+    "cbf4607ba9bd2d2d7473e22c2aec277492afdedf",
+    "12051917ddc4983c77a1103da87afd96429e1b90",
+    "339cb15885984f3505f8f5e48459ebc6c918443b",
+    "882a6016c88e06ac5168abafa827a21715d7f69b",
+    "10bd5ffb40eff3cdb2cdfc2684a210107db935c0",
+    "a1bdec87d41214b934f59cf24374023495a5f53f",
+    "30b0a372c6be005a711204a4ec48da7307a4ba09",
+    "9d295b2cb2a00a557b103f9ec4e2ab294204d2d0",
+    "b2af2678a5f81f223169e7122a156f138d68d711",
+    "1b8dd1b1b7d20ec48d0fb2d521edaa684f569918",
+    "20976c14acaa9f8bd5cc06e8a3b46bd7a5e7c8be",
+    "64b2cbed2f16e0ebf612a1b139eca1559c86437e",
+    "0a7bdc9af4975555243bb40dc1bc6d40dbd69830",
+    "13347195e2ffd7b5750afd676d58eabcbba9b3e0",
+    "66ddf6abe0be5892b8a1d229faaddef783f99be0",
+    "e50c647f4a153b10b4bdeddc89fbfd42b1bd99e1",
+    "3c39b7fa9b485b52486604173687a924278e116b",
+    "0801506e9ab38cdda7396914dc058a127f8c390e",
+    "1991b92b7bd31eef72dd0d71fd2474ab4bfbbea5",
+    "e0dcbff30dd3a417b858e579f9dc05cf44abdb71",
+    "e64927ddabb123e2e3fffcfc3b9dbbdcf1797530",
+    "ca7ee9091c1553a6ac7708ab0b171f25f843f0b8",
+    "bac7da07626efc9a9339de0b8914a5d60eb469b9",
+    "173ef7f57d16b0e7e0ff648cf62a1ab480d00c3b",
+    "79f7560a3aa687dc7e688f34726d5c18effc8fcf",
+    "9dec9f44c263bb3300f83cba6464562f34075a8f",
+    "36f30e599056244113865d59b238633f7f14bffc",
+    "744f67d948c5fad6ab8e44c204d7da02fe93febf",
+    "249413b868656ccfa76fdbccd0c65f93d5980801",
+    "95aefaaba0cf2293e75729a56cfc2194efd5ade2",
+    "423e2567a13f238fe91502acba5669832080483f",
+    "1af0d3dad75fc67f60fa24e6d6b61993b6d85f0a",
+    "8cdc03f4ce6febed7f5a2bbdfcc64bd1844a79e7",
+    "af364aa01c4e71e6f5dcd43a4901862704efabd0",
+    "f416d5e1a4fffc2861b5742c23da7e5a09cdc77b",
+    "3742e0e5ec6ba11f19daced7c49a5f00a5a47f54",
+    "4d1cf1266c9ae3c6c06ef53b96d8edbf38ebf4cc",
+    "c623ac8a1f32a10493e924fafe9363313dc5b608",
+    "d761b00585a89be0baaab40907aec647aa51f93f",
+    "77079a2ecf28f0801e4eea558eec21656627246a",
+    "c3487b971bd5c00836aaeea1ea90b76f81f55d1b",
+    "a4d19040ca3b7462b489869d683f898d6fcf4221",
+    "f1317d628acfc9712517a2204f7de8d114ce95d5",
+    "dbdf82f6a986445b47ea7a66fd9d878dfcaab85c",
+    "ee7771a8faaaac354366fa422ef406b8e6747eb7",
+    "ae54db9a5f86b065986342d7358c0124646b2392",
+    "2ae69b7a381bfa000233804ed35a8d0611343e0d",
+    "4415ad5bae49443b48819a12428137cade7c0495",
+    "d65168ff679a7c33817febd4b626a13b4f09d4ab",
+    "1830ffd34cd8fdae708782670348b10b37e97234",
+    "b32ab091eac48085784ab27622591d85adfd4937",
+    "11e509a739b50239193d1ebc7679740d4a609f99",
+    "ab67199ed6553d4b794e1146565e9029cadc3ebf",
+    "2e5db00e73d8458d60bdc0bfe5f933db9c2e4b59",
+    "d3a5dc416a7b39fb18b2ee781f4f5f13a12b0e2a",
+    "2216a66d22ae8c1a2202cca9b9954c3221b4cdba",
+    "fad84057c7190cea030f062337275b02f5686878",
+    "115a5aac08d207e051cee220d5c2e191a187cb2d",
+    "88c76824825ce3cfedbc661002a14a4844576656",
+    "1759aba904ee812b317cb6951afc6249b49995f9",
+    "a835716b3feb7efdb2a4259f1f259e46220d344d",
+    "a232b0228fc55bb12f41a6e297ce3d31764b936b",
+    "394f465dcf42167489f52e020d2283936da55270",
+    "07d402f89b0c73e38129adb024f65e930189104d",
+    "d047a2128482857c26c44c979efade9289cc3d59",
+    "42c33da70b8d257210a33884fad5b2825ca75ff5",
+    "f4b558c34e52596bad7a19b56b5a3e187dd316fa",
+    "565de3cd029a8ee1b9d3079b07d3a2517354e379",
+    "cf08c30c876a786e03205bcc4aa4a100106f3414",
+    "8fb80800915f35e8876800feaee9224f1d403af7",
+    "faa2bfaf8f961405a9ad8ccff14180cbfcb2e601",
+    "93e0bfd219f34df2310a2a3336c97e97374f0b11",
+    "6488f0bec4a0cdb5eda989c7f453b978b50e9de3",
+    "56d61e8fd55bb54ff16771a498de9f8e4b841da3",
+    "f5d0448a27860e66ad287714688d590f05612745",
+    "c1dc9aa59feb33e0f929e82d05680f23f1c655d9",
+    "9edf94567118e9d3887e268802bed2be51df555c",
+    "1dee1131c499f3c59ea5dd69b8bb2e2e0dac849b",
+    "c2d41311d3b912657e0a1335d1c304511a788751",
+    "52264c08267f113da2b61f77a0c5da23dcc117de",
+    "3e7550190c798ccb2b3f4cbb95ad493cae047987",
+    "8458cc4b92c06319c8a261ef0c705f1267e5bd9b",
+    "a6aa6ff971be4a59d056027058e6a358e6c86d13",
+    "91593a87eded9c46185a143a74b4b2ff7cfec6de",
+    "8394dc1823e5f5ea6a09a2e0c6add1de88353d4c",
+    "04457b5bd846f916550ad3056bee858e4b0036d1",
+    "249c2115899c2aae047dd3e1d39ff9d50f5a5784",
+    "5770333d33d83ebc5ce0a918b5932bd7ec2ef3bc",
+    "b7bfed6ffb2800023f025dac30647662548ed272",
+    "0176a32aff3e68bc9a1cdb8b5670d5cd53ea6e14",
+    "79ccd857481eec12c986f4031bc85d3fffcfafdd",
+    "749d62b7aac0acce7453dfccc9705b56b1072013",
+    "15f36192753eaaa4e6163c7558c38c4c6164ae00",
+    "9799e9f788c154452032d71a98a3d9bb45234c4c",
+    "9005c12cac2eaa8a3b16e1f15b79c48e7aefffa8",
+    "bd7376e8cf6c7a93134108991186239acf49a9f7",
+    "840cc097b7b3b889e454cbe2320c365fca0e30c0",
+    "8ceb8154b57b2c8f5c4247398f1b44481ff5ba84",
+    "6554242b438fa52135e617811d5344dab7c6c400",
+    "1f174c4e9df1f6232a9d7edb2f3cd18fedc87786",
+    "5f82e502262deef61605fccea313dc5fbfac73a2",
+    "906f5c76b3837190f58797e1bad2ead8aab5fefa",
+    "f6498a1bf3d283fdd6fe469363f84318916a7331",
+    "aeafa5ac62c5c2524600fd5844403f8d07a8f74d",
+    "50c2afdb655ad1da11c75e1d44b0c96b12cf418d",
+    "ea126974c1957c94777db7a9ceb6527664447f7e",
+    "7ff3b345fd2d3d09ebce4e62aa02f8c590f1dad8",
+    "797e31141fb01179face35d69878789eb57bd0a1",
+    "c762fdd8d415803f216037b484a579d0450fb7ce",
+    "87e832a06df84c912cdd19c3eea7a2dbbf28635c",
+    "b935cccfddc9dd095f97b0dcef259d8e38568974",
+    "f9f40a5887ec2e2bd6c8623e7f525bb4d107b84e",
+    "9818c578c5b434c418e36ece24e80b476db0b823",
+    "1c2248f9222a364e82b3e5a95791c2f709b703cc",
+    "d3e3a882024d30b1344ced8fc526b35f166cea7d",
+    "b6bb8c4db121a7310d6e240ef72bd00079e7f471",
+    "a1d600afc4c260d557795710c50e50127dcc5323",
+    "a610d94ac5f38d3c0059f1edbad29359caf5922a",
+    "d8dd74281ca3a807154e2ed55515323ded799d6c",
+    "d8e120292ac93a43906a7584bbd14814728d11cd",
+    "26f9440be10164bc8be543a2ada44558368eacd0",
+    "4e7b2feb96398e36e2e4170936a4d655824333f7",
+    "6f294e070f95fa53b6c356eaab01db92f1d3449a",
+    "1af07ff73f640eefe5b14840a7f478242b431363",
+    "ff55c40e4292a6d985a7a7b154d7f820b0d51676",
+    "9fb2d2e7e48c834002b716feb511e10cc41732e0",
+    "65cc47a557a557a3023dc67c8ad0f60802b20d15",
+    "1d0e3e0bf07d2103dcf86e8e315613d3c8473fbb",
+    "fafca0d136840c1fef1b16832a0735441afd1198",
+    "ef36576982dcc12922b3a7ace97558c062000e51",
+    "7d15641a47076bd171f5531c1ee346a749909e4f",
+    "a6e835fee2b95724a919c4576e9eccda1b81c908",
+    "2561cd1f6fad515a939467029971e768156a3772",
+    "e9f1610ea954b55f79f9c0317092f98038e0df93",
+    "76af276f6ccad7c7abbbe71ca6671b1f2dd5d89d",
+    "1be22877a7ea927b59b028b164353b84cc7b9590",
+    "9ba99e1a84d8b2faf67997bbbd9fde580d6b05f1",
+    "0789f16864d4f118024307a1eed2babb5938b9f7",
+    "ea05d814df00057fe27209cefce0cc9fd4d5cd64",
+    "f7c782064c3793ff614efab5725105673edac93e",
+    "1c822f5a386ec73167cd116c8d5272de44c4e3d0",
+    "2407f4bb3de11c3f99b7c4df373614b4a643795c",
+    "9b13e2d9049612caf7f2550ceff8fe8d25ab742b",
+    "5cafed11df8628c7c2e02c15530fb57bd60a64a3",
+    "893bae0597993283dd1c51c7971fab0d25930f2e",
+    "138464d3829eb4a1f06a430bcff7002a92f50369",
+    "f6ec7a55a572258a5d7297f8aeb4cad7f494c863",
+    "dcfc2d11b6bc3937d00403a93c35fd5f9eaa74f9",
+    "21b0a2d4def3e607c5f96fdfe8f2ae838887e856",
+    "eb8a01a28d1a82dfab100b0168f8fef7e8daa7e9",
+    "e44164c2d9508e996cfc97653df043f978d7dc38",
+    "dbae843bf9395f8758468db32a4ecc410bb4b8c5",
+    "935eda35cc13c54c6f44af795e9c04f0a701e8b9",
+    "b0711a348decefec339ed7554136eb36b7b56d4e",
+    "244b8fe55eaf47111e568d566311e543ae4d60fa",
+    "05f996b7cfd8755f4fa3b7146a6a39cfdf81fd45",
+    "6691fa5b4ece4d21bc868e57e0d43b409582d927",
+    "56aed7b5fffaafa419019118706c72f6cbe44278",
+    "1a36734a96c4c83ec34ee431cc24440b5866dbf9",
+    "7cc1103920b8484990fb3b6c4ef513ad1e605af0",
+    "de129ef4d7e5936eb3dd418fbf5c6a4f46f7582d",
+    "d0b4e679e0bef3e7bc93859f4b7a3a1fdfe356d1",
+    "243877a86202fad2470950ca0515d3c735ccce87",
+    "329087a456efc1391e22dc4989550bafb80b9159",
+    "1a90fd14357c2ac180014ddc3dc34ffccec84179",
+    "336e808aab58e44544eacb4327bdc20cd792dbe2",
+    "e1c9ac40b44ae1bcdd9410d01236af059debe073",
+    "e6676ce05c171a7bcf455e4302b69bcb6aac8fa7",
+    "475d907c0a2802755fcae78dcc7864ba8f972afe",
+    "7fb1c66f7f97a94b66a96e3ea87ef32f0eaf1874",
+    "570bc0450a870c79180eb582b157bab71e46359a",
+    "6d493a85cfb93a831f51205fac8588d779993a3c",
+    "3d5490ab072744f4e76fe1e2b2f06aa544acab56",
+    "f7bbc2a37ce96052e8fd416e38aa98021ae67fdd",
+    "7f243928a2016bfc5686d95e72a5fa112778f1e8",
+    "30abb8a7d3de5e9efcaa3bce4db87ff9a3f1ca2d",
+    "10d3f39b00424de7f50e0edfd2235987953c0fdb",
+    "7853e45446df618abda1dee18e19bd8bd84f7cd9",
+    "ff1be34a9c7c6d1f40f556573f9743416e92fc20",
+    "ac73639fd9e646c88528586889b646041c493dac",
+    "6ef9e98e68a32126b86b8eb38c84d541d6d0ca11",
+    "0c31ef0ec5e92b974b676ee9788b9fa04fc1a233",
+    "7f75e3a1d15b2e91ea5e1267de8f561994b0d9f8",
+    "010010756f7f2bd539b329f175d8b2a0e375b46e",
+    "d5ffdb7407e0e471423fecc9949aa5c460d33995",
+    "2890f97bbc47897c5d3951ded9c304053bea7d00",
+    "ac504133d03c215e1ca05d9bbb2e16e0c682b145",
+    "23d617e36d14011459aea096ffac67585a238542",
+    "9236d3b6a063137c41fc3ef10ca8528eb89a842c",
+    "4998a56dce23751c7c3ad9e3a886defca0262881",
+    "99be17d37314f14dc474cbd8dceb11b126cc72c8",
+    "11fa69f2b8e725fa1502d561c3718265e836dd89",
+    "672dc9f4af1b8e0209c5bdc89b1d060b6a8d4169",
+    "05b54356eb09efe2e0a33f16cced84da27843511",
+    "cc320375ea0929824848836a048d45ca3f8632a7",
+    "3eb7b6bbfd4ee5259fe3428cd4f4fb2bddf2ec95",
+    "80b49f72858530fb3c2fb30a106c023300f84a41"
+  ]
+}

@@ -153,7 +153,9 @@ def hosted_name() -> str:
 
 from ..agent_catalog import AGENTS as _AGENT_CATALOG
 
-_CLI_ALIAS = {"claude-code": "claude", "claudecode": "claude"}  # Historical names, not selectable Agents.
+# Historical names identify archived seats; they do not register an execution runtime.
+_CLI_ALIAS = {"claude-code": "claude", "claudecode": "claude",
+              "googleharness²": "harness2", "googleharness2": "harness2", "harness²": "harness2"}
 _CLI_ALIAS.update({label.lower().replace(" ", "").replace("_", ""): key
                    for key, row in _AGENT_CATALOG.items()
                    for label in (key, row["displayName"])})

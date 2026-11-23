@@ -58,6 +58,28 @@ if(typeof electron==='string'){
   await wait(()=>calls.filter(x=>x.name==='pair').length===2);
   assert.deepEqual(await page(()=>calls.filter(x=>x.name==='pair')[1].args[1]),{taskId:'new',runnerId:'desktop',allowStart:true,agentId:'pi',model:'synthetic-model'});
   report.checks.push('pairing targets original desktop task and never silently authorizes a start');
+  // An older Hub omits the observation. A later callback must appear when records are refreshed.
+  await click('关闭');
+  await page(()=>{
+   connections[0].provider='wecom';
+   window.originalMessages=api.im.messages;
+   api.im.messages=async()=>({messages:[]});
+  });
+  await click('刷新');await wait(()=>calls.filter(x=>x.name==='catalog').length>=4);
+  await click('管理');await click('查看绑定和消息');await wait(()=>document.querySelector('#modal').textContent.includes('刷新记录'));
+  const records=()=>page(()=>document.querySelector('[data-im-body]').textContent);
+  assert.match(await records(),/尚无进入任务的消息/);
+  assert.doesNotMatch(await records(),/未配对会话/);
+  await page(()=>{api.im.messages=async(...args)=>({...await originalMessages(...args),sawUnpairedMessage:true});});
+  await click('刷新记录');await wait(()=>document.querySelector('#modal').textContent.includes('解除绑定'));
+  assert.match(await records(),/此连接收到过来自未配对会话的消息/);
+  assert.match(await records(),/绑定任务.*选择执行电脑.*目标企微私聊.*一次性配对命令/);
+  assert.match(await records(),/任务 task/);
+  assert.match(await records(),/需要核对/);
+  await click('绑定任务');await wait(()=>document.querySelector('[data-im-body] select'));
+  await click('生成一次性配对命令');await wait(()=>document.querySelector('[data-im-body] input')?.value==='/pair synthetic-code');
+  assert.match(await page(()=>document.querySelector('[data-im-note]').textContent),/目标企微私聊/);
+  report.checks.push('WeCom legacy empty state, refreshed unpaired observation and existing bound task history');
   await click('关闭');await click('管理');await click('查看绑定和消息');await wait(()=>[...document.querySelectorAll('button')].some(x=>x.textContent==='我已核对，结束等待'));
   await click('我已核对，结束等待');assert.equal(await page(()=>calls.filter(x=>x.name==='dismiss').length),0);await click('确认已核对');await wait(()=>calls.some(x=>x.name==='dismiss'));
   await wait(()=>[...document.querySelectorAll('button')].some(x=>x.textContent==='解除绑定'));await click('解除绑定');await wait(()=>calls.some(x=>x.name==='unbind'));

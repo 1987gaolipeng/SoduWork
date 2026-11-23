@@ -28,6 +28,8 @@
 !client/
 !client/core/
 !client/core/connector-brand.js
+!client/core/locales/
+!client/core/locales/builtin-skills.js
 !client/components/
 !client/components/panels/
 !client/components/panels/connector-config.js

@@ -4,6 +4,82 @@ from app.services import execution_event_policy as policy, runtime_messages
 
 
 class StreamIdentityTests(unittest.TestCase):
+    def test_empty_thought_chunks_do_not_split_anonymous_markdown(self):
+        import tempfile
+        from unittest.mock import patch
+        from app.services.acp_bridge import AcpBridge
+        chunks = ["## Delivery\n\n", "A **complete", " sentence**.\n\n",
+                  "| Name | Value |\n| --- | --- |\n", "| Example | 1 |\n\n",
+                  "```js\n", "const value = 1;\n", "```\n"]
+        for agent in ("kimi", "qwen", "dsh", "opencode", "codex", "codex-harness", "acp"):
+            with self.subTest(agent=agent), tempfile.TemporaryDirectory() as cwd:
+                bridge = AcpBridge([], cwd, agent, "workspace")
+                rows = []
+                with patch("app.services.acp_bridge._emit", rows.append):
+                    for chunk in chunks:
+                        # Kimi forwards empty reasoning_content from SSE as ACP thoughts.
+                        bridge._update({"sessionUpdate": "agent_thought_chunk",
+                                        "content": {"type": "text", "text": ""}})
+                        bridge._update({"sessionUpdate": "agent_message_chunk",
+                                        "content": {"type": "text", "text": chunk}})
+                        self.assertFalse(any(row["part"].get("done") for row in rows))
+                    bridge._flush_message()
+                self.assertEqual({row["type"] for row in rows}, {"text"})
+                self.assertEqual({row["part"]["streamId"] for row in rows}, {"acp:message:1"})
+                self.assertEqual("".join(row["part"]["text"] for row in rows), "".join(chunks))
+                self.assertEqual([row["part"]["done"] for row in rows], [False] * len(chunks) + [True])
+
+    def test_nonempty_thought_still_separates_anonymous_messages(self):
+        import tempfile
+        from unittest.mock import patch
+        from app.services.acp_bridge import AcpBridge
+        for thought in ("Check the result.", " \n"):
+            with self.subTest(thought=thought), tempfile.TemporaryDirectory() as cwd:
+                bridge = AcpBridge([], cwd, "kimi", "workspace")
+                rows = []
+                with patch("app.services.acp_bridge._emit", rows.append):
+                    for kind, text in [("agent_message_chunk", "Before."),
+                                       ("agent_thought_chunk", thought),
+                                       ("agent_message_chunk", "After.")]:
+                        bridge._update({"sessionUpdate": kind, "content": {"type": "text", "text": text}})
+                    bridge._flush_message()
+                text = [row["part"] for row in rows if row["type"] == "text"]
+                reasoning = [row["part"] for row in rows if row["type"] == "reasoning"]
+                self.assertEqual([(row["streamId"], row["done"]) for row in text],
+                                 [("acp:message:1", False), ("acp:message:1", True),
+                                  ("acp:message:2", False), ("acp:message:2", True)])
+                self.assertEqual("".join(row["delta"] for row in reasoning), thought)
+                self.assertTrue(reasoning[-1]["done"])
+
+    def test_empty_thoughts_preserve_tool_and_turn_boundaries(self):
+        import tempfile
+        from unittest.mock import patch
+        from app.services.acp_bridge import AcpBridge
+        with tempfile.TemporaryDirectory() as cwd:
+            bridge = AcpBridge([], cwd, "kimi", "workspace")
+            rows = []
+            with patch("app.services.acp_bridge._emit", rows.append):
+                for boundary in ("tool", "turn"):
+                    bridge._update({"sessionUpdate": "agent_message_chunk",
+                                    "content": {"type": "text", "text": "Before " + boundary}})
+                    bridge._update({"sessionUpdate": "agent_thought_chunk",
+                                    "content": {"type": "text", "text": ""}})
+                    if boundary == "tool":
+                        bridge._update({"sessionUpdate": "tool_call", "toolCallId": "read-1",
+                                        "title": "Read", "kind": "read", "rawInput": {"path": "result.txt"}})
+                    else:
+                        bridge._flush_message()
+                bridge._update({"sessionUpdate": "agent_message_chunk",
+                                "content": {"type": "text", "text": "Next turn."}})
+                bridge._flush_message()
+            text = [row["part"] for row in rows if row["type"] == "text"]
+            self.assertEqual([row["streamId"] for row in text if row["done"]],
+                             ["acp:message:1", "acp:message:2", "acp:message:3"])
+            tool_index = next(i for i, row in enumerate(rows) if row["type"] == "tool_use")
+            self.assertEqual(rows[tool_index - 1]["part"], {
+                "streamId": "acp:message:1", "text": "", "delta": "", "done": True})
+            self.assertFalse(any(row["type"] == "reasoning" for row in rows))
+
     def test_acp_repeated_chunks_survive_and_replay_is_idempotent(self):
         run = {"round": 1, "segment": 1, "lines": []}
         for chunk in ["switch", "-", "101", "8", "-", "amber", " ", " ", "amber"]:

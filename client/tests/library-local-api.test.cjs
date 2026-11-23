@@ -11,6 +11,32 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const stale = error => error.code === 'STALE_TASK_SCOPE';
 const shareOptions = { requestId: '6107d6aa-adbf-45ed-8c41-e3de833ee8a3' };
 
+test('explicit filename repair uses only the native owner-scoped route', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.native = async (action, payload) => ({ ok: true, item: { id: payload.id, filename: payload.filename } });
+  const result = await h.api.repairLocalLibraryFilename('local-one', 'recovered.pdf');
+  assert.equal(result.item.filename, 'recovered.pdf');
+  assert.deepEqual(h.nativeCalls.map(row => row.action), ['repairFilename']);
+  assert.equal(h.nativeCalls[0].payload.id, 'local-one');
+  assert.equal(h.nativeCalls[0].payload.filename, 'recovered.pdf');
+  assert.equal(h.nativeCalls[0].payload.owner, 'owner-alice');
+  assert.equal(h.calls.length, 0);
+  for (const id of ['remote-one', 'server-history-one', '']) {
+    await assert.rejects(h.api.repairLocalLibraryFilename(id, 'recovered.pdf'), error => error.code === 'LOCAL_LIBRARY_INVALID');
+  }
+  assert.equal(h.nativeCalls.length, 1); assert.equal(h.calls.length, 0);
+});
+
+for (const changed of ['user', 'hub']) test('pending filename repair cannot dispatch after ' + changed + ' changes', async () => {
+  const h = harness(), owner = deferred(); await h.signIn('alice');
+  h.bridge.localLibrary.context = () => owner.promise;
+  const pending = h.api.repairLocalLibraryFilename('local-one', 'recovered.pdf');
+  await h.switchScope(changed); owner.resolve({ owner: 'owner-alice' });
+  await assert.rejects(pending, stale);
+  assert.equal(h.nativeCalls.length, 0); assert.equal(h.calls.length, 0);
+});
+
+
 test('explicit local sharing sends the current filename and exact bytes only to notification storage', async () => {
   const h = harness(); await h.signIn('alice');
   h.native = async () => ({ ...binary(), name: 'renamed.bin' });

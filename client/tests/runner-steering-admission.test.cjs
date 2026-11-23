@@ -7,10 +7,28 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function deferred() { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; }
 async function until(check) { for (let n = 0; n < 500; n++) { if (check()) return; await delay(5); } throw Error('Runner admission fixture timed out'); }
 
-async function fixture(t, spec, { delayedDispatch = false, delayedPlugin = false, staleReply = false } = {}) {
+async function fixture(t, spec, { delayedDispatch = false, delayedPlugin = false, staleReply = false, delayedGenerationScan = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-steering-admission-'));
   const app = { getPath: () => root }, calls = [], events = [], comments = [];
   const initialPoll = deferred(), secondPoll = deferred(), stop = deferred(), dispatch = deferred(), plugin = deferred();
+  const generationScan = deferred();
+  const outputs = require('../main/pi-session/outputs'), originalScan = outputs.scanAsync;
+  let generationScanCount = 0, generationScanWaiting = false;
+  if (delayedGenerationScan) outputs.scanAsync = async (...args) => {
+    if (args[0] === root && ++generationScanCount === 2) {
+      generationScanWaiting = true;
+      await generationScan.promise;
+    }
+    return originalScan(...args);
+  };
+  let stoppedRefresh;
+  if (delayedGenerationScan) {
+    const immediate = require('../main/agent-runtime/runner-queue-immediate'), originalCreate = immediate.create;
+    t.mock.method(immediate, 'create', options => {
+      stoppedRefresh = options.poll;
+      return originalCreate(options);
+    });
+  }
   const file = path.join(root, 'queued.txt'); fs.writeFileSync(file, 'retained queued attachment');
   let pollCount = 0, status = 'running', rows = [], round = 1;
   const data = () => ({ ok: true, status, round, items: rows,
@@ -49,13 +67,17 @@ async function fixture(t, spec, { delayedDispatch = false, delayedPlugin = false
   const handle = getRunnerSessionDetails(session).handle;
   handle.on((event, snapshot) => events.push({ kind: event.kind, status: snapshot.status, reconnecting: event.reconnecting }));
   t.after(async () => {
+    generationScan.resolve();
+    if (delayedGenerationScan) outputs.scanAsync = originalScan;
     stop.resolve({ ok: true, data: { ok: true } }); plugin.resolve(); dispatch.resolve();
     initialPoll.resolve({ ok: true, data: { ok: true, status: 'stopped', items: [] } });
     secondPoll.resolve({ ok: true, data: { ok: true, status: 'stopped', items: [] } });
     comments.forEach(row => row.resolve({ ok: true, data: { ok: true, state: 'done' } }));
     await session.dispose(); await delay(10); fs.rmSync(root, { recursive: true, force: true });
   });
-  return { handle, calls, comments, events, file, dispatch, plugin, secondPoll, initialPoll,
+  return { handle, calls, comments, events, file, dispatch, plugin, secondPoll, initialPoll, generationScan,
+    get generationScanWaiting() { return generationScanWaiting; },
+    refreshStopped: () => stoppedRefresh(),
     get polls() { return pollCount; },
     async cancelOriginal() {
       const first = handle.submit('original request', []);
@@ -111,6 +133,26 @@ for (const spec of catalog.runnerRuntimes()) {
   });
 }
 
+for (const spec of catalog.runnerRuntimes()) {
+  test(spec.id + ': stopped refresh stays fenced while the draft baseline scan is held', async t => {
+    const f = await fixture(t, spec, { delayedGenerationScan: true });
+    const { guide, later } = await f.beginSteering();
+    await until(() => f.generationScanWaiting);
+    await f.refreshStopped();
+    await delay(35);
+    assert.equal(f.polls, 1, 'old stop timer must not poll during asynchronous draft preparation');
+    assert.equal(f.comments.length, 0);
+    assert.equal(f.handle.snapshot().status, 'streaming');
+    assert.deepEqual(f.handle.snapshot().execution.queue.map(row => row.id), [later.queueId]);
+    f.generationScan.resolve();
+    await until(() => f.comments.length === 1);
+    await delay(35);
+    assert.equal(f.polls, 1, 'native admission remains fenced after draft preparation');
+    f.admit(); f.complete();
+    assert.equal((await guide.completion).ok, true);
+  });
+}
+
 for (const stale of ['stopped', 'transport-error']) test('an in-flight ' + stale + ' observation from before manual stop cannot complete the next turn', async t => {
   const f = await fixture(t, catalog.runtime('opencode'), { delayedPlugin: true });
   await f.cancelOriginal();
@@ -148,6 +190,7 @@ for (const operation of ['dispatch', 'comment']) for (const outcome of ['rejecte
     if (operation === 'dispatch') {
       active = f.handle.submit('initial request', []);
       later = f.handle.submit('later request', [{ path: f.file, name: 'queued.txt' }], { submissionId: 'later' });
+      await until(() => f.calls.some(row => row.op === 'job.dispatch'));
       reply = f.dispatch;
     } else {
       await f.cancelOriginal();

@@ -77,7 +77,7 @@ test('automation sheet translates model selector text on initial render and refr
 
   const initial = modelField('', 'local:pi');
   assert.match(initial, /value="gpt-5" selected/);
-  assert.match(initial, /The model is saved independently and each run uses this choice/);
+  assert.match(initial, /<span>Model<\/span>/);
   assert.doesNotMatch(initial, /请选择模型|模型与执行底座独立保存/);
   assert.match(modelRows('missing-model', 'local:pi'), /value="gpt-5" selected/);
   state.modelOptions = [];
@@ -94,7 +94,6 @@ test('automation sheet translates model selector text on initial render and refr
   assert.equal(select.disabled, false);
 
   assert.match(modelField('', 'local:codex'), /Managed by this runtime/);
-  assert.match(modelField('', 'local:codex'), /This runtime manages its model/);
   assert.doesNotMatch(modelField('', 'local:codex'), /由底座自身管理模型|当前底座自行管理模型/);
   state.modelOptions = [];
   assert.match(modelRows('', 'local:pi'), /No models are available/);
@@ -244,7 +243,9 @@ test('rhythm parser reads Chinese clocks and preserves periodic scheduling', () 
   assert.equal(rhythm('每天14:10打卡提醒'), 'daily 14:10');
   assert.equal(rhythm('每天下午14:10打卡'), 'daily 14:10');
   assert.equal(rhythm('每天下午2点10分打卡'), 'daily 14:10');
-  assert.equal(rhythm('每小时第10分巡检'), 'hourly 18:10');
-  /* Use the default time only when no explicit time is present. */
-  assert.equal(rhythm('每天提醒我喝水'), 'daily 18:00');
+  assert.equal(rhythm('每小时第10分巡检'), 'hourly 00:10');
+  /* Missing clocks must be completed explicitly, never defaulted to 18:00. */
+  const missing = window.ScheduleTiming.infer('每天提醒我喝水');
+  assert.equal(missing.atHour, null);
+  assert.ok(window.ScheduleTiming.validate(missing));
 });

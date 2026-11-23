@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
 import threading
 import time
 import uuid
@@ -170,6 +171,10 @@ class _Runner:
 
     def __init__(self, ws, info: dict):
         self.ws = ws
+        self.connection_id = uuid.uuid4().hex[:12]
+        self.close_reason = "peer_disconnect"
+        self.local_connection_removed = False
+        self.ownership_released = False
         self.id = str(info.get("runnerId") or "")[:64]
         self.host = str(info.get("host") or "")[:80]
         self.os = str(info.get("os") or "")[:40]
@@ -379,6 +384,7 @@ def add(ws, info: dict) -> _Runner:
         if str(old.client_id or "") != str(r.client_id or ""):
             raise RunnerIdentityConflict()
         # Replace the previous connection when the same Runner reconnects.
+        old.close_reason = "connection_replaced"
         log.info("执行机 %s 重连，替换旧连接", r.id)
         for fut in list(old._waiters.values()):
             if not fut.done():
@@ -390,6 +396,20 @@ def add(ws, info: dict) -> _Runner:
             pass
     _RUNNERS[r.id] = r
     return r
+
+
+def log_connection(runner, event, *, close_code=None):
+    """Emit bounded facts without hostnames, peer reason text or credentials."""
+    from .cluster_bus import bus
+    log.info("runner_connection %s", json.dumps({
+        "event": event, "runnerId": runner.id, "connectionId": runner.connection_id,
+        "version": runner.version, "hubNode": bus.node,
+        "closeCode": close_code, "cause": runner.close_reason if event != "online" else "",
+        "onlineSeconds": round(max(0, time.time() - runner.connected_at), 2),
+        "lastBeatAgeSeconds": round(max(0, time.time() - runner.last_beat), 2),
+        "removedLocalConnection": runner.local_connection_removed,
+        "releasedOwnership": runner.ownership_released,
+    }, ensure_ascii=True))
 
 
 async def _close_quietly(ws, code: int) -> None:
@@ -406,6 +426,7 @@ def drop(runner_id: str, ws=None) -> bool:
     cur = _RUNNERS.get(runner_id)
     if cur is not None and (ws is None or cur.ws is ws):
         _RUNNERS.pop(runner_id, None)
+        cur.local_connection_removed = True
         for fut in list(cur._waiters.values()):
             if not fut.done():
                 fut.set_result({"ok": False, "error": "执行机连接已断开",
@@ -421,6 +442,7 @@ async def disconnect_client(client_id: str, code: int = 4403, *, _local: bool = 
         await bus.broadcast({"kind": "revoke", "device": client_id, "code": code})
     targets = [r for r in list(_RUNNERS.values()) if r.client_id == client_id]
     for runner in targets:
+        runner.close_reason = "device_revoked"
         drop(runner.id, runner.ws)
         try:
             await runner.ws.close(code=code)
@@ -433,6 +455,7 @@ async def disconnect_runner(runner_id: str, code: int = 4401) -> bool:
     runner = _RUNNERS.get(str(runner_id or ""))
     if runner is None:
         return False
+    runner.close_reason = "runner_revoked"
     removed = drop(runner.id, runner.ws)
     try:
         await runner.ws.close(code=code)

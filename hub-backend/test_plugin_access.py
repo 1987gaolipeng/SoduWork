@@ -511,6 +511,24 @@ class PluginAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail["latestVersion"]["trustState"], "quarantined")
         self.assertFalse(detail["latestVersion"]["enabled"])
 
+    async def test_catalog_install_and_review_counts_follow_scope_and_version(self):
+        def review(org_id, verdict, version_id):
+            return am.PluginEvaluationRun(plugin_id=self.plugin.id, version_id=version_id, case_key="sample",
+                                          state="completed", verdict=verdict, org_id=org_id)
+        self.session.add_all([
+            am.PluginInstallation(plugin_id=self.plugin.id, version_id=self.version.id, user_id="outside"),
+            am.PluginInstallation(plugin_id=self.plugin.id, version_id=self.version.id, user_id="author", enabled=False),
+            review("company", "passed", self.version.id), review("company", "failed", self.version.id),
+            review("company", "pending", self.version.id), review("other", "failed", self.version.id),
+            review("company", "passed", "old-version"),
+        ])
+        await self.session.commit()
+        for scope, installs, total in (({"company", "subteam"}, 1, 2), (None, 2, 3)):
+            with self.subTest(scope=scope):
+                row, = await plugin_service.management_catalog(self.session, scope)
+                self.assertEqual(row["activeInstallCount"], installs)
+                self.assertEqual(row["latestVersion"]["reviewedEvaluations"], {"passed": 1, "total": total})
+
     async def test_submission_time_still_precedes_semver_for_management_history(self):
         stamp = datetime(2026, 10, 20, tzinfo=timezone.utc)
         self.version.created_at = stamp + timedelta(seconds=1)

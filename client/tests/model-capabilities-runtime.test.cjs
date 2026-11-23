@@ -18,8 +18,49 @@ test('saved output budget and native capability metadata reach both Pi configura
  assert.equal(written.providers.soduwork.models[0].maxTokens,32768);
  assert.deepEqual(written.providers.soduwork.models[0].input,['text','image']);
  assert.ok(!JSON.stringify(written).includes('fixture-key'));
- assert.equal(outputLimit({maxOutputTokens:Infinity}),65536);
+ assert.equal(outputLimit({maxOutputTokens:Infinity}),16384);
  assert.equal(outputLimit({maxOutputTokens:40000,contextWindow:8192}),8192);
+});
+
+test('real Pi wire budgets preserve explicit limits and default below a 32768-token provider cap', async () => {
+ const { pathToFileURL } = require('node:url');
+ const { streamSimple } = await import(pathToFileURL(path.resolve(__dirname,
+  '../node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js')).href);
+ const caps = require('../main/model-capability-contract.cjs');
+ const errors = require('../main/pi-session/model-errors');
+ for (const field of ['max_tokens', 'max_completion_tokens']) {
+  for (const [saved, budget, stop] of [[{}, 16384, 'stop'], [{maxOutputTokens:32768}, 32768, 'stop'],
+   [{maxOutputTokens:65536}, 65536, 'error']]) {
+   const provider = piProvider({id:'fixture',baseUrl:'https://fixture.invalid/v1',contextWindow:131072,
+    thinkingMode:'none',...caps.runtimeFields(saved),compatibility:{maxTokensField:field}});
+   const model = {...provider.models[0],api:provider.api,provider:'soduwork',baseUrl:provider.baseUrl};
+   let calls = 0;
+   const result = await streamSimple(model, {messages:[{role:'user',content:'OK',timestamp:1}]}, {
+    apiKey:'synthetic-fixture',maxRetries:0,timeoutMs:2000,env:{},
+    fetch:async (_url, options) => {
+     calls++;
+     const body = JSON.parse(options.body);
+     assert.equal(body[field], budget);
+     assert.equal(body[field === 'max_tokens' ? 'max_completion_tokens' : 'max_tokens'], undefined);
+     if (budget > 32768) return new Response(JSON.stringify({error:{message:
+      field + '=' + budget + ' cannot be greater than max_model_len=32768'}}),
+      {status:400,headers:{'content-type':'application/json'}});
+     const frame = {id:'fixture',object:'chat.completion.chunk',choices:[{
+      index:0,delta:{role:'assistant',content:'OK'},finish_reason:'stop'}]};
+     return new Response('data: ' + JSON.stringify(frame) + '\n\ndata: [DONE]\n\n',
+      {headers:{'content-type':'text/event-stream'}});
+    }
+   }).result();
+   assert.equal(model.contextWindow, 131072);
+   assert.equal(result.stopReason, stop);
+   assert.equal(calls, 1);
+   if (stop === 'error') {
+    assert.equal(errors.describe(result.errorMessage).code, 'output_token_limit_exceeded');
+    assert.equal(errors.describe(result.errorMessage).retryable, false);
+   }
+  }
+ }
+ assert.equal(outputLimit({contextWindow:8192}),8192);
 });
 
 test('same-name model capability revisions apply only at a turn boundary',async()=>{
@@ -86,7 +127,7 @@ test('required unsupported combinations fail clearly while unknown capabilities 
 test('streaming Runner runtimes reject known unsupported streaming before launch',()=>{
  const runner=require('../main/agent-runtime/runner-config.cjs');
  const base={id:'alias',baseUrl:'http://127.0.0.1:1/v1',key:'fixture'};
- for(const runtime of ['pi','harness2']){
+ for(const runtime of ['pi']){
   assert.throws(()=>runner.create({...base,capabilityProfile:{streaming:{state:'unsupported'}}},runtime),/流式/);
   assert.doesNotThrow(()=>runner.create({...base,capabilityProfile:{streaming:{state:'unknown'}}},runtime));
  }

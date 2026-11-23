@@ -2,6 +2,11 @@ name: Native package validation
 
 on:
   workflow_dispatch:
+    inputs:
+      signed_linux:
+        description: Build signed Linux packages and run native installation acceptance only
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -12,6 +17,7 @@ concurrency:
 
 jobs:
   packages:
+    if: ${{ !inputs.signed_linux }}
     name: Package ${{ matrix.shard }}
     strategy:
       fail-fast: false
@@ -60,3 +66,58 @@ jobs:
           path: release-evidence/${{ matrix.shard }}-build.json
           if-no-files-found: error
           retention-days: 30
+
+  signed-linux:
+    if: inputs.signed_linux
+    name: Signed Linux packages and installation acceptance
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    env:
+      PACKAGE_VALIDATION_REPOSITORY: ${{ vars.PACKAGE_VALIDATION_REPOSITORY }}
+      PYTHONUTF8: '1'
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+      PIP_INDEX_URL: https://pypi.org/simple
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install Linux packaging and signing tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-15 rpm gnupg libarchive-tools xvfb xauth
+      - name: Verify release tools and source boundary
+        run: |
+          python -m unittest discover -s tools/github -p 'test_*.py'
+          python tools/github/check_public_ci.py
+          node tools/check-public-source.cjs
+          node tools/check-third-party.cjs
+          python tools/security/scan_secrets.py --download
+      - name: Build, sign and accept the exact Linux packages
+        run: python tools/github/validate_signed_linux.py --output release-evidence/signed-linux
+        env:
+          SODUWORK_LINUX_SIGNING_KEY_B64: ${{ secrets.SODUWORK_LINUX_SIGNING_KEY_B64 }}
+          SODUWORK_LINUX_SIGNING_PASSPHRASE: ${{ secrets.SODUWORK_LINUX_SIGNING_PASSPHRASE }}
+          SODUWORK_LINUX_SIGNING_FINGERPRINT: ${{ vars.SODUWORK_LINUX_SIGNING_FINGERPRINT }}
+      - name: Retain signed packages and validation receipt
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-linux-validation
+          path: release-evidence/signed-linux/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - name: Retain native installation diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-linux-installation-evidence
+          path: release-evidence/linux/
+          if-no-files-found: ignore
+          retention-days: 7

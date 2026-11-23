@@ -24,6 +24,31 @@ from app.services import device_auth, model_config_guard, runtime_images, ai_exe
 
 
 class CapabilityTests(IsolatedDatabase):
+    async def test_creation_receipt_precedes_a_concurrent_edit_after_commit(self):
+        from app.api import admin
+        from app.services import client_domain_events
+        self.app.include_router(admin.router)
+        created = {}
+
+        async def edit_after_commit(_session):
+            async with self.sessions() as session:
+                rows = await catalog.catalog(session)
+                model = next(row for row in rows["models"] if row["id"] == "p:new")
+                created.update(id=model["id"], revision=model["revision"], configRevision=model["configRevision"],
+                               providerRevision=rows["providers"][0]["revision"])
+                saved = await model_config_guard.catalog(session, ModelDef, model["id"], model["revision"])
+                saved.ctx_window = 65536
+                await session.commit()
+
+        with patch.object(client_domain_events, "models_changed", edit_after_commit), patch.object(admin.audit, "log", new=AsyncMock()):
+            response = await self.http.put("/api/v1/admin/model-defs", headers=self.headers["admin"],
+                                           json={"providerId": "p", "name": "new", "expectedRevision": "new"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"ok": True, **created})
+        stale = await self.check(model="new", checks=["connection"], expectedConfigRevision=created["configRevision"])
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(self.requests, [])
+
     async def test_admin_model_edit_persists_capabilities_and_rejects_conflicting_limits(self):
         from app.api import admin
         self.app.include_router(admin.router)
@@ -63,8 +88,12 @@ class CapabilityTests(IsolatedDatabase):
             session.add_all([
                 User(id="admin", username="admin", is_super=True),
                 User(id="alice", username="alice"), User(id="bob", username="bob"),
-                Client(id="a", user_ref="alice", auth_state="active", model_keys={"p": "alice-private"}),
-                Client(id="b", user_ref="bob", auth_state="active", model_keys={"p": "bob-private"}),
+                *[Client(id=cid, user_ref=owner, auth_state="active", model_keys={"custom-p": owner + "-private"},
+                         config={"modelProviders": [{"id": "custom-p", "name": "Personal", "baseUrl": self.base,
+                                                      "personal": True, "kind": "openai-compat"}]},
+                         models=[{"providerId": "custom-p", "name": "personal-model", "ctxWindow": 128000,
+                                  "config": {"imageRouting": "auto", "maxOutputTokens": 32768}}])
+                  for cid, owner in (("a", "alice"), ("b", "bob"))],
                 ModelProvider(id="p", name="Fixture", api_key="company-private", base_url=self.base),
                 ModelDef(id="p:model", provider_id="p", name="model", ctx_window=128000,
                          config={"imageRouting": "auto", "maxOutputTokens": 32768}),
@@ -118,10 +147,20 @@ class CapabilityTests(IsolatedDatabase):
                 status, data = "401 Unauthorized", b'{"error":{"message":"company-private secret internal response"}}'
             elif body.get("stream"):
                 content_type = "text/event-stream"
-                if body.get("tools"):
+                tool_result = next((row for row in body["messages"] if row["role"] == "tool"), None)
+                if tool_result:
+                    if self.mode == "receipt-requires-choice" and "tool_choice" not in body:
+                        status, content_type = "403 Forbidden", "application/json"
+                        data = b'{"error":{"message":"synthetic receipt policy refusal"}}'
+                    else:
+                        data = ("data: " + json.dumps({"choices": [{"index": 0, "delta": {
+                            "content": tool_result["content"]}, "finish_reason": "stop"}]}) + "\n\ndata: [DONE]\n\n").encode()
+                elif body.get("tools"):
                     if self.mode == "json-tools-only":
                         status, content_type = "400 Bad Request", "application/json"
                         data = b'{"error":{"message":"streamed tools request not accepted"}}'
+                    elif self.mode == "auto-only-tools" and isinstance(body.get("tool_choice"), dict):
+                        data = b'data: {"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
                     else:
                         value = re.search(r"value ([a-f0-9]+)", body["messages"][0]["content"])[1]
                         arguments = json.dumps({"value": value})
@@ -138,9 +177,9 @@ class CapabilityTests(IsolatedDatabase):
                             b'data: {"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
             else:
                 message = {"content": "OK"}
-                if body["messages"][-1]["role"] == "tool":
-                    result = json.loads(body["messages"][-1]["content"])
-                    message = {"content": result["receipt"]}
+                tool_result = next((row for row in body["messages"] if row["role"] == "tool"), None)
+                if tool_result:
+                    message = {"content": tool_result["content"]}
                 elif body.get("tools"):
                     value = re.search(r"value ([a-f0-9]+)", body["messages"][0]["content"])[1]
                     message = {"tool_calls": [{"id": "call-test", "type": "function", "function": {
@@ -161,22 +200,24 @@ class CapabilityTests(IsolatedDatabase):
             writer.close()
             await writer.wait_closed()
 
-    async def check(self, who="a", checks=None, **extra):
+    async def check(self, who="admin", checks=None, **extra):
         path = "/api/v1/admin/model-capabilities/check" if who == "admin" else "/api/v1/my-models/capabilities/check"
         return await self.http.post(path, headers=self.headers.get(who, {}), json={
-            "providerId": "p", "model": "model", "checks": checks or list(probe.CHECKS), **extra})
+            "providerId": "p" if who == "admin" else "custom-p",
+            "model": "model" if who == "admin" else "personal-model",
+            "checks": checks or list(probe.CHECKS), **extra})
 
     async def test_real_checks_persist_and_propagate_to_runtime_with_scoped_evidence(self):
-        response = await self.check()
+        response = await self.check("a")
         self.assertEqual(response.status_code, 200, response.text)
         result = response.json()
         self.assertTrue(result["ok"], result)
         self.assertEqual(len(self.requests), 5)
         tool_request = next(body for _, body in self.requests if body.get("tools"))
-        receipt_request = next(body for _, body in self.requests if body["messages"][-1]["role"] == "tool")
+        receipt_request = next(body for _, body in self.requests if any(row["role"] == "tool" for row in body["messages"]))
         self.assertTrue(tool_request["stream"])
-        self.assertFalse(receipt_request["stream"])
-        self.assertNotIn("tools", receipt_request)
+        self.assertTrue(receipt_request["stream"])
+        self.assertEqual(receipt_request["tools"], tool_request["tools"])
         self.assertNotIn("tool_choice", receipt_request)
         self.assertTrue(all("Bearer alice-private" in headers for headers, _ in self.requests))
         self.assertEqual(result["capabilityProfile"]["imageInput"]["source"], "verified")
@@ -184,18 +225,19 @@ class CapabilityTests(IsolatedDatabase):
         self.assertEqual(result["imageRouting"], "native")
         self.assertNotIn("alice-private", response.text)
         mine = await self.http.get("/api/v1/my-models", headers=self.headers["a"])
-        self.assertTrue(mine.json()["usable"][0]["capabilityCheck"]["checkedAt"])
-        config = await self.http.get("/api/v1/ai-proxy/config", headers=self.headers["a"])
+        personal = next(row for row in mine.json()["usable"] if row["own"])
+        self.assertTrue(personal["capabilityCheck"]["checkedAt"])
+        config = await self.http.get("/api/v1/ai-proxy/config?model=personal-model", headers=self.headers["a"])
         self.assertEqual(config.json()["input"], ["text", "image"])
         self.assertEqual(config.json()["maxOutputTokens"], 32768)
         self.assertEqual(config.json().get("compatibility"), result["compatibility"])
         async with self.sessions() as session:
             admin = (await catalog.catalog(session))["models"][0]
-            bob = (await catalog.usable(session, await session.get(Client, "b")))[0]
+            bob = next(row for row in await catalog.usable(session, await session.get(Client, "b")) if row["own"])
             self.assertIsNone(admin["capabilityCheck"])
             self.assertIsNone(bob["capabilityCheck"])
             self.assertEqual(bob["imageRouting"], "vision-fallback")
-            alice = await catalog.resolve(session, await session.get(Client, "a"))
+            alice = await catalog.resolve(session, await session.get(Client, "a"), "personal-model")
             llm = ai_exec.with_llm({"cfg": {"llm": {}}}, alice)["cfg"]["llm"]
             self.assertEqual(llm["maxOutputTokens"], 32768)
             self.assertEqual(llm["capabilityProfile"]["streaming"]["state"], "supported")
@@ -211,6 +253,44 @@ class CapabilityTests(IsolatedDatabase):
             self.assertEqual(events[0].target_id, "p:model")
             self.assertEqual(events[0].detail, {"checks": {"connection": "passed"}})
 
+    async def test_single_check_reports_its_own_success_and_retains_other_evidence(self):
+        self.mode = "wrong-image"
+        first = (await self.check(checks=["connection", "imageInput"])).json()
+        self.assertFalse(first["ok"])
+        self.assertEqual(first["checks"]["imageInput"]["status"], "inconclusive")
+
+        response = await self.check(checks=["connection"])
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertEqual(result["checks"]["connection"]["status"], "passed")
+        self.assertEqual(result["checks"]["imageInput"], first["checks"]["imageInput"])
+        self.assertTrue(result["ok"])
+
+    async def test_admin_recheck_repairs_and_persists_cached_named_tool_choice(self):
+        first = await self.check("admin", ["connection"])
+        self.assertEqual(first.status_code, 200, first.text)
+        async with self.sessions() as session:
+            row = (await session.scalars(select(AppSetting).where(
+                AppSetting.key.startswith("model-check-v1:")))).one()
+            saved = json.loads(row.value)
+            saved["compatibility"]["toolChoice"] = "named"
+            row.value = json.dumps(saved)
+            await session.commit()
+
+        self.mode = "auto-only-tools"
+        for expected_choices in (["named", "auto"], ["auto"]):
+            self.requests.clear()
+            response = await self.check("admin", ["toolCalling"])
+            self.assertEqual(response.status_code, 200, response.text)
+            result = response.json()
+            self.assertEqual(result["capabilityProfile"]["toolCalling"]["source"], "verified")
+            self.assertEqual(result["capabilityProfile"]["toolCalling"]["state"], "supported")
+            self.assertEqual(result["compatibility"]["toolChoice"], "auto")
+            choices = ["named" if isinstance(body["tool_choice"], dict) else body["tool_choice"]
+                       for _, body in self.requests if "tool_choice" in body]
+            self.assertEqual(choices, expected_choices)
+            self.assertEqual(len(self.requests), len(expected_choices) + 1)
+
     async def test_auth_saved_scope_and_no_arbitrary_endpoint(self):
         self.assertEqual((await self.check("missing")).status_code, 401)
         self.assertEqual((await self.check(baseUrl="https://attacker.invalid")).status_code, 400)
@@ -220,6 +300,37 @@ class CapabilityTests(IsolatedDatabase):
         response = await self.http.post("/api/v1/admin/model-capabilities/check", headers={"Authorization": "Bearer " + no_permission}, json={})
         self.assertEqual(response.status_code, 403)
         self.assertEqual(self.requests, [])
+
+    async def test_queued_check_requires_the_saved_configuration_before_contacting_the_provider(self):
+        async with self.sessions() as session:
+            row = (await catalog.catalog(session))["models"][0]
+            previous = row["configRevision"]
+            provider = await session.get(ModelProvider, "p")
+            provider.api_key = "rotated-test-key"
+            await session.commit()
+        async with self.sessions() as session:
+            current = (await catalog.catalog(session))["models"][0]["configRevision"]
+        self.assertNotEqual(previous, current)
+        stale = await self.check(checks=["connection"], expectedConfigRevision=previous)
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(stale.headers.get("X-Error-Code"), "model_config_revision_changed")
+        self.assertEqual(stale.json()["detail"], "模型配置在检测期间已变更，请重新检测")
+        self.assertEqual(self.requests, [])
+        fresh = await self.check(checks=["connection"], expectedConfigRevision=current)
+        self.assertEqual(fresh.status_code, 200, fresh.text)
+        self.assertEqual(fresh.json()["checks"]["connection"]["status"], "passed")
+        self.assertEqual(len(self.requests), 1)
+
+    async def test_receipt_probe_uses_runtime_default_choice_and_keeps_independent_stream_check(self):
+        self.mode = "receipt-requires-choice"
+        response = await self.check(checks=["connection", "toolCalling", "streaming"])
+        self.assertEqual(response.status_code, 200)
+        checks = response.json()["checks"]
+        self.assertEqual(checks["connection"]["status"], "passed")
+        self.assertEqual(checks["streaming"]["status"], "passed")
+        self.assertEqual(checks["toolCalling"]["status"], "inconclusive")
+        self.assertEqual(checks["toolCalling"]["code"], "request_rejected")
+        self.assertEqual(checks["toolCalling"]["stage"], "tool_result")
 
     async def test_json_only_tools_do_not_enable_streamed_tool_runtime(self):
         self.mode = "json-tools-only"
@@ -235,8 +346,7 @@ class CapabilityTests(IsolatedDatabase):
     async def test_organization_evidence_follows_org_credentials_and_runtime_revision_changes(self):
         async with self.sessions() as session:
             client = await session.get(Client, "b")
-            client.model_keys = {}
-            client.models = [{"providerId": "p", "name": "personal-alias", "config": {"imageRouting": "auto"}}]
+            client.models = [{"providerId": "custom-p", "name": "personal-alias", "config": {"imageRouting": "auto"}}]
             await session.commit()
         before = (await self.http.get("/api/v1/ai-proxy/config", headers=self.headers["b"])).json()
         result = await self.check("admin", ["imageInput"])
@@ -246,7 +356,7 @@ class CapabilityTests(IsolatedDatabase):
         self.assertEqual(after["capabilityProfile"]["imageInput"]["source"], "verified")
         self.assertEqual(before["configRevision"], after["configRevision"])
         self.assertNotEqual(before["runtimeRevision"], after["runtimeRevision"])
-        alice = (await self.http.get("/api/v1/ai-proxy/config", headers=self.headers["a"])).json()
+        alice = (await self.http.get("/api/v1/ai-proxy/config?model=personal-model", headers=self.headers["a"])).json()
         self.assertEqual(alice["imageRouting"], "vision-fallback")
         mine = (await self.http.get("/api/v1/my-models", headers=self.headers["b"])).json()
         own = next(row for row in mine["usable"] if row["own"])
@@ -254,7 +364,7 @@ class CapabilityTests(IsolatedDatabase):
         self.assertEqual(own["imageRouting"], "vision-fallback")
 
     async def test_key_address_model_config_changes_invalidate_evidence(self):
-        self.assertTrue((await self.check(checks=["connection", "imageInput"])).json()["ok"])
+        self.assertTrue((await self.check("a", checks=["connection", "imageInput"])).json()["ok"])
         async with self.sessions() as session:
             client = await session.get(Client, "a")
             model = await session.get(ModelDef, "p:model")
@@ -268,25 +378,31 @@ class CapabilityTests(IsolatedDatabase):
                         (row, p, "changed-key")]
             for changed, provider, key in variants:
                 self.assertNotEqual(caps.identity(changed, provider, key, scope)[1], before)
-            client.model_keys = {"p": "new-private"}
+            client.model_keys = {"custom-p": "new-private"}
             await session.commit()
         async with self.sessions() as session:
-            row = (await catalog.usable(session, await session.get(Client, "a")))[0]
+            row = next(row for row in await catalog.usable(session, await session.get(Client, "a")) if row["own"])
             self.assertIsNone(row["capabilityCheck"])
             self.assertEqual(row["capabilityProfile"]["imageInput"]["state"], "unknown")
 
-    async def test_timeout_unsupported_and_bad_answer_have_distinct_truthful_results(self):
+    async def test_timeout_keeps_capability_unconfirmed(self):
         self.mode = "timeout"
         with patch.object(probe, "TIMEOUT", .15):
             result = (await self.check(checks=["imageInput"])).json()
         self.assertEqual(result["checks"]["imageInput"]["status"], "inconclusive")
+        self.assertEqual(result["checks"]["imageInput"]["code"], "timeout")
         self.assertEqual(result["capabilityProfile"]["imageInput"]["state"], "unknown")
+
+    async def test_unsupported_and_bad_answer_have_distinct_truthful_results(self):
+        # Keep timeout cancellation on a separate listener from response checks.
         self.mode = "wrong-image"
         result = (await self.check(checks=["imageInput"])).json()
         self.assertEqual(result["checks"]["imageInput"]["code"], "expected_output_missing")
         self.mode = "unsupported"
         result = (await self.check(checks=["imageInput"])).json()
         self.assertEqual(result["checks"]["imageInput"]["status"], "unsupported")
+        self.assertEqual(result["capabilityProfile"]["imageInput"]["state"], "unsupported")
+        self.assertEqual(result["imageRouting"], "vision-fallback")
         self.mode = "private-error"
         response = await self.check(checks=["connection"])
         self.assertNotIn("company-private", response.text)
@@ -305,6 +421,7 @@ class CapabilityTests(IsolatedDatabase):
         with patch.object(probe, "run", side_effect=changed):
             result = await self.check(checks=["connection"])
         self.assertEqual(result.status_code, 409)
+        self.assertEqual(result.headers.get("X-Error-Code"), "model_config_revision_changed")
 
     async def test_latest_transient_result_preserves_verified_evidence(self):
         first = (await self.check(checks=["imageInput"])).json()
@@ -315,6 +432,37 @@ class CapabilityTests(IsolatedDatabase):
         self.assertEqual(latest["verifiedChecks"]["imageInput"]["status"], "passed")
         self.assertEqual(latest["imageRouting"], "native")
         self.assertEqual(first["runtimeRevision"], latest["runtimeRevision"])
+
+    async def test_image_rejection_preserves_proven_native_route_across_catalog_reads(self):
+        first = (await self.check(checks=["imageInput"])).json()
+        original = first["checks"]["imageInput"]
+        self.assertEqual(original["status"], "passed")
+        self.mode = "unsupported"
+        for _ in range(2):
+            rejected = (await self.check(checks=["imageInput"])).json()
+            self.assertFalse(rejected["ok"])
+            self.assertEqual(rejected["checks"]["imageInput"]["status"], "unsupported")
+            self.assertEqual(rejected["verifiedChecks"]["imageInput"], original)
+            self.assertEqual(rejected["runtimeRevision"], first["runtimeRevision"])
+            async with self.sessions() as session:
+                row = (await catalog.catalog(session))["models"][0]
+                self.assertEqual(row["input"], ["text", "image"])
+                self.assertEqual(row["imageRouting"], "native")
+                self.assertEqual(row["capabilityCheck"]["checks"]["imageInput"], rejected["checks"]["imageInput"])
+                self.assertEqual(row["capabilityCheck"]["verifiedChecks"]["imageInput"], original)
+        self.mode = "wrong-image"
+        uncertain = (await self.check(checks=["imageInput"])).json()
+        self.assertEqual(uncertain["checks"]["imageInput"]["status"], "inconclusive")
+        self.assertEqual(uncertain["verifiedChecks"]["imageInput"], original)
+        for evidence in (rejected, uncertain):
+            for declaration, expected_conflict in (("supported", True), ("unsupported", False)):
+                manual = caps.profile({"capabilities": {"imageInput": declaration}}, evidence)["imageInput"]
+                self.assertEqual(manual["state"], declaration)
+                self.assertEqual(bool(manual.get("conflict")), expected_conflict)
+        self.mode = "ok"
+        recovered = (await self.check(checks=["imageInput"])).json()
+        self.assertEqual(recovered["checks"]["imageInput"]["status"], "passed")
+        self.assertEqual(recovered["verifiedChecks"]["imageInput"], recovered["checks"]["imageInput"])
 
     async def test_older_started_run_cannot_overwrite_newer_result(self):
         old = {"configRevision": "same", "runSequence": 1, "checkedAt": "later-finish",
@@ -363,15 +511,23 @@ class CapabilityTests(IsolatedDatabase):
         async with self.sessions() as session:
             client = await session.get(Client, "a")
             task = asyncio.create_task(api.model_transport.until_disconnect(request, api.check_saved(
-                {"providerId": "p", "model": "model", "checks": ["connection"]}, session, client)))
-            async with asyncio.timeout(3):
-                while not self.requests:
-                    await asyncio.sleep(.01)
-            disconnected.set()
-            from fastapi import HTTPException
-            with self.assertRaises(HTTPException) as caught:
-                await task
-            self.assertEqual(caught.exception.status_code, 499)
+                {"providerId": "custom-p", "model": "personal-model", "checks": ["connection"]}, session, client)))
+            try:
+                # Wait for the real loopback request, including cold DB/runtime
+                # admission on slower hosts; cancellation itself is unchanged.
+                async with asyncio.timeout(10):
+                    while not self.requests:
+                        await asyncio.sleep(.01)
+                disconnected.set()
+                from fastapi import HTTPException
+                with self.assertRaises(HTTPException) as caught:
+                    await task
+                self.assertEqual(caught.exception.status_code, 499)
+            finally:
+                disconnected.set()
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
         async with self.sessions() as session:
             records = list((await session.scalars(select(AppSetting))).all())
             for row in records:
@@ -392,7 +548,7 @@ class CapabilityTests(IsolatedDatabase):
                 await session.commit()
             return result
         with patch.object(probe, "run", side_effect=rotate):
-            response = await self.check(checks=["connection"])
+            response = await self.check("a", checks=["connection"])
         self.assertEqual(response.status_code, 401)
         async with self.sessions() as session:
             rows = list((await session.scalars(select(AppSetting))).all())
@@ -463,8 +619,8 @@ class CapabilityTests(IsolatedDatabase):
             client = await session.get(Client, "a")
             row = catalog._m_api(await session.get(ModelDef, "p:model"))
             provider = (await catalog.effective_provider_map(session, client))["p"]
-            scope = caps.principal_scope(client, row, "mine")
-            slot, legacy = caps.identity(row, provider, "alice-private", scope, legacy=True)
+            scope = caps.principal_scope(client, row, "org")
+            slot, legacy = caps.identity(row, provider, "company-private", scope, legacy=True)
             session.add(AppSetting(key=slot, value=json.dumps({"configRevision": legacy,
                 "checkedAt": "2026-01-01T00:00:00+00:00", "checks": {"imageInput": {
                     "status": "passed", "checkedAt": "2026-01-01T00:00:00+00:00"}, "toolCalling": {
@@ -475,19 +631,19 @@ class CapabilityTests(IsolatedDatabase):
         self.assertEqual(before["capabilityCheck"]["checks"]["toolCalling"]["code"], "legacy_recheck_required")
         self.assertEqual(before["capabilityProfile"]["toolCalling"]["state"], "unknown")
         result = (await self.check(checks=["connection"])).json()
-        self.assertEqual(result["reportVersion"], 2)
+        self.assertEqual(result["reportVersion"], 3)
         self.assertEqual(result["verifiedChecks"]["imageInput"]["status"], "passed")
         self.assertEqual(result["imageRouting"], "native")
         self.assertNotIn("toolCalling", result["verifiedChecks"])
         self.assertEqual(result["checks"]["toolCalling"]["status"], "inconclusive")
 
     async def test_personal_model_delete_recreate_does_not_restore_old_evidence(self):
-        definition = {"providerId": "p", "name": "own", "config": {"imageRouting": "auto"}}
+        definition = {"providerId": "custom-p", "name": "own", "config": {"imageRouting": "auto"}}
         async with self.sessions() as session:
             client = await session.get(Client, "a")
             client.models = [definition]
             await session.commit()
-        first = (await self.check(model="own", checks=["imageInput"])).json()
+        first = (await self.check("a", model="own", checks=["imageInput"])).json()
         for definitions in ([], [definition]):
             async with self.sessions() as session:
                 client = await session.get(Client, "a")
@@ -501,19 +657,21 @@ class CapabilityTests(IsolatedDatabase):
         self.assertNotEqual(first["configRevision"], own["configRevision"])
 
     async def test_personal_legacy_declaration_save_preserves_matching_wire_evidence(self):
-        definition = {"providerId": "p", "name": "own", "config": {"imageRouting": "auto"}}
+        definition = {"providerId": "custom-p", "name": "own", "config": {"imageRouting": "auto"}}
         async with self.sessions() as session:
             client = await session.get(Client, "a")
             client.models = [definition]
             await session.commit()
-        first = (await self.check(model="own", checks=["imageInput"])).json()
+        first = (await self.check("a", model="own", checks=["imageInput"])).json()
         async with self.sessions() as session:
             revision = model_config_guard.revision(await session.get(Client, "a"))
         response = await self.http.put("/api/v1/my-models", headers=self.headers["a"], json={
-            "expectedRevision": revision, "models": [{**definition, "label": "Renamed own", "ctxWindow": 0,
+            "expectedRevision": revision, "returnRevision": True, "models": [{**definition, "label": "Renamed own", "ctxWindow": 0,
                 "modality": "chat", "config": {"imageRouting": "auto", "capabilities": {"imageInput": "unsupported"}}}]})
         self.assertEqual(response.status_code, 200, response.text)
         own = next(row for row in response.json()["usable"] if row["name"] == "own")
+        async with self.sessions() as session:
+            self.assertEqual(response.json()["revision"], model_config_guard.revision(await session.get(Client, "a")))
         self.assertEqual(own["configRevision"], first["configRevision"])
         self.assertTrue(own["capabilityProfile"]["imageInput"].get("conflict"))
 
@@ -524,7 +682,7 @@ class CapabilityTests(IsolatedDatabase):
         config = {"imageRouting": "auto", "maxOutputTokens": 8192,
                   "capabilities": {"imageInput": "supported", "toolCalling": "unknown", "streaming": "supported"}}
         response = await self.http.put("/api/v1/my-models", headers=self.headers["a"], json={
-            "expectedRevision": revision, "models": [{"providerId": "p", "name": "own",
+            "expectedRevision": revision, "models": [{"providerId": "custom-p", "name": "own",
                 "ctxWindow": 64000, "config": config}]})
         self.assertEqual(response.status_code, 200, response.text)
         own = next(row for row in response.json()["usable"] if row["name"] == "own")
@@ -532,7 +690,7 @@ class CapabilityTests(IsolatedDatabase):
         self.assertEqual(own["ctxWindow"], 64000)
         self.assertEqual(own["imageRouting"], "native")
         self.assertEqual(own["capabilityProfile"]["imageInput"]["source"], "configured")
-        response = await self.check(model="own", checks=["connection", "streaming"])
+        response = await self.check("a", model="own", checks=["connection", "streaming"])
         self.assertEqual(response.status_code, 200)
         mine = (await self.http.get("/api/v1/my-models", headers=self.headers["a"])).json()
         self.assertIsNotNone(mine["myModels"][0]["capabilityCheck"])
@@ -551,6 +709,16 @@ class CapabilityTests(IsolatedDatabase):
 
 
 class ContractTests(unittest.TestCase):
+    def test_output_default_is_separate_from_context_and_small_capability_probe(self):
+        for config, expected in (({}, 16384), ({"maxOutputTokens": 32768}, 32768),
+                                 ({"maxOutputTokens": 65536}, 65536)):
+            cleaned = caps.clean_config(config)
+            caps.validate_limits(131072, cleaned)
+            fields = caps.runtime_fields(cleaned)
+            self.assertEqual(fields["maxOutputTokens"], expected)
+            body, _ = probe._payload({"model": "fixture", "contextWindow": 131072, **fields}, "connection")
+            self.assertEqual(body["max_tokens"], 512)
+
     def test_saved_target_generation_keys_fit_the_mapped_database_column(self):
         from app.services.model_capability_generations import generation_key
         key = generation_key("personal-provider", "synthetic-device", "synthetic-provider")
@@ -595,22 +763,6 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(actual.get("maxTokensField"), "max_completion_tokens")
         self.assertIs(actual.get("supportsUsageInStreaming"), False)
 
-    def test_working_compatibility_shapes_harness2_requests(self):
-        from app.services import harness2_provider
-        response = io.BytesIO(json.dumps({"choices": [{"finish_reason": "stop", "message": {"content": "OK"}}]}).encode())
-        response.headers = {"Content-Type": "application/json"}
-        seen = []
-        def opened(request, **kwargs):
-            seen.append(json.loads(request.data))
-            return response
-        model = {"base": "https://fixture.invalid/v1", "key": "synthetic", "model": "fixture",
-                 "maxOutputTokens": 4096,
-                 "compatibility": {"maxTokensField": "max_completion_tokens", "streamOptions": False}}
-        with patch.object(harness2_provider.urllib.request, "build_opener", return_value=SimpleNamespace(open=opened)):
-            harness2_provider.request(model, [{"role": "user", "content": "hello"}], [])
-        self.assertNotIn("max_tokens", seen[0])
-        self.assertEqual(seen[0].get("max_completion_tokens"), 4096)
-        self.assertNotIn("stream_options", seen[0])
 
     def test_legacy_unknown_and_explicit_native_are_not_claimed_verified(self):
         self.assertEqual(caps.runtime_fields({})["imageRouting"], "vision-fallback")

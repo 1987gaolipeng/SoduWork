@@ -236,7 +236,7 @@ if (typeof electron === 'string') {
     const dispatchEnd = apiSource.indexOf('    /* A project may contain', dispatchBegin);
     assert(dispatchBegin >= 0 && dispatchEnd > dispatchBegin, 'API dispatchToAI extraction boundary must exist');
     const dispatchMethod = apiSource.slice(dispatchBegin, dispatchEnd);
-    const managed = ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'harness2', 'codex-harness'];
+    const managed = ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'codex-harness'];
     const privateRef = 'local:model-0123456789abcdef0123456789abcdef';
     await js(`window.matrixManaged=${JSON.stringify(managed)};window.matrixLocal=${JSON.stringify(privateRef)};
       window.productionDispatch=new Function('acceptTaskResult','requireRemoteModel','jfetch','mark',
@@ -244,7 +244,7 @@ if (typeof electron === 'string') {
         value=>value,()=>{throw Error('Unexpected remote model boundary');},
         ()=>{throw Error('Unexpected Hub dispatch');},()=>{});
       SoduWorkAPI.dispatchToAI=async(...args)=>{calls.push({kind:'dispatch',args:clone(args)});return productionDispatch(...args);};
-      low.runtimes=async()=>({ok:true,runtimes:[...matrixManaged,'codex','claude'].map(id=>({id,displayName:id,
+      low.runtimes=async()=>({ok:true,runtimes:[...matrixManaged,'codex'].map(id=>({id,displayName:id,
         transport:id==='pi'?'direct':'runner',modelMode:matrixManaged.includes(id)?'managed':'account'}))});
       low.probe=async()=>({ok:true,state:'ready'});low.history=async()=>({ok:true,chats:[]});
       soduWorkAPI.localModels={get:async()=>({usable:[{id:matrixLocal,name:matrixLocal,label:'Private model',
@@ -256,7 +256,7 @@ if (typeof electron === 'string') {
         return {ok:true,ref:'ref-'+taskFixture.id,sessionId:'chat-'+taskFixture.id,adapterId:options.adapterId,model,
           snapshot:{status:'idle',messages:[],tools:[],adapterId:options.adapterId,modelSelection:{name,model}}};};void 0;`);
     let matrixIndex = 0;
-    for (const runtime of [...managed, 'codex', 'claude']) {
+    for (const runtime of [...managed, 'codex']) {
       const choices = managed.includes(runtime) ? [privateRef, 'managed-model'] : [''];
       for (const model of choices) {
         const taskId = 'isolated-model-matrix-' + (++matrixIndex);
@@ -349,7 +349,7 @@ if (typeof electron === 'string') {
         delete document.querySelector('#receipt').dataset.selectionAwaiting;};
       low.selectAgent=async(ref,id,selection)=>{calls.push({kind:'select-agent',ref,id,selection:clone(selection)});
         await waitChoice();creationArchive.adapterId=id;
-        creationArchive.model=selection.modelName||(['codex','claude'].includes(id)?id+'-account-default':'');
+        creationArchive.model=selection.modelName||(['codex'].includes(id)?id+'-account-default':'');
         return {ok:true,adapterId:id,snapshot:creationSnapshot()};};
       low.selectModel=async(ref,name)=>{calls.push({kind:'select-model',ref,name});await waitChoice();creationArchive.model=name;
         return {ok:true,selection:creationSnapshot().modelSelection,snapshot:creationSnapshot()};};
@@ -372,15 +372,15 @@ if (typeof electron === 'string') {
     const provenanceCases = [
       ...managed.flatMap(runtime => [privateRef,'managed-model'].map(model =>
         [runtime==='pi'?'qwen':'pi',runtime,privateRef,model,true])),
-      ['pi','codex','managed-model','',true], ['pi','claude','managed-model','',true],
-      ['codex','pi','account-model',privateRef,true], ['claude','kimi','account-model','managed-model',true],
+      ['pi','codex','managed-model','',true],
+      ['codex','pi','account-model',privateRef,true], ['codex','kimi','account-model','managed-model',true],
       ['pi','pi','old-model','managed-model',true], ['qwen','qwen',privateRef,privateRef,true],
       ['pi','qwen',privateRef,privateRef,false],
     ];
     for (const [createdRuntime,runtime,createdModel,model,sameOwner] of provenanceCases) {
       const taskId='provenance-'+(++matrixIndex), reuse=sameOwner;
       const changing = sameOwner && (createdRuntime !== runtime || model && createdModel !== model);
-      const expectedModel = !model && ['codex','claude'].includes(runtime) ? runtime+'-account-default' : model;
+      const expectedModel = !model && ['codex'].includes(runtime) ? runtime+'-account-default' : model;
       await js(`RequirementAssignment.close();ctx.reset();calls.length=0;errors.length=0;
         taskFixture.id=${JSON.stringify(taskId)};taskFixture.createdBy=${JSON.stringify(sameOwner?'fixture-owner':'another-owner')};
         taskFixture.assigneeUserId='fixture-owner';taskFixture.note='Execute with the explicitly selected runtime';

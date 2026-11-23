@@ -1,14 +1,16 @@
+import { catalogRows, catalogSearchView, scheduleCatalogSearch } from './repository-catalog-search.js'
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
 /*
  * Enterprise repository catalog exposes sync health, search, and project attachment. Each
  * source uses a dedicated backend account with expandable credential controls and an
  * immediate test action.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api, can } from '../api.js'
 import { FilterInput } from '../FilterControls.jsx'
 import { useViewportHeight } from '../viewport-height.js'
-import { Icon, Loading, Modal, toast, SelectMenu } from '../ui.jsx'
+import { createRefreshLoop } from '../polling.js'
+import { Icon, Loading, Modal, navTo, toast, SelectMenu } from '../ui.jsx'
 import RepositoryIssueSync, { RepositoryIssueSyncStatus } from './RepositoryIssueSync.jsx'
 import './project-governance.css'
 import './repositories.css'
@@ -38,22 +40,28 @@ const PROVIDER_META = localeMap(() => ({
 export default function Repositories() {
   const listRef = useViewportHeight()
   const uiLocale = useLocale();
-  const [integrations, setIntegrations] = useState([])
-  const [catalog, setCatalog] = useState([])
+  const [integrations, setIntegrations] = useState(null)
+  const [pages, setPages] = useState([])
+  const [searchResult, setSearchResult] = useState(null)
   const [loading, setLoading] = useState(true)
   const [catalogError, setCatalogError] = useState(null)
   const [query, setQuery] = useState('')
   const [provider, setProvider] = useState('')
   const [syncing, setSyncing] = useState('')
+  const [syncStage, setSyncStage] = useState(null)
+  const [syncError, setSyncError] = useState(null)
+  const activeSync = useRef(null)
   const [mapping, setMapping] = useState(null)   // Selected catalog row for the project-attachment dialog.
 
   const [issueSettings, setIssueSettings] = useState(null)
   const loadRequest = useRef(0)
   const manage = can('integration.manage')
 
-  const sources = useMemo(() => integrations.filter(
+  const sources = useMemo(() => (integrations || []).filter(
     (i) => supportsIssues(i.type) && i.enabled !== false), [integrations, uiLocale])
+  const missingAccounts = sources.filter((source) => !source.pullAccountSet).length
 
+  const catalog = useMemo(() => catalogRows(pages), [pages])
   const load = useCallback(async () => {
     const request = ++loadRequest.current
     setLoading(true)
@@ -68,47 +76,94 @@ export default function Repositories() {
       if (usable.length) {
         const settled = await Promise.allSettled(usable.map((item) => api.repositoryCatalog(item.id)))
         if (request !== loadRequest.current) return
-        results = settled.filter((result) => result.status === 'fulfilled').map((result) => result.value)
+        results = settled.flatMap((result, index) => result.status === 'fulfilled'
+          ? [{ id: usable[index].id, name: usable[index].name || usable[index].id, items: result.value.items || [] }] : [])
         const failures = settled.flatMap((result, index) => result.status === 'rejected'
           ? [{ id: usable[index].id, name: usable[index].name || usable[index].id, detail: result.reason?.message || String(result.reason) }]
           : [])
         if (failures.length) setCatalogError({ failures, retained: results.length === 0 })
         if (!results.length) return
       } else {
-        results = [await api.repositoryCatalog()]
+        results = [{ id: '', items: (await api.repositoryCatalog()).items || [] }]
       }
       if (request !== loadRequest.current) return
-      setCatalog([...new Map(results.flatMap((result) => result.items || []).map((row) => [row.id, row])).values()])
+      setPages(results)
     } catch (e) { if (request === loadRequest.current) toast(tx("仓库目录没有加载：") + e.message) }
     finally { if (request === loadRequest.current) setLoading(false) }
   }, [manage])
-  useEffect(() => { load(); return () => { loadRequest.current += 1 } }, [load])
+  useEffect(() => {
+    load()
+    return () => { loadRequest.current += 1; activeSync.current?.loop.stop(); activeSync.current = null }
+  }, [load])
 
   async function sync(sourceId) {
+    if (activeSync.current) return
+    const run = { observing: false, confirmedActive: false }
+    activeSync.current = run
     setSyncing(sourceId)
+    setSyncStage(null)
+    setSyncError(null)
+
+    function finish() {
+      run.loop.stop()
+      activeSync.current = null
+      setSyncing('')
+      return load()
+    }
+    run.loop = createRefreshLoop(async isCurrent => {
+      const observing = run.observing
+      let stage
+      try {
+        stage = (await api.repositorySyncProgress(sourceId)).stage
+      } catch {
+        if (!isCurrent()) return
+        setSyncStage(null)
+        if (observing && !run.confirmedActive) await finish()
+        return false
+      }
+      if (!isCurrent()) return
+      setSyncStage(stage)
+      if (observing && !stage) {
+        if (run.confirmedActive) setSyncError(null)
+        await finish()
+      } else if (stage) run.confirmedActive = true
+    }, { interval: 1000 })
     try {
       const result = await api.syncRepositoryCatalog(sourceId)
+      if (activeSync.current !== run) return
       toast(tx("仓库目录已同步：") + result.total + tx(" 个仓库"))
-      await load()
-    } catch (e) { toast(tx("同步失败：") + e.message) } finally { setSyncing('') }
+    } catch (e) {
+      if (activeSync.current !== run) return
+      const previousAt = integrations?.find(source => source.id === sourceId)?.repositorySyncAt
+      setSyncError({ sourceId, previousAt, message: e.message })
+      // A lost response or an occupied lease can leave a scan running on the Hub.
+      if (!e.status || e.status === 423 || e.status >= 500) {
+        run.observing = true
+        await run.loop.refresh()
+        return
+      }
+    }
+    await finish()
   }
 
-  const shown = catalog.filter((row) => {
-    if (provider && String(row.provider) !== provider) return false
-    const q = query.trim().toLowerCase()
-    return !q || [row.fullName, row.displayName].some((v) => String(v || '').toLowerCase().includes(q))
-  })
+  const term = query.trim()
+  useEffect(() => scheduleCatalogSearch(pages, term, api.repositoryCatalog, setSearchResult), [pages, term])
+  const search = catalogSearchView(pages, term, searchResult)
+  const shown = search.rows.filter(row => !provider || row.provider === provider)
   const counts = useMemo(() => {
     const by = {}
     for (const row of catalog) by[row.provider] = (by[row.provider] || 0) + 1
     return by
   }, [catalog])
   return <section className="pg-work-panel rc-page">
-    {manage && <div className="rc-sources">
+    {manage && missingAccounts > 0 && <div className="hintline">{tx("{0} 个代码源尚未配置固定拉取账号。", [missingAccounts])}</div>}
+    {manage && integrations !== null && <div className="rc-sources">
       {sources.length ? sources.map((s) => <SourceCard key={s.id} source={s}
-        syncing={syncing === s.id} anySyncing={!!syncing}
+        syncing={syncing === s.id} anySyncing={!!syncing} stage={syncStage}
+        syncError={syncError?.sourceId === s.id && s.repositorySyncAt === syncError.previousAt ? syncError.message : ''}
         onSync={() => sync(s.id)} onSaved={load} />)
-        : <EmptyPanel icon="plug" title={tx("还没有代码源")} text={tx("先在「系统集成」接入 GitHub 或 GitLab，再配置拉取账号并同步仓库目录。")} />}
+        : <EmptyPanel icon="plug" title={tx("没有已启用的代码源")} text={
+          <button className="admin-text-action" onClick={() => navTo('integrations')}>{tx("上一步：在系统集成新建或启用代码源")}</button>} />}
     </div>}
 
     {!loading && catalogError && <div className="rc-source-err" role="alert">
@@ -118,14 +173,15 @@ export default function Repositories() {
     </div>}
 
     <div className={'rc-toolbar admin-filterbar' + (catalog.length ? '' : ' is-empty')}>
-      <FilterInput className="rc-search" type="search" aria-label={tx("搜索仓库名称或路径")} value={query} onChange={(e) => setQuery(e.target.value)} disabled={!catalog.length} placeholder={tx("搜索 ") + catalog.length + tx(" 个仓库（名称 / 路径）")} />
+      <FilterInput className="rc-search" type="search" aria-label={tx("搜索仓库名称或路径")} value={query} onChange={(e) => setQuery(e.target.value)} disabled={!catalog.length} placeholder={search.capped ? tx("搜索仓库名称或路径") : tx("搜索 ") + catalog.length + tx(" 个仓库（名称 / 路径）")} />
       <div className="rc-filters admin-segmented admin-filter-options" role="group" aria-label={tx("仓库来源")}>
         <button disabled={!catalog.length} aria-pressed={provider === ''} className={provider === '' ? 'on' : ''} onClick={() => setProvider('')}>{tx("全部")}<b>{catalog.length}</b></button>
         {Object.entries(counts).map(([p, n]) => <button disabled={!catalog.length} key={p} aria-pressed={provider === p} className={provider === p ? 'on' : ''} onClick={() => setProvider(p)}>{(PROVIDER_META[p] || {}).label || p}<b>{n}</b></button>)}
       </div>
     </div>
 
-    {loading ? <Loading /> : shown.length ? <div ref={listRef} className="rc-list" tabIndex="0" role="region" aria-label={tx("仓库列表，可滚动")}>
+    {search.failures.length > 0 && <div className="rc-source-err" role="alert">{tx("仓库目录没有加载：")}{search.failures.join(" · ")}</div>}
+    {loading || search.loading ? <Loading /> : shown.length ? <div ref={listRef} className="rc-list" tabIndex="0" role="region" aria-label={tx("仓库列表，可滚动")}>
       <div className="rc-table-head" role="row"><span>{tx("来源")}</span><span>{tx("仓库名称 / 路径")}</span><span>{tx("默认分支")}</span><span>{tx("状态")}</span><span>{tx("操作")}</span></div>
       {shown.map((row) => <div key={row.id} className="rc-row">
         <span className={'rc-mark rc-pv-' + row.provider}>{(PROVIDER_META[row.provider] || {}).mark || '↗'}</span>
@@ -144,22 +200,43 @@ export default function Repositories() {
           {can('task.dispatch') && <button className="admin-text-action" onClick={() => setMapping(row)}>{tx("挂进项目")}</button>}
         </span>
       </div>)}
-    </div> : (sources.length > 0 || catalog.length > 0 || !manage) ? <EmptyPanel icon="box" title={catalog.length ? tx("没有匹配的仓库") : tx("目录里还没有仓库")}
-      text={catalog.length ? tx("换个关键词试试。") : manage ? tx("在上方代码源卡片配好拉取账号，点「立即同步」。") : tx("请联系管理员同步仓库目录。")} /> : null}
+    </div> : !search.failures.length && (sources.length > 0 || catalog.length > 0 || !manage) ? <EmptyPanel icon="box" title={catalog.length ? tx("没有匹配的仓库") : tx("目录里还没有仓库")}
+      text={catalog.length ? tx("换个关键词试试。") : manage ? tx("请查看上方各代码源的同步状态。") : tx("请联系管理员同步仓库目录。")} /> : null}
 
     {manage && issueSettings && <RepositoryIssueSync key={issueSettings.id} row={issueSettings}
       onClose={() => setIssueSettings(null)}
-      onUpdated={(value) => setCatalog((items) => items.map((row) => row.id === issueSettings.id ? { ...row, issueSync: value } : row))} />}
+      onUpdated={(value) => setPages(current => current.map(page => ({ ...page, items: page.items.map(row =>
+        row.id === issueSettings.id ? { ...row, issueSync: value } : row) })))} />}
     {mapping && <MapToProjectModal row={mapping} onClose={() => setMapping(null)}
       onDone={() => { setMapping(null); toast(tx("已挂进项目，可在「项目与仓库」里继续配置流程")) }} />}
   </section>
 }
 
+const SYNC_STAGES = localeMap(() => ({
+  preparing: '正在准备代码源连接',
+  listing: '正在读取仓库列表',
+  saving: '正在保存仓库目录',
+}))
+
+function SyncProgress({ stage }) {
+  useLocale()
+  const [seconds, setSeconds] = useState(0)
+  useEffect(() => {
+    const started = Date.now()
+    const clock = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => clearInterval(clock)
+  }, [])
+  return <div className="rc-sync-progress">
+    <span role="status">{SYNC_STAGES[stage] || tx("等待同步结果")}</span>
+    <span role="timer">{tx("已用 {0} 秒", [seconds])}</span>
+  </div>
+}
+
 /* Source cards summarize health and expand account configuration on demand. */
-function SourceCard({ source: s, syncing, anySyncing, onSync, onSaved }) {
+function SourceCard({ source: s, syncing, anySyncing, stage, syncError, onSync, onSaved }) {
   const uiLocale = useLocale();
   const meta = PROVIDER_META[String(s.type).toLowerCase()] || { mark: '↗', label: s.type, hint: '' }
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(!s.pullAccountSet)
   const [user, setUser] = useState(s.pullAccountUser || '')
   const [secret, setSecret] = useState('')
   const isGitHub = String(s.type).toLowerCase() === 'github'
@@ -171,6 +248,10 @@ function SourceCard({ source: s, syncing, anySyncing, onSync, onSaved }) {
   const manage = can('integration.manage')
   const busy = saving || !!probe?.busy
   const bad = s.repositorySyncOk === false
+  const lastStatus = bad ? tx("同步失败") : !s.repositorySyncAt ? tx("待同步")
+    : s.repositorySyncCount === 0 ? tx("未发现仓库") : tx("同步成功")
+  const scopeId = useId()
+  const scope = tx("同步此代码源中拉取账号可访问的仓库，可能需要几分钟。已有项目映射保持不变。")
   const base = (s.config || {}).base_url || ''
   useEffect(() => {
     active.current = true
@@ -231,21 +312,25 @@ function SourceCard({ source: s, syncing, anySyncing, onSync, onSaved }) {
       </div>
       <div className="rc-source-nums">
         <div><b>{s.repositorySyncCount || 0}</b><span>{tx("仓库")}</span></div>
-        <div><b className={bad ? 'bad' : 'ok'}><i />{bad ? tx("同步失败") : s.repositorySyncAt ? tx("正常") : tx("待同步")}</b>
+        <div><b className={bad ? 'bad' : 'ok'}><i />{lastStatus}</b>
           <span>{fmtTime(s.repositorySyncAt)}</span></div>
       </div>
       {manage && <div className="rc-source-act">
         <button className={'rc-acct' + (s.pullAccountSet ? ' set' : '') + (open ? ' open' : '')}
+          aria-expanded={open}
           onClick={() => setOpen(!open)}
           title={s.pullAccountSet ? tx("拉取账号已配置，点开可改") : tx("还没配拉取账号，点开配置")}>
           <Icon name="key" />{s.pullAccountSet ? (s.pullAccountUser || tx("已配置")) : tx("配拉取账号")}
           <Icon name="chevron" />
         </button>
-        <button className="btn btn-ghost btn-sm" disabled={anySyncing} onClick={onSync}>
+        <button className="btn btn-ghost btn-sm" disabled={anySyncing} onClick={onSync} title={scope} aria-describedby={scopeId}>
           <Icon name="refresh" />{syncing ? tx("同步中…") : tx("立即同步")}</button>
       </div>}
     </div>
-    {bad && <div className="rc-source-err" title={s.repositorySyncError}>{s.repositorySyncError || tx("上次同步失败")}</div>}
+    {manage && <p className="rc-sync-scope" id={scopeId}>{scope}</p>}
+    {syncing && <SyncProgress stage={stage} />}
+    {syncError && syncError !== s.repositorySyncError && <p className="rc-sync-scope" role="status">{tx("本次同步请求：{0}", [syncError])}</p>}
+    {bad && !syncing && <div className="rc-source-err" role="alert">{s.repositorySyncError || tx("上次同步失败")}</div>}
     {manage && open && <div className="rc-source-cfg">
       <label className="pg-field"><span>{tx("拉取账号用户名")}</span>
         <input className="f-in" value={user} disabled={busy} onChange={(e) => edit(setUser, e.target.value)} placeholder={tx("例如 gengyong.hu")} /></label>
@@ -302,9 +387,9 @@ function MapToProjectModal({ row, onClose, onDone }) {
     } catch (e) { toast(tx("没挂上：") + e.message) } finally { setBusy(false) }
   }
 
-  return <Modal scope="project-governance" title={tx("挂进项目：") + (row.displayName || row.fullName)} onClose={onClose} footer={
+  return <Modal scope="project-governance" title={tx("挂进项目：") + (row.displayName || row.fullName)} draft={[pid === projects[0]?.id ? '' : pid, form]} onClose={onClose} footer={dismiss =>
     <>
-      <button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+      <button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
       <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("正在挂载…") : tx("挂进项目")}</button>
     </>
   }>

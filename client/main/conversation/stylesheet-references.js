@@ -24,6 +24,11 @@ function references(source) {
     if (!token || /[\w$.-]/.test(text[i - 1] || '')) { i++; continue; }
     i += token[0].length; whitespace();
     if (token[0][0] === '@') {
+      while (text.startsWith('/*', i)) {
+        const end = text.indexOf('*/', i + 2);
+        i = end < 0 ? text.length : end + 2;
+        whitespace();
+      }
       if (text[i] === '"' || text[i] === "'") result.push(string());
       continue;
     }

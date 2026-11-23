@@ -7,24 +7,20 @@
     pi: 'PI',
     'codex-harness': '',
     opencode: 'OC',
-    claude: 'CL',
     codex: '',
     qwen: 'QW',
     kimi: 'KM',
     dsh: 'DS',
-    harness2: 'H2',
   });
   // Brand artwork is local and pinned by client/assets/agent-brands/sources.json.
   const ICONS = Object.freeze({
     pi: 'assets/agent-brands/pi.svg',
     'codex-harness': 'assets/agent-brands/codex.svg',
     opencode: 'assets/agent-brands/opencode.svg',
-    claude: 'assets/agent-brands/claude.svg',
     codex: 'assets/agent-brands/codex.svg',
     qwen: 'assets/agent-brands/qwen.svg',
     kimi: 'assets/agent-brands/kimi.svg',
     dsh: 'assets/agent-brands/deepseek.svg',
-    harness2: 'assets/agent-brands/google.svg',
   });
   const CUSTOM_PATHS = Object.freeze([
     'M7.4 5.8 12 3l4.6 2.8v5.5c0 3.7-1.9 6.6-4.6 8.7-2.7-2.1-4.6-5-4.6-8.7V5.8Z',
@@ -35,12 +31,10 @@
     pi: 'Pi',
     'codex-harness': 'Codex Harness',
     opencode: 'OpenCode',
-    claude: 'Claude Code',
     codex: 'Codex',
     qwen: 'Qwen Code',
     kimi: 'Kimi Code',
     dsh: 'DeepSeek Harness',
-    harness2: 'Google Harness²',
     custom: '自定义 Agent',
   });
 
@@ -59,11 +53,9 @@
     }
     const text = _text(value).replace(/[ _]+/g, '-');
     if (!text) return 'custom';
-    if (/(^|[-:./])harness[-:./]*2($|[-:./])/.test(text)) return 'harness2';
     if (/codex[-:./]*harness|harness[-:./]*codex/.test(text)) return 'codex-harness';
     if (/deepseek|(^|[-:./])dsh($|[-:./])/.test(text)) return 'dsh';
     if (/open[-:./]*code/.test(text)) return 'opencode';
-    if (/claude/.test(text)) return 'claude';
     if (/qwen/.test(text)) return 'qwen';
     if (/kimi|moonshot/.test(text)) return 'kimi';
     if (/(^|[-:./])codex($|[-:./])|chatgpt/.test(text)) return 'codex';

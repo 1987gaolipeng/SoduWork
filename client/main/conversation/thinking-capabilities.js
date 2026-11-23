@@ -8,12 +8,35 @@
  * for the reasoning families that are stable across the supported gateways.
  */
 const LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+const GLM_LEVEL_MAP = { off: null, minimal: null, low: 'low', medium: null,
+  high: 'high', xhigh: null, max: 'max' };
 
 function text(value) { return String(value == null ? '' : value).trim().toLowerCase(); }
 
+function mandatoryThinking(value) {
+  // Match a wire identity, never a display label or an arbitrary provider name.
+  return /(?:^|\/)glm[-_]?5[._]3(?:[-_]?flash)?$/.test(text(value?.wireModelId || value?.id || value?.model || value?.name));
+}
+
+function conflict(value) {
+  if (!mandatoryThinking(value)) return '';
+  if (text(value?.thinkingMode) === 'none' || value?.reasoning === false) {
+    return 'GLM-5.3 系列不支持关闭思考，请将模型思考模式设为始终开启并选择有效强度';
+  }
+  if (value?.thinkingLevelMap && Object.values(value.thinkingLevelMap)
+    .some(mapped => mapped !== null && !['low', 'high', 'max'].includes(mapped))) {
+    return 'GLM-5.3 系列仅支持 low、high、max 思考强度，请检查模型的思考级别映射';
+  }
+  const levels = { ...GLM_LEVEL_MAP, ...value?.thinkingLevelMap };
+  if (!LEVELS.some(level => level !== 'off' && ['low', 'high', 'max'].includes(levels[level]))) {
+    return 'GLM-5.3 系列至少需要一个可用思考强度，请检查模型的思考级别映射';
+  }
+  return '';
+}
+
 function profile(model) {
   const value = model && typeof model === 'object' ? model : {};
-  const id = text(value.id || value.model || value.name);
+  const id = text(value.wireModelId || value.id || value.model || value.name);
   const provider = text(value.provider || value.providerName || value.providerId);
   const key = id + ' ' + provider;
   const explicit = typeof value.reasoning === 'boolean' ? value.reasoning : null;
@@ -25,14 +48,15 @@ function profile(model) {
   // value when the profile is passed through a second time (for example when
   // writing Pi's models.json or registering a provider for a turn).
   let format = text(value.thinkingFormat || value.reasoningFormat || value.format);
-  let hinted = false;
+  let hinted = Boolean(format);
   if (!format && /deepseek/.test(key)) { format = 'deepseek'; hinted = true; }
   else if (!format && /(?:glm|zhipu|zai)/.test(key)) { format = 'zai'; hinted = true; }
   else if (!format && /(?:qwen|qwq)/.test(key)) { format = 'qwen'; hinted = true; }
   else if (!format && /(?:think|thinking|reason|reasoner|r1\b|o1\b|o3\b|o4\b|gpt-5)/.test(key)) {
     format = 'openai'; hinted = true;
   }
-  const reasoning = mode === 'none' ? false
+  const mandatory = mandatoryThinking(value);
+  const reasoning = mode === 'none' || mandatory && explicit === false ? false
     : (mode === 'always' || mode === 'controllable' ? true
       : (explicit === null ? hinted : explicit));
   if (!reasoning) return { reasoning: false, levels: ['off'], format: '', supportsReasoningEffort: false };
@@ -40,6 +64,11 @@ function profile(model) {
     ? Object.fromEntries(Object.entries(value.thinkingLevelMap)
       .filter(([level, mapped]) => LEVELS.includes(level) && (mapped === null || typeof mapped === 'string')))
     : {};
+  if (mandatory) {
+    // GLM 5.3 standard endpoints reject disabled/minimal/medium. Pi clamps a
+    // requested off level to low without pretending that thinking is disabled.
+    Object.assign(thinkingLevelMap, { ...GLM_LEVEL_MAP, ...thinkingLevelMap, off: null });
+  }
   // Some OpenAI-compatible gateways always emit hidden reasoning and reject
   // every attempt to disable it. Marking `off` as null makes Pi clamp the
   // session to the lowest available thinking level and keeps the UI honest.
@@ -80,4 +109,4 @@ function set(session, enabled) {
   return { ok: true, thinking: view(session) };
 }
 
-module.exports = { LEVELS, profile, view, set };
+module.exports = { LEVELS, profile, view, set, conflict };

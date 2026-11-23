@@ -1,5 +1,13 @@
 // Model catalog configuration, live load and request-history definitions.
 export default {
+  "已配置但无模型": "Configured, no models",
+  "无已启用的对话模型": "No chat models enabled",
+  "可对话（{0}）": "Chat ready ({0})",
+  "需兼容 Agent（{0}）": "Agent required ({0})",
+  "{0} 个已启用的对话模型需要使用支持此协议的 Agent。": "Enabled chat models ({0}) require an Agent that supports this protocol.",
+  "加第一个模型": "Add first model",
+  "展开概览": "Expand overview",
+  "收起概览": "Collapse overview",
   "目录配置": "Catalog configuration",
   "服务总数": "Total services",
   "已启用 {0} · 已停用 {1}": "Enabled {0} · Disabled {1}",
@@ -9,7 +17,8 @@ export default {
   "配置完整服务": "Fully configured services",
   "服务已启用，且地址与密钥均已填写。": "The service is enabled and its endpoint and API key are configured.",
   "配置完整仅表示设置已齐全。": "Complete configuration only means all required settings are present.",
-  "组织默认调用": "Organization defaults",
+  "组织默认调用（旧版兼容）": "Organization defaults (legacy)",
+  "此设置用于日报总结和旧版执行。新需求和 Runner 使用的模型请在模型目录中添加。": "These settings apply to daily summaries and legacy execution. Add models for new issues and Runners in the model catalog.",
   "接一个服务": "Connect a service",
   "运行状态读取失败": "Could not read runtime status",
   "正在生成": "Generating",
@@ -77,6 +86,14 @@ export default {
 }
 
 export const ja = {
+  "已配置但无模型": "設定済み・モデルなし",
+  "无已启用的对话模型": "有効なチャットモデルなし",
+  "可对话（{0}）": "チャット可能（{0}件）",
+  "需兼容 Agent（{0}）": "対応 Agent が必要（{0}件）",
+  "{0} 个已启用的对话模型需要使用支持此协议的 Agent。": "有効なチャットモデル（{0}件）を使うには、このプロトコルに対応した Agent が必要です。",
+  "加第一个模型": "最初のモデルを追加",
+  "展开概览": "概要を展開",
+  "收起概览": "概要を折りたたむ",
   "目录配置": "カタログの設定",
   "服务总数": "サービス総数",
   "已启用 {0} · 已停用 {1}": "有効 {0} · 無効 {1}",
@@ -86,7 +103,8 @@ export const ja = {
   "配置完整服务": "設定済みサービス",
   "服务已启用，且地址与密钥均已填写。": "サービスが有効で、接続先と API キーが設定されています。",
   "配置完整仅表示设置已齐全。": "設定済みは、必要な設定がそろっていることのみを示します。",
-  "组织默认调用": "組織の既定設定",
+  "组织默认调用（旧版兼容）": "組織の既定設定（旧版互換）",
+  "此设置用于日报总结和旧版执行。新需求和 Runner 使用的模型请在模型目录中添加。": "この設定は日報の要約と旧版の実行に使用されます。新しい課題や Runner で使うモデルはモデルカタログに追加してください。",
   "接一个服务": "サービスを追加",
   "运行状态读取失败": "稼働状況を取得できませんでした",
   "正在生成": "生成中",
@@ -154,6 +172,14 @@ export const ja = {
 }
 
 export const ko = {
+  "已配置但无模型": "설정 완료 · 모델 없음",
+  "无已启用的对话模型": "활성 채팅 모델 없음",
+  "可对话（{0}）": "채팅 가능({0}개)",
+  "需兼容 Agent（{0}）": "호환 Agent 필요({0}개)",
+  "{0} 个已启用的对话模型需要使用支持此协议的 Agent。": "활성 채팅 모델 {0}개를 사용하려면 이 프로토콜을 지원하는 Agent가 필요합니다.",
+  "加第一个模型": "첫 모델 추가",
+  "展开概览": "개요 펼치기",
+  "收起概览": "개요 접기",
   "目录配置": "카탈로그 설정",
   "服务总数": "전체 서비스",
   "已启用 {0} · 已停用 {1}": "활성화 {0}개 · 비활성화 {1}개",
@@ -163,7 +189,8 @@ export const ko = {
   "配置完整服务": "설정이 완료된 서비스",
   "服务已启用，且地址与密钥均已填写。": "서비스가 활성화되어 있고 주소와 API 키가 설정되어 있습니다.",
   "配置完整仅表示设置已齐全。": "설정 완료는 필요한 설정이 모두 입력되었다는 의미입니다.",
-  "组织默认调用": "조직 기본 호출 설정",
+  "组织默认调用（旧版兼容）": "조직 기본 설정(이전 버전 호환)",
+  "此设置用于日报总结和旧版执行。新需求和 Runner 使用的模型请在模型目录中添加。": "이 설정은 일일 보고서 요약과 이전 버전의 실행에 사용됩니다. 새 이슈와 Runner에서 사용할 모델은 모델 카탈로그에 추가하세요.",
   "接一个服务": "서비스 연결",
   "运行状态读取失败": "실행 상태를 불러오지 못했습니다",
   "正在生成": "생성 중",

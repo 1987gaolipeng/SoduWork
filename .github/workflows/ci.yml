@@ -41,7 +41,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb xauth
+          sudo apt-get install -y xvfb xauth rpm gnupg
       - name: Check prerequisites and launcher regressions
         shell: bash
         run: |
@@ -62,13 +62,27 @@ jobs:
           node --test tools/source-manifest.test.cjs tools/check-docs.test.cjs tools/check-source-provenance.test.cjs tools/ci/test-release-transfer.cjs client/tests/repository-layout.test.cjs
           python -m unittest discover -s tools/github -p 'test_*.py'
       - name: Verify isolated HTTP startup, persistence, and shutdown
+        if: runner.os != 'Windows'
         run: python tools/dev/verify_local_start.py
+      - name: Verify Windows desktop startup and install caches on another volume
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $fixtureRoot = Join-Path $env:RUNNER_TEMP 'soduwork-cross-volume'
+          if ([IO.Path]::GetPathRoot($fixtureRoot) -eq "$env:SystemDrive\") {
+            throw 'Cross-volume verification requires RUNNER_TEMP on a non-system drive.'
+          }
+          New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
+          python tools/dev/verify_local_start.py --desktop --temp-root $fixtureRoot
       - name: Show isolated launcher logs when startup verification fails
         if: failure()
         shell: bash
         run: |
           find "${TMPDIR:-/tmp}" -type f -name '*.launcher-*.log' -print -exec tail -200 {} \; 2>/dev/null || true
           find "${TMPDIR:-/tmp}" -type f -path '*/soduwork-source-live-*/startup.log' -print -exec tail -200 {} \; 2>/dev/null || true
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            find "$RUNNER_TEMP/soduwork-cross-volume" -type f \( -name '*.launcher-*.log' -o -name startup.log -o -name desktop.log \) -print -exec tail -200 {} \; 2>/dev/null || true
+          fi
 
   frontend:
     runs-on: ubuntu-latest
@@ -121,6 +135,10 @@ jobs:
             sudo apt-get install -y xvfb xauth libgtk-3-0 libnss3 libasound2 ripgrep
             rg --version
           fi
+      - name: Verify attachment storage names under native Windows rules
+        if: runner.os == 'Windows'
+        run: .venv/Scripts/python.exe -m unittest -v test_attachment_storage_names
+        working-directory: hub-backend
       - run: npm ci
         working-directory: client
       - run: xvfb-run -a npm test
@@ -129,6 +147,58 @@ jobs:
       - run: npm test
         if: runner.os == 'Windows'
         working-directory: client
+      - name: Verify library storage under long Windows data directories
+        if: runner.os == 'Windows'
+        run: .venv/Scripts/python.exe -m unittest -v test_library_storage_long_paths
+        working-directory: hub-backend
+
+  runner-compatibility:
+    name: Runner TLS and process cleanup (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r hub-backend/requirements-runner-build.txt
+      - name: Verify strict HTTPS trust and execution-host cleanup
+        run: python -m unittest -v test_runtime_tls test_runner_tls test_managed_agent_tls test_local_process_cleanup test_execution_stream_identity
+        working-directory: hub-backend
+      - name: Verify Agent probe replies and persisted outcomes
+        run: python -m unittest -v test_private_agent_probe.ProbeMarkerTests test_private_agent_probe.ProbePersistenceTests
+        working-directory: hub-backend
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Verify DeepSeek parent and child settlement
+        run: node --test client/tests/dsh-acp-settlement.test.cjs client/tests/dsh-session-storage.test.cjs
+      - name: Verify Agent discovery and selected runtime identity
+        run: python -m unittest -v test_agent_installation_discovery test_agent_launch_identity test_dsh_node_identity test_agent_npm_runtime test_agent_platform_installation
+        working-directory: hub-backend
+      - name: Verify DeepSeek native dependency layouts
+        run: python -m smoke.smoke_dsh_runtime
+        working-directory: hub-backend
+      - name: Verify frozen Runner network components over real HTTPS
+        run: python e2e_runner_tls.py --output ../runner-tls-evidence
+        working-directory: hub-backend
+      - name: Retain synthetic TLS acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runner-tls-${{ matrix.os }}
+          path: runner-tls-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 14
 
   backend:
     runs-on: ubuntu-latest
@@ -137,6 +207,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The PR merge commit's first parent is the base used by the lint comparison.
+          fetch-depth: 2
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
@@ -145,6 +217,19 @@ jobs:
           node-version: '22'
           package-manager-cache: false
       - run: python -m pip install -r hub-backend/requirements-test.txt
+      - name: Lint the Hub application
+        run: python -m ruff check app
+        working-directory: hub-backend
+      - name: Check for new lint violations in the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python scripts/check_changed_lint.py "$BASE_SHA"
+        working-directory: hub-backend
+      - name: Report Hub type errors
+        continue-on-error: true
+        run: python -m mypy app
+        working-directory: hub-backend
       - run: python quality_gate.py --profile release --scope backend
         working-directory: hub-backend
       - name: Verify every Runner dialogue profile through real fixture subprocesses

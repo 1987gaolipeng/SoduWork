@@ -173,7 +173,7 @@ def observer():
         (CONTROL / "accepted.json").write_text(json.dumps(reply.json()), encoding="utf-8")
 
 
-def reader():
+def reader(*, offline=False):
     import httpx
     ready = json.loads((CONTROL / "ready.json").read_text(encoding="utf-8"))
     with httpx.Client(base_url=ready["hub"], trust_env=False, timeout=30,
@@ -182,7 +182,15 @@ def reader():
         listing.raise_for_status()
         rows = listing.json()["items"]
         assert len(rows) == 1, rows
+        assert rows[0]["execution"]["status"] == "done", rows[0]["execution"]
         page = client.get("/api/v1/cloud-execution-sync/" + rows[0]["id"])
+        if offline:
+            assert page.status_code == 409, page.status_code
+            assert page.json()["detail"] == "会话存储终端未连接或需要更新，请连接原终端后重试", page.text
+            (CONTROL / "offline-reader.json").write_text(json.dumps({
+                "handoffId": rows[0]["id"], "status": "done", "bodyStatus": page.status_code,
+            }), encoding="utf-8")
+            return
         page.raise_for_status()
         result = page.json()
         assert result["page"]["status"] == "done", result
@@ -206,7 +214,7 @@ if __name__ == "__main__":
         asyncio.run(runner())
     elif role == "observer":
         observer()
-    elif role == "reader":
-        reader()
+    elif role in {"reader", "offline-reader"}:
+        reader(offline=role == "offline-reader")
     else:
         raise ValueError("Unknown fixture role")

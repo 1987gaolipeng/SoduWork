@@ -53,6 +53,157 @@ const proposal = { title: '原始计划', note: '完整要求', acceptance: ['�
   retryLimit: 2, retryDelayMinutes: 5, enabled: true, requiredCapabilities: [] };
 const restored = extra => ({ version: 1, cardId: 'card-a', phase: 'draft', proposal, ...extra });
 
+test('unconfirmed drafts accept repeated relative-time edits without a parser and preserve the latest time on restore', async () => {
+  const f = fixture();
+  const sentAt = Date.parse('2099-11-16T12:13:00Z');
+  const original = {...proposal, title:'5分钟后发送一句话提醒', runAt:'2099-11-16T12:18:00.000Z',
+    note:'关键约束：\n1. 时间：5分钟后（相对时间，自需求提出时刻起算）；\n2. 内容：分析5分钟采样日志；',
+    acceptance:['确认5分钟倒计时的起始时间点','保留5分钟采样日志']};
+  await f.sheet.open({cardId:'repeat',cardState:restored({cardId:'repeat',proposal:original})});
+  let parses = 0;
+  f.api.parseTaskText = async () => { parses++; throw Error('parser unavailable'); };
+  assert.equal(await f.sheet.refine('修改为10分钟以后', {requestedAt:sentAt}), true);
+  let updated = f.sheet.capture().proposal;
+  assert.equal(updated.runAt, '2099-11-16T12:23:00.000Z');
+  assert.equal(updated.title, '10分钟后发送一句话提醒');
+  assert.match(updated.note, /时间：10分钟后/);
+  assert.match(updated.note, /分析5分钟采样日志/);
+  assert.deepEqual(Array.from(updated.acceptance), ['确认10分钟倒计时的起始时间点','保留5分钟采样日志']);
+  assert.equal(await f.sheet.refine('再改为十五分钟后', {requestedAt:sentAt + 60000}), true);
+  updated = f.sheet.capture().proposal;
+  assert.equal(updated.runAt, '2099-11-16T12:29:00.000Z');
+  assert.equal(updated.title, '15分钟后发送一句话提醒');
+  assert.match(updated.note, /时间：15分钟后/);
+  assert.equal(updated.acceptance[0], '确认15分钟倒计时的起始时间点');
+  assert.equal(updated.pluginInputs.audience, '研发组');
+  assert.equal(parses, 0); assert.equal(f.calls.create, 0);
+  const snapshot = f.sheet.capture(); f.sheet.close(true);
+  await f.sheet.open({cardId:'repeat',cardState:snapshot});
+  assert.equal(f.sheet.capture().proposal.runAt, updated.runAt);
+  assert.equal(f.sheet.capture().phase, 'draft');
+});
+
+test('saved automation edits update the original ID and cancelling edits restores its receipt', async () => {
+  const f = fixture(), updates = [];
+  f.api.updateSchedule = async (id, body) => { updates.push({id, body}); return {...proposal, id, ...body}; };
+  await f.sheet.open({cardId:'card-a', cardState:restored()});
+  await f.probe.save();
+  assert.equal(f.calls.create, 1);
+  assert.match(f.probe.state.layer.body.innerHTML, /data-waz-edit/);
+  assert.match(f.probe.state.layer.body.innerHTML, /data-waz-pause/);
+  assert.equal(f.sheet.acceptsFollowup('修改这个自动化'), true);
+  assert.equal(f.sheet.acceptsFollowup('今天聊聊别的事情'), false);
+  f.api.parseTaskText = async () => ({title:proposal.title,note:proposal.note});
+  const sentAt = Date.parse('2099-11-16T08:00:00Z');
+  assert.equal(await f.sheet.refine('改为十分钟后', {requestedAt:sentAt}), true);
+  assert.equal(f.sheet.capture().proposal.runAt, '2099-11-16T08:10:00.000Z');
+  assert.equal(updates.length, 0, 'preview must not write before confirmation');
+  assert.equal(f.sheet.cancel(), true);
+  assert.equal(f.sheet.capture().phase, 'succeeded');
+  assert.equal(f.sheet.capture().proposal.runAt, proposal.runAt);
+  await f.sheet.refine('改为十分钟后', {requestedAt:sentAt});
+  await f.probe.save();
+  assert.equal(f.calls.create, 1, 'editing must not create a second schedule');
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].id, 'saved-1');
+  assert.equal(updates[0].body.runAt, '2099-11-16T08:10:00.000Z');
+  assert.equal(Object.hasOwn(updates[0].body, 'note'), false, 'unchanged work must not overwrite server updates');
+  assert.equal(f.sheet.capture().editBase, null);
+});
+
+test('pausing a saved automation only writes enabled=false to the original ID', async () => {
+  const f = fixture(), updates = [];
+  f.api.updateSchedule = async (id, body) => { updates.push({id,body}); return {...proposal,id,...body}; };
+  await f.sheet.open({cardId:'card-a',cardState:restored({phase:'succeeded',createdId:'existing',receipt:{...proposal,id:'existing'}})});
+  await f.probe.save(true);
+  assert.equal(f.calls.create, 0); assert.equal(f.calls.preflight, 0);
+  assert.equal(updates[0].id, 'existing');
+  assert.deepEqual(JSON.parse(JSON.stringify(updates[0].body)), {enabled:false});
+  assert.match(f.probe.state.layer.body.innerHTML, /自动化已停用/);
+  assert.doesNotMatch(f.probe.state.layer.body.innerHTML, /data-waz-pause/);
+});
+
+test('editing can remove an unavailable plugin without validating or reapplying its old binding', async () => {
+  const f=fixture(), updates=[];
+  await f.sheet.open({cardId:'existing',cardState:restored({phase:'succeeded',createdId:'existing',receipt:{...proposal,id:'existing'}})});
+  f.api.updateSchedule=async(id, body)=>{updates.push(body);return {...proposal,id,...body};};
+  f.probe.state.methods=[];
+  f.sheet.startEdit();
+  const field=f.probe.state.layer.form.elements.personalPluginKey;
+  field.value='';field.name='personalPluginKey';field.closest=()=>f.probe.state.layer.form;
+  f.probe.onChange({type:'change',target:field});
+  await f.probe.save();
+  assert.equal(updates.length,1);assert.equal(updates[0].personalPluginKey,'');
+  assert.equal(updates[0].personalPluginVersion,'');assert.equal(updates[0].personalPluginChecksum,'');
+  assert.equal(f.sheet.capture().phase,'succeeded');assert.equal(f.calls.create,0);
+});
+
+test('cancelling during initial parsing persists cancellation and ignores the late result', async () => {
+  const f = fixture(), pending = deferred(); let last;
+  f.api.parseTaskText = () => pending.promise;
+  const opening = f.sheet.open({cardId:'cancel-card',text:'五分钟后生成日报',onCardState:s => {last=s;}});
+  await tick();
+  assert.equal(f.sheet.cancel(), true);
+  assert.equal(last.phase, 'cancelled');
+  pending.resolve({title:'迟到的计划',note:'生成日报'}); await opening;
+  assert.equal(last.phase, 'cancelled'); assert.equal(f.calls.create, 0);
+  await f.sheet.open({cardId:'cancel-card',cardState:last});
+  assert.equal(f.sheet.active(), null); assert.equal(f.sheet.acceptsFollowup('改为十分钟后'), false);
+});
+
+test('a conversational cancel dismisses a draft, while cancelling a saved task previews disabling it', async () => {
+  const f=fixture(); let last;
+  await f.sheet.open({cardId:'new',cardState:restored(),onCardState:s=>{last=s;}});
+  assert.equal(await f.sheet.refine('取消这个自动化'),true);
+  assert.equal(last.phase,'cancelled');assert.equal(f.sheet.hasSurface(),false);assert.equal(f.calls.create,0);
+  await f.sheet.open({cardId:'saved',cardState:restored({phase:'succeeded',createdId:'saved',receipt:{...proposal,id:'saved'}})});
+  assert.equal(await f.sheet.refine('取消这个自动化'),true);
+  assert.equal(f.sheet.capture().phase,'draft');assert.equal(f.sheet.capture().proposal.enabled,false);
+  assert.equal(f.sheet.capture().editBase.proposal.enabled,true);
+});
+
+test('messages arriving during initial parsing and consecutive refinements keep their order and timestamp', async () => {
+  const f = fixture(), initial = deferred(), firstEdit = deferred(); let calls=0;
+  f.api.parseTaskText = async () => ++calls === 1 ? initial.promise : firstEdit.promise;
+  const sentAt = Date.parse('2099-11-16T08:00:00Z');
+  const opening = f.sheet.open({cardId:'queued',text:'五分钟后生成日报',requestedAt:sentAt});
+  await tick();
+  const first = f.sheet.refine('改为十分钟后', {requestedAt:sentAt + 60000});
+  const second = f.sheet.refine('增加来源链接', {requestedAt:sentAt + 120000});
+  initial.resolve({title:'日报',note:'生成日报'}); await opening; await tick();
+  firstEdit.resolve({title:'日报',note:'生成日报并附链接'});
+  assert.equal(await first, true); assert.equal(await second, true);
+  assert.equal(calls, 2);
+  assert.equal(f.sheet.capture().proposal.runAt, '2099-11-16T08:11:00.000Z');
+  assert.equal(f.sheet.capture().proposal.note, '生成日报并附链接');
+});
+
+test('initial parser latency cannot move a relative deadline and restoring the card does not reanchor it', async () => {
+  const f = fixture(), pending=deferred(); let clock=Date.parse('2099-11-16T08:00:00Z');
+  f.context.Date = class extends Date {static now() {return clock;}};
+  f.api.parseTaskText = () => pending.promise;
+  const opening = f.sheet.open({cardId:'relative',text:'五分钟后生成日报'});
+  await tick(); clock+=120000;
+  pending.resolve({title:'日报',note:'生成日报'}); await opening;
+  assert.equal(f.sheet.capture().proposal.runAt, '2099-11-16T08:05:00.000Z');
+  const snapshot=f.sheet.capture(); f.sheet.close(true); clock+=60000;
+  await f.sheet.open({cardId:'relative',cardState:snapshot});
+  assert.equal(f.sheet.capture().proposal.runAt, '2099-11-16T08:05:00.000Z');
+});
+
+test('cancelling an in-flight edit preserves the saved task and cannot be undone by its parser', async () => {
+  const f = fixture(), pending=deferred();
+  await f.sheet.open({cardId:'existing',cardState:restored({phase:'succeeded',createdId:'existing',receipt:{...proposal,id:'existing'}})});
+  f.api.parseTaskText = () => pending.promise;
+  const updating = f.sheet.refine('修改任务内容'); await tick();
+  assert.equal(f.sheet.cancel(), true);
+  pending.resolve({title:'不能覆盖',note:'迟到结果'});
+  assert.equal(await updating, false);
+  assert.equal(f.sheet.capture().phase, 'succeeded');
+  assert.equal(f.sheet.capture().proposal.title, proposal.title);
+  assert.equal(f.calls.create, 0);
+});
+
 test('a recovered automation catalog replaces a deleted model with its first available model', async () => {
   const f = fixture(), name = 'local:model-0123456789abcdef0123456789abcdef';
   f.api.myModels = async () => { throw Error('Temporary secure catalog failure'); };
@@ -298,7 +449,7 @@ test('迟到创建结果写回原卡，不污染新会话或调用旧页面回�
 test('跨重启恢复未确认的提交只允许查询，不当作未创建重新发送', async () => {
   const f = fixture(); await f.sheet.open({ cardId: 'card-a', cardState: restored({ phase: 'submitting' }) });
   const snapshot = f.sheet.capture(); assert.equal(snapshot.phase, 'error'); assert.equal(snapshot.uncertain, true);
-  assert.match(snapshot.error, /查询.*重复创建/); assert.equal(f.probe.state.layer.button.disabled, true);
+  assert.match(snapshot.error, /查询.*重复提交/); assert.equal(f.probe.state.layer.button.disabled, true);
   await f.probe.save(); assert.equal(f.calls.create, 0); assert.equal(f.calls.preflight, 0);
 });
 
@@ -355,6 +506,17 @@ test('补充解析失败保留原手动字段及错误状态，不能把网关�
   assert.equal(accepted, false); assert.equal(f.sheet.capture().phase, 'error');
   assert.equal(f.sheet.capture().proposal.title, proposal.title);
   assert.equal(f.sheet.capture().proposal.pluginInputs.audience, '研发组'); assert.equal(refined, 0);
+});
+
+test('refinement retains the safe provider cause instead of reporting an automation creation failure', async () => {
+  const f=fixture();
+  f.context._humanErr=(_error,fallback)=>fallback;
+  await f.sheet.open({cardId:'parse-error',cardState:restored()});
+  f.api.parseTaskText=async()=>({_parseError:'本地模型服务返回错误（HTTP 401），请检查模型服务凭据'});
+  assert.equal(await f.sheet.refine('标题改为巡检'),false);
+  assert.match(f.sheet.capture().error,/HTTP 401.*模型服务凭据/);
+  assert.doesNotMatch(f.sheet.capture().error,/没有创建成功/);
+  assert.equal(f.calls.create,0);
 });
 
 test('创建前等待提交意图写入会话，写入失败不调用服务端且允许明确重试', async () => {

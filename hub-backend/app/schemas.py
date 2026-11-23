@@ -1,11 +1,21 @@
 """Pydantic API contracts for tasks and clients, using camelCase fields and millisecond timestamps.
 
 """
+import re
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+)
+from pydantic_core import PydanticCustomError
 
+from .auth import ACCOUNT_PASSWORD_MAX, ACCOUNT_PASSWORD_MIN
 from .models import Client, Task
 
 
@@ -100,6 +110,15 @@ def client_to_api(c: Client, offline_after: int = 30) -> dict[str, Any]:
     }
 
 
+def _reject_boolean_timestamp(value):
+    if isinstance(value, bool):
+        raise PydanticCustomError("hub.input.due", "A deadline must be a timestamp in milliseconds")
+    return value
+
+
+DueTimestamp = Annotated[int, BeforeValidator(_reject_boolean_timestamp)]
+
+
 class TaskCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     kind: str = "requirement"
@@ -108,8 +127,8 @@ class TaskCreate(BaseModel):
     visibility: str = "related"
     workScenarioName: str = ""
     workRouting: dict[str, Any] = Field(default_factory=dict)
-    title: str = "未命名"
-    source: str = ""
+    title: str = Field(default="未命名", min_length=1, max_length=200)
+    source: str = Field(default="", max_length=120)
     note: str = ""
     status: str = "todo"
     urgent: Optional[bool] = None
@@ -119,7 +138,7 @@ class TaskCreate(BaseModel):
     # Task metadata.
     priority: str = "normal"                 # low|normal|high|critical
     start: Optional[int] = None              # Planned start time in milliseconds.
-    due: Optional[int] = None                # Due time in milliseconds.
+    due: Optional[DueTimestamp] = None       # Due time in milliseconds.
     actualStart: Optional[int] = None
     actualEnd: Optional[int] = None
     tags: list[str] = Field(default_factory=list)
@@ -138,6 +157,21 @@ class TaskCreate(BaseModel):
     deps: list[str] = Field(default_factory=list)  # Prerequisite task IDs; all must complete before this task is ready.
 
 
+class TaskSyncCreate(TaskCreate):
+    """Replay pre-validation desktop outboxes and undo completed deletes losslessly.
+
+    PUT cannot distinguish an unsent legacy task from a new client-generated ID.
+    Its text fields intentionally retain the old contract; POST and PATCH enforce
+    current input limits. Ownership and managed-source checks still apply to PUT.
+    """
+    title: str = "未命名"
+    source: str = ""
+
+
+class ReviewRecipient(BaseModel):
+    userId: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=36)] | None
+
+
 class TaskUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     kind: Optional[str] = None
@@ -149,8 +183,8 @@ class TaskUpdate(BaseModel):
     requirementVersion: Optional[int] = None
     workScenarioName: Optional[str] = None
     workRouting: Optional[dict[str, Any]] = None
-    title: Optional[str] = None
-    source: Optional[str] = None
+    title: Optional[str] = Field(default=None, max_length=200)
+    source: Optional[str] = Field(default=None, max_length=120)
     note: Optional[str] = None
     status: Optional[str] = None
     urgent: Optional[bool] = None
@@ -159,7 +193,7 @@ class TaskUpdate(BaseModel):
     result: Optional[str] = None
     priority: Optional[str] = None
     start: Optional[int] = None
-    due: Optional[int] = None
+    due: Optional[DueTimestamp] = None
     actualStart: Optional[int] = None
     actualEnd: Optional[int] = None
     tags: Optional[list[str]] = None
@@ -211,7 +245,7 @@ class DispatchCreate(BaseModel):
     handler: str = "me"
     priority: str = "normal"
     start: Optional[int] = None
-    due: Optional[int] = None
+    due: Optional[DueTimestamp] = None
     tags: list[str] = []
     domainId: str = ""
     workScenarioKey: str = ""
@@ -243,9 +277,23 @@ class Envelope(BaseModel):
     reporter: Optional[str] = None        # Requester who receives the completion notification.
 
 
+_NAME_CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]")
+
+
+def validate_name_characters(value: str) -> str:
+    if _NAME_CONTROLS.search(value):
+        raise ValueError("Name must be a single line without control or bidirectional formatting characters")
+    return value
+
+
+SingleLineName = Annotated[str, AfterValidator(validate_name_characters)]
+AdminName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64),
+                      AfterValidator(validate_name_characters)]
+
+
 class IntegrationCreate(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    name: str
+    model_config = ConfigDict(extra="forbid")
+    name: AdminName
     type: str = "generic"
     config: dict = {}                    # GitLab configuration stores base_url and project; tokens remain in environment variables.
 
@@ -271,29 +319,46 @@ class AssignBody(BaseModel):
 
 # Organization roles and users.
 
+def _org_sort(value: object) -> int:
+    """Preserve decimal-string clients without coercing booleans or floats."""
+    if isinstance(value, str):
+        import re
+        text = value.strip()
+        if re.fullmatch(r"[+-]?[0-9]+", text):
+            digits = text.lstrip("+-").lstrip("0") or "0"
+            if len(digits) <= 10:
+                value = int(digits) * (-1 if text.startswith("-") else 1)
+    if type(value) is not int or not -(2**31) <= value <= 2**31 - 1:
+        raise ValueError("sort must be an integer between -2147483648 and 2147483647")
+    return value
+
+
+OrgSort = Annotated[int, Field(ge=-(2**31), le=2**31 - 1), BeforeValidator(_org_sort)]
+
+
 class OrgCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    name: str
+    name: AdminName
     parentId: Optional[str] = None
-    sort: int = 0
+    sort: OrgSort = 0
 
 
 class OrgUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    name: Optional[str] = None
+    name: Optional[AdminName] = None
     parentId: Optional[str] = None
-    sort: Optional[int] = None
+    sort: Optional[OrgSort] = None
 
 
 class RoleCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    name: str
+    name: AdminName
     permissions: list[str] = []
 
 
 class RoleUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    name: Optional[str] = None
+    name: Optional[AdminName] = None
     permissions: Optional[list[str]] = None
 
 
@@ -303,28 +368,42 @@ class UserTokenQuota(BaseModel):
     limit: int = Field(default=0, ge=0, le=10_000_000_000_000, strict=True)
 
 
+AccountPassword = Annotated[str, StringConstraints(
+    min_length=ACCOUNT_PASSWORD_MIN, max_length=ACCOUNT_PASSWORD_MAX, pattern=r"\S")]
+
+
 class UserCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    username: str
-    password: str
-    displayName: str = ""
+    username: AdminName
+    password: AccountPassword
+    displayName: SingleLineName = ""
+    isTestAccount: Optional[bool] = None
     orgId: Optional[str] = None
     roleId: Optional[str] = None
     positions: Optional[list] = None
-    domains: Optional[list] = None
+    domains: Optional[list[str]] = None
     tokenQuota: Optional[UserTokenQuota] = None
 
 
 class UserUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    displayName: Optional[str] = None
+    displayName: Optional[SingleLineName] = None
+    isTestAccount: Optional[bool] = None
     orgId: Optional[str] = None
     roleId: Optional[str] = None
     isActive: Optional[bool] = None
-    password: Optional[str] = None
+    password: Optional[AccountPassword] = None
     positions: Optional[list] = None
-    domains: Optional[list] = None
+    domains: Optional[list[str]] = None
     tokenQuota: Optional[UserTokenQuota] = None
+
+
+class UserBatchUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    ids: list[Annotated[str, StringConstraints(min_length=1, max_length=36)]] = Field(
+        min_length=1, max_length=200)
+    isActive: bool | None = None
+    orgId: Annotated[str, StringConstraints(min_length=1, max_length=36)] | None = None
 
 
 class AssignUserBody(BaseModel):

@@ -280,7 +280,13 @@
     if (view === 'detail') return openWorkspace('history', {requirementId: payload?.taskId});
     // Old deep links remain compatible, but no longer open a second approval page.
     if (view === 'approvals') {
-      if (payload && payload.taskId) return window.openApprovalsEntry(payload);
+      if (payload?.taskId) {
+        const opened = window.openApprovalsEntry(payload);
+        // A detail drawer can be the first usable surface without a host view.
+        // It owns its loading and retry UI, so the workspace timer can stop once it mounts.
+        if (opened !== false && document.querySelector('.rq-detail-backdrop')) pageOpened();
+        return opened;
+      }
       return openWorkspace('history', {approvalInbox: true});
     }
     if (view === 'history' && payload?.requirementId) {
@@ -306,8 +312,17 @@
     return window.SoduWorkPagePerformance ? SoduWorkPagePerformance.navigate(key, open) : open();
   }
 
-  window.WorkspaceHost = { open: (view, payload) => window.WorkspaceNavigation
-    ? WorkspaceNavigation.open(view, payload, openWorkspace) : openWorkspace(view, payload),
+  function openWorkspaceRoute(view, payload) {
+    const opened = window.WorkspaceNavigation
+      ? WorkspaceNavigation.open(view, payload, openWorkspace) : openWorkspace(view, payload);
+    const complete = result => {
+      if (result !== false && _workspaceView) pageOpened();
+      return result;
+    };
+    return opened?.then ? opened.then(complete) : complete(opened);
+  }
+
+  window.WorkspaceHost = { open: openWorkspaceRoute,
     get view() { return _workspaceView; } };
   /* An empty workspace route opens home; restored window parameters come from the main process's current-run memory. */
   OPENERS.workspace = (p) => window.WorkspaceHost.open(String((p || {}).view || 'create'), p || {});
@@ -345,25 +360,11 @@
     _contentReadySent = true;
     try {
       if (window.soduWorkAPI && soduWorkAPI.deskContentReady) soduWorkAPI.deskContentReady();
-    } catch (e) { /* The main process also enforces a startup timeout. */ }
+    } catch (e) { /* The main process can still reveal the window. */ }
   }
 
-  function openPage(payload) {
-    const fn = OPENERS[PANEL] || OPENERS.aidesk;
-    try {
-      fn(payload || {});
-    } catch (e) {
-      /*
-       * Keep failed pages open with an error state and console diagnostics instead of
-       * automatically closing an empty window.
-       */
-      console.error('[desk] 开「' + PANEL + '」这一页失败', e);
-      _openFailed = true;
-      const hint = document.getElementById('deskBlankHint');
-      if (hint) hint.textContent = '这一页没能打开：' + (e && e.message || e);
-      contentReady();
-      return;
-    }
+  function pageOpened() {
+    if (_opened) return;
     _opened = true;
     /*
      * Hide the loading background after content mounts so stale loading text cannot appear or
@@ -374,7 +375,41 @@
     contentReady();
   }
 
-  let _booted = false, _opened = false, _openFailed = false, _pending = null;
+  function pageOpenFailed(error) {
+    console.error('[desk] 开「' + PANEL + '」这一页失败', error);
+    _openFailed = true;
+    if (PANEL === 'workspace') {
+      if (!_opened) window.dispatchEvent(new Event('soduwork-desk-startup-failed'));
+    } else {
+      const hint = document.getElementById('deskBlankHint');
+      if (hint) hint.textContent = '这一页没能打开：' + (error && error.message || error);
+    }
+    contentReady();
+  }
+
+  function openPage(payload) {
+    const fn = OPENERS[PANEL] || OPENERS.aidesk;
+    _opening = null;
+    try {
+      const result = fn(payload || {});
+      if (PANEL !== 'workspace') pageOpened();
+      else if (result?.then) {
+        // A restored route may wait for boot and retry with a fresh page before settling.
+        const pending = _opening = Promise.resolve(result);
+        pending.then(() => {
+          if (_opening === pending) _opening = null;
+        }, error => {
+          if (_opening !== pending) return;
+          _opening = null;
+          pageOpenFailed(error);
+        });
+      }
+    } catch (error) {
+      pageOpenFailed(error);
+    }
+  }
+
+  let _booted = false, _opened = false, _openFailed = false, _opening = null, _pending = null;
   let _hydratePaintPending = false;
   function _deskIsEditing() {
     const el = document.activeElement;
@@ -478,7 +513,7 @@
         }
       }
       if (_pending) openPage(_pending);           /* Explicit startup navigation takes precedence over restored early pages. */
-      else if (!_opened) openPage(args);          /* Open data-dependent pages after initialization. */
+      else if (!_opened && !_opening) openPage(args); /* Open data-dependent pages unless a workspace page already opened or is opening. */
       /* Populate assignment choices after team capabilities arrive for an early-opened creation form. */
       else if (PANEL === 'add' && typeof _requestPopulateAssign === 'function') { try { _requestPopulateAssign(); } catch (e) {} }
       /* Refresh the early-opened execution workspace after current-Hub tasks load. */

@@ -48,7 +48,11 @@ if ($env:SODUWORK_LAUNCHER_TEST_PROTECT -eq '1') {
 }
 # Materialize inherited ACL metadata before taking the exact SDDL baseline.
 # Newly created files can lack AI until a same-directory rename recomputes it.
-Set-Acl -LiteralPath $entry -AclObject $acl
+# Persist only the unchanged DACL. A no-op Get-Acl/Set-Acl on a protected file
+# can otherwise request audit-section privileges in Windows PowerShell 5.1.
+$access = [Security.AccessControl.AccessControlSections]::Access
+$acl.SetSecurityDescriptorSddlForm($acl.GetSecurityDescriptorSddlForm($access), $access)
+[IO.File]::SetAccessControl($entry, $acl)
 $before = (Get-Acl -LiteralPath $entry).Sddl
 $handle = $null
 try {

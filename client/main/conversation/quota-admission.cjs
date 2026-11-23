@@ -61,7 +61,7 @@ function localManagedRuntime(runtime) {
   const agent = String(runtime?.agent || '').trim()
     .replace(/^local:/, '').replace(/^runner:[^:]+:/, '');
   return runtime?.modelMode === 'managed' && !runtime?.controlled &&
-    agent && !['codex', 'claude'].includes(agent);
+    agent && !['codex'].includes(agent);
 }
 
 function beforeTurn(authorize, identity, previous, runtime) {

@@ -36,14 +36,16 @@ app.whenReady().then(async()=>{
     await click('.rq-scopes [data-rq-scope=related]');
     const original=await js('JSON.stringify(tasks)');
     const hint='待整理的需求；“待补充”表示仍需完善背景或完成标准';
-    assert.equal(await js("document.querySelector('[data-rq-lane=intake] .rq-lane-hint').textContent"),hint);
+    assert.equal(await js("document.querySelector('[data-rq-lane=intake] .rq-lane-hint').textContent"),'整理需求，补充信息');
+    assert.equal(await js("document.querySelector('[data-rq-lane=intake] .rq-lane-hint').title"),hint);
+    assert.equal(await js("document.querySelector('#rqStageHelp,.rq-stage-help-toggle')"),null);
     assert.equal(await js("document.querySelector('[data-rq-lane=intake] .rq-lane-title>span').textContent"),'收集箱');
     assert.equal(await js("document.querySelector('[data-rq-lane=intake] .rq-lane-title>em').textContent"),'2');
     assert.deepEqual(await js("[...document.querySelectorAll('#rqLane-intake [data-hbid]')].map(n=>n.dataset.hbid).sort()"),['clarifying','intake']);
     assert.equal(await js("document.querySelector('[data-hbid=clarifying] .rq-flag').textContent"),'待补充');
     assert.equal(await js("document.querySelector('[data-rq-lane=clarifying]')===null"),true);
     assert.equal(await js("document.querySelector('#rqScopeHint')"),null);
-    report.checks.push('Inbox retains both intake and clarification issues, its existing count and clarification badge; the approved description explains their relationship without adding a column or a scope banner');
+    report.checks.push('Inbox retains both intake and clarification issues and its existing count and badge; concise inline hints retain full explanations on hover, with no help button or popup');
     for(const file of [...JSON.parse(fs.readFileSync(path.join(client,'core/locales/manifest.json'),'utf8')).map(name=>'core/locales/'+name),'core/i18n-dom.js','core/i18n.js'])
       await js(fs.readFileSync(path.join(client,file),'utf8')+'\nvoid 0;');
     for(const locale of ['zh-CN','en-US','ja-JP','ko-KR'])for(const width of [1440,480]){
@@ -58,14 +60,18 @@ app.whenReady().then(async()=>{
           withinViewport:r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight,
           beforeCards:r.bottom<=card.top,withinLane:r.right<=lane.right+1,hit:n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),
           outerOverflow:document.documentElement.scrollWidth>innerWidth+1};})()`);
-      assert.equal(geometry.text,await js(`SoduWorkI18n.translateText(${JSON.stringify(hint)})`));
-      assert.equal(geometry.title,geometry.text);assert.equal(geometry.whiteSpace,'normal');assert.equal(geometry.otherWhiteSpace,'nowrap');
-      assert.ok(geometry.lineCount>1,JSON.stringify(geometry));
+      assert.equal(geometry.text,await js("SoduWorkI18n.translateText('整理需求，补充信息')"));
+      assert.equal(geometry.title,await js(`SoduWorkI18n.translateText(${JSON.stringify(hint)})`));
+      assert.equal(geometry.whiteSpace,'nowrap');assert.equal(geometry.otherWhiteSpace,'nowrap');
+      assert.equal(geometry.lineCount,1,JSON.stringify(geometry));
+      assert.equal(await js("document.querySelectorAll('.rq-lane-hint').length"),5);
+      const tops=await js("[...document.querySelectorAll('.rq-lane-cards')].map(n=>n.getBoundingClientRect().top)");
+      assert.ok(Math.max(...tops)-Math.min(...tops)<1,'aligned columns');
       for(const key of ['notClipped','withinHeader','withinViewport','beforeCards','withinLane','hit'])assert.equal(geometry[key],true,key+': '+JSON.stringify(geometry));
       assert.equal(geometry.outerOverflow,false);report.layouts.push({locale,width,...geometry});
       if(locale==='zh-CN'||locale==='en-US')await shot('intake-'+locale+'-'+width);
     }
-    report.checks.push('All four locales wrap only the Inbox explanation at desktop and narrow widths; full text stays visible, unobstructed and above the cards');
+    report.checks.push('All four locales keep the five inline hints on one line and column contents aligned at desktop and narrow widths; the concise Inbox hint remains visible above its cards');
     win.setContentSize(1440,1000);await js("SoduWorkI18n.setLocale('zh-CN')");await wait(100);
     assert.deepEqual(await js("tasks.filter(t=>t.id!=='ready').map(t=>({id:t.id,stage:Requirements.stage(t),column:Requirements.column(t),canOpen:Requirements.canOpenConversation(t,'fixture-device'),canStart:ChatTaskController.isPickableTask(t)}))"),
       [{id:'intake',stage:'intake',column:'intake',canOpen:false,canStart:false},{id:'clarifying',stage:'clarifying',column:'intake',canOpen:false,canStart:false}]);

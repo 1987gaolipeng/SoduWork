@@ -91,7 +91,7 @@ test('manual local automation runs fail closed when the secure model bridge is u
   assert.equal(result.localModelUnavailable, true);
 });
 
-for (const adapter of ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'harness2', 'codex-harness']) {
+for (const adapter of ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'codex-harness']) {
   test('same-device Runner automation retains a local ' + adapter + ' selection only on the device', async () => {
     const h = harness(); await h.login();
     const model = 'local:model-0123456789abcdef0123456789abcdef', writes = [];

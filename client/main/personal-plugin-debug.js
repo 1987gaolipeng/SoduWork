@@ -172,7 +172,8 @@ function create({ record, save, executeNode, stopNode, preflight, answerPermissi
       }
       if (!node || node.key !== nodeKey) throw new Error('当前步骤已改变，请刷新调试卡');
       if (command === 'permission' && record.status === 'running' && typeof answerPermission === 'function') {
-        await answerPermission(record, { nodeKey, requestId: payload?.requestId, allow: payload?.allow });
+        await answerPermission(record, { nodeKey, requestId: payload?.requestId, allow: payload?.allow,
+          policyRevision: payload?.policyRevision, decision: payload?.decision, optionId: payload?.optionId });
         commit(); return view(record);
       }
       if (command === 'approve' && record.status === 'waiting' && node.type === 'human_review') {

@@ -52,8 +52,11 @@ app.whenReady().then(async()=>{
     for(let i=0;i<50;i++) {task=(await call('/api/v1/tasks/empty-delivery')).body;if(task.requirementStage==='reviewing')break;await wait(100);}
     assert.equal(task.requirementStage,'reviewing');
     assert.equal(task.canSubmitReview,false);
-    assert.equal(await executor.js(`document.querySelectorAll('.rq-detail-backdrop').length`),0,
-      'A successful HTTP submission closes the executor drawer');
+    const drawerCount = () => executor.js(`document.querySelectorAll('.rq-detail-backdrop').length`);
+    // The Hub state may become visible to the polling device before the renderer processes its receipt.
+    const closeDeadline = Date.now() + 3000;
+    while (await drawerCount() && Date.now() < closeDeadline) await wait(25);
+    assert.equal(await drawerCount(), 0, 'A successful HTTP submission closes the executor drawer');
     const reviewer=await open('sender');
     await reviewer.js(`RequirementsDetail.open('empty-delivery')`);
     assert.equal(await reviewer.js(`document.querySelectorAll('[data-tfd-acceptance-mode]').length`),2);

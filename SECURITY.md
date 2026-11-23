@@ -6,7 +6,7 @@
 
 For credential exposure, authorization bypass, arbitrary code execution, or unauthorized access, do not post exploitable details in public issues, Discussions, or Discord.
 
-Report privately through GitHub: open the repository's **Security** tab and choose **Report a vulnerability** ([open the form](https://github.com/mdiri-ai/SoduWork/security/advisories/new)). If you can't use GitHub, email [soduwork@outlook.com](mailto:soduwork@outlook.com) with a subject starting with `[Security]`.
+Report privately through GitHub: open the repository's **Security** tab and choose **Report a vulnerability** ([open the form](https://github.com/mdiri-ai/SoduWork/security/advisories/new)). If you can't use GitHub, email [security@soduwork.ai](mailto:security@soduwork.ai) with a subject starting with `[Security]`.
 
 Include the affected version, operating system, deployment method, minimal reproduction, impact, and sanitized logs. Test in an isolated environment you control. Do not access another person's workspace, runner, or data. Do not upload real tokens, passwords, databases, or complete user sessions.
 

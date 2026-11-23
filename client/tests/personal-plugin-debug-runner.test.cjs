@@ -354,6 +354,49 @@ test('permission requests expose a bounded safe summary and reply only once to t
   assert.doesNotMatch(JSON.stringify(f.saved), /do-not-show-secret|"token"/);
 });
 
+for (const decision of ['answer', 'deny']) test(`workflow questions preserve ${decision} through controller, projection and Runner`, async t => {
+  const f = setup(t), waiting = deferred(), release = deferred(), answers = [];
+  f.record.status = 'running'; let answered = false, rejectReply = true;
+  const options = [{ optionId: 'q0_opt_0', name: 'First', kind: 'allow_once' },
+    { optionId: 'q0_opt_1', name: 'Second', kind: 'allow_once' }];
+  f.runtime.rpc = async (op, payload) => {
+    if (op === 'job.dispatch') {
+      fs.writeFileSync(path.join(payload.ctx.workDir, 'plan.md'), 'result');
+      return { ok: true, data: { ref: f.node.ref } };
+    }
+    if (op === 'job.session') return { ok: true, data: { status: answered ? 'done' : 'waiting-permission',
+      items: [], seq: 0, pendingPermissions: answered ? [] : [{ requestId: 'question-1', policyRevision: 2,
+        action: 'native.question', title: 'Choose one', options }] } };
+    if (op === 'job.permission') {
+      if (rejectReply) return { ok: true, data: { ok: false } };
+      answers.push(payload); answered = true; return { ok: true, data: { ok: true } };
+    }
+    throw Error(op);
+  };
+  const executor = createExecutor({ app: f.app, handle: f.handle, plugin: f.plugin,
+    runtime: f.runtime, identityOf: async () => ({}), skillDirs: [], deviceGrants: [],
+    wait: async () => { waiting.resolve(); await release.promise; } });
+  const controller = core.create({ record: f.record, save: () => {}, answerPermission: executor.answerPermission });
+  const execution = executor.executeNode(f.node, [], f.record, f.persist);
+  await waiting.promise;
+  assert.equal(f.node.pendingPermissions[0].action, 'native.question');
+  assert.deepEqual(f.node.pendingPermissions[0].options, options);
+  const reply = { requestId: 'question-1', policyRevision: 2, decision, optionId: 'q0_opt_1' };
+  for (const invalid of [{ allow: true }, { ...reply, decision: 'once' }, { ...reply, policyRevision: 1 },
+    { ...reply, decision: 'answer', optionId: 'unknown' }]) {
+    await assert.rejects(controller.action('permission', f.record.revision, f.node.key, invalid), /已失效/);
+  }
+  assert.deepEqual(answers, []);
+  await assert.rejects(controller.action('permission', f.record.revision, f.node.key, reply), /暂时无法完成请求/);
+  assert.equal(f.node.pendingPermissions.length, 1);
+  rejectReply = false;
+  await controller.action('permission', f.record.revision, f.node.key, reply);
+  await assert.rejects(controller.action('permission', f.record.revision, f.node.key, reply), /已失效/);
+  assert.deepEqual(answers, [{ ref: f.node.ref, requestId: 'question-1', policyRevision: 2, decision,
+    ...(decision === 'answer' ? { optionId: 'q0_opt_1' } : {}) }]);
+  release.resolve(); await execution;
+});
+
 test('whole-plan preflight checks the installed plugin version and current source authorization', async t => {
   const f = setup(t), sourceAccess = require('../main/plugin-source-access');
   const original = sourceAccess.check;

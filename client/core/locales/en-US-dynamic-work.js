@@ -110,7 +110,7 @@
     "· 未连接后台": "· Server disconnected",
     "正在加载{value1}任务": "Loading {value1} issues",
     "再显示 {value1} 条（还有 {value2}）": "Show {value1} more ({value2} remaining)",
-    "这台机器上还没有能接活的智能体。装一个 CLI（OpenCode / Claude Code / Pi），或让管理员把执行底座配好。": "No agents are available on this computer. Install a CLI (OpenCode / Claude Code / Pi), or ask an administrator to configure the runtime.",
+    "这台机器上还没有能接活的智能体。装一个 CLI（OpenCode / Codex / Pi），或让管理员把执行底座配好。": "No agents are available on this computer. Install a CLI (OpenCode / Codex / Pi), or ask an administrator to configure the runtime.",
     "填错的话这一环起不来（网关不提供模型列表，SoduWork 没法先替你核对）。常用的让管理员加进「模型服务」的开放清单，以后直接点就行。": "An incorrect name prevents this stage from starting. The gateway provides no model list, so SoduWork cannot verify it first. Ask an administrator to add common models to the allowed list in Model Services.",
     "不换人时按上一环那位算：它要是用自己模型的（Claude Code、托管的 AI），这里选了也不生效。": "Keeping the same agent uses its current settings. If it manages its own model (such as Claude Code or managed AI), this selection has no effect.",
     "跟默认（{value1}）": "Use default ({value1})",

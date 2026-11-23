@@ -8,6 +8,7 @@ from ..db import _smoke_db_guard
 
 _engines = {}
 REVISION = 'jiyong_0001'
+_migration_lock = None
 
 
 class CloudError(ValueError):
@@ -25,9 +26,9 @@ def database_url():
     if cloud.drivername != 'postgresql+asyncpg':
         raise CloudError('云端即用数据需要 postgresql+asyncpg 数据库')
     # Reject aliases with the same host/database even if credentials differ.
-    if (hub.get_backend_name() == 'postgresql' and cloud.host == hub.host
-            and (cloud.port or 5432) == (hub.port or 5432) and cloud.database == hub.database):
-        raise CloudError('即用业务库必须与 Hub 核心数据库分离')
+    # The app tables and the Hub tables may share one PostgreSQL database.
+    # The independent migration uses its own version table, and all app data
+    # remains namespaced by the jiyong_* tables and per-app schemas.
     _smoke_db_guard(value)
     return value
 
@@ -44,7 +45,7 @@ def engine():
 async def check():
     try:
         async with engine().connect() as connection:
-            revision = await connection.scalar(text('SELECT version_num FROM alembic_version'))
+            revision = await connection.scalar(text('SELECT version_num FROM jiyong_alembic_version'))
             if revision != REVISION:
                 raise CloudError('即用业务库需要执行独立 Alembic 升级')
             # Readiness is read-only; no schema, seeds, files or test rows.
@@ -58,11 +59,29 @@ async def check():
         raise
     except Exception as exc:
         raise CloudError('云端即用数据库不可用，请检查连接和独立数据库迁移') from exc
-    from pathlib import Path
-    directory = get_settings().jiyong_asset_dir
-    if not directory or not Path(directory).is_absolute():
-        raise CloudError('请配置云端即用素材的绝对持久目录，多节点须使用共享存储')
+    settings = get_settings()
+    if not (settings.jiyong_object_endpoint and settings.jiyong_object_access_key
+            and settings.jiyong_object_secret_key and settings.jiyong_object_bucket):
+        raise CloudError('请配置云端即用对象存储（COS/S3）')
     return {'ok': True, 'location': 'cloud', 'engine': 'postgresql', 'schemaVersion': 1}
+
+
+async def migrate_at_startup():
+    """Create or upgrade the app-data registry before cloud apps are admitted."""
+    global _migration_lock
+    if not database_url():
+        return {'ok': False, 'state': 'disabled'}
+    if _migration_lock is None:
+        import asyncio
+        _migration_lock = asyncio.Lock()
+    async with _migration_lock:
+        from alembic import command
+        from alembic.config import Config
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        config = Config(str(root / 'jiyong-alembic.ini'))
+        await __import__('asyncio').to_thread(command.upgrade, config, 'head')
+    return {'ok': True, 'state': 'ready'}
 
 
 async def close():

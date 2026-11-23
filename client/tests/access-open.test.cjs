@@ -24,6 +24,7 @@ function fixture(options = {}) {
     _accountSync: options.accountSync,
     _sharedHistory: options.sharedHistory || null,
     _cloudHandoff: options.cloudHandoff || { observe() {} },
+    firstTurnTitle: { enroll() {} },
     skillTurn: require('../main/pi-session/skill-turn'), sendIdentityOf: null,
     taskInput: { request: async (_identity, route) => options.request(route) },
     app: options.app || { getPath: () => emptyStorage }, path,
@@ -82,6 +83,7 @@ function fixture(options = {}) {
       if (name === '../conversation/acceptance-session' && options.acceptance) return options.acceptance;
       if (name === '../conversation/account-native-source.cjs') return require('../main/conversation/account-native-source.cjs');
       if (name === '../conversation/shared-history.cjs') return require('../main/conversation/shared-history.cjs');
+      if (name === '../conversation/execution-outcome.cjs') return require('../main/conversation/execution-outcome.cjs');
       if (!['../native-locale.cjs', '../agent-runtime/runtime-catalog', '../access-control/policy', '../access-control/preferences', '../access-control/automation-access', '../platform-connections/runtime.cjs', '../conversation/history-access', '../conversation/requirement-context', '../conversation/acceptance-session', '../conversation/work-conversation-opening', '../conversation-connectors.cjs', './resume-cwd', './task-access'].includes(name)) throw Error('Unexpected dependency ' + name);
       return require(path.join(__dirname, '../main/pi-session', name));
     },
@@ -178,6 +180,25 @@ test('a downloaded account transcript cannot intercept authenticated original op
   }
   assert.equal(accountReads, 1); assert.equal(f.calls.length, 0);
 });
+
+for (const adapterId of ['claude', 'harness2']) {
+  test(`${adapterId}: retired local history opens a passive transcript without resolving credentials or starting a runtime`, async () => {
+    const actor = automationIdentity();
+    const local = { id: 'retired-' + adapterId, adapterId,
+      workOwner: require('../main/platform-connections/runtime.cjs').scope(actor) };
+    const projection = { sessionId: local.id, localReplica: true, readOnly: true };
+    let reads = 0;
+    const f = fixture({ identityOf: async () => assert.fail('Reading retired history cannot resolve execution credentials'),
+      sharedHistory: { resolve: async () => local, open: async () => { reads++; return projection; } },
+      openReply: handle => ({ ok: true, readOnly: handle.readOnly, sessionId: handle.sessionId }) });
+    const reply = await f.open({ chatId: local.id, adapterId: 'pi' });
+    assert.equal(reply.ok, true, reply.reason);
+    assert.equal(reply.readOnly, true);
+    assert.equal(reply.sessionId, local.id);
+    assert.equal(reads, 1);
+    assert.equal(f.calls.length, 0, 'A stale renderer selection must not replace the saved runtime');
+  });
+}
 
 test('owned local history remains readable offline without starting a runtime or changing cloud access', async () => {
   for (const unavailable of [async () => null, async () => { throw Error('Hub offline'); }]) {
@@ -759,10 +780,10 @@ test('本机新建需求继承系统权限，显式选择优先且后台派发�
   assert.equal(f.calls.at(-1).accessPolicy.mode, 'standard', '历史未确认的 full 不能提升权限');
 });
 
-test('a fresh interactive desktop chat inherits full access while headless calls cannot inherit it', async () => {
+test('a fresh interactive desktop chat inherits standard access while headless calls cannot inherit it', async () => {
   const fresh = fixture();
   assert.equal((await fresh.open({ adapterId: 'pi' })).ok, true);
-  assert.equal(fresh.calls[0].accessPolicy.mode, 'full'); assert.equal(fresh.dialogs.length, 0);
+  assert.equal(fresh.calls[0].accessPolicy.mode, 'standard'); assert.equal(fresh.dialogs.length, 0);
   const headless = fixture();
   assert.equal((await headless.open({ adapterId: 'pi' }, null)).ok, true);
   assert.equal(headless.calls[0].accessPolicy, null, 'headless legacy calls do not inherit device preferences');

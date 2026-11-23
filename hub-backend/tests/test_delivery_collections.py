@@ -128,6 +128,31 @@ class DeliveryCollectionsTestCase(unittest.IsolatedAsyncioTestCase):
             files={"file": ("payload.bin", data, "application/octet-stream")}, **kwargs)
 
 class DeliveryCollectionsTests(DeliveryCollectionsTestCase):
+    async def test_decomposed_paths_keep_archive_references_and_original_bytes(self):
+        folder, asset = 'cafe\u0301', 'the\u0301me.css'
+        name = folder + '/index.html'
+        html = ('<html><link href="' + asset + '"><body>Ready</body></html>').encode()
+        files = [(name, html), (folder + '/' + asset, b'body{color:red}')]
+        data = archive_bytes(files)
+        manifest = self.manifest(files=[entry(n, b, 'primary' if n == name else 'supporting') for n, b in files],
+                                 entryPath=name, kind='bundle')
+        made = await self.upload(manifest, data)
+        self.assertEqual(made.status_code, 200, made.text)
+        delivery_id = made.json()['delivery']['id']
+        downloaded = await self.http.get(f'/api/v1/deliveries/{delivery_id}/download')
+        self.assertEqual(downloaded.content, data)
+        for n, b in files:
+            response = await self.http.get(f'/api/v1/deliveries/{delivery_id}/files/{n}')
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.content, b)
+
+    async def test_unicode_equivalent_delivery_paths_are_rejected_as_collisions(self):
+        files = [('caf\u00e9.md', b'# First'), ('cafe\u0301.md', b'# Other')]
+        manifest = self.manifest(files=[entry(n, b) for n, b in files], entryPath=files[0][0], kind='bundle')
+        response = await self.upload(manifest, archive_bytes(files))
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn('重复', response.json()['detail'])
+
     async def test_utf16_html_is_saved_and_downloaded_without_changing_original_bytes(self):
         text = '<!doctype html><html><body><h1>工作汇报</h1></body></html>'
         for encoding, marker in (("utf-16-le", codecs.BOM_UTF16_LE),
@@ -400,6 +425,58 @@ class DeliveryCollectionsTests(DeliveryCollectionsTestCase):
             self.assertEqual((await session.get(ExecutionSession, "execution")).state, "done")
             self.assertIsNone(await session.get(ConversationHandoff, "handoff"))
 
+    async def test_reviewed_requirement_files_are_downloadable_before_library_save(self):
+        from app.api import attachments, tasks
+        from app.models import User
+        from app.services import release_control
+
+        self.app.include_router(attachments.router)
+        self.app.include_router(tasks.router)
+        await self.seed_cloud([("report.md", b"# Accepted report", "output"),
+                               ("input.txt", b"private context", "input")])
+        async with self.sessions() as session:
+            await session.delete(await session.get(ConversationHandoff, "handoff"))
+            task = await session.get(Task, "cloud-task")
+            task.origin, task.kind, task.status = "local", "requirement", "doing"
+            session.add_all([User(id="alice", username="alice"),
+                             TaskEvent(task_id=task.id, kind="ai.artifacts",
+                                       detail={"ref": "runner-ref", "round": 1})])
+            version, _ = await release_control.ensure_current_output(session, task, source_ref="runner-ref")
+            await session.commit()
+            version_id = version.id
+
+        path = "/api/v1/deliveries/from-task/cloud-task"
+        phone = {"X-Device": "phone"}
+        self.assertEqual((await self.http.get(path, headers=phone)).json()["state"], "pending")
+        reviewed = await self.http.post("/api/v1/tasks/cloud-task/review", json={"decision": "approve"})
+        self.assertEqual(reviewed.status_code, 200, reviewed.text)
+        self.assertEqual(reviewed.json()["status"], "done")
+        result = (await self.http.get(path, headers=phone)).json()
+        self.assertEqual((result["state"], result["artifactVersionId"]), ("delivered", version_id))
+        self.assertEqual((result["round"], result["executionRef"]), (1, "runner-ref"))
+        self.assertEqual([f["filename"] for f in result["files"]], ["report.md"])
+        self.assertEqual((await self.http.get(result["artifactUrl"], headers=phone)).content, b"# Accepted report")
+        with patch.object(storage, "open_stream", side_effect=FileNotFoundError):
+            self.assertEqual((await self.http.get(result["artifactUrl"], headers=phone)).status_code, 404)
+        self.assertEqual((await self.http.get(path, headers={"X-User": "bob"})).status_code, 404)
+        self.assertEqual((await self.http.get("/api/v1/deliveries")).json()["items"], [])
+
+        async with self.sessions() as session:
+            execution = await session.get(ExecutionSession, "execution")
+            execution.metadata_ = {**execution.metadata_, "round": 2}
+            await session.commit()
+        newer = (await self.http.get(path)).json()
+        self.assertEqual((newer["state"], newer["round"]), ("pending", 2))
+        self.assertFalse(newer["artifactUrl"])
+        async with self.sessions() as session:
+            execution = await session.get(ExecutionSession, "execution")
+            execution.metadata_ = {**execution.metadata_, "round": 1}
+            await session.commit()
+        self.assertTrue(result["retryable"])
+        saved = (await self.http.post(path, headers=phone)).json()
+        self.assertEqual(saved["state"], "synced")
+        self.assertEqual((await self.http.get(path)).json()["delivery"]["id"], saved["delivery"]["id"])
+
     async def test_cloud_failure_retries_and_no_partial_success(self):
         await self.seed_cloud([("index.html", b"<html>result</html>", "output"),
                                ("assets/style.css", b"body{}", "output")])
@@ -645,6 +722,8 @@ class DeliveryCollectionsTests(DeliveryCollectionsTestCase):
                         files={"file": ("delivery.zip", package, "application/zip")})
                     self.assertEqual(upload.status_code, 200, upload.text)
                     delivery_id = upload.json()["delivery"]["id"]
+                # Receiving the body can precede FastAPI releasing its request session.
+                await asyncio.wait_for(asyncio.gather(*server.server_state.tasks), 5)
                 await self.engine.dispose()
                 async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", trust_env=False) as phone_http:
                     listed = await phone_http.get("/api/v1/deliveries", headers={"Authorization": tokens["phone"]})

@@ -2,7 +2,7 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os');
 const { EventEmitter } = require('node:events'), { pathToFileURL } = require('node:url');
-const { commandFiles, instanceData, instanceFiles, create, MAX_BYTES } = require('../main/file-open.cjs');
+const { commandFiles, instanceData, instanceFiles, relaunchArgs, create, MAX_BYTES } = require('../main/file-open.cjs');
 const artifactRuntime = require('../main/conversation/artifact-runtime');
 async function setup(t) {
   // Match the OS-resolved spelling (e.g. Windows TEMP versus Temp).
@@ -29,6 +29,96 @@ test('launch arguments preserve Unicode, spaces and metacharacters without shell
   assert.deepEqual(commandFiles(['app.exe', 'https://example.com'], process.cwd()), []);
 });
 
+test('source launch switches before the known application entry never queue that entry as a file', () => {
+  const entry = path.resolve(__dirname, '..'), file = path.resolve('report.html');
+  assert.deepEqual(commandFiles(['electron', '--inspect=9222', entry], process.cwd(), false), []);
+  assert.deepEqual(commandFiles(['electron', '--inspect=9222', entry, file], process.cwd(), false), [file]);
+  assert.deepEqual(instanceData(['electron', '--inspect=9222', entry, file], process.cwd(), false),
+    { soduworkOpenFiles: { version: 1, files: [file] } });
+  assert.deepEqual(instanceFiles(['electron', '--inspect=9222', entry, file], process.cwd(), false), [file]);
+});
+
+test('source instance capture recognizes both loaded application entries without extra caller arguments', () => {
+  const root = path.resolve(__dirname, '..'), file = path.resolve('report.html');
+  for (const entry of [root, path.resolve(root, require('../package.json').main)]) {
+    assert.deepEqual(instanceData(['electron', '--inspect=9222', entry], process.cwd(), false),
+      { soduworkOpenFiles: { version: 1, files: [] } });
+    assert.deepEqual(instanceFiles(['electron', '--inspect=9222', entry, file], process.cwd(), false), [file]);
+  }
+});
+
+test('Windows source launches accept the filesystem casing of the entry and preserve requested paths',
+  { skip: process.platform !== 'win32' }, () => {
+    const root = path.resolve(__dirname, '..');
+    const file = path.join(root, 'Mixed Case Report.txt');
+    for (const entry of [root, path.join(root, require('../package.json').main)]) {
+      const argv = ['electron', '--disable-gpu', entry.toUpperCase(), file];
+      assert.deepEqual(commandFiles(argv, process.cwd(), false), [file]);
+      const data = instanceData(argv, process.cwd(), false);
+      assert.deepEqual(data.soduworkOpenFiles.files, [file]);
+      assert.deepEqual(instanceFiles(argv, process.cwd(), false, data), [file]);
+    }
+  });
+
+test('only the Electron entry and preceding switches are consumed on source launches', () => {
+  const root = path.resolve(__dirname, '..');
+  const alias = path.resolve('linked-client');
+  const preload = path.resolve('preload.cjs');
+  const files = [path.resolve('notes.txt'), path.join(root, require('../package.json').main)];
+  for (const start of [
+    ['--disable-gpu', alias],
+    ['--require', preload, '-r', preload, alias],
+    ['--disable-gpu', '--app=' + alias],
+  ]) {
+    const argv = ['electron', ...start, ...files];
+    assert.deepEqual(commandFiles(argv, process.cwd(), false), files);
+    assert.deepEqual(instanceData(argv, process.cwd(), false).soduworkOpenFiles.files, files);
+  }
+});
+
+test('the source file broker skips the application directory when collecting cold requests', async t => {
+  const h = await setup(t), file = path.join(h.root, 'report.html');
+  await fs.writeFile(file, '<h1>Exact user file</h1>');
+  assert.equal(h.broker.fromCommand(['electron', '--inspect=9222', h.root], process.cwd()), 0);
+  assert.equal(h.broker.fromCommand(['electron', '--inspect=9222', h.root, file], process.cwd()), 1);
+  const list = await h.call('list');
+  assert.deepEqual(list.items.map(row => row.name), ['report.html']);
+  const result = await h.call('claim', list.items[0].id);
+  assert.equal(result.ok, true);
+  assert.equal(await fs.readFile(result.file.path, 'utf8'), '<h1>Exact user file</h1>');
+});
+
+test('the source file broker also skips a package main script used as its entry', async t => {
+  const h = await setup(t), file = path.join(h.root, 'report.html');
+  const root = path.resolve(__dirname, '..'), entry = path.resolve(root, require('../package.json').main);
+  await fs.writeFile(file, '<h1>Source script launch</h1>');
+  assert.equal(h.broker.fromCommand(['electron', '--inspect=9222', entry], process.cwd()), 0);
+  assert.equal(h.broker.fromCommand(['electron', '--inspect=9222', entry, file], process.cwd()), 1);
+  const list = await h.call('list');
+  assert.deepEqual(list.items.map(row => row.name), ['report.html']);
+  const result = await h.call('claim', list.items[0].id);
+  assert.equal(result.ok, true);
+  assert.notEqual(result.file.path, file);
+  assert.equal(await fs.readFile(result.file.path, 'utf8'), '<h1>Source script launch</h1>');
+  assert.equal(await fs.readFile(file, 'utf8'), '<h1>Source script launch</h1>');
+});
+
+test('source entry filtering preserves relaunch handoffs and never reopens an earlier file', () => {
+  const root = path.resolve(__dirname, '..'), entry = path.resolve(root, require('../package.json').main);
+  const old = path.resolve('earlier.html'), current = path.resolve('材料 & current.html');
+  const argv = ['electron', '--inspect=9222', entry, '--soduwork-open-file', old];
+  for (const expected of [[current], []]) {
+    const handoff = ['electron', ...relaunchArgs(argv, expected)];
+    assert.deepEqual(commandFiles(handoff, process.cwd(), false), expected);
+    assert.deepEqual(instanceData(handoff, process.cwd(), false),
+      { soduworkOpenFiles: { version: 1, files: expected } });
+    assert.deepEqual(instanceFiles(handoff, process.cwd(), false), expected);
+    assert.deepEqual(instanceFiles(argv, process.cwd(), false,
+      instanceData(handoff, process.cwd(), false)), expected);
+  }
+  assert.deepEqual(commandFiles([...argv, '--soduwork-relaunch-files', '{'], process.cwd(), false), []);
+});
+
 test('second-instance preserves the requested file when Chromium reorders switches', () => {
   const file = path.resolve('中文 页面 & one.html'), entry = path.resolve('main.js');
   const original = ['electron.exe', entry, '--soduwork-open-file', file];
@@ -38,6 +128,12 @@ test('second-instance preserves the requested file when Chromium reorders switch
   assert.deepEqual(instanceFiles(reordered, process.cwd(), false, data), [file]);
   assert.deepEqual(instanceFiles(['app.exe', '--soduwork-open-file', file], process.cwd()), [file]);
   assert.deepEqual(instanceFiles(reordered, process.cwd(), false), [], 'legacy input must not guess the entry point');
+  const preload = path.resolve('preload.cjs');
+  const withPreload = ['electron.exe', '-r', preload, '--disable-gpu', entry, file];
+  const movedSwitch = ['electron.exe', '-r', '--disable-gpu', preload, entry, file];
+  assert.deepEqual(instanceFiles(movedSwitch, process.cwd(), false), []);
+  assert.deepEqual(instanceFiles(movedSwitch, process.cwd(), false,
+    instanceData(withPreload, process.cwd(), false)), [file]);
 });
 
 test('structured launch requests reject malformed input and never fall back to unrelated arguments', () => {

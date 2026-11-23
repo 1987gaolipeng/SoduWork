@@ -13,6 +13,7 @@ from ..services import im_adapters, im_connections as connections, im_ingress, r
 
 router = APIRouter(prefix="/api/v1/im", tags=["im"])
 from ..services.im_provider_registry import public as provider_catalog
+from ..timestamps import iso_utc
 
 
 async def raw_body(request):
@@ -108,12 +109,13 @@ async def revoke_binding(binding_id: str, client=Depends(current_client), sessio
 
 @router.get("/connections/{connection_id}/messages")
 async def messages(connection_id: str, client=Depends(current_client), session=Depends(get_session)):
-    await connections.owned(session, client, connection_id)
+    connection = await connections.owned(session, client, connection_id)
     rows = list((await session.scalars(select(im.IMInbox).where(im.IMInbox.connection_id == connection_id)
         .order_by(im.IMInbox.created_at.desc()).limit(50))).all())
     outgoing = list((await session.scalars(select(im.IMOutbox).where(im.IMOutbox.inbox_id.in_([row.id for row in rows])))).all())
-    return {"messages": [{"id": row.id, "taskId": row.task_id, "status": row.status, "detail": row.detail,
-        "createdAt": row.created_at.isoformat(), "outgoing": [{"status": item.status, "kind": item.kind,
+    return {**connections.unpaired_observation(connection),
+        "messages": [{"id": row.id, "taskId": row.task_id, "status": row.status, "detail": row.detail,
+        "createdAt": iso_utc(row.created_at), "outgoing": [{"status": item.status, "kind": item.kind,
             "detail": item.detail} for item in outgoing if item.inbox_id == row.id]} for row in rows]}
 
 

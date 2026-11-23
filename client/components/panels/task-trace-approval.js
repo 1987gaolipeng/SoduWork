@@ -52,10 +52,11 @@
   // Show review entry points from actual pending work and creator fallback, regardless of the execution device.
   function canAcceptTask(task, context) {
     const R = global.Requirements;
-    if (!task || !R || R.stage(task) !== 'reviewing' || task.reviewedAt || task.canViewExecution === false) return false;
+    if (!task || !R || R.stage(task) !== 'reviewing' || task.reviewedAt) return false;
     const creator = R.canReview(task) ||
       (Boolean(global.__teamCap?.meId) && String(task.createdBy || '') === String(global.__teamCap.meId));
     const item = R.approval(task, context);
+    if (task.canViewExecution === false && !(task.canReview === true && item)) return false;
     if (item) return item.action === 'review' && creator &&
       (!item.status || item.status === 'pending') && !item.myDecision;
     return task.status === 'done' && creator && !R.waitingOn(task, context).length;
@@ -109,7 +110,8 @@
       if (!id || typeof global.openTaskConversation !== 'function') throw new Error('验收会话暂时无法打开，请重试');
       const latest = global.SoduWorkAPI?.getTask ? await global.SoduWorkAPI.getTask(id) : task;
       assertCurrent();
-      if (global.Requirements && (!latest || global.Requirements.stage(latest) !== 'reviewing' || latest.reviewedAt || latest.canViewExecution === false))
+      if (global.Requirements && (!latest || global.Requirements.stage(latest) !== 'reviewing' || latest.reviewedAt ||
+          (latest.canViewExecution === false && !(latest.canReview === true && approvalId))))
         throw new Error('需求状态或验收权限已变化，请刷新后重试');
       let context = null;
       if (typeof global.SoduWorkAPI?.getAcceptanceContext === 'function') {
@@ -126,7 +128,8 @@
         // Use the approval's frozen criteria, not a mutable task field. Fail
         // before navigation; runtime and Hub guards still recheck on send.
         if (!Array.isArray(context?.criteria) || !context.criteria.length || !context.artifactVersionId)
-          throw new Error(translated('自动验收需要明确的验收标准和固定交付版本，请先补齐或选择手动验收'));
+          throw Object.assign(new Error(translated('自动验收需要明确的验收标准和固定交付版本，请切换为“手动验收”，核对交付成果后确认。')),
+            {code: 'AUTO_ACCEPTANCE_PREREQUISITES'});
       }
       const capabilityResult = currentTeamCapability();
       const capability = capabilityResult && typeof capabilityResult.then === 'function'
@@ -134,7 +137,7 @@
       assertCurrent();
       if (global.Requirements?.canReview && !global.Requirements.canReview(latest) &&
           String(latest?.createdBy || '') !== String(capability?.meId || ''))
-        throw new Error('只有需求创建人可以验收交付成果');
+        throw new Error('当前验收已处理或不由你确认，请刷新后重试');
       let assignment = null;
       if (approvalId && global.SoduWorkAPI?.approvalDetail) {
         const response = await global.SoduWorkAPI.approvalDetail(approvalId), item = response?.item;
@@ -144,7 +147,7 @@
         assignment = item.assignment;
       }
       const direct = !approvalId;
-      const samePerson = sameExecutorReviewer(latest, assignment, direct, capability);
+      const samePerson = latest.canViewExecution !== false && sameExecutorReviewer(latest, assignment, direct, capability);
       const preferred = samePerson && global.TaskConversationNavigation?.preferredConversation
         ? await global.TaskConversationNavigation.preferredConversation(latest) : '';
       assertCurrent();
@@ -423,6 +426,7 @@
         Boolean(approval.myDecision) || submitting.has(id) || block.dataset.approvalSubmitted === 'true' ||
         (manualOnly && (item.getAttribute('data-tfd-acceptance-session') === 'auto' ||
           (item.hasAttribute?.('data-tfd-acceptance-mode') && item.value === 'auto'))) ||
+        (Boolean(block.dataset.tfdAutoUnavailable) && item.getAttribute('data-tfd-acceptance-session') === 'auto') ||
         (item.getAttribute('data-tfd-approval-action') === 'approve' &&
           ((needsVerification(approval) && !(verify && verify.checked)) ||
             (gate.readiness?.canApprove === false)));
@@ -577,6 +581,7 @@
         decision: button.getAttribute('data-tfd-acceptance-session') === 'auto' ? 'auto' : 'manual',
       });
     } catch (error) {
+      if (error?.code === 'AUTO_ACCEPTANCE_PREREQUISITES') block.dataset.tfdAutoUnavailable = error.message;
       showError(block, String(error?.message || '验收会话未能打开，请重试'));
     } finally {
       submitting.delete(id); block.removeAttribute('aria-busy');
@@ -664,7 +669,7 @@
       renderSubject(block, item);
       renderProof(block, item);
       renderGate(block, item);
-      showError(block, '');
+      showError(block, block.dataset.tfdAutoUnavailable || '');
     } catch (error) {
       if (epoch !== acceptanceEpoch || !block.isConnected) return;
       const permissionDenied = error && (error.status === 403 || error.status === 404);
@@ -748,6 +753,7 @@
         consent: block.getAttribute('data-tfd-consent'),
         verified: Boolean(block.querySelector('[data-tfd-approval-verify]')?.checked),
         acceptanceMode: block.dataset.tfdAcceptanceChoice || 'manual',
+        autoUnavailable: block.dataset.tfdAutoUnavailable || '',
       }];
     }));
     currentRoot.replaceWith(wanted);
@@ -762,6 +768,10 @@
       if (proof) proof.open = draft.proofOpen;
       if (verify && draft.consent === block.getAttribute('data-tfd-consent')) verify.checked = draft.verified;
       if (draft.consent === block.getAttribute('data-tfd-consent')) {
+        if (draft.autoUnavailable) {
+          block.dataset.tfdAutoUnavailable = draft.autoUnavailable;
+          showError(block, draft.autoUnavailable);
+        }
         block.dataset.tfdAcceptanceChoice = draft.acceptanceMode;
         const mode = block.querySelector('[data-tfd-acceptance-mode][value="' + draft.acceptanceMode + '"]');
         if (mode) mode.checked = true;

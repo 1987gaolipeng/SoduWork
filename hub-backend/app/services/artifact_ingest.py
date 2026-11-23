@@ -347,7 +347,7 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
                     log.warning("Output review unavailable for %s: %s", tid, error)
                 if candidate_ready:
                     await code_delivery.notify_reviewer(
-                        session, t, url or "?".join(sorted(deliverables)) or "??")
+                        session, t, artifact.id, url or "?".join(sorted(deliverables)) or "??")
             else:
                 submission_error = ("交付文件校验未通过：" + str(invalid[0].get("name") or "") + "（" +
                                     str(invalid[0].get("reason") or "文件校验失败") + "）" if invalid else

@@ -228,3 +228,59 @@ test('an unavailable managed catalog preserves unapplied Hub editor drafts',asyn
   assert.equal(f.evaluate('_mdDrafts.get("custom-hub")?.fields.label'),'Keep unapplied input');
   assert.equal(f.state.writes.length,0);
 });
+
+test('deleting one personal Hub service excludes company data and keeps the refreshed catalog revision usable', async () => {
+  const f = fixture();
+  const company = { id: 'company', name: 'Company service', personal: false, baseUrl: 'https://company.invalid/v1',
+    myKeySet: true, modelDefs: [{ name: 'company-model' }], modelNames: ['company-model'] };
+  const own = { id: 'custom-other', name: 'Other personal service', personal: true,
+    baseUrl: 'https://own.invalid/v1', modelNames: [] };
+  const models = [{providerId:'company',name:'legacy-company-override'}, {providerId:'custom-other',name:'own-model'}];
+  f.managed.providers.push(structuredClone(company), structuredClone(own));
+  f.managed.myModels.push(...structuredClone(models));
+  f.context.extraProviders = [company, own]; f.context.extraModels = models;
+  f.evaluate('_mdData.providers.push(...structuredClone(extraProviders));_mdMyModels.push(...structuredClone(extraModels));_mdKeyEdits.company="old-override-key";_mdDrafts.set("company",{changed:true,original:"legacy-company-override"});');
+  f.context.SoduWorkAPI.saveMyModels = async input => {
+    f.state.writes.push(structuredClone(input));
+    assert.equal(input.expectedRevision, 'hub-1');
+    assert.deepEqual(Array.from(input.providers, row => row.id), ['custom-other']);
+    assert.deepEqual(Array.from(input.models, row => row.providerId), ['custom-other']);
+    assert.deepEqual(Object.keys(input.keys), []);
+    f.managed.providers = [{...company, name:'Updated company service'}, ...structuredClone(input.providers)];
+    f.managed.myModels = [models[0], ...structuredClone(input.models)];
+    f.managed.revision = 'hub-2';
+    return {ok:true};
+  };
+  f.context.plan = await f.evaluate('_mdPrepareServiceDelete("custom-hub")');
+  assert.equal(await f.evaluate('_mdDeleteService(plan)'), true);
+  assert.equal(f.state.writes.length, 1);
+  assert.equal(f.evaluate('_mdProvider("custom-hub")'), undefined);
+  assert.equal(f.evaluate('_mdProvider("company").name'), 'Updated company service');
+  assert.equal(f.evaluate('_mdProvider("custom-other").name'), 'Other personal service');
+  assert.equal(f.evaluate('_mdProvider("local-first").name'), 'First service');
+  assert.equal(f.evaluate('_mdData.revision'), 'hub-2');
+  assert.equal(f.evaluate('_mdManagedNeedsReload'), false);
+  assert.equal(f.evaluate('_mdDirty'), false);
+  assert.equal(f.context.plan.refreshWarning, false);
+  const next = await f.evaluate('_mdPrepareServiceDelete("custom-other")');
+  assert.equal(next.body.expectedRevision, 'hub-2');
+  assert.equal(next.body.providers.length, 0);
+  assert.equal(next.body.models.length, 0);
+});
+
+for (const personal of [false, undefined, 'true', 1]) test('service deletion requires explicit personal ownership: ' + String(personal), async () => {
+  const f = fixture(); f.context.ownership = personal;
+  f.evaluate('_mdProvider("custom-hub").personal=ownership');
+  await assert.rejects(f.evaluate('_mdPrepareServiceDelete("custom-hub")'));
+  f.evaluate('_mdConfirmServiceDelete("custom-hub")');
+  assert.equal(f.state.writes.length, 0);
+  assert.equal(f.evaluate('_mdProvider("custom-hub").name'), 'Hub service');
+});
+
+test('a prepared personal deletion rechecks changed ownership before writing', async () => {
+  const f = fixture(); f.context.plan = await f.evaluate('_mdPrepareServiceDelete("custom-hub")');
+  f.evaluate('_mdProvider("custom-hub").personal=false');
+  await assert.rejects(f.evaluate('_mdDeleteService(plan)'));
+  assert.equal(f.state.writes.length, 0);
+  assert.equal(f.evaluate('_mdProvider("custom-hub").name'), 'Hub service');
+});

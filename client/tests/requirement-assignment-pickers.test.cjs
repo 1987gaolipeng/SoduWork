@@ -44,6 +44,24 @@ test('assignment picker renders untrusted catalog names, identifiers and diagnos
   assert.doesNotMatch(markup, /<(?:img|script)\b/i);
 });
 
+test('English assignment choices translate UI labels and preserve plugin and agent names', () => {
+  const h = fixture({
+    substrates: [agent('agent-id', {name: '团队 Agent', locationLabel: '本机'})],
+    workflows: [flow('workflow-id', {name: '团队插件'})], models: [],
+  });
+  const work = require('../core/locales/en-US-work-pages.js');
+  const copy = { ...work, '本机': 'Local' };
+  h.ctx.window.SoduWorkI18n = {translateText: value => copy[value] || value};
+  h.ctx._fwdPaintSelection = h.ctx._fwdSyncConfirm = () => {};
+  let markup;
+  const box = {set innerHTML(value) {markup = value;},
+    querySelector: () => ({addEventListener() {}}), querySelectorAll: () => []};
+  h.ctx._fwdRenderAIPickers('fixture-task', box);
+  assert.match(markup, /No plugin · Run directly/);
+  assert.match(markup, /团队插件/);
+  assert.match(markup, /团队 Agent · Local/);
+});
+
 test('assignment methods require builtin or installed provenance plus a binding', () => {
   const h = fixture();
   for (const [item, expected] of [
@@ -448,7 +466,7 @@ test('the native duplicate never replaces a repository, workflow or saved Runner
 test('a verified local managed Agent advertises device-owned models while account Agents remain isolated', () => {
   const h = directModelFixture();
   h.ctx._fwdMergeLocalModelChoices([{name: 'local:model-fixture', label: 'Fixture local model', localOnly: true}]);
-  for (const cli of ['qwen', 'codex-harness', 'opencode', 'dsh', 'harness2', 'custom-runtime']) {
+  for (const cli of ['qwen', 'codex-harness', 'opencode', 'dsh', 'custom-runtime']) {
     h.ctx.options.substrates = [agent('local:' + cli, {name: cli, cli, executionSource: 'conversation', modelPick: true})];
     h.run("_fwdSelection.ai = {type:'direct',id:'previous-pi',available:true};_fwdModel = 'local:model-fixture'");
     h.ctx._fwdChoose('task', {type:'direct',id:'local:'+cli,available:true});
@@ -457,7 +475,7 @@ test('a verified local managed Agent advertises device-owned models while accoun
       'local choice remains visible: ' + cli);
     assert.equal(h.button.disabled, false);
   }
-  for (const cli of ['codex', 'claude']) {
+  for (const cli of ['codex']) {
     h.ctx.options.substrates = [agent('local:' + cli, {name: cli, cli, executionSource: 'conversation', modelMode: 'account', modelPick: true})];
     h.run("_fwdSelection.ai = {type:'direct',id:'previous-pi',available:true};_fwdModel = 'local:model-fixture'");
     h.ctx._fwdChoose('task', {type:'direct',id:'local:'+cli,available:true});

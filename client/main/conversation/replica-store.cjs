@@ -7,7 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 
-const METHODS = ['register', 'join', 'importChunk', 'importPlan', 'importPage', 'sealImport', 'discardImport', 'get', 'nativeRows', 'list', 'catalog', 'page', 'directory', 'lifecycleRows', 'remoteLifecycleRows', 'lifecycle', 'cache', 'messages', 'changes', 'ack', 'workspace', 'close'];
+const METHODS = ['register', 'join', 'importChunk', 'importPlan', 'importPage', 'sealImport', 'discardImport', 'get', 'sourceCopies', 'nativeRows', 'list', 'catalog', 'page', 'directory', 'lifecycleRows', 'remoteLifecycleRows', 'lifecycle', 'cache', 'messages', 'changes', 'ack', 'workspace', 'close'];
 const REMOTE_LIFECYCLE = "deleted=0 AND revision>0 AND json_extract(data,'$.cached')=1 AND coalesce(json_extract(data,'$.taskId'),'')<>''";
 function key(value) {
   if (typeof value !== 'string' || !value.trim() || value.length > 512 || /[\x00-\x1f]/.test(value))
@@ -87,14 +87,18 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
       .iterate(...rows.map(row => row.id))) aliases.get(row.replica).push(row.alias);
     return rows.map(row => project(row, aliases.get(row.id)));
   }
-  function register(rows) {
+  function register(rows, { expectedRevision } = {}) {
     if (!Array.isArray(rows) || rows.length > 500) throw Error('Invalid local history batch');
+    if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0))
+      throw Error('Invalid local history revision');
     return transaction(() => rows.map(raw => {
       const id = key(raw.id), ids = [...new Set([id, ...(raw.historyAliasIds || [])].map(key))];
       if (ids.length > 100) throw Error('Too many conversation aliases');
       const matches = ids.map(exact).filter(Boolean), canonical = matches[0]?.id || id;
       if (matches.some(row => row.id !== canonical)) throw Error('Conflicting conversation aliases');
       const old = exact(canonical), previous = old ? JSON.parse(old.data) : {};
+      // A background repair cannot overwrite a more recent execution receipt.
+      if (expectedRevision !== undefined && old?.catalog_revision !== expectedRevision) return project(old);
       if (old && id !== canonical) return project(old);
       // Provenance is immutable. Registering a refreshed snapshot cannot revive
       // a deleted replica, change local lifecycle intent, or claim another user.
@@ -282,6 +286,13 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
       });
     },
     get: id => project(resolve(id)),
+    sourceCopies(ids) {
+      if (!Array.isArray(ids) || ids.length > 200) throw Error('Invalid source history batch');
+      const wanted = [...new Set(ids.map(key))];
+      if (!wanted.length) return [];
+      return projectPage(db.prepare(`SELECT * FROM replicas WHERE json_extract(data,'$.cached')=1
+        AND json_extract(data,'$.source.id') IN (${wanted.map(() => '?').join(',')})`).all(...wanted));
+    },
     nativeRows(ids, { includeDeleted = false } = {}) {
       if (!Array.isArray(ids) || ids.length > 200) throw Error('Invalid native history batch');
       const wanted = [...new Set(ids.map(key))];
@@ -389,7 +400,7 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
       const page = rows.slice(0, limit), last = page.at(-1);
       return { items: projectPage(page), next: rows.length > limit ? { at: last.updated, id: last.id } : null };
     },
-    lifecycle(id, action, actor = {}) {
+    lifecycle(id, action, actor = {}, { preserveCopies = false } = {}) {
       if (!['archive', 'restore', 'delete'].includes(action)) throw Error('Invalid replica operation');
       // Audit fields contain identities only, never tokens or a raw auth object.
       const audit = JSON.stringify({ account: String(actor.account || '').slice(0, 180),
@@ -406,7 +417,7 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
         if (action === 'delete') db.prepare('DELETE FROM messages WHERE replica=?').run(row.id);
         // Migrated copies of this same local source are recovery records, not
         // independent cloud originals. A late import must obey its tombstone.
-        if (action === 'delete') {
+        if (action === 'delete' && !preserveCopies) {
           const copies = db.prepare("SELECT id FROM replicas WHERE deleted=0 AND json_extract(data,'$.sourceLocalId') IN (SELECT alias FROM aliases WHERE replica=?)").all(row.id);
           for (const copy of copies) {
             const revision = Number(db.prepare('INSERT INTO operations(replica,action,actor,created) VALUES(?,?,?,?)')

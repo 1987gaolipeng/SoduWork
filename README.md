@@ -12,9 +12,15 @@
 
 **A chat ends with an answer. A SoduWork request ends when the person who asked signs off.**
 
+<a href="https://trendshift.io/repositories/350333?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-350333" target="_blank" rel="noopener noreferrer">
+  <img src="https://trendshift.io/api/badge/trendshift/repositories/350333/daily" alt="mdiri-ai/SoduWork — #1 GitHub Trending Repository" width="250" height="55" />
+</a>
+
 **Multi-harness · Multi-agent · Self-hosted**
 
-Works with Pi · OpenCode · DeepSeek Harness · Qwen Code · Kimi Code · Codex Harness · Codex · Claude Code · Google Harness²
+Works with Pi · OpenCode · DeepSeek Harness · Qwen Code · Kimi Code · Codex Harness · Codex
+
+**Run from source**
 
 ```sh
 git clone https://github.com/mdiri-ai/SoduWork
@@ -27,7 +33,9 @@ cd SoduWork
 | Windows PowerShell | `.\start.cmd --desktop` |
 | Windows Command Prompt | `start.cmd --desktop` |
 
-[Website](https://soduwork.ai) | [Live demo](https://soduwork.ai) | [Documentation](docs/README.md) | [Docs website](https://dev.soduwork.ai) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
+For source setup, we recommend [Python 3.12.x](https://www.python.org/downloads/) and [Node.js 22.x](https://nodejs.org/) (22.19.0 or later in that series). The clone command uses [Git](https://git-scm.com/downloads).
+
+**[Windows desktop app](https://github.com/mdiri-ai/SoduWork/releases/latest)** | [Website](https://soduwork.ai) | [Live demo](https://soduwork.ai) | [Documentation](docs/README.md) | [Docs website](https://dev.soduwork.ai) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/mdiri-ai/SoduWork)](https://github.com/mdiri-ai/SoduWork/releases)
@@ -90,9 +98,11 @@ cd SoduWork
 
 > SoduWork is in public beta. Try it and tell us what you think, and evaluate it before using it in production.
 
-You need Python 3.12+, Node.js 22.19+ and Git.
+Clone the repository with Git or extract a source archive. See the [source setup guide](docs/getting-started.en.md) for prerequisites.
 
-From the cloned repository, run `sh start.sh --desktop` on macOS/Linux, `.\start.cmd --desktop` in Windows PowerShell, or `start.cmd --desktop` in Command Prompt.
+From the repository root, run `sh start.sh --desktop` on macOS/Linux, `.\start.cmd --desktop` in Windows PowerShell, or `start.cmd --desktop` in Command Prompt.
+
+If Windows says a command “is not recognized”, check which command it names. For `git`, `python` or `node`, check that the corresponding tool is installed and on `PATH`, then reopen Command Prompt. See the [source setup guide](docs/getting-started.en.md).
 
 The first run installs dependencies, then starts the Hub, the admin console and the desktop client on this computer. Set a password for the `admin` account (12–128 characters) when asked. Then add a model provider under **Model catalog** in the admin console, start a chat in the client and try a small task. Pi is built in.
 
@@ -100,7 +110,7 @@ The first run installs dependencies, then starts the Hub, the admin console and 
 
 1. **Add a chat model as well.** Under **Capabilities → Model catalog**, find the service you connected, choose **Add model**, enter the provider's exact model ID, select **Chat model**, and save. Saving a service credential alone does not create a selectable model.
 2. **Open the desktop client and sign in to the same Hub.** Use `--desktop` when starting from source. The browser admin console configures the service; check that **Connection** on the desktop sign-in screen points to that same Hub.
-3. **Choose New conversation, Pi, and the model you added.** Pi uses the SoduWork model catalog. Runtimes such as Codex and Claude Code use their own accounts and need their own sign-in; they do not automatically use this API key.
+3. **Choose New conversation, Pi, and the model you added.** Pi uses the SoduWork model catalog. Codex uses its own account and needs its own sign-in; it does not automatically use this API key.
 4. **Try a small task.** For example: “Turn these fictional meeting notes into an action table with owner and due date. Mark missing information as unconfirmed: Alex will organize the requirements by Friday; Sam will check the quotation.” Check the returned table against the notes.
 5. **Create a requirement when you need assignment and acceptance.** Describe the goal, inputs and acceptance criteria, open **Arrange execution**, choose an Agent and model, and inspect the delivery before accepting it. A normal conversation does not require a project, plugin or automation first.
 
@@ -111,7 +121,7 @@ See [Run from source: send your first AI message](docs/getting-started.en.md#sen
 <details>
 <summary><b>Try the live demo</b></summary>
 
-Download the client from [Releases](https://github.com/mdiri-ai/SoduWork/releases), enter `https://soduwork.ai` under **Connection** on the sign-in screen, then sign up and sign in.
+Download the client from [Releases](https://github.com/mdiri-ai/SoduWork/releases/latest), enter `https://service.soduwork.ai` under **Connection** on the sign-in screen, then sign up and sign in.
 
 > The demo is for evaluation only. Don't upload real business data or anything sensitive.
 
@@ -119,6 +129,8 @@ Download the client from [Releases](https://github.com/mdiri-ai/SoduWork/release
 
 <details>
 <summary><b>Install the desktop client</b></summary>
+
+Follow the illustrated [desktop installation and first conversation guide](docs/desktop-quickstart.en.md).
 
 | OS | Package |
 | --- | --- |
@@ -197,8 +209,6 @@ A harness is the agent runtime that does the work. It is not the model. SoduWork
 | Kimi Code | Your SoduWork models | ACP, installed on demand |
 | Codex Harness | Your SoduWork models | ACP, installed on demand |
 | Codex | Its own OpenAI account | Native adapter, installed on demand |
-| Claude Code | Its own Anthropic account | ACP adapter, official installer |
-| Google Harness² | Your SoduWork models | Native adapter; core bundled, prepared on first use |
 
 </details>
 
@@ -321,10 +331,10 @@ The runner connects to the Hub over a WebSocket. Every dispatch has an ID, so th
 - Model requests go from the runner to the model provider you configure. Each run gets a short-lived credential; keys are not written to the harness's config files in plain text.
 - Prompts and files sent to a model provider or connector you configure are visible to that service. With self-hosted models, inference can stay in your environment.
 
-**Telemetry and updates.** This public source does not include a separate analytics or crash-reporting upload to MDiRi. The client defaults to `http://127.0.0.1:18989`; its operational requests go to the Hub selected under **Connection** on the sign-in screen. Selecting the public demo sends those requests to its operator. Selecting your own Hub keeps this traffic with your deployment.
+**Telemetry and updates.** This public source does not include a separate analytics or crash-reporting upload to MDiRi. The client defaults to `https://service.soduwork.ai`; its operational requests go to the Hub selected under **Connection** on the sign-in screen. You can change this address, and your saved selection is kept across restarts and upgrades. Using the hosted service sends those requests to its operator. Selecting your own Hub keeps this traffic with your deployment.
 
 - The selected Hub receives device/account authentication and the data required by the features you use. Usage accounting includes the conversation ID and title, Agent/model/provider identifiers, token and cost counters, and timestamps. Update attempts report version, progress, status and errors. These are operational records, not an optional analytics subscription.
-- Installed clients check the selected Hub for updates at startup and periodically (every six hours). Checks include the current version, platform, CPU architecture and update channel, authenticated with the device session. Source-launched clients skip installer update checks. There is currently no separate setting to disable Hub accounting or installed-client update polling; use your own Hub to avoid sending this traffic to the demo service. Release-note requests also use the selected Hub.
+- Installed clients check the selected Hub for updates at startup and periodically (every six hours). Checks include the current version, platform, CPU architecture and update channel, authenticated with the device session. Source-launched clients skip installer update checks. There is currently no separate setting to disable Hub accounting or installed-client update polling; use your own Hub to avoid sending this traffic to the hosted service. Release-note requests also use the selected Hub.
 - Hub request/database performance statistics are maintained within the Hub process; they are not automatically exported to MDiRi. Dependencies and optional Agent downloads contact their configured package registries or mirrors, and models/connectors contact the services you configure. Those services have their own data policies.
 
 ## FAQ
@@ -376,7 +386,7 @@ Ideas are welcome in [Discussions](https://github.com/mdiri-ai/SoduWork/discussi
 - **Chat**: [Discord](https://discord.gg/AXYNrAYHy)
 - **Bugs and feature requests**: [GitHub Issues](https://github.com/mdiri-ai/SoduWork/issues)
 - **Questions and ideas**: [GitHub Discussions](https://github.com/mdiri-ai/SoduWork/discussions)
-- **Enterprise**: private deployment, integration and support. Email [soduwork@outlook.com](mailto:soduwork@outlook.com).
+- **Enterprise**: private deployment, integration and support. Email [contact@soduwork.ai](mailto:contact@soduwork.ai).
 
 ## Contributing
 

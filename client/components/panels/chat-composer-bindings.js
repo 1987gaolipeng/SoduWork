@@ -224,6 +224,11 @@ function _loadChatSkills(force) {
     const picker = ctx._skillPicker;
     const api = global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
     if (!picker) return;
+    const auth = global.SoduWorkAPI?.clientAuthSnapshot?.();
+    if (auth?.state && auth.state !== 'active') {
+      ctx._skillLoadSeq++; skillRefreshQueued = false; picker.setItems([]);
+      return Promise.resolve();
+    }
     // A changed catalog invalidates the active response, but only one trailing
     // request is needed even when several install or preference events arrive.
     if (force === true) ctx._skillLoadSeq++;
@@ -282,7 +287,7 @@ function _loadChatSkills(force) {
 
 function _canStop() {
     const snap = ctx._snap || {}, execution = snap.execution || {}, phase = execution.quality?.phase || '';
-    return snap.status === 'streaming' || execution.running === true ||
+    return ['streaming', 'queued'].includes(snap.status) || execution.running === true ||
       ['executing', 'implementing', 'reviewing', 'repairing'].includes(phase);
   }
 
@@ -527,6 +532,12 @@ function _bind(el) {
     }
     if (global.ChatWorkbench) ChatWorkbench.bind(el, () => ({
       ref: ctx._ref, cwd: ctx._wd?.dir, intent: ctx._sessionOptions, pending: ctx._pending,
+      revealTool(id) {
+        const tool = ctx._snap?.tools?.find(item => String(item.id) === id);
+        if (!tool) return;
+        const size = (ctx._snap.messages?.length || 0) - Math.max(0, Number(tool.after) || 0);
+        if (size > ctx._messageWindowSize) { ctx._messageWindowSize = size; ctx._render(); }
+      },
     }));
     if (global.ChatWorkbenchAnnotations) ChatWorkbenchAnnotations.bind(el, {
       scope: () => ctx._sessionId || ctx._ref || 'draft:' + ctx._viewEpoch,
@@ -575,6 +586,8 @@ function _bind(el) {
       if (rework) { void ctx._collabAction('rework-task', { taskId: rework.getAttribute('data-task-rework') }); return; }
       const receipt = e.target.closest('[data-task-receipt]');
       if (receipt) { ctx._collabAction('open-task', { taskId: receipt.getAttribute('data-task-receipt') }); return; }
+      const record = e.target.closest('[data-command-record]');
+      if (record) { global.ChatToolDetails?.openRecord(ctx, record.dataset.commandRecord, record); return; }
       const detailRetry = e.target.closest('[data-tool-detail-retry]');
       if (detailRetry) { global.ChatToolDetails?.activate(ctx, detailRetry.dataset.toolDetailRetry, true); return; }
       const read = e.target.closest('[data-dks-read]');

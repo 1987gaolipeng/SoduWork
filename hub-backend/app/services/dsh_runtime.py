@@ -1,7 +1,7 @@
 """Platform-correct DeepSeek Harness runtime managed by SoduWork.
 
 The ACP adapter ships a version-locked DSH archive. That archive can be
-produced on Linux, so npm omits Windows optional native packages. SoduWork
+produced on another platform, so npm can omit optional native packages. SoduWork
 extracts the verified archive into a staging directory, downloads only the
 exact native packages recorded in its lock file, verifies their hashes,
 and atomically activates the complete runtime through DSH_PATH.
@@ -75,19 +75,14 @@ def _adapter_candidates(executable: str = "", npm_root: str = "") -> list[str]:
     candidates: list[str] = []
     explicit = str(os.environ.get("SODUWORK_DSH_ACP_MANIFEST") or "").strip()
     if explicit:
-        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+        return [os.path.abspath(os.path.expanduser(explicit))]
+    if executable:
+        from .agent_installation import selected_manifest
+        selected = selected_manifest('@openma/deepseek-harness-acp', executable)
+        return [selected] if selected else []
     if npm_root:
         candidates.append(os.path.join(
             npm_root, "@openma", "deepseek-harness-acp", "package.json"))
-    if executable:
-        base = Path(os.path.abspath(os.path.expanduser(executable))).parent
-        candidates.extend((
-            str(base / "node_modules" / "@openma" / "deepseek-harness-acp" /
-                "package.json"),
-            str(base.parent / "lib" / "node_modules" / "@openma" /
-                "deepseek-harness-acp" / "package.json"),
-            str(base.parent / "package.json"),
-        ))
     appdata = str(os.environ.get("APPDATA") or "")
     if appdata:
         candidates.append(os.path.join(
@@ -163,22 +158,68 @@ def _arch() -> str:
     return ""
 
 
-def _required_native_packages() -> tuple[str, ...]:
-    arch = _arch()
-    if os.name == "nt" and arch:
-        return (f"@img/sharp-win32-{arch}", f"@koromix/koffi-win32-{arch}",
-                f"@vscode/ripgrep-win32-{arch}")
-    return ()
+def _linux_libc() -> str:
+    name = platform.libc_ver()[0].lower()
+    if name in ("glibc", "musl"):
+        return name
+    try:
+        if os.confstr("CS_GNU_LIBC_VERSION"):
+            return "glibc"
+    except (AttributeError, OSError, ValueError):
+        pass
+    if list(Path("/lib").glob("ld-musl-*.so.1")):
+        return "musl"
+    raise RuntimeError("无法识别 Linux libc，不能验证 DeepSeek Harness 原生组件")
 
 
-def _native_specs(root: str) -> list[dict]:
-    required = _required_native_packages()
-    if os.name == "nt" and not required:
-        raise RuntimeError("当前 Windows CPU 架构尚不受 DeepSeek Harness 支持")
-    if not required:
-        return []
+def _native_target(executable: str = "") -> tuple[str, str, str]:
+    # The standalone host is imported into the adapter's Node process. Python
+    # can have a different architecture (Rosetta) or Linux libc from that Node.
+    from . import acp_agents, agent_npm_runtime
+    selected = executable or acp_agents.find_bin('dsh') or ''
+    command = acp_agents.executable_command('dsh', selected) if selected else []
+    if len(command) > 1:
+        node = command[0]
+        try:
+            identity = json.loads(agent_npm_runtime._probe(
+                (node, '-p', agent_npm_runtime._NODE_IDENTITY), (agent_npm_runtime._stamp(node),)))
+        except (TypeError, ValueError):
+            identity = {}
+        if not isinstance(identity, dict):
+            identity = {}
+        system, arch, libc = (str(identity.get(key) or '') for key in ('platform', 'arch', 'libc'))
+        if (not identity.get('node') or identity.get('electron') or system != sys.platform
+                or system not in {'win32', 'darwin', 'linux'} or arch not in {'x64', 'arm64'}):
+            raise RuntimeError('无法确认 DeepSeek Harness 所选 Node 的平台和架构')
+        if system == 'linux' and libc not in {'glibc', 'musl'}:
+            raise RuntimeError('无法确认 DeepSeek Harness 所选 Node 的 Linux libc')
+        return system, arch, libc if system == 'linux' else ''
+    # Preserve the legacy native/custom wrapper path; do not reinterpret it as JS.
+    system, arch = sys.platform, _arch()
+    if system not in ("win32", "darwin", "linux") or not arch:
+        raise RuntimeError("当前平台或 CPU 架构尚不受 DeepSeek Harness 支持")
+    return system, arch, _linux_libc() if system == "linux" else ""
+
+
+def _required_native_packages(target=None) -> tuple[str, ...]:
+    system, arch, libc = target or _native_target()
+    sharp_system = "linuxmusl" if libc == "musl" else system
+    names = (f"@img/sharp-{sharp_system}-{arch}",
+             f"@koromix/koffi-{system}-{arch}",
+             f"@vscode/ripgrep-{system}-{arch}")
+    # Verified adapter 0.4.41: Windows bundles libvips inside sharp; Darwin
+    # and both Linux libc variants require a separate locked libvips package.
+    if system != "win32":
+        names += (f"@img/sharp-libvips-{sharp_system}-{arch}",)
+    return names
+
+
+def _native_specs(root: str, *, target=None) -> list[dict]:
+    required = _required_native_packages(target)
     owners = (("sharp", required[0]), ("koffi", required[1]),
               ("@vscode/ripgrep", required[2]))
+    if len(required) == 4:
+        owners += (("sharp", required[3]),)
     lock_packages = (_read_json(os.path.join(root, "package-lock.json")).get(
         "packages") or {})
     specs = []
@@ -197,16 +238,48 @@ def _native_specs(root: str) -> list[dict]:
     return specs
 
 
-def _has_exact_package(root: str, package: str, version: str) -> bool:
-    if str(_read_json(_package_file(root, package)).get(
-            "version") or "").strip() != version:
+def _native_files(root: str, package: str, version: str, *, native_target=None) -> list[str]:
+    """Critical loaders/binaries in the reviewed archive, not arbitrary globs."""
+    folder = os.path.dirname(_package_file(root, package))
+    if package.startswith("@vscode/ripgrep-"):
+        relative = ["bin/rg.exe" if "-win32-" in package else "bin/rg"]
+    elif package.startswith("@koromix/koffi-"):
+        target = package.removeprefix("@koromix/koffi-").replace("-", "_")
+        if target.startswith("linux_") and (native_target or _native_target())[2] == "musl":
+            target = target.replace("linux_", "musl_", 1)
+        relative = ["index.js", target + "/koffi.node"]
+    elif package.startswith("@img/sharp-libvips-"):
+        exported = (_read_json(os.path.join(folder, "package.json")).get("exports") or {})
+        if not isinstance(exported, dict):
+            exported = {}
+        relative = ["lib/index.js", str(exported.get("./binary") or ".missing-binary")]
+    else:
+        target = package.removeprefix("@img/sharp-")
+        relative = ["index.cjs", f"lib/sharp-{target}-{version}.node"]
+        if target.startswith("win32-"):
+            vips = str(_read_json(os.path.join(folder, "versions.json")).get("vips") or "")
+            relative += ["lib/libvips-42.dll", f"lib/libvips-cpp-{vips}.dll"]
+    paths = []
+    for name in relative:
+        path = os.path.abspath(os.path.join(folder, name))
+        if os.path.commonpath((os.path.abspath(folder), path)) != os.path.abspath(folder):
+            raise RuntimeError(f"{package} 的原生组件路径无效")
+        paths.append(path)
+    return paths
+
+
+def _has_exact_package(root: str, package: str, version: str, *, target=None) -> bool:
+    manifest = _read_json(_package_file(root, package))
+    if manifest.get("name") != package or manifest.get("version") != version:
         return False
-    if package.startswith("@vscode/ripgrep-win32-"):
-        return os.path.isfile(os.path.join(root, "node_modules", *package.split("/"), "bin", "rg.exe"))
-    return True
+    try:
+        paths = _native_files(root, package, version, native_target=target)
+        return all(os.path.isfile(path) and os.path.getsize(path) > 0 for path in paths)
+    except (OSError, ValueError, RuntimeError):
+        return False
 
 
-def _runtime_issue_at(root: str, expected_version: str = "") -> str:
+def _runtime_issue_at(root: str, expected_version: str = "", *, executable: str = "", target=None) -> str:
     version = _installed_version_at(root)
     if not version:
         return ("DeepSeek Harness 适配器已安装，但 SoduWork 执行运行时尚未准备好。"
@@ -216,20 +289,21 @@ def _runtime_issue_at(root: str, expected_version: str = "") -> str:
                 "请在 Agent 管理的 DeepSeek Harness 卡片上点「修复安装」。" %
                 (version, expected_version))
     try:
-        specs = _native_specs(root)
+        target = target or _native_target(executable)
+        specs = _native_specs(root, target=target)
     except RuntimeError as exc:
         return "DeepSeek Harness 运行时清单不完整：" + str(exc)
     missing = [f"{spec['name']}@{spec['version']}" for spec in specs
-               if not _has_exact_package(root, spec["name"], spec["version"])]
+               if not _has_exact_package(root, spec["name"], spec["version"], target=target)]
     if missing:
-        return ("DeepSeek Harness 的 Windows 原生组件不完整（缺少 %s）。"
+        return ("DeepSeek Harness 的当前平台原生组件不完整（缺少或损坏 %s）。"
                 "请在 Agent 管理的 DeepSeek Harness 卡片上点「修复安装」后重试。" %
                 "、".join(missing))
     return ""
 
 
-def runtime_issue(data_root: str | None = None, expected_version: str = "") -> str:
-    return _runtime_issue_at(host_root(data_root), expected_version)
+def runtime_issue(data_root: str | None = None, expected_version: str = "", *, executable: str = "") -> str:
+    return _runtime_issue_at(host_root(data_root), expected_version, executable=executable)
 
 
 def _storage_env(env: dict, runtime_root: str) -> None:
@@ -242,9 +316,22 @@ def _storage_env(env: dict, runtime_root: str) -> None:
     env["NODE_OPTIONS"] = "--import=" + loader.resolve().as_uri()
 
 
+def _host_env(env: dict, runtime_root: str) -> None:
+    # Only host-owned preloads may alter the native adapter. Repeated setup must
+    # not duplicate hooks or inherit arbitrary shell/desktop Node options.
+    env.pop("NODE_OPTIONS", None)
+    _storage_env(env, runtime_root)
+    loader = Path(__file__).with_name("dsh_acp_settlement.mjs")
+    if not loader.is_file():
+        raise RuntimeError("DeepSeek Harness 子代理等待组件缺失，请更新 SoduWork")
+    env["SODUWORK_DSH_ACP_SETTLEMENT"] = "1"
+    env["NODE_OPTIONS"] = (env.get("NODE_OPTIONS", "") +
+                           " --import=" + loader.resolve().as_uri()).strip()
+
+
 def apply_env(env: dict, data_root: str | None = None) -> None:
     env["DSH_PATH"] = host_root(data_root)
-    _storage_env(env, env["DSH_PATH"])
+    _host_env(env, env["DSH_PATH"])
     env.setdefault("DSH_TELEMETRY_DISABLED", "1")
 
 
@@ -374,7 +461,7 @@ def stage_bundled_runtime(data_root: str, executable: str = "",
             raise RuntimeError(
                 f"内置运行时版本不一致：归档 {version or '未知'}，"
                 f"清单 {bundle['version']}")
-        specs = _native_specs(stage)
+        specs = _native_specs(stage, target=_native_target(executable))
         return {"path": stage, "version": version, "sha256": bundle["sha256"],
                 "nativePackages": specs}
     except Exception:
@@ -452,17 +539,18 @@ def install_native_pack(stage: str, spec: dict) -> None:
 
 
 def activate_stage(stage: str, data_root: str, expected_version: str,
-                   archive_sha256: str = "") -> None:
+                   archive_sha256: str = "", *, executable: str = "") -> None:
     """Atomically replace the active host only after full static validation."""
     staged = _stage_parent(stage)
-    issue = _runtime_issue_at(staged, expected_version)
+    target_identity = _native_target(executable)
+    issue = _runtime_issue_at(staged, expected_version, target=target_identity)
     if issue:
         raise RuntimeError(issue)
     packs = os.path.join(staged, ".soduwork-native-packs")
     shutil.rmtree(_io_path(packs), ignore_errors=True)
     with open(os.path.join(staged, _MARKER), "w", encoding="utf-8") as handle:
         json.dump({"version": expected_version, "archiveSha256": archive_sha256,
-                   "nativePackages": _native_specs(staged)}, handle,
+                   "nativePackages": _native_specs(staged, target=target_identity)}, handle,
                   ensure_ascii=False, indent=2)
     target = os.path.abspath(host_root(data_root))
     parent = os.path.dirname(target)
@@ -513,17 +601,29 @@ def remove_host(data_root: str | None = None) -> None:
 
 def _fingerprint(executable: str, data_root: str, expected_version: str) -> tuple:
     root = host_root(data_root)
-    paths = [_package_file(root, PACKAGE)]
+    paths = [executable, _package_file(root, PACKAGE),
+             os.path.join(root, "package-lock.json")]
+    from .acp_agents import executable_command
     try:
-        specs = _native_specs(root)
+        paths.extend(executable_command('dsh', executable))
+    except RuntimeError:
+        # No longer having a compatible Node invalidates the successful identity;
+        # the actual probe returns the actionable startup failure.
+        pass
+    paths += [_package_file(root, name) for name in ("sharp", "koffi", "@vscode/ripgrep")]
+    try:
+        target_identity = _native_target(executable)
+        specs = _native_specs(root, target=target_identity)
     except RuntimeError:
         specs = []
     for spec in specs:
         paths.append(_package_file(root, spec["name"]))
+        paths.extend(_native_files(root, spec["name"], spec["version"], native_target=target_identity))
     mtimes = []
     for path in paths:
         try:
-            mtimes.append((path, os.path.getmtime(path)))
+            stat = os.stat(path)
+            mtimes.append((path, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_mode))
         except OSError:
             mtimes.append((path, 0.0))
     return (os.path.abspath(executable), root, expected_version, tuple(mtimes))
@@ -594,7 +694,7 @@ def _probe_runtime(executable: str, runtime_root: str,
             for name in ("NODE_OPTIONS", "ELECTRON_RUN_AS_NODE"):
                 env.pop(name, None)
             env["DSH_PATH"] = runtime_root
-            _storage_env(env, runtime_root)
+            _host_env(env, runtime_root)
             env.setdefault("DSH_TELEMETRY_DISABLED", "1")
             env.update(
                 DSH_HOME=home,
@@ -606,8 +706,13 @@ def _probe_runtime(executable: str, runtime_root: str,
             )
             kwargs = ({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
                       if os.name == "nt" else {"start_new_session": True})
+            from .acp_agents import executable_command
+            from .agent_installation import prepend_node_path
+            command = executable_command('dsh', executable)
+            if len(command) > 1:
+                prepend_node_path(env, command[0])
             proc = subprocess.Popen(
-                [executable], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, cwd=runtime_root, env=env,
                 text=True, encoding="utf-8", errors="replace", **kwargs,
             )
@@ -702,7 +807,7 @@ def stage_boot_issue(executable: str, stage: str, expected_version: str,
         runtime_root = _stage_parent(stage)
     except RuntimeError as exc:
         return str(exc)
-    issue = _runtime_issue_at(runtime_root, expected_version)
+    issue = _runtime_issue_at(runtime_root, expected_version, executable=executable)
     if issue:
         return issue
     if not executable or not os.path.isfile(executable):
@@ -715,7 +820,7 @@ def boot_issue(executable: str, data_root: str | None = None,
                expected_version: str = "", *, timeout: int = 15,
                force: bool = False) -> str:
     root = os.path.abspath(os.path.expanduser(data_root or default_data_root()))
-    issue = runtime_issue(root, expected_version)
+    issue = runtime_issue(root, expected_version, executable=executable)
     if issue:
         return issue
     if not executable or not os.path.isfile(executable):

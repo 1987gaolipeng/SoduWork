@@ -269,7 +269,7 @@ export default {
   "· 待登录": "· Sign-in required",
   "· 待上报 {0}": "· {0} not reported",
   "已安装": "Installed",
-  "Codex / Claude Code 需在对应电脑上完成账号登录。": "Sign into Codex / Claude Code on the corresponding computer.",
+  "Codex 需在对应电脑上完成账号登录。": "Sign into Codex on the corresponding computer.",
   "个近 30 天有使用 / 共": "used in the past 30 days / total",
   "个插件": "plugins",
   "搜索插件名称或标识": "Search plugin name or ID",

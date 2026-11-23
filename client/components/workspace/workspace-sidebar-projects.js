@@ -1,6 +1,7 @@
 /* Local conversation groups may explicitly reference an authorized Hub project. */
 (function (global) {
   'use strict';
+  const PROJECT_PREVIEW_LIMIT = 5;
   const invalidations = new WeakMap();
   global.addEventListener?.('soduwork-domain-changed', event => {
     if (event.detail?.domain !== 'conversation-projects') return;
@@ -42,6 +43,7 @@
     root.querySelector('#wsChatsBox').dataset.sidebarSection = 'recent';
     let store = null, scope = '', dialog = null, sync = null;
     const archivingProjects = new Set();
+    const expandedProjects = new Set();
     let lastSync = 0;
     invalidations.set(box, () => { void sync?.run(); });
     const notify = error => {
@@ -52,6 +54,7 @@
     function state() {
       const options = global.WorkspaceSidebarState.accountOptions({ storage: localStorage, api: global.SoduWorkAPI });
       if (options.key !== scope) {
+        expandedProjects.clear();
         store = global.WorkspaceSidebarState.create({...options, onChange: () => { void sync?.run(); }});
         scope = options.key;
         const ownScope = scope;
@@ -76,6 +79,8 @@
         const item = allItems().find(row => String(row.id) === id);
         if (!item) throw Error('会话已不在列表中，请刷新后重试');
         state().move(item, destination, before, getItems());
+        // Keep an appended conversation visible even beyond the project preview.
+        if (state().get().projects.some(project => project.id === destination)) expandedProjects.add(destination);
         if (destination === 'pinned' || destination === 'recent') {
           const body = root.querySelector(destination === 'pinned' ? '#wsPinnedChats' : '#wsChats');
           if (body.hidden) root.querySelector(destination === 'pinned' ? '#wsPinnedToggle' : '#wsChatsToggle').click();
@@ -333,12 +338,38 @@
         if (!action) return;
         action.disabled = !item.id || !!item.pending;
       },
+      previewItems(project, items) {
+        const el = project.target.parentElement;
+        let more = el.querySelector('.ws-project-more');
+        if (!more) {
+          more = button('ws-project-more', '显示更多');
+          more.onclick = () => {
+            if (expandedProjects.has(project.id)) expandedProjects.delete(project.id);
+            else expandedProjects.add(project.id);
+            render();
+            more.focus({ preventScroll: true });
+          };
+          el.appendChild(more);
+        }
+        const expanded = expandedProjects.has(project.id);
+        const label = expanded ? '收起' : '显示更多';
+        more.textContent = global.SoduWorkI18n?.translateText(label) || label;
+        more.title = more.textContent; more.setAttribute('aria-label', more.textContent);
+        more.setAttribute('aria-expanded', String(expanded));
+        more.setAttribute('aria-controls', project.target.id);
+        more.hidden = project.collapsed || items.length <= PROJECT_PREVIEW_LIMIT;
+        const next = expanded ? null : items[PROJECT_PREVIEW_LIMIT];
+        project.target.dataset.sidebarNextChatId = next?.displaySlotId || next?.id || '';
+        return expanded ? items : items.slice(0, PROJECT_PREVIEW_LIMIT);
+      },
       partition(items) {
         const data = state().view(items);
         list.hidden = data.collapsed; toggle.setAttribute('aria-expanded', String(!data.collapsed));
         toggle.title = (data.collapsed ? '展开' : '收起') + '项目';
         const wanted = new Set(data.projects.map(p => p.id));
-        list.querySelectorAll('.ws-project').forEach(el => { if (!wanted.has(el.dataset.projectId)) el.remove(); });
+        list.querySelectorAll('.ws-project').forEach(el => {
+          if (!wanted.has(el.dataset.projectId)) { expandedProjects.delete(el.dataset.projectId); el.remove(); }
+        });
         list.querySelector('.ws-project-empty')?.remove();
         for (const p of data.projects) {
           let el = [...list.children].find(el => el.dataset.projectId === p.id);

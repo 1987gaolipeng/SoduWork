@@ -13,6 +13,19 @@ function clean(value, redact) {
 }
 function project(item, { cwd = '', redact = value => value } = {}) {
   if (!item || typeof item.requestId !== 'string' || !Number.isSafeInteger(item.policyRevision)) return null;
+  if (item.action === 'native.question') {
+    const detail = clean(item.title, redact);
+    const options = Array.isArray(item.options) && item.options.length > 0 && item.options.length <= 64 &&
+      item.options.every(option => option && typeof option.optionId === 'string' && option.optionId.length > 0 &&
+        option.optionId.length <= 1024 && typeof option.name === 'string' && option.name.trim() && option.name.length <= 4000 &&
+        ['allow_once', 'reject_once'].includes(option.kind)) &&
+      new Set(item.options.map(option => option.optionId)).size === item.options.length ? item.options : [];
+    const reviewable = Boolean(detail.trim()) && detail.length <= 12000 && options.length > 0;
+    return { requestId: item.requestId, policyRevision: item.policyRevision, action: item.action,
+      summary: '请选择', detail: detail.slice(0, 12000), reviewable,
+      options: reviewable ? options.map(option => ({ optionId: option.optionId,
+        name: clean(option.name, redact), kind: option.kind })) : [] };
+  }
   const labels = { 'file.read': '读取文件', 'file.write': '修改文件', 'command.execute': '执行命令',
     'terminal.execute': '执行命令', 'native.command': '执行命令', 'tool.execute': '调用工具' };
   const editing = item.action === 'native.tool' && item.kind === 'edit';

@@ -7,6 +7,18 @@
   const LIMITS = { summary: 6000, goal: 3000, decisions: 3000, constraints: 3000, pending: 3000, outcomes: 3000 };
   const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g,
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function memoryMarkdown(content) {
+    try {
+      if (global.marked?.parse && global.DOMPurify?.sanitize) {
+        return global.DOMPurify.sanitize(global.marked.parse(content, { gfm: true, breaks: false }), {
+          ALLOWED_TAGS: ['p', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'del',
+            'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'hr', 'table', 'thead', 'tbody', 'tr', 'th', 'td'],
+          ALLOWED_ATTR: [],
+        });
+      }
+    } catch (_) { /* A renderer failure must not expose untrusted HTML. */ }
+    return '<pre>' + esc(content) + '</pre>';
+  }
   const api = () => (global.soduWorkAPI?.conversationSession || global.soduWorkAPI?.piSession)?.memory;
   let panel, sequence = 0, listSequence = 0, optionsSequence = 0, current = null, previewId = '', choices = null;
   let wizardStep = 'idle';
@@ -181,9 +193,11 @@
       '<div class="cmem-file-bar"><span class="cmem-file-icon">MD</span><div><b>personal.md</b><small>\u672c\u5730\u6587\u4ef6 \u00b7 \u6bcf\u4e2a\u8d26\u53f7\u4e00\u4efd</small></div>' +
       (sizeLabel ? '<span class="cmem-file-size">' + esc(sizeLabel) + '</span>' : '') +
       '<span class="cmem-file-path">' + esc(pathLabel) + '</span></div>' +
+      '<div class="cmem-memory-preview" data-memory-preview aria-label="记忆内容">' + memoryMarkdown(content) + '</div>' +
+      '<details class="cmem-memory-editor"' + (draft != null ? ' open' : '') + '><summary>编辑 Markdown</summary>' +
       '<label class="cmem-content-label"><span>\u8bb0\u5fc6\u5185\u5bb9</span><textarea name="content" data-personal-content maxlength="16777216" rows="18" placeholder="完成对话后，工作摘要会自动出现在这里。也可以补充希望 SoduWork 记住的事情…">' + esc(content) + '</textarea></label>' +
       '<div class="cmem-editor-footer"><span class="cmem-count" data-content-count>' + content.length.toLocaleString() + ' / 16 MiB</span><span class="cmem-muted">自动保留近期工作摘要，也可以补充或修正内容</span></div>' +
-      '<footer class="cmem-actions"><button type="submit" class="cmem-primary">\u4fdd\u5b58 personal.md</button>' + (item ? '<button type="button" data-dim-delete>\u5220\u9664\u6587\u4ef6</button>' : '') + '</footer></form>';
+      '</details><footer class="cmem-actions"><button type="submit" class="cmem-primary">\u4fdd\u5b58 personal.md</button>' + (item ? '<button type="button" data-dim-delete>\u5220\u9664\u6587\u4ef6</button>' : '') + '</footer></form>';
     const form = root.querySelector('form');
     form.elements.content.disabled = loadingPersonal;
     form.querySelector('[type=submit]').disabled = loadingPersonal;

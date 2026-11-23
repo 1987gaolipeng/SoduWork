@@ -19,12 +19,11 @@ import uuid
 from .local_base import (
     _PROFILES, _WIN, _bundled_pi_cli_js, _bundled_pi_node,
     _command_argv, _data_root, _npm_root, _pi_cli_js,
+    bind_command_environment,
 )
 from .acp_agents import runtime_issue as _acp_runtime_issue
 from ..agent_catalog import install_specs
-from . import dsh_runtime, managed_agents, agent_npm_runtime, agent_npm_network, harness2_runtime
-from . import agent_native_install
-from . import harness2_probe
+from . import dsh_runtime, managed_agents, agent_npm_runtime, agent_npm_network
 from .agent_npm_runtime import node_env
 from .agent_setup_runtime import (
     _short, _codex_native_name, _codex_native_spec, _codex_dependency_version,
@@ -36,7 +35,6 @@ from .agent_setup_probe import (
     _clean as _probe_console_text, _why_failed, probe_succeeded as _probe_succeeded,
 )
 from .agent_messages import decorate as _decorate_agent
-from .claude_runtime import account_setup as _claude_account_setup
 
 log = logging.getLogger("uvicorn.error")
 
@@ -71,6 +69,12 @@ _LOG_CAP = 400                      # Bound log history, including verbose npm o
 # Shared helpers.
 def _package_files(pkg: str) -> list[str]:
     files = []
+    key = next((key for key, spec in _SPECS.items() if spec.get("pkg") == pkg), "")
+    selected = _pi_cli_js() if key == "pi" else _bin_of(key)
+    if selected:
+        from .agent_installation import selected_manifest
+        manifest = selected_manifest(pkg, selected)
+        return [manifest] if manifest else []
     if pkg == "@earendil-works/pi-coding-agent":
         bundled_cli = _bundled_pi_cli_js()
         if bundled_cli:
@@ -81,12 +85,16 @@ def _package_files(pkg: str) -> list[str]:
     return files
 
 
-def _pkg_version(pkg: str) -> str:
+def _pkg_version(pkg: str, *, root: str | None = None) -> str:
     """Read live package metadata without launching npm or caching availability."""
-    for package_file in _package_files(pkg):
+    files = _package_files(pkg) if root is None else [os.path.join(root, *pkg.split("/"), "package.json")]
+    for package_file in files:
         try:
             with open(package_file, encoding="utf-8") as f:
-                version = str(json.load(f).get("version") or "")
+                metadata = json.load(f)
+                if root is not None and metadata.get("name") != pkg:
+                    continue
+                version = str(metadata.get("version") or "")
             if version:
                 return version
         except Exception:  # noqa: BLE001
@@ -94,19 +102,69 @@ def _pkg_version(pkg: str) -> str:
     return ""
 
 
+def _verified_version(key: str) -> str:
+    # These host compatibility modules are reviewed against exact native source.
+    # Other agents retain their existing installation and upgrade policy.
+    return str((_SPECS.get(key) or {}).get("version") or "") if key in {"kimi", "qwen", "dsh"} else ""
+
+
+def _verified_version_issue(key: str, actual: str) -> str:
+    expected = _verified_version(key)
+    if expected and actual != expected:
+        return (f"需要 SoduWork 已验证版本 {expected}，实际为 {actual or '未找到有效安装记录'}。"
+                "请点「更新」切换至已验证版本。")
+    return ""
+
+
+def _verified_cli_issue(key: str, reported: str) -> str:
+    expected = _verified_version(key)
+    if not expected:
+        return ""
+    package = str((_SPECS.get(key) or {}).get("pkg") or "")
+    prefixes = {key, package, package.rsplit("/", 1)[-1], str((_PROFILES.get(key) or {}).get("name") or "")}
+    prefix = "|".join(re.escape(value) for value in sorted(prefixes) if value)
+    semver = r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"
+    # Match a version response, not a number quoted in an error or warning.
+    # Kimi/Qwen print the version alone; DSH prefixes its scoped package name.
+    match = re.fullmatch(rf"(?:(?:{prefix})(?:\s+(?:version\s+)?|@))?v?({semver})",
+                         str(reported or "").strip(), re.I)
+    actual = match.group(1) if match else ""
+    if actual != expected:
+        return (f"需要 SoduWork 已验证版本 {expected}，当前选中的执行程序版本为 {actual or '无法确认'}。"
+                "请检查该底座的执行程序路径，并点「更新」切换至已验证版本。")
+    return ""
+
+
+def _selected_cli_version(key: str, *, cached: bool = True) -> str:
+    executable = _bin_of(key)
+    if not executable:
+        return ""
+    prefix = list(((_PROFILES.get(key) or {}).get("argv_prefix") or (lambda: []))())
+    if (_PROFILES.get(key) or {}).get('acp_key'):
+        from .acp_agents import executable_command
+        try:
+            command = executable_command(key, executable)
+        except RuntimeError:
+            return ''
+        executable, prefix = command[0], [*command[1:], *prefix]
+    if not cached:
+        return _short(executable, [*prefix, "--version"])
+    return _cached_version_probe(executable, [*prefix, "--version"], run=_short,
+                                 files=_package_files((_SPECS.get(key) or {}).get("pkg", "")))
+
+
 def _runtime_issue(key: str) -> str:
+    if _verified_version(key):
+        issue = _verified_version_issue(key, _pkg_version((_SPECS.get(key) or {}).get("pkg", "")))
+        if issue:
+            return issue
     if key == "opencode":
         return managed_agents.runtime_issue()
-    if key == "harness2":
-        from .harness2_lifecycle import disabled_issue
-        return disabled_issue() or harness2_runtime.runtime_issue()
     if key == "codex":
         from .codex_account_acp import runtime_issue
         return runtime_issue()
     if key == "dsh":
         return _acp_runtime_issue("dsh")
-    if key == "claude":
-        return _acp_runtime_issue(key)
     if key != "codex-harness":
         return ""
     native = _codex_native_name()
@@ -154,8 +212,6 @@ def _bin_of(key: str) -> str:
 
 def is_bundled(key: str) -> bool:
     """Whether this agent is shipped and lifecycle-managed by SoduWork."""
-    if key == "harness2":
-        return harness2_runtime.is_bundled()
     if key == "pi":
         return bool(_bundled_pi_cli_js() and _bundled_pi_node())
     return False
@@ -165,15 +221,8 @@ def _version_of(key: str) -> tuple[str, str, str]:
     """Read the package version first, falling back to the CLI. An executable-only installation is
     also valid.
     """
-    if key == "harness2":
-        return (harness2_runtime.version(), "bundled", "") if is_bundled(key) else ("", "", "")
     binp = _bin_of(key)
     spec = _SPECS.get(key) or {}
-    if key == "claude":
-        from .local_base import _claude_bin
-        native = _claude_bin()
-        ver = _cached_version_probe(native, ["--version"], run=_short) if native else ""
-        return ver, "cli" if ver else "", ""
     if spec.get("installer") == "managed":
         if key == "opencode" and (issue := managed_agents._cpu_compatibility_issue()):
             return managed_agents._read_active(), "managed-record", issue
@@ -222,10 +271,6 @@ def _auth_probe(key: str) -> tuple[str, str]:
                 return state, "独立 Codex 账号未通过本机验证，请点击「登录 Codex」后新建对话"
         except Exception:
             return "", "Codex 独立登录设置无法读取，请检查 Runner 数据目录后重新登录"
-    if key == "claude":
-        from .local_base import _claude_bin
-        from .claude_runtime import environment
-        return _account_auth_probe(key, _claude_bin() or "", env=environment(_data_root()))
     return _account_auth_probe(key, _bin_of(key))
 
 
@@ -233,31 +278,40 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
     """The caller supplies model_catalog.usable as has_model; this status check does not query the
     database.
     """
-    prof, spec = _PROFILES.get(key) or {}, _SPECS.get(key) or {}
+    if key not in _PROFILES:
+        raise ValueError("该执行底座已不可用，请选择其他底座")
+    prof, spec = _PROFILES[key], _SPECS.get(key) or {}
     binp = _bin_of(key)
     pkg = spec.get("pkg", "")
     needs_llm = bool(prof.get("needs_llm"))
     bundled = is_bundled(key)
     ver, ver_from, warn_now = _version_of(key)
-    # Harness uses the host Python executable, which is not proof that its
-    # bundled core exists. Other runtimes can also leave metadata behind.
-    present = bundled if key == "harness2" else bool(binp or ver or bundled)
+    # Runtimes can leave package metadata behind after an incomplete removal.
+    present = bool(binp or ver or bundled)
     platform_issue = managed_agents._cpu_compatibility_issue() if key == "opencode" else ""
     runtime_issue = platform_issue or (_runtime_issue(key) if binp else "")
     # npm accepts unsupported engine versions with a warning. Treat an
     # installed CLI on an incompatible Node runtime as unavailable so the
     # Runner never advertises a seat that immediately crashes on dispatch.
     if binp and not bundled and (spec.get("installer") == "npm"):
-        engine = agent_npm_runtime.package_engine(pkg, _npm_root())
+        engine = ""
+        for manifest in _package_files(pkg):
+            try:
+                with open(manifest, encoding="utf8") as stream:
+                    engine = str((json.load(stream).get("engines") or {}).get("node") or "")
+                break
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
         node_issue = node_env(key, engine=engine).get("why") or ""
         if node_issue:
             runtime_issue = node_issue
         elif not runtime_issue:
-            argv = list((prof.get("argv_prefix") or (lambda: []))())
-            if not _cached_version_probe(binp, [*argv, "--version"], run=_short,
-                                         files=_package_files(pkg)):
+            reported = _selected_cli_version(key)
+            if not reported:
                 runtime_issue = "Agent 启动自检失败，请检查 Node 版本、系统架构和原生依赖。"
-    if binp and not runtime_issue and spec.get("installer") in {"managed", "native"}:
+            else:
+                runtime_issue = _verified_cli_issue(key, reported)
+    if binp and not runtime_issue and spec.get("installer") == "managed":
         if ver_from not in {"managed", "cli", "bundled"}:
             runtime_issue = "Agent 启动自检失败，请检查系统运行库、目录权限或重新安装。"
     if not binp and present and not platform_issue:
@@ -309,20 +363,14 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
         why = auth_detail
     if not installed:
         setup_state = "broken" if present or runtime_issue else "missing"
-        if key == "harness2":
-            from .harness2_lifecycle import disabled_issue
-            if disabled_issue():
-                setup_state = "disabled"
         if setup_state in {"setup", "disabled"}:
             warn_now = ""
     p = (probes if probes is not None else _load_probes()).get(key) or {}
-    if key == "harness2":
-        p = harness2_probe.visible_record(p)
     # Persisted probes are not bound to the current binary, account or model.
     # Return history explicitly without mutating the stored record.
     if p:
         p = {**p, "historical": True}
-    return _decorate_agent({
+    agent = {
         "key": key,
         "name": prof.get("name") or key,
         "pkg": pkg,
@@ -345,7 +393,6 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
         "loginAvailable": key == "codex" and bool(binp),
         "loginFlowVersion": 1 if key == "codex" and binp else 0,
         "isolatedLoginAvailable": key == "codex" and bool(binp),
-        "accountSetup": _claude_account_setup(_data_root()) if key == "claude" and installed else {},
         "version": ver,
         "verFrom": ver_from,        # Distinguish package metadata from CLI fallback version detection.
         "warnNow": warn_now,        # Separate this machine's issue from general runtime requirements.
@@ -356,7 +403,11 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
         "state": state,
         "why": why,
         "probe": p,                 # {ok, detail, at, steps:[...]}
-    })
+    }
+    if key == "dsh" and setup_state == "missing":
+        from .agent_installation import dsh_desktop_detected
+        agent["desktopAppDetected"] = dsh_desktop_detected()
+    return _decorate_agent(agent)
 
 
 def _config_ready(key: str) -> bool:
@@ -520,13 +571,13 @@ def _stream(jid: str, argv: list[str], *, cwd: str | None = None, env: dict | No
 # ---- Install / uninstall / update ----
 def can_uninstall(key: str) -> bool:
     """Pi is required even when its bundled payload is absent or being repaired."""
-    return key in _SPECS and key != "pi" and (key == "harness2" or not is_bundled(key))
+    return key in _SPECS and key != "pi" and not is_bundled(key)
 
 
 def start_install(key: str, action: str, *, owner_id: str = "") -> str:
     """Start an explicit lifecycle or account-login job and return its polling ID."""
     if key not in _SPECS:
-        raise ValueError("Unknown Agent installation target")
+        raise ValueError("该执行底座已不可用，请选择其他底座")
     if action not in {"install", "update", "uninstall", "check", "login", "login-isolated"}:
         raise ValueError("Unsupported Agent installation action")
     if action.startswith("login") and key != "codex":
@@ -546,10 +597,6 @@ def start_install(key: str, action: str, *, owner_id: str = "") -> str:
             return jid
         _spawn(jid, _run_codex_login)
         return jid
-    if key == "harness2":
-        from .agent_setup_harness2 import run
-        _spawn(jid, run, action)
-        return jid
     if is_bundled(key):
         version = _version_of(key)[0]
         name = str((_PROFILES.get(key) or {}).get("name") or key)
@@ -566,9 +613,6 @@ def start_install(key: str, action: str, *, owner_id: str = "") -> str:
                               "Install this Agent in an isolated Runner environment, then retry detection."))
         return jid
 
-    if spec.get("installer") == "native":
-        _spawn(jid, _run_native, key, action)
-        return jid
 
     if spec.get("installer") == "managed":
         _spawn(jid, _run_managed, key, action)
@@ -612,28 +656,6 @@ def _run_managed(jid: str, key: str, action: str) -> None:
         _done(jid, False, "OpenCode 安装失败：" + str(exc)[:220])
 
 
-@agent_npm_runtime.serial_install
-def _run_native(jid: str, key: str, action: str) -> None:
-    """Run a Runner-isolated vendor binary installer without Node or shell scripts."""
-    try:
-        ok, detail = agent_native_install.install(
-            _data_root(), action, emit=lambda line: _say(jid, line))
-    except (OSError, RuntimeError, ValueError) as exc:
-        _done(jid, False, "Claude Code native installation failed: " + str(exc)[:300], 2)
-        return
-    if not ok:
-        _done(jid, False, detail or "Claude Code native installation failed", 2)
-        return
-    if action in {"install", "update"}:
-        from .claude_runtime import install_adapter
-        issue = install_adapter(
-            execute=lambda argv, **opts: _stream(jid, argv, **opts),
-            say=lambda line: _say(jid, line))
-        if issue:
-            _done(jid, False, issue, 2)
-            return
-        agent_npm_runtime.activate_environment()
-    _done(jid, True, detail or "Claude Code native installation complete", 0)
 
 
 @agent_npm_runtime.serial_install
@@ -644,6 +666,7 @@ def _run_npm(jid: str, key: str, action: str) -> None:
     spec = _SPECS.get(key) or {}
     pkg = spec.get("pkg") or ""
     version = str(spec.get("version") or "").strip()
+    verified = _verified_version(key)
     target_pkg = pkg + ("@" + version if version else "")
     if not pkg:
         _done(jid, False, "该 Agent 缺少安装包定义")
@@ -668,6 +691,18 @@ def _run_npm(jid: str, key: str, action: str) -> None:
         cur = _version_of(key)[0]
         if code != 0 or not latest:
             _done(jid, False, "查不到版本（多半是这台机器连不上 npm registry）", code)
+            return
+        if verified:
+            if latest != verified:
+                _done(jid, False, f"版本查询不一致：需要已验证版本 {verified}，实际返回 {latest}", 2)
+            elif not cur:
+                _done(jid, True, f"已验证版本是 {verified}，这台设备尚未安装", code)
+            elif cur != verified:
+                _done(jid, True, f"当前为 {cur}；SoduWork 已验证版本为 {verified}，请点「更新」切换。", code)
+            elif issue := (_runtime_issue(key) or _verified_cli_issue(key, _selected_cli_version(key))):
+                _done(jid, False, f"已安装已验证版本 {cur}，但{issue}", 2)
+            else:
+                _done(jid, True, f"已安装 SoduWork 已验证版本 {cur}", code)
             return
         if not cur:
             _done(jid, True, f"最新是 {latest}，你这台还没装", code)
@@ -706,6 +741,17 @@ def _run_npm(jid: str, key: str, action: str) -> None:
     runtime_detail = ""
     code, _ = run(["install", "-g", "--include=optional", "--engine-strict", target_pkg], timeout=900)
     agent_npm_runtime.activate_environment()
+    if code == 0 and verified:
+        # Inspect the tree npm was asked to install. Legacy/global metadata
+        # must not hide a missing or wrong private installation, particularly
+        # before DSH activates a runtime derived from that adapter.
+        actual = _pkg_version(pkg, root=agent_npm_runtime.private_root())
+        if issue := _verified_version_issue(key, actual):
+            _done(jid, False, issue, 2)
+            return
+        if key == "dsh" and (issue := _verified_cli_issue(key, _selected_cli_version(key, cached=False))):
+            _done(jid, False, issue, 2)
+            return
     if code == 0 and key == "codex":
         from .codex_account_acp import PACKAGE
         _say(jid, "正在补齐 Codex 安全权限适配器，保留个人账号登录…")
@@ -739,7 +785,7 @@ def _run_npm(jid: str, key: str, action: str) -> None:
                 raise RuntimeError(stage_issue)
             dsh_runtime.activate_stage(
                 stage, _data_root(), str(plan["version"]),
-                str(plan.get("sha256") or ""))
+                str(plan.get("sha256") or ""), executable=_bin_of(key))
             stage = ""
             _say(jid, "DeepSeek Harness 执行运行时已通过完整性校验并启用。")
         except Exception as exc:  # noqa: BLE001
@@ -755,15 +801,16 @@ def _run_npm(jid: str, key: str, action: str) -> None:
         code, runtime_detail = repair_native(run)
         if runtime_detail:
             _say(jid, runtime_detail)
-    ver = _pkg_version(pkg)
-    issue = _runtime_issue(key)
+    ver = _pkg_version(pkg, root=agent_npm_runtime.private_root()) if verified else _pkg_version(pkg)
+    issue = _verified_version_issue(key, ver) or _runtime_issue(key)
     if code == 0 and key == "dsh" and not issue:
         issue = _acp_runtime_issue("dsh", probe=True)
     if code == 0 and not issue:
-        executable = _bin_of(key)
-        prefix = list(((_PROFILES.get(key) or {}).get("argv_prefix") or (lambda: []))())
-        if not executable or not _short(executable, [*prefix, "--version"]):
+        reported = _selected_cli_version(key, cached=False)
+        if not reported:
             issue = "安装包已写入，但 Agent 启动自检失败；请检查 Node 版本、系统架构和原生依赖。"
+        else:
+            issue = _verified_cli_issue(key, reported)
     runtime_ready = not issue
     if code == 0 and ver and runtime_ready:
         _done(jid, True, f"装好了：{pkg}@{ver}", code)
@@ -780,6 +827,8 @@ def start_probe(key: str, llm: dict, *, private: bool = False) -> str:
     configuration selects runtime-managed authentication.
     """
     from ..agent_catalog import AGENTS
+    if key not in _PROFILES:
+        raise ValueError("该执行底座已不可用，请选择其他底座")
     llm = dict(llm or {})
     if llm.get("localOnly") is True and not private:
         raise ValueError("本地模型测试只允许通过本机私有通道执行")
@@ -803,8 +852,6 @@ def _probe_ws() -> str:
 def _probe_args(key: str, args: list[str]) -> list[str]:
     """Run a minimal real probe without user sessions or extensions."""
     out = list(args)
-    if key == "harness2":
-        out.append("--probe")
     if key == "pi":
         out += ["--no-session", "--no-tools", "--no-extensions", "--no-skills",
                 "--no-prompt-templates", "--no-themes", "--no-context-files"]
@@ -839,8 +886,6 @@ def _run_probe_once(jid: str, key: str, llm: dict, *, workspace=None,
                     _JOBS[jid]["_privateOutcome"] = bool(ok)
             return
         rec = {"ok": ok, "detail": detail, "at": time.time(), "steps": steps}
-        if key == "harness2" and ok:
-            rec["coverage"] = harness2_probe.COVERAGE
         _save_probe(key, rec)
         _done(jid, ok, detail)
 
@@ -906,16 +951,15 @@ def _run_probe_once(jid: str, key: str, llm: dict, *, workspace=None,
         steps.append({"name": "能干活吗", "ok": False, "detail": detail})
         _fin(False, detail)
         return
-    _say(jid, harness2_probe.INTRO if key == "harness2" else
-         "② 让它真干一轮最小的活（要它把两段拼成一个词说回来）…")
+    _say(jid, "② 让它真干一轮最小的活（要它把两段拼成一个词说回来）…")
     # Hide raw JSON protocol lines from user-facing logs.
     # Machine-readable JSON is not progress text.
     # Display progress and the final verdict.
     # _why_failed extracts errors while raw output remains available for validation.
     try:
         argv = _command_argv(binp, args, ws, cfg, prof)
-        options = ({"timeout": harness2_probe.TIMEOUT}
-                   if key == "harness2" else {"timeout": 180})
+        bind_command_environment(env, argv)
+        options = {"timeout": 180}
         code, out = _stream(jid, argv, cwd=ws, env=env, **options,
                             quiet_re=r"^\s*\{", stdin_text=_PROMPT)
     except Exception as e:  # noqa: BLE001 - keep persisted probe and job outcome consistent
@@ -929,14 +973,10 @@ def _run_probe_once(jid: str, key: str, llm: dict, *, workspace=None,
     # An echoed prompt cannot satisfy this check.
     hit = _probe_succeeded(out, code, _TOKEN)
     why = "" if hit else _why_failed(out, code)
-    if key == "harness2" and hit and not harness2_probe.completed(out):
-        hit, why = False, harness2_probe.MISSING_PROOF
     steps.append({"name": "能干活吗", "ok": hit,
-                  "detail": ("把口令原样说回来了" if hit else why)})
+                  "detail": ("通过" if hit else why)})
     if hit:
-        _say(jid, "   它把口令原样拼回来了：" + _TOKEN)
-        _fin(True, harness2_probe.success_detail(ver) if key == "harness2" else
-             f"通了 —— {prof.get('name')} {ver} 真跑了一轮，口令对上了。")
+        _fin(True, f"通了 —— {prof.get('name')} {ver} 真跑了一轮，口令对上了。")
     else:
         # Include recognized failure reasons in the log.
         # Otherwise filtering JSON could hide the actual failure.
@@ -948,7 +988,7 @@ def configure(key: str, llm: dict) -> dict:
     """Rewrite configuration without starting execution."""
     prof = _PROFILES.get(key) or {}
     if not prof:
-        return {"ok": False, "detail": "没有这个 agent"}
+        return {"ok": False, "detail": "该执行底座已不可用，请选择其他底座"}
     if not prof.get("needs_llm"):
         return {"ok": True, "detail": (_SPECS.get(key) or {}).get("config_how", "这个不用配")}
     if not (llm.get("base") and llm.get("model") and

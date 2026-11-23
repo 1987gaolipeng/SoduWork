@@ -84,6 +84,22 @@ async function run(file, args, options = {}) {
     }
   }
 }
+async function fetchBaseline(url, options) {
+  const githubAsset = url.origin === 'https://github.com' && /^\/[^/]+\/[^/]+\/releases\/download\//.test(url.pathname);
+  let response = await fetch(url, { ...options, redirect: githubAsset ? 'manual' : 'error' });
+  if (githubAsset && [301, 302, 303, 307, 308].includes(response.status)) {
+    const location = response.headers.get('location');
+    await response.body?.cancel();
+    assert.ok(location, 'GitHub baseline redirect has no location');
+    const target = new URL(location, url);
+    assert.ok(target.origin === 'https://release-assets.githubusercontent.com' &&
+      !target.username && !target.password, 'Unexpected GitHub baseline redirect');
+    // GitHub serves public release bytes from this CDN. Keep the original deadline,
+    // reject further redirects, and verify the pinned digest after downloading.
+    response = await fetch(target, options);
+  }
+  return response;
+}
 async function baseline(key, directory, { file = process.env.SODUWORK_ACCEPT_BASELINES_FILE, productName,
   candidateVersion = require('../../client/package.json').version,
   cacheDirectory = process.env.SODUWORK_DOWNLOAD_CACHE || (process.env.CI ?
@@ -109,7 +125,7 @@ async function baseline(key, directory, { file = process.env.SODUWORK_ACCEPT_BAS
     const url = new URL(item.url);
     assert.ok(['https:', 'http:'].includes(url.protocol) && !url.username && !url.password);
     const options = { redirect: 'error', signal: AbortSignal.timeout(10 * 60 * 1000) };
-    let response = await fetch(url, options);
+    let response = await fetchBaseline(url, options);
     if (response.status === 404 && item.fallbackUrl) {
       // Bootstrap against the old Hub before fixed-version downloads are deployed.
       // The mandatory SHA-256 below rejects a newer latest download immediately.
@@ -117,7 +133,7 @@ async function baseline(key, directory, { file = process.env.SODUWORK_ACCEPT_BAS
       assert.ok(fallback.protocol === 'https:' && fallback.origin === url.origin &&
         !fallback.username && !fallback.password && !fallback.search && !fallback.hash);
       await response.body?.cancel();
-      response = await fetch(fallback, options);
+      response = await fetchBaseline(fallback, options);
     }
     assert.ok(response.ok, 'Baseline download failed: HTTP ' + response.status);
     await pipeline(Readable.fromWeb(response.body), createWriteStream(target, { flags: 'wx' }));

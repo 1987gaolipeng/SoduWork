@@ -207,11 +207,24 @@
       const actions = el('footer', 'pdebug-actions');
       for (const permission of node?.pendingPermissions || []) {
         const prompt = el('section', 'pdebug-confirm');
-        prompt.append(el('strong', '', '需要你的许可'), el('p', '', permission.summary));
-        if (permission.detail) prompt.append(el('pre', 'pdebug-permission-detail', permission.detail));
+        const question = permission.action === 'native.question';
+        prompt.append(el('strong', '', question ? '请选择' : '需要你的许可'));
+        if (!question) prompt.append(el('p', '', permission.summary));
+        if (permission.detail) {
+          const detail = el('pre', 'pdebug-permission-detail', permission.detail);
+          if (question) detail.setAttribute('data-user-content', '');
+          prompt.append(detail);
+        }
         if (permission.reviewable === false) prompt.append(el('p', 'pdebug-note', '操作内容未完整提供。请拒绝本次操作，并让 Agent 提供明确、简短的操作。'));
         const controls = el('div', 'pdebug-actions');
-        controls.append(button('不允许', () => change('permission', node, { requestId: permission.requestId, allow: false })),
+        if (question) {
+          const reply = { requestId: permission.requestId, policyRevision: permission.policyRevision };
+          controls.append(button('取消', () => change('permission', node, { ...reply, decision: 'deny' })));
+          if (permission.reviewable !== false) for (const option of permission.options || []) {
+            const choice = button(option.name, () => change('permission', node, { ...reply, decision: 'answer', optionId: option.optionId }));
+            choice.setAttribute('data-user-content', ''); controls.append(choice);
+          }
+        } else controls.append(button('不允许', () => change('permission', node, { requestId: permission.requestId, allow: false })),
           ...(permission.reviewable === false ? [] : [button('仅允许本次', () => change('permission', node, { requestId: permission.requestId, allow: true }), true)]));
         prompt.append(controls); body.append(prompt);
       }

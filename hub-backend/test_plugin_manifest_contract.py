@@ -6,6 +6,7 @@ import json
 import os
 import unittest
 import zipfile
+from pathlib import Path
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
@@ -60,6 +61,36 @@ EXPECTED = {
 
 
 class PluginManifestContractTests(unittest.TestCase):
+    def test_builtin_iterator_quality_and_selfcheck_rework_implementation(self):
+        path = Path(__file__).parent / "plugins" / "autonomous-dev-iterator.json"
+        _, workflow, _ = plugin_packages.normalize(json.loads(path.read_text(encoding="utf-8")))
+        nodes = {node["key"]: node for node in workflow["nodes"]}
+        for key in ("quality", "selfcheck"):
+            with self.subTest(node=key):
+                self.assertEqual(nodes[key]["config"]["onFailure"],
+                                 {"retryFrom": "implement", "maxRounds": 2})
+
+    def test_rework_policy_validation_reports_node_and_invalid_field(self):
+        manifest = fixture(True)
+        config = manifest["workflow"]["nodes"][1]["config"]
+        invalid = [
+            ("build", "retryFrom"), (None, "retryFrom"), ({}, "retryFrom"),
+            ({"retryFrom": ""}, "retryFrom"), ({"retryFrom": "missing"}, "retryFrom"),
+        ]
+        invalid.extend(({"retryFrom": "build", "maxRounds": value}, "maxRounds")
+                       for value in (0, -1, False, 1.5, "2"))
+        for key in ("onFailure", "onReject"):
+            for policy, field in invalid:
+                config[key] = policy
+                with self.subTest(key=key, policy=policy):
+                    with self.assertRaises(ValueError) as error:
+                        plugin_packages.parse(archive(manifest))
+                    for term in ("finish", key, field):
+                        self.assertIn(term, str(error.exception))
+            config[key] = {"retryFrom": "build"}
+            parsed = plugin_packages.parse(archive(manifest))
+            self.assertEqual(parsed["workflow"]["nodes"][1]["config"][key]["retryFrom"], "build")
+
     def test_personal_package_top_level_mcp_declaration_survives_hub_import(self):
         manifest = fixture()
         manifest["mcpServers"] = ["fixture-app-service"]

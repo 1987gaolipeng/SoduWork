@@ -366,7 +366,7 @@
       if (!(global.soduWorkAPI && soduWorkAPI.reportDeskFlags)) return;
       const c = (typeof Store !== 'undefined' && Store._cfg) || {};
       soduWorkAPI.reportDeskFlags({
-        dock: c.dockVisible !== false, pet: c.petVisible !== false, tray: c.trayVisible !== false,
+        dock: c.dockVisible === true, pet: c.petVisible === true, tray: c.trayVisible !== false,
       });
     } catch (e) { /* Browser previews have no main process or tray. */ }
   }
@@ -383,6 +383,7 @@
       if (typeof saveCfg === 'function') saveCfg();
       if (typeof applyPetVisible === 'function') applyPetVisible();
       if (typeof applyDockVisible === 'function') applyDockVisible();
+      if (typeof syncDeskFlagChks === 'function') syncDeskFlagChks();
     });
   }
   /* Report authoritative preferences on startup to refresh the main-process cache. */

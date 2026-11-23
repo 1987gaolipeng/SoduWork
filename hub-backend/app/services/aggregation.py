@@ -3,12 +3,14 @@ Keep claiming and assignment independent of the source platform.
 """
 import secrets
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models, automation_models, repository_issue_models  # register subscription ownership metadata
 from ..realtime import hub
+from . import catalog_names
 from .task_access import publish_owner
 from ..schemas import binding_to_api, integration_to_api, task_to_api
 
@@ -17,17 +19,47 @@ def _new_ingest_token() -> str:
     return "ingest_" + secrets.token_urlsafe(18)
 
 
+def _validate_integration_config(type_: str, config: dict | None) -> tuple[str, dict]:
+    from ..connectors import REGISTRY
+    normalized_type = str(type_ or "generic").strip().lower()
+    # Keep retired provider names parseable so scm_support can return the
+    # terminal retired-provider error for legacy records and new attempts.
+    supported = set(REGISTRY) | {"generic", "gerrit"}
+    if normalized_type not in supported:
+        raise ValueError("集成类型不受支持")
+    normalized = dict(config or {})
+    for key in ("baseUrl", "base_url"):
+        if key not in normalized or normalized[key] in (None, ""):
+            continue
+        value = normalized[key]
+        if not isinstance(value, str):
+            raise ValueError("config.baseUrl 必须是字符串")
+        try:
+            parsed = urlsplit(value.strip())
+        except ValueError:
+            raise ValueError("config.baseUrl 只允许 http:// 或 https:// 地址") from None
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("config.baseUrl 只允许 http:// 或 https:// 地址")
+        if parsed.username or parsed.password:
+            raise ValueError("config.baseUrl 不允许携带账号或密码")
+        normalized[key] = value.strip().rstrip("/")
+    return normalized_type, normalized
+
+
 # Integration management.
 
 async def create_integration(
     session: AsyncSession, name: str, type_: str = "generic", config: dict | None = None
 ) -> dict:
     from . import scm_support
-    scm_support.require_active(type_)
+    normalized_type, normalized_config = _validate_integration_config(type_, config)
+    scm_support.require_active(normalized_type)
+    name = name.strip()
+    await catalog_names.require_available(session, models.Integration, name, "集成名已存在")
     integ = models.Integration(
         name=name,
-        type=type_,
-        config=config or {},
+        type=normalized_type,
+        config=normalized_config,
         ingest_token=_new_ingest_token(),
     )
     session.add(integ)
@@ -62,6 +94,7 @@ async def update_integration(
     if enabled is not None:
         i.enabled = bool(enabled)
     if config is not None:
+        _, config = _validate_integration_config(i.type, config)
         merged = {**(i.config or {}), **config}  # Assign a new dictionary so JSON changes are tracked.
         # Pull secrets are write-only; expose only user, kind, and secretSet.
         # A masked configuration round trip must not replace stored credentials.

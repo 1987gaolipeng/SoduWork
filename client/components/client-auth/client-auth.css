@@ -10,6 +10,25 @@ body.soduwork-client-auth-open {
 .soduwork-auth-gate[hidden] {
   display: none !important;
 }
+.soduwork-auth-gate.is-restoring > :not([data-auth-restoring]) {
+  display: none !important;
+}
+.soduwork-auth-restoring {
+  text-align: center;
+}
+.soduwork-auth-restoring[hidden] {
+  display: none !important;
+}
+.soduwork-auth-restoring b {
+  color: var(--auth-ink);
+  font-size: 20px;
+  font-weight: 650;
+}
+.soduwork-auth-restoring p {
+  margin: 12px 0 0;
+  color: var(--auth-muted);
+  font-size: var(--font-min-readable, 14.5px);
+}
 .soduwork-auth-gate {
   --auth-blue: #3278f5;
   --auth-ink: #172033;

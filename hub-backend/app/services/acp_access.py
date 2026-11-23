@@ -119,7 +119,7 @@ class BridgeAccess:
         return automatic_path(workspace, value, write=write)
 
     def observe_tool(self, update: dict):
-        if self.agent_name in {"codex-harness", "codex", "opencode", "dsh", "kimi", "claude"}:
+        if self.agent_name in {"codex-harness", "codex", "opencode", "dsh", "kimi"}:
             self._observe_native(update)
         if self.agent_name in {"codex-harness", "codex"}:
             return
@@ -176,7 +176,7 @@ class BridgeAccess:
         cached = self.native_calls.get(str(call.get("toolCallId") or ""), ({}, 0))[0]
         # DSH and Kimi omit the kind. OpenCode sends the permission kind, whose
         # external_directory pre-gate must not inherit a read/edit operation.
-        if self.agent_name in {"dsh", "kimi", "claude"} and not call.get("kind") and cached:
+        if self.agent_name in {"dsh", "kimi"} and not call.get("kind") and cached:
             call["kind"] = cached.get("kind")
         if not cached or cached.get("kind") != call.get("kind"):
             return
@@ -207,6 +207,11 @@ class BridgeAccess:
     def _codex_operation(self, params: dict, call: dict):
         call_id = str(call.get("toolCallId") or "")
         cached = self.native_calls.get(call_id, ({}, 0))[0]
+        # Codex ACP's negotiated AIR contract omits kind on approvals for an
+        # already-started command/edit. Recover it only from this live call;
+        # an explicitly different kind must never inherit another operation.
+        if call.get("kind") is None and cached:
+            call["kind"] = cached.get("kind")
         # A permission update can omit fields, but a changed tool kind cannot
         # inherit another operation's inputs. Never parse display titles.
         if cached.get("kind") == call.get("kind"):
@@ -254,9 +259,32 @@ class BridgeAccess:
         # or safely support a reusable grant. grantRoot is a scope, not a file.
         return "native.tool", "", arguments, False
 
+    def native_question(self, params: dict) -> str | None:
+        if not self.enabled:
+            return None
+        call = params.get("toolCall") or {}
+        # Kimi's ACP fallback carries the question in text content and encodes
+        # each answer as an allow_once option. Never reduce this to a boolean.
+        title = "\n".join(item["content"]["text"] for item in call.get("content", [])
+                          if isinstance(item, dict) and item.get("type") == "content"
+                          and isinstance(item.get("content"), dict)
+                          and item["content"].get("type") == "text"
+                          and isinstance(item["content"].get("text"), str))
+        options = params.get("options")
+        response = self.call("/request", {
+            "action": "native.question", "operationId": str(call.get("toolCallId") or ""),
+            "title": title or "AskUserQuestion", "tool": "AskUserQuestion",
+            "arguments": {"question": title}, "options": options, "allowSession": False})
+        choice = response.get("optionId")
+        if (response.get("decision") == "answer" and isinstance(choice, str)
+                and isinstance(options, list)
+                and any(isinstance(item, dict) and item.get("optionId") == choice for item in options)):
+            return choice
+        return None
+
     def native_permission(self, params: dict) -> bool:
         call = dict(params.get("toolCall") or {})
-        if self.agent_name in {"opencode", "dsh", "kimi", "claude"}:
+        if self.agent_name in {"opencode", "dsh", "kimi"}:
             self._restore_native_inputs(call)
         arguments = call.get("rawInput")
         arguments = (arguments if isinstance(arguments, dict) else
@@ -269,7 +297,7 @@ class BridgeAccess:
         action, tool, allow_session = "native.tool", "", call.get("rawInput") is not None
         if self.agent_name in {"codex-harness", "codex"}:
             action, tool, arguments, allow_session = self._codex_operation(params, call)
-        elif self.agent_name in {"opencode", "dsh", "kimi", "claude"} and (not arguments or arguments.get("inputIncomplete")):
+        elif self.agent_name in {"opencode", "dsh", "kimi"} and (not arguments or arguments.get("inputIncomplete")):
             arguments = arguments or {"inputUnavailable": True}
             allow_session = False
         if (call.get("kind") == "execute" and isinstance(arguments.get("command"), str)
@@ -386,7 +414,6 @@ class BridgeAccess:
             available = {str(item.get("id")) for item in modes.get("availableModes", [])
                          if isinstance(item, dict)}
             mapping = {
-                "harness2": {"standard": ("standard",), "readonly": ("readonly",), "full": ("full",)},
                 # New adapters reserve 'agent' for a remote auto-review service.
                 # Prefer the advertised user-approval mode; older adapters expose
                 # only 'agent', whose historical contract is workspace access.
@@ -396,8 +423,6 @@ class BridgeAccess:
                           "full": ("agent-full-access",)},
                 "qwen": {"standard": ("default",), "readonly": ("plan",), "full": ("yolo",)},
                 "kimi": {"standard": ("default",), "readonly": ("plan",), "full": ("yolo",)},
-                "claude": {"standard": ("default",), "readonly": ("plan",),
-                           "full": ("bypassPermissions",)},
                 "dsh": {"standard": ("workspace-write",), "readonly": ("read-only",),
                         "full": ("danger-full-access",)},
             }

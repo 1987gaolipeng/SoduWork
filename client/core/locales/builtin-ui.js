@@ -1,6 +1,15 @@
 /* System-authored capability and requirement copy, shared by renderer and main process. */
 (function (global) {
   const rows = {
+    '整理需求，补充信息': ['Organize and clarify', '要件を整理・補足', '요구사항 정리 및 보완'],
+    '安排人员或 AI 执行': ['Assign to people or AI', '担当者または AI に割当', '담당자 또는 AI에 배정'],
+    '跟进进展，处理确认': ['Track progress and decisions', '進捗確認・承認対応', '진행 상황 및 확인 사항 처리'],
+    "正在整理本轮成果…": ["Preparing this turn’s outputs…","今回の成果を整理しています…","이번 작업의 결과를 정리하는 중…"],
+    "正在检查插件草稿…": ["Checking the plugin draft…","プラグインの下書きを確認しています…","플러그인 초안을 확인하는 중…"],
+    "正在修复插件草稿…": ["Repairing the plugin draft…","プラグインの下書きを修正しています…","플러그인 초안을 수정하는 중…"],
+    "正在检查插件草稿": ["Checking the plugin draft","プラグインの下書きを確認中","플러그인 초안 확인 중"],
+    "正在修复插件草稿": ["Repairing the plugin draft","プラグインの下書きを修正中","플러그인 초안 수정 중"],
+    "插件草稿未通过检查，请修复后再安装": ["The plugin draft failed validation. Repair it before installing.","プラグインの下書きが検証に失敗しました。修正してからインストールしてください。","플러그인 초안이 검증에 실패했습니다. 수정 후 설치하세요."],
     '未找到该账号，请检查输入是否正确。': ['Account not found. Check that you entered it correctly.', 'アカウントが見つかりません。入力内容を確認してください。', '계정을 찾을 수 없습니다. 입력한 계정이 올바른지 확인하세요.'],
     '密码不正确，请重新输入。': ['Incorrect password. Please try again.', 'パスワードが正しくありません。もう一度入力してください。', '비밀번호가 올바르지 않습니다. 다시 입력하세요.'],
     '如果你已注册，请确认服务地址是否正确。': ['If you already have an account, check that the server address is correct.', '登録済みの場合は、サーバーのアドレスが正しいか確認してください。', '이미 가입했다면 서버 주소가 올바른지 확인하세요.'],
@@ -10,6 +19,7 @@
     '过程与验证材料': ['Process and verification materials', '作業過程と検証の資料', '작업 과정 및 검증 자료'],
     '本轮没有可自动核验的交付物，请使用手动验收确认实际结果': ['This delivery has no fixed output for automatic review. Analyze it if needed, then confirm the actual result manually.', 'この納品には自動検収できる固定成果物がありません。必要に応じて分析し、実際の結果を手動で確認してください。', '이 납품 버전에는 자동 검수할 고정 산출물이 없습니다. 필요하면 분석한 뒤 실제 결과를 수동으로 확인하세요.'],
     '自动验收需要明确的验收标准和固定交付版本，请先补齐或选择手动验收': ['Automatic review requires acceptance criteria and a fixed delivery version. Complete them first or choose manual review.', '自動検収には明確な検収基準と固定された納品バージョンが必要です。先に補うか、手動検収を選択してください。', '자동 검수에는 명확한 검수 기준과 고정된 납품 버전이 필요합니다. 먼저 해당 내용을 갖추거나 수동 검수를 선택하세요.'],
+    '自动验收需要明确的验收标准和固定交付版本，请切换为“手动验收”，核对交付成果后确认。': ['Automatic review requires acceptance criteria and a fixed delivery version. Switch to manual review, inspect the delivered outputs, then confirm.', '自動検収には明確な検収基準と固定された納品バージョンが必要です。「手動検収」に切り替え、納品された成果物を確認してから承認してください。', '자동 검수에는 명확한 검수 기준과 고정된 납품 버전이 필요합니다. “수동 검수”로 전환하여 납품된 산출물을 검토한 뒤 확인하세요.'],
     '暂时无法读取验收条件，请刷新后重试': ['Review prerequisites could not be loaded. Refresh and try again.', '検収条件を読み込めませんでした。更新して再試行してください。', '검수 조건을 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'],
     '模型的单次输出上限已被思考内容用完，尚未生成答复。请检查模型管理中的最大输出量；也可降低模型支持的思考强度或选择其他模型后继续。部分模型不支持关闭思考。已有内容和工具结果已保留，不会自动重复执行。': ['Reasoning used the entire response token limit before an answer was produced. Check the maximum output setting, reduce the reasoning effort if supported, or select another model to continue. Some models cannot disable reasoning. Existing content and tool results are preserved; completed actions will not be repeated automatically.', '回答が生成される前に、思考で1回の出力上限を使い切りました。最大出力設定を確認し、対応する思考強度を下げるか別のモデルを選んで続行してください。思考を無効にできないモデルもあります。既存の内容とツール結果は保持され、完了済みの操作は自動で繰り返されません。', '답변을 생성하기 전에 추론이 단일 출력 한도를 모두 사용했습니다. 최대 출력 설정을 확인하거나, 지원되는 추론 강도를 낮추거나 다른 모델을 선택해 계속하세요. 일부 모델은 추론을 끌 수 없습니다. 기존 내용과 도구 결과는 보존되며 완료된 작업은 자동 반복되지 않습니다.'],
     '插件开发助手': ['Plugin Developer', 'プラグイン開発アシスタント', '플러그인 개발 도우미'],
@@ -53,6 +63,8 @@
     '退回去向：等待执行人根据返修意见继续修正。': ['Returned for revision: waiting for the executor to act on the feedback.', '差し戻し先：実行担当者によるフィードバックに基づく修正を待っています。', '수정 요청: 실행 담당자가 피드백에 따라 수정하기를 기다리고 있습니다.'],
     '已退回，等待执行人继续修正': ['Returned; waiting for the executor to continue revising', '差し戻しました。実行担当者による修正の続行を待っています', '반려되었습니다. 실행 담당자의 수정 재개를 기다리고 있습니다'],
     '本轮交付已验收或退回，请修改交付内容后重新提交': ['This delivery has already been accepted or returned. Revise the deliverables before submitting again.', '今回の成果物は承認済み、または差し戻されています。内容を修正してから再提出してください。', '이번 산출물은 이미 승인되었거나 반려되었습니다. 산출물을 수정한 후 다시 제출하세요.'],
+    '文件夹包含超过12层的文件，请将文件移近所选文件夹后重试': ['Folder contains directories nested more than 12 levels; move files closer to the selected folder', 'フォルダー内のファイルが12階層を超えています。選択したフォルダーに近い場所へ移動して再試行してください。', '폴더 안의 파일이 12단계보다 깊이 있습니다. 선택한 폴더에 더 가까운 위치로 옮긴 뒤 다시 시도하세요.'],
+    '文件夹打包失败': ['Folder packaging failed', 'フォルダーの圧縮に失敗しました', '폴더 압축에 실패했습니다'],
     '执行进展': ['Execution progress', '実行状況', '실행 진행 상황'],
     '需求进展': ['Issue progress', '要件の進捗', '요구사항 진행 상황'],
     '只有执行人可以继续修正这条需求': ['Only the executor can continue revising this issue', 'この要件の修正を続行できるのは実行担当者のみです', '실행 담당자만 이 요구사항의 수정을 계속할 수 있습니다'],

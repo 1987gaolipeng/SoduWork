@@ -31,8 +31,8 @@ window.models=[{name:'long-model',label:'fixture-coding-large-model'},{name:'vis
 window.state={ref:'isolated-chat',adapterId:'pi',selection:{name:models[0].name,model:models[0]}};
 window.selected=[];window.sent=[];window.notices=[];
 window.SoduWorkAPI={myModels:async()=>({usable:models})};
-window.fixtureRuntimes=['pi','opencode','qwen','codex-harness','dsh','codex','claude'].map(id=>({
-  id,modelMode:['codex','claude'].includes(id)?'account':'managed'
+window.fixtureRuntimes=['pi','opencode','qwen','codex-harness','dsh','codex'].map(id=>({
+  id,modelMode:['codex'].includes(id)?'account':'managed'
 }));
 window.soduWorkAPI={conversationSession:{runtimes:async()=>({ok:true,runtimes:fixtureRuntimes}),selectModel:async(ref,name)=>{selected.push({ref,name});return{ok:true,selection:{name,model:models.find(r=>r.name===name)}}}}};
 WorkComposer.upgradeChat(document.querySelector('#old'));

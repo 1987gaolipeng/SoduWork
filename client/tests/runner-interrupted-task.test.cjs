@@ -36,7 +36,7 @@ async function fixture(t, options = {}) {
 }
 
 test('restored Qwen and Harness2 handles recover only bound tasks with fresh terminal proof', async t => {
-  for (const adapterId of ['qwen', 'harness2']) {
+  for (const adapterId of ['qwen', 'kimi']) {
     const f = await fixture(t, { adapterId });
     assert.equal(typeof f.handle.claimInterruptedTask, 'function');
     assert.equal(await f.handle.claimInterruptedTask('unrelated'), null);

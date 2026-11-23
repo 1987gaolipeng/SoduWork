@@ -23,7 +23,7 @@ function snapshot() {
   const api = fs.readFileSync(path.join(repo, 'client/api.js'), 'utf8').replace(/\r\n/g, '\n');
   const ranges = [
     ['    async clientLogin(credentials)', '    async patchTask('],
-    ['  function rememberSession(row)', '  function handleAuthError('],
+    ['  function rememberSession(', '  function handleAuthError('],
     ['  if (global.soduWorkAPI?.onAccountSessionChanged)', '  global.SoduWorkAPI ='],
   ];
   const accountSections = ranges.map(([start, end]) => {

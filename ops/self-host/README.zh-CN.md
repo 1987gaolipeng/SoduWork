@@ -84,6 +84,12 @@ python3 ops/self-host/deploy.py up --public-url https://work.example.com
 
 桌面客户端连接这个 Hub 地址并登录。模型与连接器使用用户自己的合法授权；仓库不提供服务密钥。默认不在管理容器内自动执行 Agent，云端任务应在管理端登记独立 Runner，本地任务由客户端的 Runner 处理。这样管理服务不会自动获得宿主机 Docker socket 或 SSH 凭据。容器内以普通用户运行，不挂载 Docker socket。
 
+### 开启企业微信机器人对话
+
+配置好公网 HTTPS 地址后，在此实例的私有 `deployment.json` 中设置 `"imEnabled": true`，使用相同的数据目录运行 `python3 ops/self-host/deploy.py up --no-build`。Hub 会启用远程对话服务和消息处理进程。直接从源码运行 Hub 时，在 Hub 环境中设置 `IM_ENABLED=true`，配置 `HUB_PUBLIC_URL` 和 `CONNECTOR_OAUTH_KEY`，再重启 Hub。
+
+在桌面端连接器页面刷新「手机远程对话」，连接「企业微信自建应用」，将回调地址复制到该应用的接收消息配置中。验证并启用机器人，绑定任务和执行电脑，然后在应用私聊中发送一次性配对命令。发送一个简短任务，确认回复到达同一私聊。
+
 ## 更新、备份与回退
 
 首次部署与正式升级不同：升级前停止派发新任务，等待当前任务结束，备份数据库及全部业务文件卷，并单独备份私有配置与当前源码版本。数据库和资料库必须按同一时间点恢复。已有完整加密备份工具见 [full_backup.py](../../hub-backend/full_backup.py)，数据库校验与恢复工具见 [db_admin.py](../../hub-backend/db_admin.py)。组织自己的备份存储需要实际演练恢复，再用于生产。

@@ -1,5 +1,6 @@
 """Dedicated allowance management, with scoped members and audited mutations."""
 import json
+from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,9 +21,15 @@ class CatalogUpdate(qp.Catalog):
     defaultLimit: StrictInt | None = Field(default=None, ge=0, le=qp.MAX_TOKENS)
 
 
+class PlanPreview(BaseModel):
+    revision: StrictInt = Field(ge=0)
+    plan: qp.Plan
+
+
 class Assignment(BaseModel):
     model_config = ConfigDict(extra="forbid")
     revision: StrictInt = Field(ge=0)
+    catalogRevision: StrictInt | None = Field(default=None, ge=0)
     mode: Literal["inherit", "plan", "custom"]
     planId: str = Field(default="", max_length=48)
     custom: qp.Allowance | None = None
@@ -45,6 +52,14 @@ async def settings_rows(session, ids=()):
         keys.extend([qp.GRANT_PREFIX + uid, client_access.USER_QUOTA_PREFIX + uid])
     return dict((await session.execute(select(AppSetting.key, AppSetting.value).where(
         AppSetting.key.in_(keys)))).all())
+
+
+async def validate_model_definitions(session, allowances):
+    requested = {(m.provider, m.model) for allowance in allowances for m in allowance.models}
+    if requested:
+        definitions = set((await session.execute(select(ModelDef.provider_id, ModelDef.name))).all())
+        if not requested.issubset(definitions):
+            raise HTTPException(422, "请选择模型目录中已有的模型")
 
 
 @router.get("")
@@ -72,11 +87,7 @@ async def save_configuration(body: CatalogUpdate,
     plans = body.model_dump(exclude={"defaultLimit"})
     if {p["id"] for p in old["plans"]} - {p["id"] for p in plans["plans"]}:
         raise HTTPException(422, "已建立的套餐需要保留，避免影响已分配的成员")
-    definitions = set((await session.execute(select(ModelDef.provider_id, ModelDef.name))).all())
-    for plan in plans["plans"]:
-        for item in plan["models"]:
-            if (item["provider"], item["model"]) not in definitions:
-                raise HTTPException(422, "请选择模型目录中已有的模型")
+    await validate_model_definitions(session, body.plans)
     plans["revision"] += 1
     row.value = json.dumps(plans, ensure_ascii=False)
     default = await lock_setting(session, client_access.POLICY_KEY)
@@ -98,6 +109,61 @@ async def save_configuration(body: CatalogUpdate,
         policy["tokenLimitEnabled"] != old_policy["tokenLimitEnabled"] or
         policy["monthlyTokenLimit"] != old_policy["monthlyTokenLimit"]))
     return {**plans, "defaultLimit": default_limit}
+
+
+def preview_totals(previous_limit, new_limit, *, scoped=False):
+    return {"previousLimit": previous_limit, "newLimit": new_limit,
+            "affectedMembers": 0, "used": 0, "remaining": None if new_limit is None else 0,
+            "pausedMembers": 0, "scopeLimited": scoped}
+
+
+def preview_details(status):
+    return {key: status[key] for key in ("used", "remaining", "reason", "period", "models", "restrictModels")}
+
+
+@router.post("/plans/preview")
+async def preview_plan(body: PlanPreview, user: User = Depends(require_perm("quota.manage")),
+                       session: AsyncSession = Depends(get_session)):
+    catalog = await qp.catalog(session)
+    if catalog["revision"] != body.revision:
+        raise conflict()
+    await validate_model_definitions(session, [body.plan])
+    plan = body.plan.model_dump()
+    old = next((p for p in catalog["plans"] if p["id"] == plan["id"]), None)
+    scope = await rbac.scope_org_ids(session, user)
+    result = preview_totals(old["totalLimit"] if old else None, plan["totalLimit"], scoped=scope is not None)
+    if plan["id"] == "trial":
+        # Existing trials keep their grant snapshot. Show a future registration's starting balance.
+        return {**result, **preview_details(qp.status_from(plan, {}, {}))}
+    result["modelLimitedMembers"] = 0
+    if not old:
+        return {**result, "remaining": 0}
+    query = select(User.id, AppSetting.value).join(
+        AppSetting, AppSetting.key == qp.GRANT_PREFIX + User.id).where(User.account_deleted_at.is_(None))
+    if scope is not None:
+        query = query.where(User.org_id.in_(scope))
+    now = datetime.now(timezone.utc)
+    # Grants are stored as text. Bound the ledger query and memory even on large installations.
+    rows = await session.stream(query.execution_options(yield_per=400))
+    async for batch in rows.partitions(400):
+        ids = []
+        for uid, value in batch:
+            grant = qp.parse(value)
+            if grant.get("mode") == "plan" and grant.get("planId") == plan["id"]:
+                ids.append(uid)
+        usage = await quota_usage.totals(session, ids, now=now)
+        for uid in ids:
+            status = qp.status_from(plan, {}, usage.get(uid, {}), now=now)
+            result["affectedMembers"] += 1
+            result["used"] += status["used"]
+            if result["remaining"] is not None:
+                result["remaining"] += status["remaining"]
+            result["pausedMembers"] += int(status["exceeded"])
+            if not status["exceeded"] and any(row["exceeded"] for row in status["models"]):
+                result["modelLimitedMembers"] += 1
+    if not result["affectedMembers"]:
+        result["remaining"] = 0
+    return result
 
 
 @router.get("/members")
@@ -137,14 +203,12 @@ async def member_items(session, users):
     for member in users:
         grant, policy = grants[member.id], policies[member.id]
         override = client_access.user_quota(qp.parse(rows.get(client_access.USER_QUOTA_PREFIX + member.id)))
-        if policy:
-            status = qp.status_from(policy, grant, usage.get(member.id, {}))
+        if not policy:
+            policy = legacy_policy(override, global_policy)
+            status_grant = {"mode": override["mode"]}
         else:
-            enabled = override["mode"] == "limited" or (override["mode"] == "inherit" and global_policy["tokenLimitEnabled"])
-            cap = override["limit"] if override["mode"] == "limited" else global_policy["monthlyTokenLimit"]
-            status = qp.status_from({"id": "legacy", "name": "原有额度", "period": "monthly",
-                                     "totalLimit": cap if enabled else None},
-                                    {"mode": override["mode"]}, usage.get(member.id, {}))
+            status_grant = grant
+        status = qp.status_from(policy, status_grant, usage.get(member.id, {}))
         items.append({"id": member.id, "username": member.username, "displayName": member.display_name,
                       "isActive": member.is_active, "quota": status, "legacyOverride": override,
                       "assignment": {"revision": grant.get("revision", 0),
@@ -153,38 +217,39 @@ async def member_items(session, users):
     return items
 
 
+def legacy_policy(override, global_policy):
+    enabled = override["mode"] == "limited" or (override["mode"] == "inherit" and global_policy["tokenLimitEnabled"])
+    cap = override["limit"] if override["mode"] == "limited" else global_policy["monthlyTokenLimit"]
+    return {"id": "legacy", "name": "原有额度", "period": "monthly", "totalLimit": cap if enabled else None}
+
+
+async def managed_member(session, user, uid, *, lock=False):
+    member = await session.get(User, uid, with_for_update=lock, populate_existing=lock)
+    if member is None or member.account_deleted_at:
+        raise HTTPException(404, "用户不存在")
+    scope = await rbac.scope_org_ids(session, user)
+    if scope is not None and member.org_id not in scope:
+        raise HTTPException(403, "只能管理自己管辖部门的额度")
+    return member
+
+
 @router.get("/members/{uid}")
 async def member_detail(uid: str, user: User = Depends(require_perm("quota.manage")),
                         session: AsyncSession = Depends(get_session)):
-    member = await session.get(User, uid)
-    if member is None or member.account_deleted_at:
-        raise HTTPException(404, "用户不存在")
-    scope = await rbac.scope_org_ids(session, user)
-    if scope is not None and member.org_id not in scope:
-        raise HTTPException(403, "只能管理自己管辖部门的额度")
+    member = await managed_member(session, user, uid)
     return (await member_items(session, [member]))[0]
 
 
-@router.put("/members/{uid}")
-async def assign(uid: str, body: Assignment, user: User = Depends(require_perm("quota.manage")),
-                 session: AsyncSession = Depends(get_session)):
-    # Lock the account even when its first grant does not exist yet.
-    member = await session.get(User, uid, with_for_update=True, populate_existing=True)
-    if member is None or member.account_deleted_at:
-        raise HTTPException(404, "用户不存在")
-    scope = await rbac.scope_org_ids(session, user)
-    if scope is not None and member.org_id not in scope:
-        raise HTTPException(403, "只能管理自己管辖部门的额度")
-    key = qp.GRANT_PREFIX + uid
-    row = await lock_setting(session, key)
-    old = qp.parse(row.value)
+async def proposed_grant(session, body, old, plans=None):
     if old.get("revision", 0) != body.revision:
+        raise conflict()
+    if body.catalogRevision is not None and plans["revision"] != body.catalogRevision:
         raise conflict()
     grant = {"mode": body.mode, "revision": body.revision + 1}
     if old.get("trial"):
         grant["trial"] = old["trial"]
     if body.mode == "plan":
-        plans = await qp.catalog(session)
+        plans = plans if plans is not None else await qp.catalog(session)
         if not any(p["id"] == body.planId for p in plans["plans"]):
             raise HTTPException(422, "请选择有效套餐")
         if body.planId == "trial" and not grant.get("trial"):
@@ -193,10 +258,42 @@ async def assign(uid: str, body: Assignment, user: User = Depends(require_perm("
     if body.mode == "custom":
         if body.custom is None:
             raise HTTPException(422, "请填写个人额度")
-        definitions = set((await session.execute(select(ModelDef.provider_id, ModelDef.name))).all())
-        if any((m.provider, m.model) not in definitions for m in body.custom.models):
-            raise HTTPException(422, "请选择模型目录中已有的模型")
+        await validate_model_definitions(session, [body.custom])
         grant["custom"] = body.custom.model_dump()
+    return grant
+
+
+@router.post("/members/{uid}/preview")
+async def preview_member(uid: str, body: Assignment, user: User = Depends(require_perm("quota.manage")),
+                         session: AsyncSession = Depends(get_session)):
+    await managed_member(session, user, uid)
+    rows = await settings_rows(session, [uid])
+    old = qp.parse(rows.get(qp.GRANT_PREFIX + uid))
+    plans = qp.catalog_from(rows.get(qp.CATALOG_KEY))
+    grant = await proposed_grant(session, body, old, plans)
+    fallback = legacy_policy(client_access.user_quota(qp.parse(rows.get(client_access.USER_QUOTA_PREFIX + uid))),
+                             {**client_access.DEFAULT_POLICY, **qp.parse(rows.get(client_access.POLICY_KEY))})
+    previous = qp.effective(old, plans) or fallback
+    policy = qp.effective(grant, plans) or fallback
+    now = datetime.now(timezone.utc)
+    usage = await quota_usage.totals(session, [uid], monthly=policy["period"] != "once", now=now)
+    status = qp.status_from(policy, grant, usage.get(uid, {}), now=now)
+    return {**preview_totals(previous["totalLimit"], policy["totalLimit"]), **preview_details(status),
+            "affectedMembers": 1, "pausedMembers": int(status["exceeded"])}
+
+
+@router.put("/members/{uid}")
+async def assign(uid: str, body: Assignment, user: User = Depends(require_perm("quota.manage")),
+                 session: AsyncSession = Depends(get_session)):
+    # Lock the account even when its first grant does not exist yet.
+    await managed_member(session, user, uid, lock=True)
+    row = await lock_setting(session, qp.GRANT_PREFIX + uid)
+    old = qp.parse(row.value)
+    plans = None
+    if body.catalogRevision is not None:
+        # Serialize the reviewed catalog revision with concurrent catalog saves, including first use.
+        plans = qp.catalog_from((await lock_setting(session, qp.CATALOG_KEY)).value)
+    grant = await proposed_grant(session, body, old, plans)
     row.value = json.dumps(grant, ensure_ascii=False)
     record(session, user, "quota.member.assign", uid, old, grant)
     await session.commit()

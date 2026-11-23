@@ -55,11 +55,11 @@ def main() -> int:
 
     # Project node overrides remain below manual overrides.
     binding_with_override = {**binding_cfg,
-                             "nodeOverrides": {"implement": {"agentKind": "local:claude"}}}
+                             "nodeOverrides": {"implement": {"agentKind": "local:codex"}}}
     route = execution_route(ctx, binding_with_override, node_cfg, "implement")
     ok(route["agentKind"] == "local:opencode", "手动层也压过项目级节点覆盖", route)
     route = execution_route({}, binding_with_override, node_cfg, "implement")
-    ok(route["agentKind"] == "local:claude", "无手动层时项目级覆盖照旧", route)
+    ok(route["agentKind"] == "local:codex", "无手动层时项目级覆盖照旧", route)
 
     # Reject invalid agent kinds through the same validation used by API execution preferences.
     try:

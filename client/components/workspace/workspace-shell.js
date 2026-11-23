@@ -131,7 +131,7 @@
   /* Main navigation lists frequent actions in priority order. */
   const HOME_GROUPS = [
     ['', ['schedules', 'skills', 'library', 'notices']],
-    ['协作', ['history', 'aidesk'], 'collaboration'],
+    ['协作', ['history'], 'collaboration'],
   ];
   /* Account navigation groups personal work, security and preferences. */
   const SETTINGS_GROUPS = [
@@ -157,9 +157,8 @@
     ['schedules', '自动化', 'schedules'],
     ['library', '资料库', 'library'],
   ];
-  /* Team and briefs stay registered while their menu entries are temporarily hidden. */
+  /* AI team, team and briefs stay registered while their menu entries are temporarily hidden. */
   const RAIL_MORE_ITEMS = [
-    ['aidesk', 'AI 团队', 'aidesk'],
     ['memory', '记忆', 'memory'],
   ];
   const RAIL_MORE_KEYS = new Set(RAIL_MORE_ITEMS.map(([key]) => key));
@@ -232,7 +231,7 @@
   const { MAX_CHAT_ITEMS, CHAT_STATE, chatState, _chatAt, _chatUiKey, _withChatUiKey, _sameDraft, _settleDraft, _reconcileChats, _upsertChatItems } = global.WorkspaceChatHistory;
   let mode = 'home';              // home | settings
   let collaborationCollapsed = true; // Start collapsed; preserve expansion during navigation and permission refreshes.
-  let lastHomeView = 'create';    // Return to a new chat when leaving settings.
+  let lastHomeView = '';
   let railMoreOpen = false;
   function reportWorkspaceView(key) {
     if (global.WorkspaceNavigation) { global.WorkspaceNavigation.record(key); return; }
@@ -380,6 +379,7 @@
     global.WorkspaceSidebarApps?.mount();
     refreshNoticeBadge();
     if (updateStatus) applyUpdateState(updateStatus);
+    global.ClientAuth?.renderIdentity?.();
   }
 
 
@@ -399,10 +399,12 @@
       '#wsPinnedToggle span': wsT('pinned', '置顶'),
       '#wsChatsToggle span': wsT('recentChats', '最近聊天'),
       '#wsRecentToggle span': wsT('recentTasks', '最近需求'),
-      '#wsMine .ws-profile-copy b': wsT('my', '我的'),
       '#wsHubState': root.querySelector('#wsMine')?.dataset.connection === 'connected'
         ? wsT('connected', '已连接 SoduWork 服务') : wsT('connecting', '服务连接中'),
     };
+    if (!global.ClientAuth?.snapshot?.().user) {
+      text['#wsMine .ws-profile-copy b'] = wsT('my', '我的');
+    }
     Object.keys(text).forEach((selector) => {
       const node = root.querySelector(selector);
       if (node && node.textContent !== text[selector]) node.textContent = text[selector];
@@ -459,7 +461,7 @@
         '<div class="ws-profile-row">' +
           '<button class="ws-profile" id="wsMine" type="button" data-connection="connecting" title="打开个人信息">' +
             '<span class="ws-avatar" aria-hidden="true"><span data-soduwork-user-initial>我</span></span>' +
-            '<span class="ws-profile-copy"><b>我的</b><small id="wsHubState">正在连接服务</small></span>' +
+            '<span class="ws-profile-copy"><b data-soduwork-user-name>我的</b><small id="wsHubState">正在连接服务</small></span>' +
             '<svg class="ws-profile-go" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>' +
         '</div>' +
       '</aside>' +
@@ -583,12 +585,8 @@
     /* Return to the page that was active before entering settings. */
     root.querySelector('#wsBack').addEventListener('click', () => {
       if (!global.WorkspaceHost) return;
-      const key = lastHomeView || 'create';
-      global.WorkspaceHost.open(key, key === 'create'
-        ? (global.WorkspaceShell && typeof global.WorkspaceShell.newSessionPayload === 'function'
-          ? global.WorkspaceShell.newSessionPayload()
-          : { newSession: true })
-        : {});
+      if (!lastHomeView) return openWorkspaceView('create');
+      global.WorkspaceHost.open(lastHomeView, lastHomeView === 'create' ? { resumeComposer: true } : {});
     });
 
     document.addEventListener('pointerdown', (e) => {
@@ -739,25 +737,10 @@
     return { ...context, cwd, workspaceLabel };
   }
 
-  /* 顶部「新对话」/窗口菜单「新建」等纯新对话入口的参数：项目归属只认显式
-     传入（cda885c8），但工作目录作为默认值延续——显式传入优先；其次沿用当
-     前活动会话的目录（云端会话目录不沿用，见 newSessionContext 的防护）；
-     无活动会话时用最近一次手选的目录兜底（冷启动，主进程已校验目录仍存在）。
-     用户点「默认工作区」会同步清掉最近手选记录，之后的新对话不再延续。 */
+  // Ordinary new chats get a private directory from the main process. A recent
+  // directory is only a picker hint; sharing a workspace requires explicit input.
   function newSessionPayload(extra) {
-    const given = extra || {};
-    let inherited = {};
-    if (!given.cwd) {
-      const context = newSessionContext();
-      if (context.cwd) {
-        inherited = { cwd: context.cwd, workspaceLabel: context.workspaceLabel || '',
-          workspaceSource: 'last-session' };
-      } else if (recentWorkspace.dir) {
-        inherited = { cwd: recentWorkspace.dir, workspaceLabel: recentWorkspace.name || '',
-          workspaceSource: 'recent' };
-      }
-    }
-    return { ...inherited, ...given, newSession: true };
+    return { ...(extra || {}), newSession: true };
   }
 
   function projectForChat(id) { return sidebarProjects?.projectForChat(String(id || '')) || null; }
@@ -811,7 +794,7 @@
                             get active() { return active; }, get mode() { return mode; },
                             get activeChatId() { return activeChatId; }, set activeChatId(value) { activeChatId = value; },
                             /* Remember the return destination for the detail page. */
-                            get lastView() { return lastHomeView; } };
+                            get lastView() { return lastHomeView || 'create'; } };
   // The desk has no pet dock; reuse the store/window-sync invalidation hook.
   if (typeof global.updateNoticeBadge !== 'function') global.updateNoticeBadge = () => {
     refreshNoticeBadge();

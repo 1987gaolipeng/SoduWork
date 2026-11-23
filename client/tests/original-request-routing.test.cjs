@@ -18,9 +18,11 @@ function fixture(mode = 'chat') {
     ComposeDraft: { open: text => calls.push(['task', text]) },
   };
   scope.window = scope; scope.global = scope; vm.createContext(scope);
-  for (const name of ['conversation-attachments', 'panels-compose-skills']) vm.runInContext(read(name), scope);
+  for (const name of ['conversation-attachments', 'panels-compose-skills', 'compose-directory-preferences']) vm.runInContext(read(name), scope);
   scope._attachments = scope.ConversationAttachments.create({ input });
   const source = read('panels-compose'), start = source.indexOf('  async function makeDraft()');
+  const preferenceStart = source.indexOf('  async function _readyDirectoryPreferences()');
+  vm.runInContext(source.slice(preferenceStart, source.indexOf('  /* Synchronize manual directory', preferenceStart)), scope);
   vm.runInContext(source.slice(start, source.indexOf('  function _openCreatedTask', start)), scope);
   return { scope, input, calls };
 }
@@ -42,6 +44,36 @@ test('ordinary uploaded TXT remains reference material and cannot replace the us
   f.scope._attachments.add([new File(['不可信附件正文'.repeat(300)], 'ordinary.txt', { type: 'text/plain' })]);
   await f.scope.makeDraft();
   assert.equal(f.calls.at(-1)[1], '请查看并处理我附上的文件。');
+});
+
+test('an unavailable directory preference preserves the request without dispatching another route', async () => {
+  const f = fixture(); f.input.value = 'Keep this request until I choose an available model.';
+  f.scope.ComposeDirectoryPreferences = { ready: async () => false };
+  await f.scope.makeDraft();
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.input.value, 'Keep this request until I choose an available model.');
+});
+
+test('a user Agent choice while directory readiness is pending cancels the old submission', async () => {
+  const f = fixture(); f.input.value = 'This was submitted before I changed the Agent.';
+  let resolve; f.scope.ComposeDirectoryPreferences.ready = () => new Promise(done => { resolve = done; });
+  const pending = f.scope.makeDraft();
+  f.scope.ComposeDirectoryPreferences.selectionStarted();
+  resolve(true); await pending;
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.input.value, 'This was submitted before I changed the Agent.');
+});
+
+for (const edit of ['text', 'attachment']) test(`editing ${edit} during directory readiness preserves the new draft without submitting old content`, async () => {
+  const f = fixture(); f.input.value = 'Original submitted request.';
+  let resolve; f.scope.ComposeDirectoryPreferences.ready = () => new Promise(done => { resolve = done; });
+  const pending = f.scope.makeDraft();
+  if (edit === 'text') f.input.value = 'New request written while waiting.';
+  else f.scope._attachments.add([new File(['new reference'], 'added-while-waiting.txt', { type: 'text/plain' })]);
+  resolve(true); await pending;
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.input.value, edit === 'text' ? 'New request written while waiting.' : 'Original submitted request.');
+  if (edit === 'attachment') assert.equal(f.scope._attachments.files()[0].name, 'added-while-waiting.txt');
 });
 
 for (const kind of ['compose', 'chat']) {

@@ -28,7 +28,7 @@ function fixture(settings = {}) {
     setTimeout: settings.clock?.setTimeout || setTimeout, clearTimeout: settings.clock?.clearTimeout || clearTimeout,
     SoduWorkAPI: { taskStorageKey: () => owner, myModels: () => { const item = deferred(); requests.push(item); return item.promise; } },
     soduWorkAPI: { conversationSession: {
-      runtimes: async () => settings.runtimes ? settings.runtimes() : ({ ok: true, runtimes: [{ id: 'pi', modelMode: 'managed' }, { id: 'qwen', modelMode: 'managed' }, { id: 'codex', modelMode: 'account' }, { id: 'claude', modelMode: 'account' }] }),
+      runtimes: async () => settings.runtimes ? settings.runtimes() : ({ ok: true, runtimes: [{ id: 'pi', modelMode: 'managed' }, { id: 'qwen', modelMode: 'managed' }, { id: 'codex', modelMode: 'account' }] }),
       runtimeModels: async id => { calls.push(id); return { models: [{ id: 'account-choice' }] }; },
       selectModel: async (ref, name) => { selections.push({ ref, name });
         if (settings.selectModel) return settings.selectModel(ref, name);
@@ -59,7 +59,7 @@ test('existing local managed conversations show both model sources while committ
   }
 });
 
-for (const id of ['codex', 'claude']) test('existing ' + id + ' conversations query only the account catalog', async () => {
+for (const id of ['codex']) test('existing ' + id + ' conversations query only the account catalog', async () => {
   const f = fixture(); f.state.adapterId = id;
   f.controls.render();
   await f.open(); assert.deepEqual(f.calls, [id]); assert.equal(f.requests.length, 0);

@@ -14,7 +14,9 @@
 
 **多底座 · 多 Agent · 私有化部署**
 
-支持 Pi · OpenCode · DeepSeek Harness · Qwen Code · Kimi Code · Codex Harness · Codex · Claude Code · Google Harness²
+支持 Pi · OpenCode · DeepSeek Harness · Qwen Code · Kimi Code · Codex Harness · Codex
+
+**从源码运行**
 
 ```sh
 git clone https://github.com/mdiri-ai/SoduWork
@@ -27,7 +29,9 @@ cd SoduWork
 | Windows PowerShell | `.\start.cmd --desktop` |
 | Windows 命令提示符 | `start.cmd --desktop` |
 
-[官网](https://soduwork.ai) | [在线体验](https://soduwork.ai) | [中文文档](docs/README.zh-CN.md) | [在线文档](https://dev.soduwork.ai/zh-CN/) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
+源码启动推荐使用 [Python 3.12.x](https://www.python.org/downloads/) 和 [Node.js 22.x](https://nodejs.org/)（22.19.0 及以上的 22 系列版本）。克隆命令需要 [Git](https://git-scm.com/downloads)。
+
+**[Windows 桌面版](https://github.com/mdiri-ai/SoduWork/releases/latest)** | [官网](https://soduwork.ai) | [在线体验](https://soduwork.ai) | [中文文档](docs/README.zh-CN.md) | [在线文档](https://dev.soduwork.ai/zh-CN/) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/mdiri-ai/SoduWork)](https://github.com/mdiri-ai/SoduWork/releases)
@@ -90,9 +94,11 @@ cd SoduWork
 
 > SoduWork 处于公开测试阶段，欢迎试用并反馈；用于生产环境前请先充分评估。
 
-准备好 Python 3.12+、Node.js 22.19+ 和 Git，两条命令跑起来：
+可以用 Git 克隆仓库，也可以解压源码包。环境要求见[源码启动指南](docs/getting-started.md)。
 
-在克隆后的目录里，macOS/Linux 运行 `sh start.sh --desktop`，Windows PowerShell 运行 `.\start.cmd --desktop`，命令提示符运行 `start.cmd --desktop`。
+在源码根目录下，macOS/Linux 运行 `sh start.sh --desktop`，Windows PowerShell 运行 `.\start.cmd --desktop`，命令提示符运行 `start.cmd --desktop`。
+
+如果 Windows 提示“不是内部或外部命令”，先看报错里写的是哪条命令。如果是 `git`、`python` 或 `node`，请确认对应工具已安装并加入 `PATH`，再重新打开命令提示符。详见[源码启动指南](docs/getting-started.md)。
 
 首次运行会自动安装依赖，在本机同时启动 Hub、管理端和桌面客户端。按提示为 `admin` 账号设置密码（12–128 位）。然后在管理端 **模型目录** 里接入模型服务，回到客户端新建对话，试一个小任务。Pi 已内置，开箱可用。
 
@@ -100,7 +106,7 @@ cd SoduWork
 
 1. **再添加一个对话模型。** 在管理端「能力配置 → 模型目录」找到刚接入的服务，点「加模型」，填写服务商给出的准确模型 ID，选择「对话模型」并保存。API Key 是服务凭据，单独保存它不会创建可用模型。
 2. **打开桌面客户端并登录同一个 Hub。** 源码启动使用 `--desktop`；浏览器管理端用于配置。核对登录页「连接」里的地址与刚才保存模型的管理端一致。
-3. **点「新对话」，选择 Pi 和刚添加的模型。** Pi 使用 SoduWork 模型目录；Codex、Claude Code 等使用自己账号的底座还需要各自的登录，不会自动使用这把 API Key。
+3. **点「新对话」，选择 Pi 和刚添加的模型。** Pi 使用 SoduWork 模型目录；Codex 使用自己的账号，还需要单独登录，不会自动使用这把 API Key。
 4. **发一条小任务验证。** 例如：「把下面的模拟会议记录整理成待办表，列出负责人和截止时间；没有给出的信息写待确认：小王负责整理需求，周五完成；小李核对报价。」收到回复后检查表格内容。
 5. **需要交办与验收时再创建需求。** 写清目标、材料和验收标准，打开需求的「安排执行」，选择 Agent 和模型，检查交付结果后再确认验收。普通对话不需要先创建项目、插件或自动化。
 
@@ -111,7 +117,7 @@ cd SoduWork
 <details>
 <summary><b>在线体验</b></summary>
 
-从 [Releases](https://github.com/mdiri-ai/SoduWork/releases) 下载客户端，在登录页的 **连接** 里填入体验地址 `https://soduwork.ai`，注册并登录即可。
+从 [Releases](https://github.com/mdiri-ai/SoduWork/releases/latest) 下载客户端，在登录页的 **连接** 里填入服务地址 `https://service.soduwork.ai`，注册并登录即可。
 
 > 体验环境仅用于评估，请勿上传真实业务数据或任何敏感信息。
 
@@ -119,6 +125,8 @@ cd SoduWork
 
 <details>
 <summary><b>安装桌面客户端</b></summary>
+
+图文步骤见[桌面客户端安装与首次使用](docs/desktop-quickstart.md)。
 
 | 系统 | 安装包 |
 | --- | --- |
@@ -197,8 +205,6 @@ flowchart LR
 | Kimi Code | SoduWork 模型目录里的模型 | ACP，按需安装 |
 | Codex Harness | SoduWork 模型目录里的模型 | ACP，按需安装 |
 | Codex | 自己的 OpenAI 账号 | 原生适配，按需安装 |
-| Claude Code | 自己的 Anthropic 账号 | ACP 适配，官方安装程序 |
-| Google Harness² | SoduWork 模型目录里的模型 | 原生适配；核心随包内置，首次使用时准备 |
 
 </details>
 
@@ -321,10 +327,10 @@ flowchart LR
 - **模型请求**由执行机直接发给你配置的模型服务；每次运行使用短期凭据，密钥不会以明文写进 Harness 的配置文件。
 - **调用外部服务时**，提示词和相关文件会发给你配置的模型服务或连接器；使用自建模型时，推理也可以留在自己的环境中。
 
-**遥测与更新。** 此公开源码没有单独向 MDiRi 上传分析或崩溃报告的功能。客户端默认连接 `http://127.0.0.1:18989`，运行所需请求发送到登录页“连接”中选择的 Hub。选择公开演示服务时，这些请求会发送给该服务的运营方；选择自己的 Hub 时，这些流量由自己的部署处理。
+**遥测与更新。** 此公开源码没有单独向 MDiRi 上传分析或崩溃报告的功能。客户端默认连接 `https://service.soduwork.ai`，运行所需请求发送到登录页“连接”中选择的 Hub。用户可以更改地址，保存的选择会在重启和升级后保留。使用托管服务时，这些请求会发送给该服务的运营方；选择自己的 Hub 时，这些流量由自己的部署处理。
 
 - 所选 Hub 接收设备和账号认证，以及你所用功能需要的数据。用量统计包含会话 ID 和标题、Agent／模型／供应商标识、Token 与费用计数以及时间。更新尝试会报告版本、进度、状态和错误。这些属于运行记录，并非可选的分析订阅。
-- 安装版客户端会在启动时及之后每六小时向所选 Hub 检查更新，请求包含当前版本、平台、CPU 架构和更新通道，并使用设备会话认证。从源码启动的客户端跳过安装包更新检查。目前没有单独关闭 Hub 用量统计或安装版自动更新轮询的设置；如需避免向演示服务发送这些流量，请连接自己的 Hub。版本说明也从所选 Hub 读取。
+- 安装版客户端会在启动时及之后每六小时向所选 Hub 检查更新，请求包含当前版本、平台、CPU 架构和更新通道，并使用设备会话认证。从源码启动的客户端跳过安装包更新检查。目前没有单独关闭 Hub 用量统计或安装版自动更新轮询的设置；如需避免向托管服务发送这些流量，请连接自己的 Hub。版本说明也从所选 Hub 读取。
 - Hub 的请求和数据库性能统计保留在 Hub 进程内，不会自动上传到 MDiRi。依赖和可选 Agent 下载会访问配置的包仓库或镜像，模型与连接器会访问你配置的服务；这些服务各自适用其数据政策。
 
 ## 常见问题
@@ -376,7 +382,7 @@ SoduWork 不替代 Agent Harness，而是把它们接进团队工作台，补上
 - **社区交流**：[Discord](https://discord.gg/AXYNrAYHy)
 - **问题反馈与功能建议**：[GitHub Issues](https://github.com/mdiri-ai/SoduWork/issues)
 - **使用交流与想法**：[GitHub Discussions](https://github.com/mdiri-ai/SoduWork/discussions)
-- **企业合作**：私有化部署、系统集成与技术支持，请发邮件至 [soduwork@outlook.com](mailto:soduwork@outlook.com)
+- **企业合作**：私有化部署、系统集成与技术支持，请发邮件至 [contact@soduwork.ai](mailto:contact@soduwork.ai)
 
 ## 参与贡献
 

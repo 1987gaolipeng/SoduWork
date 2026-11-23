@@ -71,16 +71,6 @@ hidden = [
     "app.services.opencode_access",
     "app.services.acp_agents",
     "app.services.acp_bridge",
-    "app.services.harness2_runtime",
-    "app.services.harness2_bridge",
-    "app.services.harness2_native",
-    "app.services.harness2_provider",
-    "app.services.harness2_streaming",
-    "app.services.harness2_session",
-    "app.services.harness2_tools",
-    "app.services.harness2_mcp",
-    "app.services.harness2_engine",
-    "app.services.agent_setup_harness2",
     "app.services.runtime_images",
     "app.services.ai_local",
     "app.services.local_base",
@@ -101,6 +91,9 @@ hidden = [
     "app.services.workspace_guard",
     "app.services.code_creds",
 ]
+# Retain the platform-native verifier in the frozen Runner.
+hidden.append({"darwin": "truststore._macos", "win32": "truststore._windows"}.get(
+    sys.platform, "truststore._openssl"))
 
 # winpty only exists on Windows; the macOS/Linux Runner uses the stdlib pty
 # (pty_term.py), so the collected ConPTY payload must stay Windows-only.
@@ -114,10 +107,11 @@ a = Analysis(
     datas=(winpty_datas + [
         (os.path.join(backend, "app", "agent_catalog.json"), "app"),
         (os.path.join(backend, "app", "services", "dsh_session_storage.mjs"), "app/services"),
+        (os.path.join(backend, "app", "services", "dsh_acp_settlement.mjs"), "app/services"),
+        (os.path.join(backend, "app", "services", "kimi_acp_outcome.mjs"), "app/services"),
+        (os.path.join(backend, "app", "services", "qwen_acp_outcome.mjs"), "app/services"),
         (os.path.join(backend, "app", "services", "codex_gateway_startup.mjs"), "app/services"),
         (os.path.join(backend, "app", "services", "dsh_gateway_bundle"), "app/services/dsh_gateway_bundle"),
-        (os.path.join(backend, "app", "services", "harness2_vendor", "LICENSE"), "app/services/harness2_vendor"),
-        (os.path.join(backend, "app", "services", "harness2_vendor", "UPSTREAM.md"), "app/services/harness2_vendor"),
     ] + skill_data + license_data),
     hiddenimports=hidden,
     hookspath=[],

@@ -1,12 +1,15 @@
 """Plugin registration, immutable versions, trust approval, and project bindings."""
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-from sqlalchemy import inspect as sa_inspect, select
+from sqlalchemy import func, inspect as sa_inspect, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am, models
@@ -291,6 +294,35 @@ async def list_plugins(session: AsyncSession, org_ids: set[str] | None = None) -
     return out
 
 
+async def management_catalog(session: AsyncSession, org_ids: set[str] | None) -> list[dict]:
+    items = await list_plugins(session, org_ids)
+    if not items:
+        return items
+    install = am.PluginInstallation
+    evaluation = am.PluginEvaluationRun
+    installs = select(install.plugin_id, func.count()).where(
+        install.plugin_id.in_([item["id"] for item in items]), install.enabled.is_(True))
+    reviews = select(evaluation.version_id, evaluation.verdict, func.count()).where(
+        evaluation.version_id.in_([item["latestVersion"]["id"] for item in items if item["latestVersion"]]),
+        evaluation.state == "completed", evaluation.verdict.in_(("passed", "failed")))
+    if org_ids is not None:
+        installs = installs.join(models.User, models.User.id == install.user_id).where(
+            models.User.org_id.in_(org_ids))
+        reviews = reviews.where(evaluation.org_id.in_(org_ids))
+    counts = dict((await session.execute(installs.group_by(install.plugin_id))).all())
+    results = {(version_id, verdict): total for version_id, verdict, total in
+               await session.execute(reviews.group_by(evaluation.version_id, evaluation.verdict))}
+    for item in items:
+        item["activeInstallCount"] = counts.get(item["id"], 0)
+        version = item["latestVersion"]
+        if version:
+            passed = results.get((version["id"], "passed"), 0)
+            version["reviewedEvaluations"] = {
+                "passed": passed, "total": passed + results.get((version["id"], "failed"), 0),
+            }
+    return items
+
+
 async def install(session: AsyncSession, data: bytes, user, org_id: str | None = None, *,
                   visibility: str = plugin_audience.ORGANIZATION,
                   audience_user_ids=None, audience_org_unit_ids=None,
@@ -354,7 +386,6 @@ async def install(session: AsyncSession, data: bytes, user, org_id: str | None =
         raise plugin_identity.PluginVersionConflict(
             "同一个版本号的插件内容已经变化，请提升版本号后再导入")
 
-    path = plugin_packages.store(parsed)
     capability_report = dict(parsed["capabilities"] or {})
     capability_report["sourceKind"] = parsed["sourceKind"]
     version = am.PluginVersion(
@@ -363,15 +394,29 @@ async def install(session: AsyncSession, data: bytes, user, org_id: str | None =
         capability_report=capability_report,
         provenance=_provenance(
             parsed, user, source_channel, source_name, signature_proof, candidate),
-        package_path=path,
         trust_state="quarantined", visibility=mode, enabled=False, created_by=uid)
     version, created = await plugin_identity.insert_version_once(session, version)
     if not created:
         return await reuse_version(version)
-    await plugin_audience.replace(
-        session, version, mode, selected_users, org_id=org_id, created_by=uid,
-        org_unit_ids=selected_orgs)
-    await session.commit()
+    version_id = version.id
+    path = None
+    try:
+        await plugin_audience.replace(
+            session, version, mode, selected_users, org_id=org_id, created_by=uid,
+            org_unit_ids=selected_orgs)
+        await session.flush()
+        path = plugin_packages.store(parsed, version_id=version_id)
+        version.package_path = path
+        await session.commit()
+    except BaseException as exc:
+        await session.rollback()
+        # A lost connection or cancellation during COMMIT can precede the
+        # server's decision. A new reader cannot prove rollback in that case.
+        uncertain = isinstance(exc, asyncio.CancelledError) or (
+            isinstance(exc, DBAPIError) and exc.connection_invalidated)
+        if path is not None and not uncertain and await session.get(am.PluginVersion, version_id) is None:
+            Path(path).unlink(missing_ok=True)
+        raise
     return {"created": created, "versionId": version.id,
             "plugin": await plugin_api(session, plugin, True)}
 

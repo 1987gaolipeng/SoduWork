@@ -495,7 +495,7 @@
   }
   function _stopCapable() {
     const execution = _snap?.execution || {}, phase = execution.quality?.phase || '';
-    return _snap?.status === 'streaming' || execution.running === true ||
+    return ['streaming', 'queued'].includes(_snap?.status) || execution.running === true ||
       ['executing', 'implementing', 'reviewing', 'repairing'].includes(phase);
   }
   function _paintActionState() {

@@ -42,18 +42,23 @@ if (typeof electron === 'string') {
   const uiWindow = require('../main/pi-session/ui-window').create(), handles = new Map();
   const state = require('../main/workspace-state.cjs').create({ ownerOf: () => owner });
   state.install({ ipcMain, BrowserWindow, getWorkspace: () => windows.get('workspace') });
-  const snapshots = new Map(['local-chat', 'cloud-chat'].map(id => [id, {
-    status: id === 'local-chat' ? 'streaming' : 'idle', adapterId: 'pi', tools: [],
+  const projectTask = { id: 'project-task', projectId: 'fixture-project', repoId: 'fixture-repo',
+    title: 'Project execution fixture', status: 'doing', canViewExecution: true,
+    workRouting: { conversationTurn: { conversationId: 'project-chat' } } };
+  const snapshots = new Map(['local-chat', 'cloud-chat', 'project-chat'].map(id => [id, {
+    status: id === 'cloud-chat' ? 'idle' : 'streaming', adapterId: 'pi', tools: [],
     messages: Array.from({ length: 220 }, (_, i) => i % 2 === 0
       ? { role: 'user', text: id + ' user message ' + i, sentAt: 1000 + i }
       : { role: 'assistant', blocks: [{ kind: 'text', text: id + ' assistant message ' + i,
-        done: !(id === 'local-chat' && i === 219) }], done: !(id === 'local-chat' && i === 219) }),
+        done: id === 'cloud-chat' || i < 219 }], done: id === 'cloud-chat' || i < 219 }),
     ...(id === 'cloud-chat' ? { cloudHandoff: { phase: 'committed', taskId: 'cloud-task' } } : {}),
   }]));
   const handle = (name, fn) => ipcMain.handle(name, fn);
   ipcMain.on('client-distribution-info', event => { event.returnValue = { hubOrigin: 'http://127.0.0.1:19999' }; });
   handle('hub-connection-info', () => ({ hub: 'http://127.0.0.1:19999', internalTest: true, editable: false }));
   handle('device-auth-status', () => ({ ready: true, sessionReady: true, secure: true }));
+  handle('app-info', () => ({ version: 'fixture', website: '', releaseHistory: [] }));
+  handle('pi-session-open-application', () => ({ ok: true, handled: false }));
   handle('pi-session-open', (event, input) => {
     assert.ok(input.chatId, 'restoration must name an existing chat, never create execution'); opens++;
     const snapshot = snapshots.get(input.chatId);
@@ -64,6 +69,7 @@ if (typeof electron === 'string') {
     runtime.attachedWindow = window; runtime.detached = false; handles.set(input.chatId, runtime);
     window.once('closed', () => { runtime.detached = true; uiWindow.reset(runtime); });
     return { ok: true, ref: input.chatId, sessionId: input.chatId, title: input.chatId,
+      ...(input.chatId === 'project-chat' ? { taskId: projectTask.id, taskTitle: projectTask.title } : {}),
       adapterId: 'pi', cwd: profile, model: null, snapshot: limitSnapshot(snapshot), capabilities: [] };
   });
   handle('pi-session-snapshot', (event, ref, options) => {
@@ -154,10 +160,12 @@ if (typeof electron === 'string') {
           window.fixtureErrors=[];addEventListener('error',e=>fixtureErrors.push(e.message));addEventListener('unhandledrejection',e=>fixtureErrors.push(String(e.reason)));
           document.addEventListener('click',e=>{window.fixtureLastClick=e.target.outerHTML.slice(0,300);},true);
           window.fixtureUser='unbound';
+          const fixtureProjectTask=${JSON.stringify(projectTask)};
           window.SoduWorkAPI=new Proxy({online:true,taskStorageKey:()=>fixtureUser,
             clientAuthSnapshot:()=>({state:fixtureUser==='unbound'?'pending':'active',clientId:'fixture-device',
               user:fixtureUser==='unbound'?null:{id:fixtureUser}}),
             myModels:async()=>({usable:[]}),pluginCatalog:async()=>({items:[]}),listTeammates:async()=>[],
+            getTask:async id=>id===fixtureProjectTask.id?fixtureProjectTask:null,
             getTeamCapability:async()=>({canManage:false,meId:'fixture'}),getConfig:async()=>({})},
             {get:(target,key)=>key in target?target[key]:async()=>({items:[],skills:[],enabled:[],schedules:[],runs:[]})});
           initData=async()=>{fixtureBootStarted=true;while(${holdBoot}&&!window.fixtureReleaseBoot)await new Promise(r=>setTimeout(r,10));await new Promise(r=>setTimeout(r,30));fixtureUser=${identity};tasks=[];Store._tasks=[];Store._taskState='ready';Store._startupPromise=Promise.resolve();dispatchEvent(new CustomEvent('soduwork-device-auth',{detail:{state:'active',user:{id:'fixture'}}}));};
@@ -166,12 +174,42 @@ if (typeof electron === 'string') {
         const html = fs.readFileSync(path.join(client, 'desk.html'), 'utf8').replace('<script src="desk-boot.js"></script>', injected + '<script src="desk-boot.js"></script>');
         return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
       });
-      await open();
+      await open(phase === 'reopen' ? { panel: 'workspace', view: 'account' } : undefined);
       if (phase === 'cold') {
         assert.equal(await js('WorkspaceHost.view'), 'create');
         assert.equal(await js('NativeChat.hasSession()'), false);
         assert.equal(opens, 0); report.checks.push('a second complete Electron process opens home using the same profile');
       } else {
+        await until('WorkspaceHost.view==="account" && document.querySelector("#personalAccountPanel.show")');
+        await click('#wsBack');
+        await until('WorkspaceHost.view==="create" && document.getElementById("composePanel").dataset.stage==="compose"');
+        assert.equal(await js('NativeChat.hasSession()'), false);
+        assert.equal(opens, 0);
+        report.checks.push('a direct profile entry without a previous page returns to the new conversation home');
+
+        const taskOpened = await js('openTaskConversation(fixtureProjectTask.id, fixtureProjectTask.title, {source:"task-list", chatId:"project-chat"})');
+        assert.equal(taskOpened, true);
+        const projectInfo = await js('NativeChat.sessionInfo()');
+        assert.equal(projectInfo.sessionId, 'project-chat');
+        assert.equal(projectInfo.projectId, projectTask.projectId);
+        assert.equal(projectInfo.repoId, projectTask.repoId);
+        assert.ok(projectInfo.taskIds.includes(projectTask.id));
+        await js('{const i=document.getElementById("nchatInput");i.value="unsent project draft";i.dispatchEvent(new Event("input",{bubbles:true}));}void 0;');
+        const attachedBeforeProfile = opens;
+        await click('#wsRailMine');
+        await until('WorkspaceHost.view==="account" && document.querySelector("#personalAccountPanel.show")');
+        await click('#wsBack');
+        await until('WorkspaceHost.view==="create" && document.querySelector("#composePanel.show").dataset.stage==="chat"');
+        const returned = await js('NativeChat.sessionInfo()');
+        assert.equal(returned.sessionId, projectInfo.sessionId);
+        assert.equal(returned.projectId, projectInfo.projectId);
+        assert.equal(returned.repoId, projectInfo.repoId);
+        assert.deepEqual(returned.taskIds, projectInfo.taskIds);
+        assert.equal(await js('document.getElementById("nchatInput").value'), 'unsent project draft');
+        assert.equal(opens, attachedBeforeProfile);
+        assert.equal(sends, 0);
+        report.checks.push('profile back reveals the same project task, conversation and unsent draft without opening or sending a turn');
+
         for (const page of ['skills', 'schedules', 'settings']) {
           await js(`WorkspaceHost.open(${JSON.stringify(page)},{});void 0;`); await delay(120);
           await close(); await open();

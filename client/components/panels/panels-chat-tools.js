@@ -22,6 +22,9 @@
     }
     return '';
   }
+  function filePath(args) {
+    return pick(args, ['path', 'file_path', 'filePath', 'filename', 'fileName', 'file', 'target', 'target_path', 'targetPath']);
+  }
   function baseName(p) {
     const s = String(p || '').split(/[\\/]/);
     return s[s.length - 1] || p || '';
@@ -217,7 +220,7 @@
     const item = tool || {};
     const args = (item.args && typeof item.args === 'object') ? item.args : {};
     const kind = toolKind(item);
-    const path = pick(args, ['path', 'file_path', 'filePath', 'filename', 'file', 'target']);
+    const path = filePath(args);
     if (kind === 'command') {
       return render(item).title;
     }
@@ -228,14 +231,25 @@
     const subject = path || pick(args, ['pattern', 'query', 'dir']) || item.name || '';
     return compact((labels[kind] || '\u6267\u884c') + (subject ? ' ' + baseName(subject) : ''), 44);
   }
-  function accessCancelled(item) {
-    return item?.state === 'cancelled' && item.cancelReason === 'access-change' && !item.isError;
+  function unexecuted(item) {
+    return item?.state === 'cancelled' && ['access-change', 'output-limit'].includes(item.cancelReason) && item.isError === false;
+  }
+  function finishedCommand(item) {
+    return Boolean(item.id) && /^(?:done|completed|success|error|failed|cancelled)$/i.test(item.state) &&
+      !unexecuted(item) && item.phase !== 'preparing';
+  }
+  function recordOwner(ctx) {
+    return JSON.stringify([ctx._ref, ctx._viewEpoch, ctx._draftScopeEpoch, ctx._draftOwnerScope?.()]);
+  }
+  function cancellationTitle(item) {
+    return item.cancelReason === 'output-limit' ? '输出截断，未执行' : '权限已调整，未执行';
   }
   function batchSummary(input) {
     const items = Array.isArray(input) ? input.filter(Boolean) : [];
     const running = items.filter(item => String(item.state || '').toLowerCase() === 'running');
-    const errors = items.filter(item => !accessCancelled(item) && (item.isError || /^(?:error|failed|cancelled)$/i.test(String(item.state || ''))));
-    const cancelled = items.filter(accessCancelled);
+    const errors = items.filter(item => !unexecuted(item) && (item.isError || /^(?:error|failed|cancelled)$/i.test(String(item.state || ''))));
+    const cancelled = items.filter(unexecuted);
+    const reasons = new Set(cancelled.map(item => item.cancelReason));
     const complete = Math.max(0, items.length - running.length);
     const current = running[running.length - 1] || items[items.length - 1] || null;
     const state = running.length ? 'running' : errors.length ? 'error' : cancelled.length === items.length && items.length ? 'cancelled' : 'done';
@@ -250,10 +264,11 @@
         ? (commandsOnly ? '正在运行命令' : '正在执行操作')
         : errors.length
           ? (commandsOnly ? '命令执行有异常' : '执行有异常')
-          : cancelled.length === items.length && items.length ? '权限已调整，未执行'
+          : cancelled.length === items.length && items.length
+            ? (reasons.size === 1 ? cancellationTitle(cancelled[0]) : '操作未执行')
           : (commandsOnly ? '运行了命令' : '完成了操作'),
       detail: running.length ? conciseTool(current)
-        : (errors.length ? errors.length + ' 项异常' : cancelled.length && cancelled.length < items.length ? '部分操作因权限调整未执行' : ''),
+        : (errors.length ? errors.length + ' 项异常' : cancelled.length && cancelled.length < items.length ? '部分操作未执行' : ''),
     };
   }
   function batchHtml(input, key, open, itemHtml) {
@@ -261,14 +276,19 @@
     if (!items.length) return '';
     const summary = batchSummary(items);
     const id = String(key || (items[0] && items[0].id) || 'batch');
+    let detail = summary.detail;
     if (summary.commandsOnly) {
+      if (summary.errors) detail = summary.errors + ' 项异常';
+      else if (summary.state === 'running') detail = '';
+    }
+    const detailHtml = detail ? '<span class="ntool-batch-detail">' + esc(detail) + '</span>' : '';
+    if (summary.commandsOnly && !items.some(finishedCommand)) {
       return '<div class="ntool-batch ' + summary.state +
         '" data-tool-node="batch:commands:' + esc(id) + '">' +
         '<div class="ntool-batch-head ntool-summary">' + icon(items[0]) +
           '<span class="ntool-batch-title">' + esc(summary.title) + '</span>' +
           (summary.total > 1 ? '<span class="ntool-batch-count">' + summary.total + ' 项</span>' : '') +
-          (summary.errors ? '<span class="ntool-batch-detail">' + summary.errors + ' 项异常</span>' :
-            /权限/.test(summary.detail) ? '<span class="ntool-batch-detail">' + esc(summary.detail) + '</span>' : '') +
+          detailHtml +
         '</div></div>';
     }
     const rows = typeof itemHtml === 'function' ? items.map(itemHtml).join('') : '';
@@ -278,7 +298,7 @@
         '" aria-expanded="' + (open ? 'true' : 'false') + '">' +
         icon(items[0]) +
         "<span class=\"ntool-batch-copy\"><b class=\"ntool-batch-title\">" + esc(summary.title) + '</b>' +
-          (summary.detail ? '<span class="ntool-batch-detail">' + esc(summary.detail) + '</span>' : '') + '</span>' +
+          detailHtml + '</span>' +
         (summary.total > 1 ? '<span class="ntool-batch-count">' + summary.total + ' 项</span>' : '') +
         '<svg class="ntool-batch-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>' +
       '</button><div class="ntool-batch-body">' + rows + '</div></div>';
@@ -380,22 +400,27 @@
       title: /write|edit|create/i.test(t.name) ? '正在生成文件' : /read/i.test(t.name) ? '准备读取' : '准备删除',
       sub: baseName(pick(t.args, ['path', 'filePath', 'file_path'])), summaryOnly: true, body: '', tip: '',
     };
-    // Conversation command cards show status only, without expandable command/receipt details or hover payloads.
-    // Avoid reading potentially large result/partial payloads here; execution records retain them intact.
+    if (unexecuted(t)) {
+      if (isCommandTool(t)) return {
+        title: cancellationTitle(t), sub: '', commandOnly: true, summaryOnly: true, body: '', tip: '',
+      };
+      return {
+        title: cancellationTitle(t), sub: conciseTool(t), tip: t.name || '',
+        body: '<pre>' + esc(t.cancelReason === 'output-limit'
+          ? '模型输出被截断，此工具调用尚未执行。'
+          : '此操作在执行前因权限调整而取消，将按新权限继续当前任务。') + '</pre>',
+      };
+    }
+    // Commands stay summaries. Only an explicit click may open their recorded input and output.
     if (isCommandTool(t)) {
       const done = t.state !== 'running';
       const mcp = mcpView(t, '', done);
       if (mcp) return { ...mcp, summaryOnly: true, body: '', tip: '' };
       return {
-        title: accessCancelled(t) ? '权限已调整，未执行' :
-          (done ? (t.isError || /^(?:error|failed|cancelled)$/i.test(t.state) ? '命令执行异常' : '运行了命令') : '正在运行命令'),
-        sub: '', commandOnly: true, summaryOnly: true, body: '', tip: '',
+        title: done ? (t.isError || /^(?:error|failed|cancelled)$/i.test(t.state) ? '命令执行异常' : '运行了命令') : '正在运行命令',
+        sub: '', commandOnly: true, summaryOnly: true, recordAvailable: finishedCommand(t), body: '', tip: '',
       };
     }
-    if (accessCancelled(t)) return {
-      title: '权限已调整，未执行', sub: conciseTool(t), tip: t.name || '',
-      body: '<pre>' + esc('此操作在执行前因权限调整而取消，将按新权限继续当前任务。') + '</pre>',
-    };
     if (t.name === 'generate_image') return {
       title: t.state === 'running' ? '正在生成图片' : t.isError ? '图片生成未完成' : '图片已生成',
       sub: String(t.args?.prompt || '').slice(0, 120), tip: String(t.args?.prompt || ''),
@@ -404,7 +429,7 @@
     const name = String(t.name || '').toLowerCase();
     const kind = toolKind(t);
     const args = (t.args && typeof t.args === 'object') ? t.args : {};
-    const path = pick(args, ['path', 'file_path', 'filePath', 'filename', 'file', 'target']);
+    const path = filePath(args);
     // Read contents are already in the tool receipt; only process them on click.
     if (kind === 'read' && path) return {
       title: '读取', sub: baseName(path), tip: path, file: true, side: true, readSnapshot: true, body: '',
@@ -825,8 +850,8 @@
     const tools = snap?.tools || [], ids = new Set(tools.map(row => row.id));
     return tools.concat((snap?.toolPreparations || []).filter(row => !ids.has(row.id)));
   }
-  global.ChatTools = { displayTools, render, icon, kind: toolKind, diffHtml, esc, patchList, patchContent, mcpView, commandSummary, timeline,
-    isCommandTool, groupConsecutiveCommands, openSide, closeSide,
+  global.ChatTools = { displayTools, render, icon, filePath, kind: toolKind, diffHtml, esc, patchList, patchContent, mcpView, commandSummary, timeline,
+    isCommandTool, groupConsecutiveCommands, recordOwner, openSide, closeSide,
     phaseNarrative, batchSummary, batchHtml, composerHasPayload, paintSendButton, toggleGroup,
     appendTimeline, appendGoalProgress, goalProgressRows, goalPhaseHtml, artifactKey,
     artifactRequest, previewKind, fileUrl, normalizeAddress, currentTurnTools, latestTurnWebFile };

@@ -30,7 +30,7 @@ test('acceptance context reaches the actual Pi request but never its visible or 
   assert.doesNotMatch(JSON.stringify(restored), /version-internal|criterion-internal|soduwork-material-context/);
 });
 
-test('reasoning-only provider length stops preserve history and never issue an automatic retry', { timeout: 30000 }, async t => {
+test('repeated reasoning-only provider length stops preserve history and stop after one recovery', { timeout: 30000 }, async t => {
   const f = await fixture(t);
   f.reply(() => ({ respond(response) {
     response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -41,8 +41,9 @@ test('reasoning-only provider length stops preserve history and never issue an a
     response.end('data: [DONE]\n\n');
   } }));
   await f.handle.submit('检查隔离测试材料').completion;
-  assert.equal(f.requests.length, 1);
-  assert.equal(f.requests[0].max_tokens ?? f.requests[0].max_completion_tokens, 65536);
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.requests[1].max_tokens ?? f.requests[1].max_completion_tokens, 16384);
+  assert.equal(f.requests[0].max_tokens ?? f.requests[0].max_completion_tokens, 16384);
   const snapshot = f.handle.snapshot();
   assert.equal(snapshot.status, 'incomplete');
   assert.match(snapshot.statusText, /单次输出上限/);

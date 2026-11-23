@@ -224,6 +224,7 @@ function buildPage() {
   for (const file of ['core/model-choice.js', 'core/plugin-icon.js', 'core/requirements.js', 'core/requirement-session-context.js',
     'components/panels/chat-collaboration.js', 'components/panels/chat-task-session.js', 'components/panels/agent-brand.js',
     'components/panels/panels-compose-runtime.js', 'components/panels/compose-execution.js', 'components/panels/panels-compose-model-picker.js',
+    'components/panels/compose-directory-preferences.js',
     'components/panels/compose-candidate-navigation.js', 'components/panels/panels-compose-capabilities.js',
     'components/panels/chat-plugin-mention-model.js', 'components/panels/chat-plugin-mention.js',
     'components/panels/chat-message-plugins.js', 'components/panels/plugin-ui-host.js',
@@ -943,6 +944,7 @@ app.whenReady().then(async () => {
   });
   await require('./requirement-session-navigation-cases.cjs')({ runCase, js, click, until, phase, reloadPage,
     recordNavigation: sample => report.navigationTimings.push(sample) });
+  await require('./directory-session-defaults-cases.cjs')({ runCase, js, click, type, until, setup, reloadPage });
   report.ok = report.cases.length > 0 && report.cases.every(item => item.ok) && report.network.length === 0;
 }).catch(error => { report.error = error.stack; }).finally(() => {
   win?.destroy(); fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2));

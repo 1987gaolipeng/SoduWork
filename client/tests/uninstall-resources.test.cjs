@@ -54,6 +54,39 @@ test('confirmed profile cleanup validates all boundaries before deleting install
   assert.equal(await fs.readFile(f.executable, 'utf8'), 'fixture');
   assert.equal(await fs.readFile(path.join(f.outside, 'sentinel'), 'utf8'), 'keep');
 });
+test('the native helper distinguishes local-data permission failures from other cleanup failures', async t => {
+  for (const [operation, code, exitCode] of [
+    ['data-scan', 'EPERM', 5], ['data-remove', 'EACCES', 5],
+    ['data-scan', 'EIO', 2], ['install-scan', 'EPERM', 2],
+  ]) await t.test(operation + ': ' + code, async t => {
+    const f = await fixture(t), appData = path.join(f.parent, 'Roaming'), productName = 'SoduWork isolated test';
+    const profile = path.join(appData, productName);
+    await fs.mkdir(profile, { recursive: true }); await fs.writeFile(path.join(profile, 'sentinel'), 'local data');
+    const method = operation === 'data-remove' ? 'rm' : 'readdir';
+    const blocked = operation === 'install-scan' ? f.root : profile, original = fs[method];
+    const message = code + ': fixture access failure';
+    t.mock.method(fs, method, async (file, ...options) => {
+      if (file === blocked) throw Object.assign(new Error(message), { code, path: file });
+      return original(file, ...options);
+    });
+    // Run the actual CLI with its own installation identity and isolated APPDATA.
+    const helper = require.resolve('../build/uninstall-resources.cjs'), helperModule = { exports: {} };
+    const helperRequire = require('node:module').createRequire(helper); helperRequire.main = helperModule;
+    const runtime = { execPath: f.executable, env: { APPDATA: appData },
+      argv: [f.executable, helper, f.root, f.root, appData, productName] };
+    const errors = [];
+    await require('node:vm').runInNewContext(await fs.readFile(helper, 'utf8'), {
+      require: helperRequire, module: helperModule, process: runtime,
+      console: { log: () => assert.fail('A failed cleanup must not report success'), error: value => errors.push(value) },
+    }, { filename: helper });
+    assert.equal(runtime.exitCode, exitCode);
+    assert.deepEqual(errors, [message]);
+    assert.equal(await fs.readFile(f.resource, 'utf8'), 'fixture');
+    assert.equal(await fs.readFile(path.join(profile, 'sentinel'), 'utf8'), 'local data');
+    assert.equal(await fs.readFile(path.join(f.outside, 'sentinel'), 'utf8'), 'keep');
+  });
+});
+
 test('foreign runtime and traversal pointers are rejected before removal', async t => {
   const f = await fixture(t);
   await assert.rejects(cleanResources(f.root, process.execPath), /active Electron/);

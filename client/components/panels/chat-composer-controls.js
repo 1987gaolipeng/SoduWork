@@ -151,7 +151,7 @@
         if (nativeMode(state) && nativeView === 'effort' && pop.querySelector('.cp-effort-card')) paintNativeEffort(state);
         else renderThinking(state);
       }
-      if ((!selectedName || selectedModel?.unavailable) && !['codex', 'claude'].includes(state.adapterId) &&
+      if ((!selectedName || selectedModel?.unavailable) && !['codex'].includes(state.adapterId) &&
           !catalogLoads && catalogScope !== scope) void loadModels();
     }
     function nativeSelection(state) {
@@ -552,7 +552,7 @@
         if (failed) throw failed;
         return false;
       }
-      if (['codex', 'claude'].includes(options.state().adapterId)) return true;
+      if (['codex'].includes(options.state().adapterId)) return true;
       // A confirmed Agent switch may change the adapter while preserving the conversation.
       const scope = modelScope();
       // Recheck at send time and share an in-flight read. A model-change push

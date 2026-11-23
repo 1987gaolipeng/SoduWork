@@ -151,3 +151,12 @@
 }
 html[data-desk-panel="workspace"] #sessionMemoryPanel .sch-h-txt { display: grid !important; align-items: start !important; gap: 4px !important; flex-direction: initial !important; flex-wrap: initial !important; }
 html[data-desk-panel="workspace"] #sessionMemoryPanel .cmem-kicker { flex-basis: auto !important; }
+
+.cmem-memory-preview { padding: 24px; border: 1px solid var(--line); border-radius: 14px; line-height: 1.75; overflow-wrap: anywhere; max-height: 65vh; overflow: auto; }
+.cmem-memory-preview > :first-child { margin-top: 0; }
+.cmem-memory-preview > :last-child { margin-bottom: 0; }
+.cmem-memory-preview pre { white-space: pre-wrap; padding: 12px; background: var(--accent-soft); border-radius: 8px; }
+.cmem-memory-preview table { border-collapse: collapse; display: block; overflow-x: auto; }
+.cmem-memory-preview th, .cmem-memory-preview td { padding: 8px 12px; border: 1px solid var(--line); }
+.cmem-memory-preview blockquote { margin-left: 0; padding-left: 16px; border-left: 3px solid var(--line); }
+.cmem-memory-editor > summary { cursor: pointer; padding: 12px 0; color: var(--ink-3); }

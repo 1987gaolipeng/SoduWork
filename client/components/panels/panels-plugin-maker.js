@@ -203,7 +203,7 @@
             '<div class="cap-maker-icon-copy"><b>插件图标 <em>可选</em></b><span>PNG、JPG 或 WebP，最大 2 MB；未设置时保留默认图标。</span>' +
             '<div class="cap-maker-icon-actions"><button type="button" class="btn-mini" id="capPluginIconUpload">上传图标</button>' +
             '<button type="button" class="btn-mini" id="capPluginIconReset">恢复默认</button></div>' +
-            '<span id="capPluginIconStatus" role="status" aria-live="polite"></span></div>' +
+            '<span id="capPluginIconStatus" role="status"></span><div id="capPluginIconError" class="cap-maker-icon-error" role="alert"></div></div>' +
             '<input type="file" id="capPluginIconFile" accept="image/png,image/jpeg,image/webp" hidden></div>' +
           '<label class="cap-field"><span>插件名称</span><input class="cap-input" id="capPluginName" maxlength="120" value="' + h(draft.name || '') + '" placeholder="例如：产品原型交付"></label>' +
           '<label class="cap-field"><span>版本</span><input class="cap-input" id="capPluginVersion" maxlength="40" value="' + h(versionValue) + '"></label>' +
@@ -270,6 +270,9 @@
     const iconUpload = layer.querySelector('#capPluginIconUpload');
     const iconReset = layer.querySelector('#capPluginIconReset');
     const iconStatus = layer.querySelector('#capPluginIconStatus');
+    const iconError = layer.querySelector('#capPluginIconError');
+    iconFile.setAttribute('aria-describedby', iconError.id);
+    iconUpload.setAttribute('aria-describedby', iconError.id);
     const mcpInput = layer.querySelector('#capPluginMcp');
     const mcpPicker = layer.querySelector('#capPluginMcpPicker');
     const mcpHint = layer.querySelector('#capPluginMcpHint');
@@ -311,19 +314,25 @@
     }
     iconUpload.addEventListener('click', () => iconFile.click());
     iconReset.addEventListener('click', () => {
-      pluginIcon = ''; iconFile.value = ''; iconStatus.textContent = '已恢复默认，保存后生效';
+      pluginIcon = ''; iconFile.value = ''; iconError.textContent = '';
+      iconStatus.textContent = '已恢复默认，保存后生效';
       renderIcon(); resetPreview();
     });
     iconFile.addEventListener('change', async () => {
       const file = iconFile.files[0]; if (!file || iconLoading) return;
       iconLoading = true; iconUpload.disabled = true; iconReset.disabled = true;
+      iconError.textContent = '';
       submit.disabled = true; iconStatus.textContent = '正在处理图标…';
       try {
         const value = await global.SoduWorkPluginIcon.readFile(file);
         if (layer.hidden || !iconFile.isConnected) return;
         pluginIcon = value; renderIcon(); resetPreview();
         iconStatus.textContent = '图标已准备好，将随插件版本保存';
-      } catch (error) { iconStatus.textContent = error.message; }
+      } catch (error) {
+        iconStatus.textContent = '';
+        const message = error.message;
+        iconError.textContent = global.SoduWorkI18n?.translateText?.(message) || message;
+      }
       finally {
         iconFile.value = ''; iconLoading = false;
         iconUpload.disabled = false; iconReset.disabled = false; submit.disabled = false;

@@ -43,11 +43,11 @@ if (typeof electron === 'string') {
   async function navigate(view) {
     const direct = await js(`!!document.querySelector('.ws-rail [data-rail-view="${view}"]')`);
     if (direct) await click(`[data-rail-view="${view}"]`);
-    else if (['briefs','team'].includes(view)) {
+    else if (['aidesk','briefs','team'].includes(view)) {
       // Hidden menus do not remove the existing panels or their regression coverage.
       assert.equal(await js(`document.querySelectorAll('[data-rail-view="${view}"], #wsNav [data-view="${view}"]').length`), 0);
       await js(`WorkspaceHost.open(${JSON.stringify(view)});void 0;`);
-    } else if (['aidesk','memory'].includes(view)) {
+    } else if (view === 'memory') {
       await click('[data-rail-menu="more"]'); await click(`#wsRailMoreMenu [data-rail-view="${view}"]`);
     } else {
       if (!(await js('document.documentElement.dataset.workspaceLayout==="settings"'))) await click('#wsRailMine');

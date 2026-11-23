@@ -7,6 +7,7 @@ import sys
 import time
 import uuid
 from opencode_peer_outcome import NativeOutcome
+from opencode_peer_session import create_session, require_session
 
 for stream in (sys.stdin, sys.stdout, sys.stderr):
     stream.reconfigure(encoding="utf-8", errors="replace")
@@ -50,11 +51,9 @@ def work(prompt):
 
 agent = sys.argv[1]
 sid = "fixture-" + uuid.uuid4().hex
-if agent == "harness2":
-    sid = "h2_" + uuid.uuid4().hex
 resumed = False
 thought = "Inspect restored workspace before delivering."
-if agent in {"codex-harness", "qwen", "opencode", "dsh", "harness2"}:
+if agent in {"codex-harness", "qwen", "opencode", "dsh"}:
     native_outcome = NativeOutcome()
     for raw in sys.stdin:
         message = json.loads(raw)
@@ -62,11 +61,13 @@ if agent in {"codex-harness", "qwen", "opencode", "dsh", "harness2"}:
         if method == "initialize":
             result = {"protocolVersion": 1, "agentCapabilities": {"loadSession": True, "sessionCapabilities": {"resume": {}}}}
         elif method == "session/new":
+            if agent == "opencode":
+                create_session(os.environ, sid, os.getcwd())
             result = {"sessionId": sid}
         elif method in {"session/load", "session/resume"}:
             sid, resumed = params["sessionId"], True
-            result = {}
-        elif method == "session/set_mode" and agent == "harness2":
+            if agent == "opencode":
+                require_session(os.environ, sid, os.getcwd())
             result = {}
         elif method == "session/prompt":
             native_outcome.begin(sid)

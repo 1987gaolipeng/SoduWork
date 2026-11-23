@@ -76,10 +76,12 @@ function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skill
   ipcMain.handle('conversation-capabilities', async (event, options) => {
     try {
       const localPi = options?.adapterId === 'pi' && options?.executionLocation !== 'cloud';
-      // SDK loading needs no credentials. Begin while identity is renewed,
-      // rather than adding cold import time after a slow authentication call.
-      // Keep the promise: a first send must never race the warmup that makes
-      // the opening path feel like a frozen desktop window.
+      const identity = await _withTimeout(identityOf(app), CAPABILITY_WARMUP_TIMEOUT_MS,
+        'identity lookup timed out');
+      // Capability refreshes also arrive during logout, before the renderer reloads.
+      // Validate the account before starting any account-dependent runtime warmup.
+      require('../platform-connections/runtime.cjs').scope(identity);
+      // Retain every warmup promise so the first send cannot race preparation.
       const warmups = [];
       if (localPi && typeof session.loadSdk === 'function') {
         warmups.push(Promise.resolve(session.loadSdk(app)).catch(() => null));
@@ -91,8 +93,6 @@ function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skill
         warmups.push(Promise.resolve(session.prewarmResources(app, { cwd: workDir(app) }))
           .catch(() => null));
       }
-      const identity = await _withTimeout(identityOf(app), CAPABILITY_WARMUP_TIMEOUT_MS,
-        'identity lookup timed out');
       // Capability catalogs are shared by every Agent and the settings page.
       // Only an explicitly selected local Pi composer should load the Pi SDK.
       // `prewarm` prepares model config as well as the SDK, and is awaited
@@ -127,15 +127,27 @@ function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skill
     const dir = workDir(app);
     return { ok: true, dir, name: path.basename(dir) };
   });
-  function saveWorkdir(dir) {
-    if (typeof dir !== 'string' || !path.isAbsolute(dir) || !fs.statSync(dir).isDirectory()) {
-      return { ok: false, reason: '所选工作位置不是文件夹' };
+  function selectWorkdir(dir, persist) {
+    if (typeof dir !== 'string' || !path.isAbsolute(dir)) return { ok: false, reason: '所选工作位置不是文件夹' };
+    try {
+      if (!fs.statSync(dir).isDirectory()) return { ok: false, reason: '所选工作位置不是文件夹' };
+      fs.accessSync(dir, fs.constants.R_OK | fs.constants.W_OK | fs.constants.X_OK);
+      if (process.platform === 'win32') {
+        // accessSync overlooks NTFS ACLs. Exercise the operations required to create a workspace.
+        fs.opendirSync(dir).closeSync();
+        const probe = fs.mkdtempSync(path.join(dir, '.soduwork-check-'));
+        fs.rmdirSync(probe);
+      }
+    } catch {
+      return { ok: false, reason: '工作目录不可用，请选择可读写的文件夹' };
     }
-    _saveConf({ workDir: dir });
-    if (_conf().workDir !== dir) return { ok: false, reason: '无法保存工作目录，请重试' };
+    if (persist) {
+      _saveConf({ workDir: dir });
+      if (_conf().workDir !== dir) return { ok: false, reason: '无法保存工作目录，请重试' };
+    }
     return { ok: true, dir, name: path.basename(dir) };
   }
-  ipcMain.handle('pi-session-save-workdir', async (_event, dir) => saveWorkdir(dir));
+  ipcMain.handle('pi-session-save-workdir', async (_event, dir) => selectWorkdir(dir, true));
   ipcMain.handle('pi-session-pick-workdir', async (event, options = {}) => {
     const { dialog, BrowserWindow } = require('electron');
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -146,9 +158,7 @@ function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skill
       properties: ['openDirectory', 'createDirectory'],
     }));
     if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true };
-    const dir = r.filePaths[0];
-    if (!fs.statSync(dir).isDirectory()) return { ok: false, reason: '所选工作位置不是文件夹' };
-    return options?.persist === false ? { ok: true, dir, name: path.basename(dir) } : saveWorkdir(dir);
+    return selectWorkdir(r.filePaths[0], options?.persist !== false);
   });
   ipcMain.handle('pi-session-pick-cwd', async (event, options = {}) => {
     const { dialog, BrowserWindow } = require('electron');

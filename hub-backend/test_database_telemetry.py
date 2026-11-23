@@ -249,7 +249,7 @@ class DatabaseTelemetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.headers["x-request-id"], "request-production")
             self.assertEqual(set(response.headers["access-control-expose-headers"].split(", ")),
-                             {"X-Request-ID", "Server-Timing"})
+                             {"X-Request-ID", "Server-Timing", "X-Error-Code"})
             for field_name in ("app;dur=", "db-acquire;dur=", "db-sql;dur=", "db-hold;dur="):
                 self.assertIn(field_name, response.headers["server-timing"])
             self.assertEqual(telemetry._recent[-1]["requestId"], "request-production")

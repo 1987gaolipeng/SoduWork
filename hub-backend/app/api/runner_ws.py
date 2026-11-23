@@ -128,16 +128,18 @@ async def _heartbeat_write(runner, websocket, *, force: bool) -> bool:
     try:
         return await _persist_runner_heartbeat(runner, force=force)
     except RunnerIdentityConflict:
+        runner.close_reason = "identity_conflict"
         await websocket.send_json({"op": "bye", "code": RunnerIdentityConflict.code,
                                    "error": str(RunnerIdentityConflict())})
         await websocket.close(code=4409)
     except ValueError:
+        runner.close_reason = "registry_rejected"
         await websocket.close(code=1011, reason="执行机登记失败，请稍后重试")
     return False
 
 
 async def _auth(token: str, peer: str, device: str = "", secret: str = "",
-                runner_id: str = "", runner_key: str = "") -> tuple[bool, str]:
+                runner_id: str = "", runner_key: str = "", *, diagnostic=None) -> tuple[bool, str]:
     """Return authorization and denial reason. Prefer device-specific secrets or per-Runner keys;
     retain deprecated shared tokens for migration. Without configured credentials, accept only
     loopback connections.
@@ -147,21 +149,29 @@ async def _auth(token: str, peer: str, device: str = "", secret: str = "",
             try:
                 await device_auth.client_from_secret(s, device, secret)
                 return True, ""
-            except device_auth.DeviceAuthError:
+            except device_auth.DeviceAuthError as exc:
+                if diagnostic is not None:
+                    diagnostic.update(code=exc.code, status=exc.status)
                 return False, "SoduWork 设备身份或密钥不对"
         if runner_id and runner_key:
             if await runner_registry.verify_key(s, runner_id, runner_key):
                 return True, ""
+            if diagnostic is not None:
+                diagnostic.update(code="RUNNER_KEY_REJECTED", status=401)
             return False, "执行机钥匙不对或已被吊销"
         row = (await s.execute(
             select(AppSetting).where(AppSetting.key == "runner_token"))).scalars().first()
     want = ((row.value if row else "") or "").strip()
     if want:
         matched = bool(token) and hmac.compare_digest(token, want)
+        if not matched and diagnostic is not None:
+            diagnostic.update(code="RUNNER_TOKEN_REJECTED", status=401)
         return (matched, "" if matched else "执行机令牌不对")
     # Without configured credentials, permit only loopback connections for local development Runners.
     if peer in _LOCAL_HOSTS:
         return True, ""
+    if diagnostic is not None:
+        diagnostic.update(code="RUNNER_CREDENTIAL_MISSING", status=401)
     return False, "还没配执行机令牌（管理端→设置里配 runner_token），远程执行机连不进来"
 
 
@@ -285,6 +295,7 @@ async def _kick_runner(runner_id: str, code: int = 4401) -> bool:
     live = runner_hub.get(runner_id)
     if live is None:
         return False
+    live.close_reason = "runner_revoked"
     await _drop_runner(runner_id, live.ws)
     try:
         await live.ws.close(code=code)
@@ -303,6 +314,8 @@ async def _drop_runner(runner_id: str, websocket) -> bool:
     except Exception:
         pass  # Always remove the dead local socket, even during a Redis outage.
     removed = runner_hub.drop(runner_id, websocket)
+    if removed:
+        current.ownership_released = released
     if not removed:
         return False
     if not released:
@@ -357,14 +370,22 @@ async def admin_runner_enroll(request: Request, body: dict = Body(default_factor
     its key and invalidates the old key immediately.
     """
     rid = str(body.get("runnerId") or "").strip()
+    host = body.get("host", "")
+    if not isinstance(host, str):
+        raise HTTPException(status_code=422, detail="主机名必须是字符串",
+                            headers={"X-Error-Code": "hub.input.host_type"})
+    host = host.strip()
     row = await session.get(am.RunnerNode, rid) if rid else None
+    if row is None and not host:
+        raise HTTPException(status_code=422, detail="请填写主机名，否则无法识别这台执行节点",
+                            headers={"X-Error-Code": "hub.input.host_required"})
     if row is not None:
         row = await _admin_runner(session, user, rid, lock=True)
         require_generic_admin_mutation(row)
     org_id = await _assigned_org(session, user, str(body.get("orgId") or ""), row)
     try:
         out = await runner_enroll.enroll(
-            session, runner_id=rid, host=str(body.get("host") or ""),
+            session, runner_id=rid, host=host,
             tags=body.get("tags") or [], hub=str(body.get("hub") or ""),
             request_base=str(request.base_url).rstrip("/"),
             work_root=str(body.get("workRoot") or ""), org_id=org_id)
@@ -678,10 +699,14 @@ async def runner_ws(websocket: WebSocket, token: str = ""):
     secret = str(headers.get("x-soduwork-secret") or "")
     keyed_id = str(headers.get("x-soduwork-runner-id") or "")
     runner_key = str(headers.get("x-soduwork-runner-key") or "")
-    okk, why = await _auth(header_token or token, peer, device, secret, keyed_id, runner_key)
+    diagnostic = {}
+    okk, why = await _auth(header_token or token, peer, device, secret, keyed_id, runner_key,
+                          diagnostic=diagnostic)
     if not okk:
         await websocket.close(code=4401)
-        log.warning("执行机被拒: %s（%s）", peer, why)
+        from ..services.cluster_bus import bus
+        diagnostic.update({"deviceId": device[:64], "runnerId": keyed_id[:64], "hubNode": bus.node})
+        log.warning("runner_auth_rejected %s", json.dumps(diagnostic, ensure_ascii=True))
         return
     await websocket.accept()
     runner_hub.bind_loop()      # Retain the event loop for provider calls from worker threads; see call_sync.
@@ -691,6 +716,7 @@ async def runner_ws(websocket: WebSocket, token: str = ""):
     telemetry_job = None
     heartbeat_job = None
     heartbeat_force = False
+    close_code = None
     try:
         # Bound the handshake phase: an authenticated but silent peer must not
         # pin a coroutine and socket indefinitely. Neither cleanup mechanism
@@ -706,16 +732,16 @@ async def runner_ws(websocket: WebSocket, token: str = ""):
         # Require a keyed Runner's reported identity to match the machine associated with its key.
         # Otherwise one machine could impersonate another and corrupt execution attribution.
         if keyed_id and str(hello.get("runnerId") or "") != keyed_id:
-            await websocket.send_json({"op": "bye", "error": "执行机身份与钥匙不符"})
+            await websocket.send_json({"op": "bye", "code": "AUTH_REQUIRED", "error": "执行机身份与钥匙不符"})
             await websocket.close(code=4403)
             return
         hello_client = str(hello.get("clientId") or "")
         if device and hello_client != device:
-            await websocket.send_json({"op": "bye", "error": "执行机归属与设备密钥不符"})
+            await websocket.send_json({"op": "bye", "code": "AUTH_REQUIRED", "error": "执行机归属与设备密钥不符"})
             await websocket.close(code=4403)
             return
         if not device and hello_client:
-            await websocket.send_json({"op": "bye", "error": "独立执行机不能冒充桌面客户端"})
+            await websocket.send_json({"op": "bye", "code": "AUTH_REQUIRED", "error": "独立执行机不能冒充桌面客户端"})
             await websocket.close(code=4403)
             return
         try:
@@ -746,8 +772,10 @@ async def runner_ws(websocket: WebSocket, token: str = ""):
             valid_after_register = bool(valid_after_register and
                 await authenticated_identity(s, r.id, keyed_id, runner_key))
         if not valid_after_register:
+            r.close_reason = "authorization_changed"
+            close_code = 4403
             await _drop_runner(r.id, websocket)
-            await websocket.send_json({"op": "bye", "error": "执行机授权已失效"})
+            await websocket.send_json({"op": "bye", "code": "AUTH_REQUIRED", "error": "执行机授权已失效"})
             await websocket.close(code=4403)
             return
         async with SessionLocal() as s:
@@ -764,6 +792,7 @@ async def runner_ws(websocket: WebSocket, token: str = ""):
                       "serverTime": int(time.time()),
                       "caps": [ws_frames.CAP_BIN1, "sessionAck1"]})
         r.ready = True
+        runner_hub.log_connection(r, "online")
         await _reconcile_runner_restart(r)
         log.info("执行机上线: %s @ %s（%d 个 agent%s）", r.id, r.host, len(r.agents),
                  "，二进制帧" if r.bin else "")
@@ -778,6 +807,7 @@ async def runner_ws(websocket: WebSocket, token: str = ""):
         while True:
             packet = await websocket.receive()
             if packet.get("type") == "websocket.disconnect":
+                close_code = packet.get("code")
                 break
             if packet.get("bytes") is not None:
                 # Binary frames carry only the supported large-payload types; discard malformed frames without closing the connection.
@@ -843,7 +873,7 @@ async def runner_ws(websocket: WebSocket, token: str = ""):
                               if str(x).strip()][:20]
                 # Refresh installed-agent inventory from heartbeats to reflect changes on the Runner.
                 if isinstance(msg.get("agents"), list):
-                    r.agents = msg["agents"]
+                    r.agents = runner_hub.clean_agent_inventory(msg["agents"])
                     r.inventory_ready = True
                 if isinstance(msg.get("skills"), list):
                     r.skills = runner_hub.clean_skill_names(msg["skills"])
@@ -903,12 +933,18 @@ async def runner_ws(websocket: WebSocket, token: str = ""):
             else:
                 log.debug("执行机发来不认识的 op: %s", op)
     except RunnerIdentityConflict:
+        if r is not None:
+            r.close_reason = "identity_conflict"
+        close_code = 4409
         await websocket.send_json({"op": "bye", "code": RunnerIdentityConflict.code,
                                    "error": str(RunnerIdentityConflict())})
         await websocket.close(code=4409)
-    except WebSocketDisconnect:
-        pass
+    except WebSocketDisconnect as exc:
+        close_code = exc.code
     except Exception as e:  # noqa: BLE001
+        if r is not None:
+            r.close_reason = "connection_error"
+        close_code = 1011
         log.warning("执行机连接异常 %s: %s", getattr(r, "id", "?"), type(e).__name__)
         # An accepted socket must be closed even if registration fails before
         # welcome. Otherwise older clients wait forever and newer ones time out.
@@ -925,4 +961,4 @@ async def runner_ws(websocket: WebSocket, token: str = ""):
         if r is not None:
             # Remove only the matching WebSocket so an old connection's cleanup cannot remove its replacement.
             await _drop_runner(r.id, websocket)
-            log.info("执行机下线: %s", r.id)
+            runner_hub.log_connection(r, "closed", close_code=close_code)

@@ -31,7 +31,8 @@
     root.addEventListener('dragstart', event => {
       const row = event.target.closest('.ws-chat-row');
       if (!row || event.target.closest('.ws-chat-actions') || row.draggable !== true) return;
-      const id = row.querySelector('.ws-chat')?.dataset.chatId;
+      const button = row.querySelector('.ws-chat');
+      const id = button?.dataset.sidebarChatId || button?.dataset.chatId;
       if (!id || !find(id) || !event.dataTransfer) return;
       source = id;
       event.dataTransfer.effectAllowed = 'move';
@@ -54,7 +55,8 @@
       const box = row.getBoundingClientRect(), lower = y > box.top + box.height / 2;
       marker.classList.add(lower ? 'is-drop-after' : 'is-drop-before');
       const next = lower ? row.nextElementSibling?.querySelector('.ws-chat') : row.querySelector('.ws-chat');
-      before = next?.dataset.chatId || '';
+      before = next?.dataset.sidebarChatId || next?.dataset.chatId ||
+        (lower ? row.parentElement.dataset.sidebarNextChatId : '') || '';
     });
     root.addEventListener('drop', event => {
       if (!source) return;

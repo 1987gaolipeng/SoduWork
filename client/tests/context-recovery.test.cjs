@@ -73,3 +73,20 @@ test('common gateway context errors remain distinguishable from ordinary capacit
   assert.equal(recovery.OVERFLOW.test('Context window is 128000 tokens'), false);
   assert.equal(recovery.errorWindow('maximum context length is 8,192 tokens'), 8192);
 });
+
+test('output-budget errors mentioning context do not shrink the model or compact history', async () => {
+  const failure = '400 max_tokens exceeds the maximum context length of 32768 tokens';
+  for (const thrown of [false, true]) {
+    let calls = 0;
+    const state = { lastStopReason: 'error', lastAssistantError: failure };
+    const session = { model: { id: 'fixture', contextWindow: 131072, maxTokens: 65536 },
+      setModel: () => assert.fail('Output limit must not change the context window'),
+      prompt: async () => { calls++; if (thrown) throw Error(failure); },
+      sendCustomMessage: () => assert.fail('Output limit must not retry or compact history') };
+    const pending = recovery.prompt(session, { state }, 'Original request', {});
+    if (thrown) await assert.rejects(pending, /max_tokens/); else await pending;
+    assert.equal(calls, 1);
+    assert.equal(state.lastAssistantError, failure);
+    assert.equal(session.model.contextWindow, 131072);
+  }
+});

@@ -40,7 +40,7 @@ const repChar=t=>{if(!t)return'？';return[...t].find(c=>/[\u4e00-\u9fa5a-zA-Z0-
 const Store={
   _tasks:[],
   /* Preserve existing settings, tolerate malformed startup data, and remove server-owned fields. */
-  _cfg:stripServerOwned(Object.assign({mode:'quad',shape:'ball',remind:'light',gender:'boy',theme:'vivid',character:'soduwork',locale:'zh-CN',_lastSkinId:'soduwork-logo',hubX:null,hubY:null,tubeCols:1},safeParseCfg(localStorage.getItem(LS_CFG)))),
+  _cfg:stripServerOwned(Object.assign({dockVisible:false,petVisible:false,mode:'quad',shape:'ball',remind:'light',gender:'boy',theme:'vivid',character:'soduwork',locale:'zh-CN',_lastSkinId:'soduwork-logo',hubX:null,hubY:null,tubeCols:1},safeParseCfg(localStorage.getItem(LS_CFG)))),
   _syncT:null,_syncC:null,_wsOff:null,_taskRetryT:null,_taskFlushPromise:null,
   _taskInFlight:Object.create(null),
   _taskPriorityFlushPromise:null,
@@ -159,6 +159,18 @@ const Store={
     if(!priorityOnly)clearTimeout(this._taskRetryT);
     while(window.SoduWorkAPI){
       if(operationScope!==LS_TASK_OPS())return false;
+      // One compatibility retry for old length-only PUT refusals. Persist the
+      // marker before sending so a still-old Hub cannot cause a restart loop.
+      let recovered=false;
+      const recovery=this._readTaskOps().map(op=>{
+        if(this._taskInFlight[op.id]?.scope===operationScope)return op;
+        const next=TaskSync.recoverTaskTextOperation(op);
+        if(next)recovered=true;
+        return next||op;
+      });
+      if(recovered)this._writeTaskOps(recovery);
+      // Re-read after saving: a full/unavailable localStorage must not permit
+      // retries whose one-time marker could not be durably recorded.
       const ops=this._readTaskOps();
       const usable=ops.filter(x=>!x.blocked&&(!this._taskInFlight[x.id]||this._taskInFlight[x.id].scope!==operationScope)&&(!priorityOnly||
         Array.from(this._taskPersistWaiters).some(waiter=>waiter.scope===operationScope&&waiter.id===x.id)));
@@ -250,7 +262,7 @@ const Store={
           continue;
         }
         if(status>=400&&status<500&&i>=0){
-          latest[i].blocked=msg;this._writeTaskOps(latest);
+          latest[i].blocked=msg;latest[i].blockedStatus=status;this._writeTaskOps(latest);
           const local=this._tasks.find(x=>x.id===op.id)||this._shadow[op.id];
           this._reportTaskSyncError(op.id,msg,'“'+((local&&local.title)||'这条任务')+'”暂未保存，请检查后再试');
           this._failTaskWaiters(op.id,operationScope);
@@ -480,6 +492,9 @@ const Store={
   /* Merge WebSocket and integration events into local state without echoing them back to the server. */
   applyServerEvent(ev){
     if(!ev||!ev.type)return;
+    if(ev.task && (ev.type==='task.created'||ev.type==='task.updated')) {
+      try { window.RequirementDiagnostics?.emit('renderer.task',window.RequirementDiagnostics.task(ev.task)); } catch (_) {}
+    }
     if((ev.type==='task.created'||ev.type==='task.updated')&&ev.task?.projectionPending){
       const canonical=TaskSync.mergeSaveReceipt(this._shadow[ev.task.id],ev.task);
       delete canonical.statusTransition;
@@ -708,6 +723,23 @@ SoduWorkStoreLifecycle.install(Store,{
   },
   recovered:()=>{if(typeof _otaUpdate==='function')void _otaUpdate(true);},
 });
+
+function watchClientUpdateNotices() {
+  const updater = window.soduWorkAPI;
+  function record(status) {
+    const version = status?.targetVersion;
+    if (!version) return;
+    if (status.state === 'downloaded' && (!status.phase || status.phase === 'ready')) {
+      logNotice(`SoduWork ${version} 安装包已下载并通过校验。`, null, 'client_update',
+        { noticeEventId: 'client_update_ready_' + version });
+    } else if (status.state === 'manual') {
+      logNotice(`请前往下载页手动安装 SoduWork ${version}。`, null, 'client_update',
+        { noticeEventId: 'client_update_manual_' + version });
+    }
+  }
+  updater?.onClientUpdateStatus?.(record);
+  updater?.clientUpdateStatus?.().then(record).catch(() => {});
+}
 
 /* The renderer only triggers full-client updates; the main process owns Hub selection, validation, and execution. */
 async function _otaUpdate(silent){

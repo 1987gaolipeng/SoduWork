@@ -2,7 +2,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const core = require('../components/panels/chat-read-aloud-core.js');
-const marked = require('../vendor/markdown/marked.umd.js');
+const marked = require('../core/markdown.js');
+
+test('read-aloud preserves range separators instead of joining their numbers', () => {
+  assert.equal(core.plainText('找 3~5 个用户，运行 7~14 天。~~旧建议~~', marked.lexer, 'Table'),
+    '找 3~5 个用户，运行 7~14 天。旧建议');
+});
 
 test('speech text follows Markdown structure and excludes code, HTML and image URLs', () => {
   const text = core.plainText('# Hello\n\nRead **this** [guide](https://example.test).\n\n```js\nsecretCode();\n```\n\n![image](https://private.test/a.png)\n\n<script>bad()</script>\n\n- First\n- Second', marked.lexer, 'Table');

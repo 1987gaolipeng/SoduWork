@@ -19,6 +19,69 @@ const cases = [
   [{ name: '日报\u0000' }, 'name', /控制字符/],
 ]
 
+test('date validation rejects malformed, impossible and reversed dates', async () => {
+  setLocale('zh-CN')
+  for (const changes of [{ startDate: '2030-02-29' }, { endDate: '2030-13-01' }, { startDate: '0000-01-01' },
+    { startDate: true }, { endDate: ['2030-01-01'] }, { startDate: '2030-2-01' },
+    { startDate: '2030-12-31', endDate: '2030-01-01' }]) {
+    const page = await createComponentHarness(new URL('../src/screens/AutomationTemplates.jsx', import.meta.url), {
+      exportName: 'templateErrors', privateExports: ['templateErrors'], dependencies, props: { ...valid, ...changes },
+    })
+    try { assert.ok(page.render().startDate || page.render().endDate) } finally { page.unmount() }
+  }
+  for (const dates of [{}, { startDate: null, endDate: '' }, { startDate: '2032-02-29' }, { endDate: '2030-12-31' },
+    { startDate: '2030-12-31', endDate: '2030-12-31' }]) {
+    const page = await createComponentHarness(new URL('../src/screens/AutomationTemplates.jsx', import.meta.url), {
+      exportName: 'templateErrors', privateExports: ['templateErrors'], dependencies, props: { ...valid, ...dates },
+    })
+    try { assert.deepEqual(page.render(), {}) } finally { page.unmount() }
+  }
+})
+
+test('date editor defaults to unlimited, validates ranges and clears limits explicitly', async () => {
+  setLocale('zh-CN')
+  let saves = 0, page
+  let props = { value: { ...valid }, onChange(value) { props = { ...props, value }; page.render(props) },
+    onCancel() {}, onSave() { saves++ } }
+  page = await createComponentHarness(new URL('../src/screens/AutomationTemplates.jsx', import.meta.url), {
+    exportName: 'Editor', privateExports: ['Editor'], dependencies, props,
+  })
+  const input = name => page.nodes(n => n.type === 'input' && n.props.name === name)[0]
+  const submit = () => page.act(() => page.nodes(n => n.type === 'form')[0].props.onSubmit({ preventDefault() {} }))
+  const set = (name, value) => page.act(() => input(name).props.onChange({ target: { value } }))
+  try {
+    assert.equal(input('unlimitedDates').props.checked, true)
+    assert.equal(input('startDate').props.disabled, true)
+    submit(); assert.equal(saves, 1)
+    page.act(() => input('unlimitedDates').props.onChange({ target: { checked: false } }))
+    submit(); assert.equal(saves, 1)
+    assert.equal(input('startDate').props['aria-invalid'], true)
+    set('startDate', '2030-12-01')
+    submit(); assert.equal(saves, 2, 'start-only boundary is valid')
+    set('endDate', '2030-11-30')
+    submit(); assert.equal(saves, 2)
+    assert.equal(input('endDate').props['aria-invalid'], true)
+    set('endDate', '2030-12-31')
+    submit(); assert.equal(saves, 3)
+    page.act(() => input('unlimitedDates').props.onChange({ target: { checked: true } }))
+    assert.equal(props.value.startDate, '')
+    assert.equal(props.value.endDate, '')
+    submit(); assert.equal(saves, 4)
+  } finally { page.unmount() }
+})
+
+test('existing template dates are editable and keep date inputs enabled', async () => {
+  const page = await createComponentHarness(new URL('../src/screens/AutomationTemplates.jsx', import.meta.url), {
+    exportName: 'Editor', privateExports: ['Editor'], dependencies,
+    props: { value: { ...valid, updatedAt: '2030-01-01', endDate: '2030-12-31' }, onChange() {}, onCancel() {}, onSave() {} },
+  })
+  try {
+    assert.equal(page.nodes(n => n.props.name === 'unlimitedDates')[0].props.checked, false)
+    assert.equal(page.nodes(n => n.props.name === 'endDate')[0].props.disabled, false)
+    assert.equal(page.nodes(n => n.props.name === 'endDate')[0].props.value, '2030-12-31')
+  } finally { page.unmount() }
+})
+
 test('invalid identities show field errors and cannot submit, while correction clears feedback', async t => {
   setLocale('zh-CN')
   for (const [changes, field, expected] of cases) {

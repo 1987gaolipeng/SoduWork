@@ -1,4 +1,5 @@
 """Library isolation and failure recovery; no live database or storage."""
+from io import BytesIO
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
@@ -62,7 +63,11 @@ class LibraryIntegrityTests(LibraryHttpTestCase):
             with self.assertRaises(IntegrityError):
                 await session.commit()
             await session.rollback()
-        long_name = await self.create_folder("a" * 200)
+        # Folder names exceeding 160 characters are now rejected (422).
+        long_response = await self.request("POST", "/folders", json={"name": "a" * 200})
+        self.assertIn(long_response.status_code, (422, 400), long_response.text)
+        # Names within the limit still work.
+        long_name = await self.create_folder("a" * 160)
         self.assertEqual(len(long_name["name"]), 160)
 
     async def test_invalid_edit_does_not_write_or_orphan_objects(self):
@@ -156,6 +161,106 @@ class LibraryIntegrityTests(LibraryHttpTestCase):
             self.assertEqual(self.store.objects, before)
             downloaded = await self.request("GET", f"/items/{item['id']}/download")
             self.assertEqual(downloaded.content, b"original bytes")
+
+    async def test_xlsx_content_updates_preserve_the_original_workbook(self):
+        from openpyxl import Workbook
+
+        workbook = Workbook()
+        summary = workbook.active
+        summary.title = "Summary"
+        summary.append(["Subject", 42, "=B1*2"])
+        summary["A2"] = "first\nsecond"
+        workbook.create_sheet("Details")["A1"] = "keep me"
+        with BytesIO() as buffer:
+            workbook.save(buffer)
+            original = buffer.getvalue()
+        workbook.close()
+
+        upload = await self.request("POST", "/items/upload", files={
+            "file": ("report.XLSX", original, "application/octet-stream"),
+        })
+        self.assertEqual(upload.status_code, 200, upload.text)
+        item = upload.json()["item"]
+        path = f"/items/{item['id']}"
+        read = await self.request("GET", path + "/content")
+        self.assertEqual(read.status_code, 200, read.text)
+        content = read.json()["content"]
+        objects = dict(self.store.objects)
+        original_metadata = read.json()["item"]
+        target_folder = await self.create_folder("Office files")
+
+        for edit in (content, content.replace("Subject", "Topic")):
+            response = await self.request("PATCH", path, json={
+                "content": edit, "title": "Changed", "favorite": True,
+                "folderId": target_folder["id"], "extra": {"note": "must not persist"},
+            })
+            self.assertEqual(response.status_code, 400, response.text)
+            self.assertIn("XLSX", response.json()["detail"])
+            self.assertEqual(self.store.objects, objects)
+            unchanged = await self.request("GET", path + "/content")
+            self.assertEqual(unchanged.status_code, 200, unchanged.text)
+            self.assertEqual(unchanged.json()["item"], original_metadata)
+
+        renamed = await self.request("PATCH", path, json={
+            "title": "Renamed", "folderId": target_folder["id"], "favorite": True,
+        })
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["item"]["title"], "Renamed")
+        self.assertEqual(renamed.json()["item"]["folderId"], target_folder["id"])
+        self.assertTrue(renamed.json()["item"]["favorite"])
+        self.assertEqual(self.store.objects, objects)
+        download = await self.request("GET", path + "/download")
+        self.assertEqual(download.status_code, 200, download.text)
+        self.assertEqual(download.content, original)
+
+    async def _assert_office_overwrite_rejected(self, filename, original, label):
+        upload = await self.request("POST", "/items/upload", files={
+            "file": (filename, original, "application/octet-stream"),
+        })
+        self.assertEqual(upload.status_code, 200, upload.text)
+        path = f"/items/{upload.json()['item']['id']}"
+        read = await self.request("GET", path + "/content")
+        self.assertEqual(read.status_code, 200, read.text)
+        content = read.json()["content"]
+        objects = dict(self.store.objects)
+        original_metadata = read.json()["item"]
+        for edit in (content, content + "\nextra"):
+            response = await self.request("PATCH", path, json={"content": edit, "title": "Changed"})
+            self.assertEqual(response.status_code, 400, response.text)
+            self.assertIn(label, response.json()["detail"])
+            self.assertEqual(self.store.objects, objects)
+            unchanged = await self.request("GET", path + "/content")
+            self.assertEqual(unchanged.status_code, 200, unchanged.text)
+            self.assertEqual(unchanged.json()["item"], original_metadata)
+        download = await self.request("GET", path + "/download")
+        self.assertEqual(download.status_code, 200, download.text)
+        self.assertEqual(download.content, original)
+
+    async def test_docx_content_updates_preserve_the_original_document(self):
+        from docx import Document
+
+        document = Document()
+        document.add_heading("Report", level=1)
+        document.add_paragraph("Summary: ").add_run("up 12%").bold = True
+        table = document.add_table(rows=1, cols=2)
+        table.cell(0, 0).text, table.cell(0, 1).text = "East", "12.8M"
+        document.sections[0].header.paragraphs[0].text = "Internal"
+        with BytesIO() as buffer:
+            document.save(buffer)
+            original = buffer.getvalue()
+        await self._assert_office_overwrite_rejected("report.docx", original, "DOCX")
+
+    async def test_pptx_content_updates_preserve_the_original_presentation(self):
+        from pptx import Presentation
+
+        presentation = Presentation()
+        slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+        slide.shapes.title.text = "Roadmap"
+        slide.notes_slide.notes_text_frame.text = "Pause for questions"
+        with BytesIO() as buffer:
+            presentation.save(buffer)
+            original = buffer.getvalue()
+        await self._assert_office_overwrite_rejected("roadmap.PPTX", original, "PPTX")
 
     async def test_real_office_exports_download_and_read_back(self):
         for kind, content, expected in (("spreadsheet", "a\tb\n1\t2", "a\tb\n1\t2"),

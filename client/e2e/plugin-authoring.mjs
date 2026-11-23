@@ -52,7 +52,7 @@ await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));
 const port = probe.address().port;
 await new Promise(resolve => probe.close(resolve));
 const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-const child = spawn(path.join(client, 'node_modules/electron/dist/electron.exe'),
+const child = spawn(require('electron'),
   [path.join(client, 'e2e/fixtures/plugin-authoring-window.cjs'), profile, controlFile, '--remote-debugging-port=' + port],
   { windowsHide: true, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let processLog = '';
@@ -277,7 +277,7 @@ try {
   checks.push('real version conflict remains inline with controls restored and existing installed version unchanged');
 
   // Reproduce a rejected generated file, then repair it on disk and retry the
-  // same conversation button. An optional real user draft is copied into this
+  // same conversation card. An optional real user draft is copied into this
   // isolated workspace only; it is never edited or installed in their profile.
   const retryBody = process.env.SODUWORK_E2E_PLUGIN_DRAFT
     ? JSON.parse(fs.readFileSync(process.env.SODUWORK_E2E_PLUGIN_DRAFT, 'utf8').replace(/^\uFEFF/, ''))
@@ -288,19 +288,26 @@ try {
   updateControl({ since: 0, history: true, pluginSince: control.startedAt });
   await click('#reopen');
   await page.waitFor(name => visibleArtifacts.some(item => item.pluginName === name), retryBody.name);
-  await click('[data-install-plugin-draft]');
   await page.waitFor(() => !document.querySelector('.nplugin-draft-error')?.hidden, null);
   const errorMessage = await page.run(() => document.querySelector('.nplugin-draft-error').textContent);
   assert.match(errorMessage, /setup/);
   assert.doesNotMatch(errorMessage, /Error invoking remote method|personal-plugin-preflight/);
-  assert.equal(await page.run(() => document.querySelector('[data-install-plugin-draft]').disabled), false);
+  assert.equal(await page.run(() => document.querySelector('[data-install-plugin-draft]')), null);
   assert.equal(installs(), beforeRetryInstalls);
   await shot('09-draft-error-with-retry');
+  fs.writeFileSync(path.join(cwd, drafts.DRAFT_NAME), '{\n\"prompt\": \"text \"bad\" quotes\"}');
+  await click('#reopen');
+  await page.waitFor(() => visibleArtifacts.some(item => item.pluginValidation?.diagnostic?.field === 'JSON'), null);
+  assert.equal(await page.run(() => document.querySelector('[data-install-plugin-draft]')), null);
+  const syntax = await page.run(() => visibleArtifacts.find(item => item.pluginDraft).pluginValidation.diagnostic);
+  assert.equal(syntax.file, drafts.DRAFT_NAME); assert.equal(syntax.line, 2); assert.ok(syntax.column > 1);
   fs.writeFileSync(path.join(cwd, drafts.DRAFT_NAME), JSON.stringify(retryBody));
+  await click('#reopen');
   await click('[data-install-plugin-draft]');
   await page.waitFor(() => document.querySelector('#capLocalOnly'), null);
   assert.equal(await page.run(() => document.querySelector('.nplugin-draft-error').hidden), true);
-  assert.equal(await page.run(() => document.querySelector('.cap-plugin-preview b').textContent), retryBody.name);
+  assert.equal(await page.run(() => Array.from(document.querySelectorAll('.cap-plugin-preview b'))
+    .find(node => node.checkVisibility())?.textContent), retryBody.name);
   await shot('10-corrected-draft-install-preview');
   await click('#capLocalOnly');
   await page.waitFor(() => document.querySelector('#capLocalTry'), null);
@@ -323,7 +330,7 @@ try {
   }
   assert.equal((await page.run(() => window.trial)).payload.pluginId, retried.pluginId);
   assert.equal(installs(), beforeRetryInstalls + 1);
-  checks.push('real IPC validation rejection is readable, button recovers, retry reads corrected file, installation preserves resources/preferences and starts trial');
+  checks.push('real IPC schema/JSON validation rejects invalid cards before install; read-only reread restores corrected readiness; installation preserves resources/preferences and starts trial');
 
   assert.deepEqual(page.takeRuntimeErrors(), []);
   const report = { ok: true, checks, installAttempts: installs(), installedPlugins: personal.catalog(app).filter(item => !item.builtIn).length, realDraft: Boolean(process.env.SODUWORK_E2E_PLUGIN_DRAFT),

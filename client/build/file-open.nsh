@@ -26,6 +26,9 @@
   WriteRegStr SHELL_CONTEXT "${SODUWORK_FILE_VERB}\command" "" '"$appExe" --soduwork-open-file "%1"'
   WriteRegStr SHELL_CONTEXT "${SODUWORK_OPEN_APP}" "FriendlyAppName" "${PRODUCT_NAME}"
   WriteRegStr SHELL_CONTEXT "${SODUWORK_OPEN_APP}\shell\open\command" "" '"$appExe" --soduwork-open-file "%1"'
+  WriteRegStr SHELL_CONTEXT "Software\Classes\soduwork" "" "URL:SoduWork"
+  WriteRegStr SHELL_CONTEXT "Software\Classes\soduwork" "URL Protocol" ""
+  WriteRegStr SHELL_CONTEXT "Software\Classes\soduwork\shell\open\command" "" '"$appExe" -- "%1"'
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 !macroend
 
@@ -41,6 +44,10 @@
   ReadRegStr $0 SHELL_CONTEXT "${SODUWORK_OPEN_APP}\shell\open\command" ""
   ${If} $0 == '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --soduwork-open-file "%1"'
     DeleteRegKey SHELL_CONTEXT "${SODUWORK_OPEN_APP}"
+  ${EndIf}
+  ReadRegStr $0 SHELL_CONTEXT "Software\Classes\soduwork\shell\open\command" ""
+  ${If} $0 == '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" -- "%1"'
+    DeleteRegKey SHELL_CONTEXT "Software\Classes\soduwork"
   ${EndIf}
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 !macroend

@@ -52,7 +52,7 @@ async function open(opts) {
     get harness() { return harness; }, set harness(value) { harness = value; },
     get harnessEventSeq() { return harnessEventSeq; }, set harnessEventSeq(value) { harnessEventSeq = value; },
     get identity() { return identity; },
-    get imageController() { return imageController; }, set imageController(value) { imageController = value; },
+    get directModelController() { return directModelController; }, set directModelController(value) { directModelController = value; },
     get immediate() { return immediate; },
     get inFlight() { return inFlight; }, set inFlight(value) { inFlight = value; },
     get limitRequest() { return limitRequest; }, set limitRequest(value) { limitRequest = value; },
@@ -101,6 +101,7 @@ async function open(opts) {
   const openStarted = performance.now();
   _openTiming('open-start', openStarted);
   const { app, identity, cwd } = opts || {};
+  const failureTarget = model => require('./model-failure-target.cjs').capture(model, prep.model, identity);
   try { await require('../local-model-privacy.cjs').prepare(app); }
   catch (_) { return { ok: false, reason: '本地模型隐私保护初始化失败，请检查本机安全存储后重试' }; }
   const loaded = await loadSdk(app);
@@ -166,7 +167,7 @@ async function open(opts) {
   // removed from the personal model catalog; retry once with the current default and clear
   // the stale selection for future resumes.
   const canRecoverStaleModel = Boolean(opts.resumePath || opts.resumedConversation) &&
-    prep?.code !== 'LOCAL_AGENT_DEFAULT_UNAVAILABLE';
+    !prep?.providerPinned && prep?.code !== 'LOCAL_AGENT_DEFAULT_UNAVAILABLE';
   // Some older Hub releases returned a successful default configuration even
   // when the requested historical model had already been retired. Treat a
   // different returned model as stale in a resumed conversation so the same
@@ -285,6 +286,8 @@ async function open(opts) {
     args.customTools = [prepared[1],
       require('./vision-read-tool').create(sdk, args.cwd, identity, () => prep.model)];
     created = await require('./background-process').run(() => sdk.createAgentSession(args));
+    require('../access-control/pi-tool-selection').restore(created.session, sdk,
+      resources.settingsManager, effectiveCwd, accessPolicy);
     _openTiming('agent-created', openStarted);
   } catch (e) {
     return { ok: false, reason: '起会话失败：' + String((e && e.message) || e) };
@@ -411,6 +414,8 @@ async function open(opts) {
           require('./vision-read-tool').create(sdk, effectiveCwd, identity, () => prep.model)],
       }));
       try {
+        require('../access-control/pi-tool-selection').restore(next.session, sdk,
+          nextResources.settingsManager, effectiveCwd, policy, accessPolicy);
         await initializeExtensions(next.session, nextResources);
         return { session: next.session, resources: nextResources };
       } catch (error) { next.session.dispose(); throw error; }
@@ -420,7 +425,7 @@ async function open(opts) {
       piSession = next.session; access = next.access; accessPolicy = next.policy;
       resources = next.resources; opts.readOnly = accessPolicy.mode === 'readonly';
       opts.accessPolicy = accessPolicy;
-      unsub = piSession.subscribe(onPiEvent);
+      unsub = require('./model-request-phase.cjs').subscribe(piSession, onPiEvent, failureTarget);
       _rawPromptComplete = outputContinuation.bind(piSession, acc, () => Boolean(run.stopReason) || liveAccess.changing() || turnQueue.active()?.stopRequested || closed, _emit);
     },
   });
@@ -429,11 +434,11 @@ async function open(opts) {
     transition: accessChanges, changed: accessChanged,
     stopped: () => closed || Boolean(run.stopReason) || goalCancelled,
   });
-  let imageController = null;
+  let directModelController = null;
   // One MCP result can be replayed by the SDK during a reconnect.  Keep the
   // attachment id in memory so a retry cannot create duplicate output files.
   const materializedMedia = new Set();
-  const turnQueue = createTurnQueue(undefined, () => handle.captureDelivery?.());
+  const turnQueue = createTurnQueue(undefined, result => result?.summaryOnly ? undefined : handle.captureDelivery?.());
   const modelRecovery = require('./model-recovery').create({
     beforeRetry: async ({ authExpired } = {}) => {
       if (!authExpired) return;
@@ -441,7 +446,7 @@ async function open(opts) {
       if (!refreshed.ok) throw new Error(refreshed.reason || '模型会话凭据刷新失败');
     },
   });
-  let failedLastTurn = false;
+  let failedLastTurn = opts.retainedExecutionFailure === true;
   let skillSelectionFailure = null;
   const storedQuality = restoredQuality || (goal.intent === 'goal'
     ? goalQuality.fromEntries(piSession.sessionManager.getEntries()) : null);
@@ -606,7 +611,7 @@ async function open(opts) {
 
 
   // Contain subscription exceptions because they propagate through the runtime event loop.
-  let unsub = piSession.subscribe(onPiEvent);
+  let unsub = require('./model-request-phase.cjs').subscribe(piSession, onPiEvent, failureTarget);
 
   let _rawPromptComplete = outputContinuation.bind(
     piSession, acc, () => Boolean(run.stopReason) || liveAccess.changing() || turnQueue.active()?.stopRequested || closed, _emit);
@@ -630,6 +635,8 @@ async function open(opts) {
           require('./vision-read-tool').create(sdk, effectiveCwd, identity, () => prep.model)],
       }));
       try {
+        require('../access-control/pi-tool-selection').restore(next.session, sdk,
+          nextResources.settingsManager, effectiveCwd, previous.policy);
         const nextAccess = require('../access-control/pi').install(next.session, previous.policy, effectiveCwd, accessChanged, { readScope });
         try {
           await initializeExtensions(next.session, nextResources);
@@ -640,7 +647,7 @@ async function open(opts) {
     commit(next) {
       unsub(); piSession = next.session; access = next.access; resources = next.resources;
       opts.noExtensions = false;
-      unsub = piSession.subscribe(onPiEvent);
+      unsub = require('./model-request-phase.cjs').subscribe(piSession, onPiEvent, failureTarget);
       _rawPromptComplete = outputContinuation.bind(piSession, acc, () => Boolean(run.stopReason) || liveAccess.changing() || turnQueue.active()?.stopRequested || closed, _emit);
     },
   });
@@ -649,7 +656,9 @@ async function open(opts) {
     _openTiming('prompt-start', openStarted);
     return runControl.promptComplete(run,
       (value, config) => require('./background-process').run(() =>
-        liveAccess.run(() => _rawPromptComplete(value, config)),
+        liveAccess.run(() => options?.pluginRepair
+          ? piSession.sendCustomMessage({ customType: 'soduwork.plugin.repair', display: false, content: value }, { triggerTurn: true })
+          : _rawPromptComplete(value, config)),
         { desktopScope: desktopControlScope }), prompt, options)
       .finally(() => _openTiming('prompt-end', openStarted));
   };
@@ -665,10 +674,13 @@ async function open(opts) {
   runControl.startMonitor(run, _runContext());
 
   function _enqueueTurn(text, turnAttachments, sendOptions, options) {
+    const turnOptions = { ...sendOptions };
+    // Only modelRecovery.take() may admit a summary using its verified receipt.
+    delete turnOptions.summaryReceipt;
     const item = turnQueue.add({
       text: String(text || ''),
       attachments: Array.isArray(turnAttachments) ? turnAttachments : [],
-      options: { ...(sendOptions || {}) },
+      options: turnOptions,
     });
     updatedAt = Date.now();
     // An idle submit is drained immediately. Do not publish a transient
@@ -689,6 +701,8 @@ async function open(opts) {
       if (next.options.controlled) return next.options.controlled.execute(handle, next.text, next.attachments);
       await modelSelection.applyForTurn(next.options.modelName);
       if (next.stopRequested) return { ok: true, cancelled: true, manualStop: true };
+      if (next.options.summaryReceipt) return modelRecovery.summarize(state, next);
+      next.messageFrom = piSession.messages?.length || 0;
       const result = await handle.send(next.text, next.attachments, { ...next.options, fromQueue: true });
       return runControl.finishRecovery(run, result);
     });
@@ -722,7 +736,8 @@ async function open(opts) {
       if (active && (active.options.taskId || active.options.controlled) || goalEnabled || active?.options.goalMode)
         return '当前工作正在执行，请等待结束后再引导';
       if (liveAccess.changing()) return '正在切换权限，请稍后重试';
-      if (imageController) return '正在生成图片，请等待生成结束后再引导';
+      if (directModelController) return active?.options.summaryReceipt
+        ? '正在总结已有结果，请等待总结结束后再引导' : '正在生成图片，请等待生成结束后再引导';
       if (run.stallPending || limitRequest || modelRecovery.view() || acc.state.pendingUi || inFlight && !active)
         return '当前回复正在恢复或等待处理，请处理后再引导';
       if (typeof piSession.abort !== 'function') return '当前底座暂不支持引导';

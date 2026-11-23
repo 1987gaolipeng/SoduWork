@@ -66,19 +66,20 @@ def _mapping(value) -> dict:
 
 def project_evidence(raw) -> dict:
     evidence = _mapping(raw)
-    if evidence.get("reportVersion", 1) != 1:
+    if evidence.get("reportVersion") == 3:
         return evidence
     checks = dict(_mapping(evidence.get("checks")))
     verified = dict(_mapping(evidence.get("verifiedChecks")))
     changed = False
-    # v1 accepted JSON tools/incomplete streams and confused optional-control
-    # refusals with absent features. Keep raw attempts, but require v2 proof.
-    for key in ("toolCalling", "streaming"):
+    # v2 never tested streaming tool-result continuation. Retire its tool
+    # success only; retain independent checks and explicit feature refusals.
+    version_two = evidence.get("reportVersion") == 2
+    for key in (("toolCalling",) if version_two else ("toolCalling", "streaming")):
         latest, prior = _mapping(checks.get(key)), _mapping(verified.get(key))
-        if _conclusive(latest):
+        if _conclusive(latest) and (not version_two or latest["status"] == "passed"):
             checks[key] = {**latest, "status": "inconclusive", "code": "legacy_recheck_required"}
             changed = True
-        if _conclusive(prior):
+        if _conclusive(prior) and (not version_two or prior["status"] == "passed"):
             verified.pop(key, None)
             if not latest:
                 checks[key] = {**prior, "status": "inconclusive", "code": "legacy_recheck_required"}
@@ -107,6 +108,7 @@ def merge_evidence(previous, result: dict) -> dict:
         return public_evidence(previous)
     checks = dict(_mapping(previous.get("checks"))) if same else {}
     verified = dict(evidence_checks(previous)) if same else {}
+    image_rejected_since_pass = same and previous.get("imageInputRejectedSincePass") is True
     for key, check in _mapping(result.get("checks")).items():
         if key not in CHECKS or not isinstance(check, dict):
             continue
@@ -116,10 +118,18 @@ def merge_evidence(previous, result: dict) -> dict:
                 and older["checkedAt"] > check["checkedAt"]):
             continue
         checks[key] = dict(check)
-        if _conclusive(check):
-            verified[key] = dict(check)
-    return {**public_evidence(result), "reportVersion": 2,
+        if not _conclusive(check):
+            continue
+        if key == "imageInput":
+            # Chat retains proven support; manual conflicts follow the latest conclusive attempt.
+            image_rejected_since_pass = bool(result.get("configRevision") and check["status"] == "unsupported"
+                                             and _mapping(verified.get(key)).get("status") == "passed")
+            if image_rejected_since_pass:
+                continue
+        verified[key] = dict(check)
+    return {**public_evidence(result), "reportVersion": 3,
             "apiFamily": result.get("apiFamily", API_FAMILY), "checks": checks, "verifiedChecks": verified,
+            "imageInputRejectedSincePass": image_rejected_since_pass,
             "compatibility": {**(compatibility(previous.get("compatibility")) if same else {}),
                               **compatibility(result.get("compatibility"))},
             "reasoningStreamReported": bool(result.get("reasoningStreamReported")
@@ -156,7 +166,9 @@ def profile(config: dict, evidence: dict | None = None) -> dict:
             result[key]["verifiedState"] = verified_state
             if verified.get("checkedAt"):
                 result[key]["lastVerifiedAt"] = verified["checkedAt"]
-            if source != "verified" and state != "unknown" and verified_state != state:
+            observed_state = ("unsupported" if key == "imageInput" and evidence.get("imageInputRejectedSincePass") is True
+                              else verified_state)
+            if source != "verified" and state != "unknown" and observed_state != state:
                 result[key]["conflict"] = True
     reported = bool((evidence or {}).get("apiFamily", API_FAMILY) == API_FAMILY
                     and (evidence or {}).get("reasoningStreamReported"))

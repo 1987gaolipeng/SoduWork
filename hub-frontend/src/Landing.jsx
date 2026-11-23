@@ -37,10 +37,18 @@ function platform() {
   if (/Linux|X11/i.test(ua) && !/Android|Mobile/i.test(ua)) return 'lin'
   return 'win'
 }
+function mobileWebUrl(info) {
+  if (typeof info?.webUrl !== 'string' || !info.webUrl.trim()) return ''
+  try {
+    const url = new URL(info.webUrl, window.location.origin)
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : ''
+  } catch { return '' }
+}
+
 function primaryTarget(pkgs) {
   const os = platform(), info = pkgs?.[os]
   if (os === 'android') return { info, meta: info, href: '/api/v1/download/mobile/android', label: 'Android · APK' }
-  if (os === 'ios') return { info, meta: null, href: '', label: 'iOS' }
+  if (os === 'ios') return { info: pkgs?.android, web: true, href: mobileWebUrl(pkgs?.android), label: 'iOS' }
   if (os === 'mac') {
     const arch = ['arm64', 'x64'].find(key => info?.arches?.[key])
     return { info, meta: info?.arches?.[arch], href: arch ? `/api/v1/download/client/mac/${arch}` : '', label: arch === 'x64' ? 'macOS · Intel' : 'macOS · Apple Silicon' }
@@ -55,13 +63,17 @@ function Download({ pkgs, variant = 'fill' }) {
   const target = primaryTarget(pkgs)
   const ready = Boolean(target.info?.available && target.meta && target.href)
   const className = 'w-cta w-cta-' + variant
-  return ready ? <a className={className} href={target.href}><Glyph name="download" size={18} />{tx('下载员工客户端')}</a>
-    : <button type="button" className={className} disabled aria-busy={pkgs === null}><Glyph name="download" size={18} />{tx('下载员工客户端')}</button>
+  if (target.web && pkgs !== null) return <a className={className} href={target.href || '#downloads'}>
+    {target.href ? tx('打开网页版') : tx('查看其他平台')}</a>
+  if (ready) return <a className={className} href={target.href}><Glyph name="download" size={18} />{tx('下载员工客户端')}</a>
+  if (pkgs === null) return <button type="button" className={className} disabled aria-busy="true"><Glyph name="download" size={18} />{tx('正在确认安装包…')}</button>
+  return <a className={className} href="#downloads"><Glyph name="download" size={18} />{tx('查看各平台发布状态')}</a>
 }
 function DownloadMeta({ pkgs, onRetry }) {
-  const { info, meta, label } = primaryTarget(pkgs)
+  const { info, meta, label, web, href } = primaryTarget(pkgs)
   if (pkgs === null) return <p className="w-meta" role="status">{tx('正在确认安装包…')}</p>
   if (info?.error) return <p className="w-meta" role="status">{tx('暂时取不到安装包信息')}<button className="public-text-button" type="button" onClick={onRetry}>{tx('重试')}</button></p>
+  if (web) return <p className="w-meta">{href ? tx('此设备可使用网页版。') : tx('此服务尚未提供 iOS 客户端或网页版入口。')}</p>
   if (!info?.available || !meta) return <p className="w-meta" role="status">{tx('此平台安装包尚未发布，请联系管理员。')}</p>
   return <p className="w-meta">{label}{meta.version ? ` · v${meta.version}` : ''}{meta.sizeText ? ` · ${meta.sizeText}` : ''}</p>
 }
@@ -71,11 +83,11 @@ function PlatformDownloads({ pkgs, onRetry }) {
     { key: 'mac', label: 'macOS', packages: pkgs?.mac?.available ? ['arm64', 'x64'].filter(arch => pkgs.mac.arches?.[arch]).map(arch => [arch === 'arm64' ? 'Apple Silicon' : 'Intel', `/api/v1/download/client/mac/${arch}`, pkgs.mac.arches[arch]]) : [] },
     { key: 'lin', label: 'Linux', packages: pkgs?.lin?.available ? ['deb', 'rpm', 'tar.gz'].filter(format => pkgs.lin.formats?.[format]).map(format => [format, `/api/v1/download/client/linux/${format}`, pkgs.lin.formats[format]]) : [] },
     { key: 'android', label: 'Android', packages: pkgs?.android?.available ? [['APK', '/api/v1/download/mobile/android', pkgs.android]] : [] },
-    { key: 'ios', label: 'iPhone / iPad', packages: [] },
+    { key: 'ios', label: 'iPhone / iPad', packages: mobileWebUrl(pkgs?.android) ? [[tx('打开网页版'), mobileWebUrl(pkgs.android), {}]] : [] },
   ]
   return <div className="public-download-grid">{targets.map(target => <article className="public-download-platform" key={target.key}>
     <div className="public-platform-head"><span className={'public-platform-icon is-' + target.key}>{target.key === 'win' ? <Glyph name="grid" size={21} /> : target.key === 'mac' ? '⌘' : ['android', 'ios'].includes(target.key) ? <Glyph name="grid" size={21} /> : '>_'}</span><h3>{target.label}</h3></div>
-    <div className="public-platform-packages">{target.packages.length ? target.packages.map(([label, href, info]) => <a href={href} key={href}><span>{label}<small>{info.version ? `v${info.version}` : ''}{info.sizeText ? ` · ${info.sizeText}` : ''}</small></span><Glyph name="download" size={17} /></a>) : <p>{pkgs === null ? tx('正在确认安装包…') : pkgs?.[target.key]?.error ? <>{tx('暂时取不到安装包信息')} <button className="public-text-button" type="button" onClick={onRetry}>{tx('重试')}</button></> : tx('尚未发布')}</p>}</div>
+    <div className="public-platform-packages">{target.packages.length ? target.packages.map(([label, href, info]) => <a href={href} key={href}><span>{label}<small>{info.version ? `v${info.version}` : ''}{info.sizeText ? ` · ${info.sizeText}` : ''}</small></span><Glyph name="download" size={17} /></a>) : <p>{pkgs === null ? tx('正在确认安装包…') : pkgs?.[target.key === 'ios' ? 'android' : target.key]?.error ? <>{tx('暂时取不到安装包信息')} <button className="public-text-button" type="button" onClick={onRetry}>{tx('重试')}</button></> : target.key === 'ios' ? tx('此服务尚未提供 iOS 客户端或网页版入口。') : tx('尚未发布')}</p>}</div>
   </article>)}</div>
 }
 

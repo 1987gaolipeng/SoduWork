@@ -8,6 +8,25 @@ const ROOTS = new Set(['templates', 'examples', 'assets', 'scripts', 'references
 const SECRET = /(?:sk|pk|pat|ghp|glpat)-[A-Za-z0-9_-]{12,}|(?:api[_ -]?key|token|password)\s*[:=]\s*["']?[^\s"']{8,}/i;
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
+// Limit allocation and reads even if another process appends to the file after stat.
+function readSized(file, expectedSize) {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const before = fs.fstatSync(fd, { bigint: true });
+    const changed = () => Object.assign(Error('Package file changed during validation'), { code: 'EAGAIN' });
+    if (!before.isFile() || before.size !== BigInt(expectedSize)) throw changed();
+    const bytes = Buffer.allocUnsafe(expectedSize);
+    for (let offset = 0; offset < bytes.length;) {
+      const count = fs.readSync(fd, bytes, offset, bytes.length - offset, offset);
+      if (!count) throw changed();
+      offset += count;
+    }
+    const after = fs.fstatSync(fd, { bigint: true });
+    if (after.size !== before.size || after.mtimeNs !== before.mtimeNs || after.ctimeNs !== before.ctimeNs) throw changed();
+    return bytes;
+  } finally { fs.closeSync(fd); }
+}
+
 function resourcePath(value) {
   if (typeof value !== 'string' || value !== value.normalize('NFC') || value.length > 240 ||
       /[\\\x00-\x1f\x7f:]/.test(value)) throw new Error('插件资源路径不合法');
@@ -81,7 +100,7 @@ function collect(body, draftFile, workRoot) {
     if (!inside(fs.realpathSync(root), fs.realpathSync(file))) throw new Error('插件资源指向工作目录之外');
     const stat = fs.statSync(file);
     if (!stat.isFile() || stat.size > MAX_FILE_BYTES || (total += stat.size) > MAX_BYTES) throw new Error('插件资源不是文件或超过大小限制');
-    return { ...item, encoding: 'base64', content: fs.readFileSync(file).toString('base64') };
+    return { ...item, encoding: 'base64', content: readSized(file, stat.size).toString('base64') };
   });
   return { ...body, resources: normalize(resources) };
 }
@@ -161,4 +180,4 @@ function guidance(bundle) {
     bundle.items.slice(0, 6).map(x => '- ' + x.path + '（' + x.kind + '）').join('\n') +
     '\n完整资源共 ' + bundle.items.length + ' 个文件，可在该目录查看。安装不会执行脚本；使用资源仍须遵守当前任务授权。' + rescueNote;
 }
-module.exports = { normalize, summary, digest, collect, materialize, guidance, resourcePath, assertNoLinks, MAX_FILES, MAX_FILE_BYTES, MAX_BYTES };
+module.exports = { normalize, summary, digest, collect, materialize, guidance, resourcePath, assertNoLinks, readSized, MAX_FILES, MAX_FILE_BYTES, MAX_BYTES };

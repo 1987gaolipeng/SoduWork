@@ -21,12 +21,11 @@ from .agent_version_probe import probe as cached_probe
 
 NODE_MINIMUMS = {
     "pi": (22, 19, 0),
-    "qwen": (22, 0, 0),
+    "qwen": (22, 15, 0),
     "codex-harness": (20, 0, 0),
     "dsh": (22, 15, 0),
     "codex": (20, 0, 0),
     "kimi": (22, 19, 0),
-    "claude": (22, 0, 0),
 }
 _INSTALL_LOCK = threading.Lock()
 _NODE_IDENTITY = """(() => {
@@ -169,7 +168,8 @@ def _npm_cli(node: str, path_value: str) -> str:
     return next((str(p) for p in candidates if p.is_file()), "")
 
 
-def resolve() -> dict:
+def resolve(*, minimum: tuple[int, int, int] = (22, 19, 0),
+            fallback_minimum: tuple[int, int, int] = (0, 0, 0)) -> dict:
     """Find real Node, ignoring the Electron-backed desktop command shim.
 
     npm is always invoked as ``selected-node npm-cli.js``. A shebang or .cmd
@@ -179,7 +179,8 @@ def resolve() -> dict:
     bundled = os.path.normcase(os.path.abspath(os.environ.get("SODUWORK_BUNDLED_NODE") or "."))
     candidates, seen = [], set()
     name = "node.exe" if os.name == "nt" else "node"
-    for directory in path_value.split(os.pathsep):
+    from .agent_installation import known_bin_dirs
+    for directory in [*path_value.split(os.pathsep), *known_bin_dirs()]:
         if not directory:
             continue
         node = os.path.abspath(os.path.join(directory.strip('"'), name))
@@ -209,11 +210,12 @@ def resolve() -> dict:
                 "platform": str(info.get("platform") or ""), "arch": str(info.get("arch") or ""),
                 "libc": str(info.get("libc") or "")}
         candidates.append(pair)
-        if npm_version and version_tuple(pair["node"]) >= (22, 19, 0):
+        if npm_version and version_tuple(pair["node"]) >= minimum:
             return pair
     # Preserve PATH precedence among suitable native pairs; a later modern
     # installation can rescue an obsolete Node at the front of PATH.
-    return next(iter([p for p in candidates if p["npm"]] or candidates), {})
+    compatible = [p for p in candidates if p["npm"] and version_tuple(p["node"]) >= fallback_minimum]
+    return next(iter(compatible or [p for p in candidates if p["npm"]] or candidates), {})
 
 
 def runtime_target(pair: dict | None = None) -> tuple[str, str]:
@@ -314,13 +316,19 @@ def activate_environment(data_root: str = "") -> None:
 
 def node_env(key: str = "", *, engine: str = "") -> dict:
     import socket
-    pair = resolve()
     required = NODE_MINIMUMS.get(key, (0, 0, 0))
     # Existing package versions can legitimately support an older runtime than
     # today's install target. Only accept the simple official minimum form;
     # npm itself evaluates the complete semver range during installation.
     if re.fullmatch(r">=\d+(?:\.\d+){0,2}", engine.strip()):
         required = version_tuple(engine.strip()[2:])
+    # These adapters also load reviewed host modules via registerHooks. An
+    # older package's engines field cannot lower the host API requirement.
+    if key in {"qwen", "dsh", "kimi"}:
+        required = max(required, NODE_MINIMUMS[key])
+    # Preserve the resolver's modern-pair preference (also used for native
+    # dependency architecture), while allowing a package to require a newer pair.
+    pair = resolve(minimum=max(required, (22, 19, 0)), fallback_minimum=required)
     actual = version_tuple(pair.get("node", ""))
     has_runtime = bool(pair.get("nodePath") and pair.get("npm"))
     compatible = not any(required) or actual >= required

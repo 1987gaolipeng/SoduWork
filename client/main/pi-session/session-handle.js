@@ -27,10 +27,14 @@ function create(ctx) {
     if (ctx.opts?.resumedConversation) return ctx.pluginOutputSince || 0;
     return ctx.startedAt;
   }
-  function completedOutputs(scanned) {
+  function completedJournal() {
     const journal = ctx.completedOutputJournal;
     return journal && journal.startedAt === ctx.run.startedAt && journal.changes === ctx.handle.fileChanges
-      ? require('./outputs').withJournal(scanned, journal.changes) : scanned;
+      ? journal.changes : null;
+  }
+  function completedOutputs(scanned) {
+    const journal = completedJournal();
+    return journal ? require('./outputs').withJournal(scanned, journal) : scanned;
   }
   return {
 ref: ctx.ref,
@@ -59,16 +63,16 @@ outputs() {
     },
 outputSnapshot() {
       const since = outputsSince();
-      return { ...completedOutputs(require('./outputs').scan(ctx.effectiveCwd, since, ctx.run.startedAt || 0)),
-        pluginSince: ctx.pluginOutputSince, fileChanges: ctx.handle.fileChanges || null };
+      return { ...completedOutputs(require('./outputs').scan(ctx.effectiveCwd, since, ctx.run.startedAt || 0, completedJournal())),
+        pluginSince: ctx.pluginOutputSince, pluginValidation: require('./plugin-generation-gate.cjs').records(ctx.handle), fileChanges: ctx.handle.fileChanges || null };
     },
 async outputSnapshotAsync() {
       const since = outputsSince();
       const turnSince = ctx.run.startedAt || 0, fileChanges = ctx.handle.fileChanges || null;
-      const scanned = await require('./outputs').scanAsync(ctx.effectiveCwd, since, turnSince);
+      const scanned = await require('./outputs').scanAsync(ctx.effectiveCwd, since, turnSince, completedJournal());
       if ((ctx.run.startedAt || 0) !== turnSince || (ctx.handle.fileChanges || null) !== fileChanges)
         throw Error('当前轮次的成果已变化，请刷新后重试');
-      return { ...completedOutputs(scanned), pluginSince: ctx.pluginOutputSince, fileChanges };
+      return { ...completedOutputs(scanned), pluginSince: ctx.pluginOutputSince, pluginValidation: require('./plugin-generation-gate.cjs').records(ctx.handle), fileChanges };
     },
 fileChanges: null,
 model: ctx.prep.model,
@@ -196,7 +200,8 @@ historyRow(existingSnapshot) {
         collaboration: Boolean((ctx.handle.taskIds || []).length || ctx.handle.taskRef),
         at: ctx.updatedAt, count: (snap.messages || []).length,
         state: ctx.failedLastTurn || ctx.qualityPhase === 'blocked' ? 'failed' :
-          ((ctx.inFlight || ctx.turnQueue.size()) && snap.status !== 'waiting-user' ? 'running' : _presenceState(snap.status)),
+          ((ctx.inFlight || ctx.turnQueue.size()) && snap.status !== 'waiting-user' ? 'running' :
+            require('./turn-outcome').historyState(snap) || _presenceState(snap.status)),
         status: snap.status, live: true,
       };
     },
@@ -315,13 +320,16 @@ disableGoal() {
       ctx._emit({ kind: 'goal-disabled' });
       return { ok: true, snapshot: ctx._snapshot() };
     },
-cancel() {
+cancel(options = {}) {
       if (stopPromise) return stopPromise;
+      if (options.userInitiated === true && !ctx.turnQueue.active()?.options.controlled) {
+        require('./turn-outcome').userStopped(ctx);
+      }
       ctx.resourceActivation.cancel();
       ctx.immediate.cancel();
       ctx.liveAccess.cancel();
       ctx.access?.broker.cancel();
-      if (ctx.imageController) ctx.imageController.abort();
+      if (ctx.directModelController) ctx.directModelController.abort();
       ctx.modelRecovery.clear();
       const active = ctx.turnQueue.active();
       if (active && active.options.controlled) {
@@ -382,6 +390,12 @@ updateQueue(id, action, value) {
         if (ctx.closed || ctx.inFlight || ctx.turnQueue.active() || ctx.acc.state.pendingUi) return { ok: false, reason: '当前执行尚未结束，请稍后重试' };
         const recovery = ctx.modelRecovery.view();
         if (recovery?.id !== id) return { ok: false, reason: '这轮状态已变化，请刷新后确认' };
+        if (recovery.mode === 'text-summary') {
+          const selected = ctx.modelSelection.view();
+          if (!selected.name || !selected.model.id || selected.model.id === recovery.failedModelName ||
+              selected.model.modality === 'image' || selected.model.unavailable)
+            return { ok: false, reason: '请先选择其他对话模型，再总结已有结果' };
+        }
         if (recovery?.requiresModelChange && recovery.failedModelName === ctx.modelSelection.capture()) {
           return { ok: false, reason: '当前模型仍不可用，请先切换到可用模型后再恢复这一轮' };
         }
@@ -419,7 +433,7 @@ close() {
       ctx.liveAccess.close();
       ctx.accessChanges.close();
       ctx.access?.broker.close();
-      if (ctx.imageController) ctx.imageController.abort();
+      if (ctx.directModelController) ctx.directModelController.abort();
       ctx.closed = true;
       // Optional conversation services (memory, telemetry, etc.) may attach
       // listeners to the public handle. Release them before disposing Pi so a

@@ -4,10 +4,10 @@ import fs from 'node:fs'
 import connectorConfig from '../../client/components/panels/connector-config.js'
 import { createComponentHarness } from './helpers/react-harness.mjs'
 import * as argumentText from '../src/screens/mcp-arguments.js'
-import { setLocale } from '../src/i18n.js'
+import { setLocale, translateText as tx } from '../src/i18n.js'
 const text=n=>Array.isArray(n)?n.map(text).join(''):n?.props?text(n.props.children):typeof n==='string'?n:''
 const formCss=fs.readFileSync(new URL('../src/screens/McpConnectionForm.css',import.meta.url),'utf8')
-const wait=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve}}
+const wait=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no});return{promise,resolve,reject}}
 async function form(t, probe, overrides = {}) {
  const previous=globalThis.window;globalThis.window={SoduWorkConnectorConfig:connectorConfig,dispatchEvent(){}};t.after(()=>{if(previous===undefined)delete globalThis.window;else globalThis.window=previous});
  const calls=[],pending=[];const page=await createComponentHarness(new URL('../src/screens/McpConnectionForm.jsx',import.meta.url),{exportName:'McpForm',props:{initial:{id:'a',name:'A',type:'http',url:'https://example.com/mcp'},onClose(){},onSave:async s=>calls.push(s),...overrides},dependencies:{
@@ -60,6 +60,81 @@ test('company management writes one row with its original server revision',async
  const calls=[];const original={id:'a',name:'A',revision:'server-rev',type:'http',url:'https://a.example/mcp'};
  const page=await createComponentHarness(new URL('../src/screens/McpServers.jsx',import.meta.url),{dependencies:{'../api.js':{api:{mcpServers:async()=>({servers:[original]}),upsertMcpServer:async(server,base)=>{calls.push({server,base});return{servers:[server,{id:'colleague',name:'new'}]}},deleteMcpServer:async()=>{throw Error('unexpected')}}},'../ui.jsx':{ErrorState:'ErrorState',Loading:'Loading',Icon:'Icon',Modal:'Modal',Confirm:'Confirm',toast(){}},'./McpSharing.jsx':'McpSharing','../components/ConnectorIcon.jsx':'ConnectorIcon','./McpConnectionForm.jsx':{McpForm:'McpForm'}}});
  t.after(()=>page.unmount());page.render();await page.flush();page.act(()=>page.nodes(n=>n.type==='button'&&text(n)==='编辑')[0].props.onClick());await page.nodes(n=>n.type==='McpForm')[0].props.onSave({...original,name:'Updated'});page.render();assert.deepEqual(calls[0].base,original);assert.equal(calls[0].server.name,'Updated');assert.match(text(page.render()),/new/)
+});
+
+async function management(t, api) {
+ const messages=[];
+ const page=await createComponentHarness(new URL('../src/screens/McpServers.jsx',import.meta.url),{dependencies:{
+  '../api.js':{api},
+  '../ui.jsx':{ErrorState:'ErrorState',Loading:'Loading',Icon:'Icon',Modal:'Modal',Confirm:'Confirm',toast:message=>messages.push(message)},
+  './McpSharing.jsx':'McpSharing','../components/ConnectorIcon.jsx':'ConnectorIcon','./McpConnectionForm.jsx':{McpForm:'McpForm'},
+ }});
+ t.after(()=>page.unmount());page.render();await page.flush();
+ const dialog=action=>page.nodes(node=>node.type===(action==='save'?'McpForm':'Confirm'))[0];
+ return {page,messages,dialog,
+  open(action){page.act(()=>page.nodes(node=>node.type==='button'&&text(node)===tx(action==='save'?'编辑':'移除'))[0].props.onClick())},
+  submit(action,draft){return action==='save'?dialog(action).props.onSave(draft):dialog(action).props.onConfirm()},
+ };
+}
+
+const refreshFailed='此连接已被更新，但自动刷新失败。当前填写内容已保留，请稍后重试。';
+const refreshSucceeded='此连接已被更新，当前填写内容已保留。关闭后重新打开可查看最新配置。';
+for (const action of ['save','delete']) for (const [locale,failureWords] of [
+ ['zh-CN',/自动刷新失败/],['en-US',/automatic refresh failed/i],['ja-JP',/自動.*失敗/],['ko-KR',/자동.*실패/],
+]) test(`${action} conflict reports failed refresh in ${locale} and recovers on another attempt`,async t=>{
+ setLocale(locale);t.after(()=>setLocale('zh-CN'));
+ const original={id:'a',name:'Original connector',revision:'v1',type:'http',url:'https://example.com/mcp'};
+ const latest={...original,name:'Latest connector',revision:'v2'};
+ const draft={...original,name:'Unsaved connector'};
+ const refresh=wait(),writes=[];let reads=0;
+ const conflict=()=>Object.assign(Error('fixture-sensitive-write-error'),{status:409});
+ const f=await management(t,{
+  mcpServers:async()=>{reads++;return reads===1?{servers:[original]}:reads===2?refresh.promise:{servers:[latest]}},
+  upsertMcpServer:async(server,base)=>{writes.push({action:'save',server,base});throw conflict()},
+  deleteMcpServer:async(id,base)=>{writes.push({action:'delete',id,base});throw conflict()},
+ });
+ f.open(action);
+ const pending=f.submit(action,draft);await f.page.flush();
+ assert.equal(reads,2);assert.equal(writes.length,1);
+ assert.equal(writes[0].action,action);assert.deepEqual(writes[0].base,original);
+ assert.ok(f.dialog(action),'the conflict does not close the active dialog');
+ if(action==='save')assert.equal(f.dialog(action).props.busy,true);
+ refresh.reject(Error('fixture-sensitive-refresh-error'));await pending;f.page.render();
+ assert.ok(f.dialog(action));assert.match(text(f.page.render()),/Original connector/);
+ assert.doesNotMatch(text(f.page.render()),/Latest connector/);
+ if(action==='save'){
+  assert.equal(f.dialog(action).props.busy,false);
+  assert.deepEqual(f.dialog(action).props.initial,original);
+  assert.equal(writes[0].server.name,draft.name);
+ }
+ assert.deepEqual(f.messages,[tx(refreshFailed)]);
+ assert.match(f.messages[0],failureWords);
+ assert.notEqual(f.messages[0],tx(refreshSucceeded));
+ assert.doesNotMatch(f.messages.join(' '),/fixture-sensitive-/);
+ await f.submit(action,draft);f.page.render();
+ assert.equal(reads,3);assert.equal(writes.length,2);
+ assert.deepEqual(writes[1].base,original,'a failed write never changes the optimistic revision');
+ assert.match(text(f.page.render()),/Latest connector/);
+ assert.ok(f.dialog(action),'refreshing the list does not discard the active draft or confirmation');
+ if(action==='save')assert.equal(f.dialog(action).props.busy,false);
+ assert.deepEqual(f.messages,[tx(refreshFailed),tx(refreshSucceeded)]);
+ f.page.act(()=>f.dialog(action).props.onClose());
+ f.open(action);
+ if(action==='save')assert.deepEqual(f.dialog(action).props.initial,latest);
+ else assert.match(f.dialog(action).props.text,/Latest connector/);
+});
+
+for(const action of ['save','delete'])test(`${action} failure without a conflict does not refresh the connector list`,async t=>{
+ setLocale('zh-CN');t.after(()=>setLocale('zh-CN'));
+ const original={id:'a',name:'Original connector',revision:'v1',type:'http',url:'https://example.com/mcp'};
+ let reads=0,writes=0;
+ const fail=async()=>{writes++;throw Object.assign(Error('Fixture write failure'),{status:503})};
+ const f=await management(t,{mcpServers:async()=>{reads++;return{servers:[original]}},upsertMcpServer:fail,deleteMcpServer:fail});
+ f.open(action);await f.submit(action,{...original,name:'Unsaved connector'});f.page.render();
+ assert.equal(reads,1);assert.equal(writes,1);assert.ok(f.dialog(action));
+ assert.match(text(f.page.render()),/Original connector/);
+ assert.deepEqual(f.messages,[tx('保存失败：')+'Fixture write failure']);
+ if(action==='save')assert.equal(f.dialog(action).props.busy,false);
 });
 
 test('typed private-key field accepts complete PEM paste without exposing or stripping lines',async t=>{

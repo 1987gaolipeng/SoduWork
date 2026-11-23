@@ -126,10 +126,10 @@ const ownPendingTask = () => ({id:'own-pending', title:'Choose execution indepen
   executionContext:{strategy:'direct', runner:{mode:'local'}}});
 
 for (const [created, selected] of [['pi','qwen'], ['qwen','opencode'], ['opencode','dsh'],
-  ['kimi','harness2'], ['harness2','codex-harness'], ['pi','codex'], ['pi','claude'], ['codex','pi'], ['claude','qwen']]) {
+  ['kimi','qwen'], ['kimi','codex-harness'], ['pi','codex'], ['codex','pi'], ['codex','qwen']]) {
   test(`implicit creation archive ${created} continues in the same conversation with runtime ${selected}`, async () => {
     const task = ownPendingTask(), f = sameOwnerCreationFixture(task, {adapterId:created});
-    const selectedModel = selected === 'claude' ? '' : 'shared-model';
+    const selectedModel = selected === 'codex' ? '' : 'shared-model';
     const result = await f.api.enqueueTask(task.id, {source:'task-dispatch',agentId:'local:' + selected,model:selectedModel});
     assert.equal(result.ok, true);
     assert.equal(f.nativeOpens.length, 1);
@@ -177,18 +177,18 @@ test('an omitted model is not interpreted as an explicit replacement of the crea
   assert.equal(f.ctx._model.id, 'creation-model');
 });
 
-test('Claude keeps its account default in the original conversation without using a managed catalog', async () => {
-  const task = ownPendingTask(), f = sameOwnerCreationFixture(task,{adapterId:'claude',model:''});
-  assert.equal((await f.api.enqueueTask(task.id,{source:'task-dispatch',agentId:'local:claude',model:''})).ok,true);
+test('Codex keeps its account default in the original conversation without using a managed catalog', async () => {
+  const task = ownPendingTask(), f = sameOwnerCreationFixture(task,{adapterId:'codex',model:''});
+  assert.equal((await f.api.enqueueTask(task.id,{source:'task-dispatch',agentId:'local:codex',model:''})).ok,true);
   assert.equal(f.nativeOpens.length,1); assert.equal(f.ctx._sessionId,'creation-chat');
   assert.deepEqual(f.changes,[]); assert.equal(f.sent.length,1);
 });
 
-test('an unsupported Claude model change remains in the original conversation and never sends', async () => {
-  const task = ownPendingTask(), f = sameOwnerCreationFixture(task,{adapterId:'claude',model:'',
-    selectModel:async()=>({ok:false,reason:'Claude does not support switching the account model here'})});
-  const result = await f.api.enqueueTask(task.id,{source:'task-dispatch',agentId:'local:claude',model:'unsupported-model'});
-  assert.equal(result.ok,false); assert.match(result.reason,/Claude/);
+test('an unsupported Codex model change remains in the original conversation and never sends', async () => {
+  const task = ownPendingTask(), f = sameOwnerCreationFixture(task,{adapterId:'codex',model:'',
+    selectModel:async()=>({ok:false,reason:'Codex does not support switching the account model here'})});
+  const result = await f.api.enqueueTask(task.id,{source:'task-dispatch',agentId:'local:codex',model:'unsupported-model'});
+  assert.equal(result.ok,false); assert.match(result.reason,/Codex/);
   assert.equal(f.nativeOpens.length,1); assert.equal(f.ctx._sessionId,'creation-chat');
   assert.deepEqual(f.ctx._snap.messages,f.messages); assert.equal(f.sent.length,0); assert.deepEqual(f.removed,[]);
 });
@@ -347,7 +347,7 @@ for (const change of ['owner','view','request','missing','started','receipt','ru
       if (change === 'read-failed') throw Error('Offline authority read');
       if (change === 'started') return {...task,status:'doing'};
       if (change === 'receipt') return {...task,workRouting:{conversationTurn:{conversationId:'other-chat',state:'failed'}}};
-      if (change === 'runtime') return {...task,executionContext:{...task.executionContext,agent:{id:'local:claude'}}};
+      if (change === 'runtime') return {...task,executionContext:{...task.executionContext,agent:{id:'local:codex'}}};
       if (change === 'model') return {...task,model:'newly-assigned-model'};
       if (change === 'repo') return {...task,repoId:'another-repo'};
       return task;
@@ -594,8 +594,8 @@ test('failed existing-task binding never submits the requirement after opening i
 });
 
 test('saved canonical Agent and model reach each native substrate through the actual enqueue controller', async () => {
-  for (const cli of [...new Set([...require('../main/agent-runtime/runtime-catalog').runtimes().map(row => row.id), 'claude'])]) {
-    const model = cli === 'claude' ? '' : cli === 'codex' ? 'gpt-5.3-codex' : 'company-selected';
+  for (const cli of [...new Set([...require('../main/agent-runtime/runtime-catalog').runtimes().map(row => row.id), 'codex'])]) {
+    const model = cli === 'codex' ? '' : cli === 'codex' ? 'gpt-5.3-codex' : 'company-selected';
     const task = { id: cli, title: 'Saved task', status: 'todo', executionContext: {
       agent: { id: 'local:' + cli, cli }, model, runner: { mode: 'local' }, strategy: 'direct' } };
     const f = fixture(task);
@@ -610,10 +610,10 @@ test('saved canonical Agent and model reach each native substrate through the ac
 });
 
 test('saved remote substrate retains machine, model, repository and reasoning on controlled HTTP dispatch', async () => {
-  for (const cli of [...new Set([...require('../main/agent-runtime/runtime-catalog').runtimes().map(row => row.id), 'claude'])]) {
+  for (const cli of [...new Set([...require('../main/agent-runtime/runtime-catalog').runtimes().map(row => row.id), 'codex'])]) {
     const id = 'runner:machine-1:' + cli;
     const task = { id: cli, title: 'Remote task', status: 'todo', executionContext: {
-      agent: { id, cli }, model: cli === 'claude' ? '' : 'selected-model', reasoningEffort: cli === 'codex' ? 'high' : '',
+      agent: { id, cli }, model: cli === 'codex' ? '' : 'selected-model', reasoningEffort: cli === 'codex' ? 'high' : '',
       repo: { id: 'repository', branch: 'feature-task' }, runner: { mode: 'remote', id: 'machine-1' } } };
     const f = fixture(task);
     assert.equal((await f.api.enqueueTask(cli)).ok, true, cli);
@@ -893,7 +893,7 @@ test('recovery refuses changed execution scope instead of applying the previous 
   const changes = [
     {projectId: 'another-project'}, {repoId: 'repository'}, {repo: {path: 'D:/project', branch: 'main'}},
     {workflowBindingId: 'workflow'}, {workRouting: {selectedStrategy: 'workflow'}},
-    {executionContext: {agent: {id: 'local:claude'}}}, {executionContext: {model: 'another-model'}},
+    {executionContext: {agent: {id: 'local:codex'}}}, {executionContext: {model: 'another-model'}},
     {executionContext: {runner: {mode: 'remote', id: 'machine'}}},
     {workRouting: {executionContext: {repoId: 'repository'}}},
     {workRouting: {executionContext: {plugin: {bindingId: 'workflow'}}}},

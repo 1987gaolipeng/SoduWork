@@ -2,11 +2,13 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const PRODUCTION_HUB = 'http://127.0.0.1:18989';
+const PRODUCTION_HUB = require('./default-hub.cjs').bundledDefaultHub();
+const SOURCE_HUB = 'http://127.0.0.1:18989';
 const connections = new WeakMap();
 
 const BAD_HUB = '后台地址应为不带路径的 http:// 或 https:// 地址';
-// Public builds default to a local Hub and persist the user's service selection.
+// Source runs default to the local Hub; packaged clients default to the hosted Hub.
+// Both retain saved service selections, including the source launcher's chosen port.
 // The isolated integration harness keeps a fixed connection:
 // - an unpackaged, separately profiled integration harness may opt into its own
 //   loopback backend (SODUWORK_TEST_HUB_URL; internalTest, never editable);
@@ -31,7 +33,8 @@ function saveHub(app, hub) {
   fs.writeFileSync(savedFile(app), JSON.stringify({ hub }), { encoding: 'utf8', mode: 0o600 });
 }
 function initialize(app, env = process.env, distributionProfile = require('./distribution.cjs').current()) {
-  let hub = distributionProfile.hubOrigin, internalTest = false, editable = false;
+  let hub = app.isPackaged === false ? SOURCE_HUB : distributionProfile.hubOrigin;
+  let internalTest = false, editable = false;
   const testHub = env.SODUWORK_TEST_HUB_URL;
   const testProfile = env.SODUWORK_USER_DATA;
   if (!app.isPackaged && testHub) {

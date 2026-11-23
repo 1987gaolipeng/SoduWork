@@ -50,6 +50,37 @@ test('neutral access cancellation is neither successful execution nor a failed b
   assert.equal(tools.batchSummary([{ ...cancelled, cancelReason: undefined }]).state, 'error');
 });
 
+test('truncated tool previews remain unexecuted in cards and mixed batches', () => {
+  global.window = global;
+  const tools = require('../components/panels/panels-chat-tools'); delete global.window;
+  const truncated = { name: 'bash', args: { command: 'build' }, state: 'cancelled', cancelReason: 'output-limit', isError: false };
+  const access = { ...truncated, cancelReason: 'access-change' };
+  const complete = { ...truncated, state: 'done', cancelReason: undefined };
+  for (const item of [truncated, { ...truncated, name: 'write_file', args: { path: 'synthetic.txt' } }]) {
+    assert.equal(tools.render(item).title, '输出截断，未执行');
+    assert.equal(tools.batchSummary([item]).title, '输出截断，未执行');
+    assert.equal(tools.batchSummary([item]).state, 'cancelled');
+    assert.equal(tools.batchSummary([item]).errors, 0);
+  }
+  assert.equal(tools.batchSummary([truncated, access]).title, '操作未执行');
+  assert.equal(tools.batchSummary([truncated, access]).state, 'cancelled');
+  assert.equal(tools.batchSummary([truncated, complete]).detail, '部分操作未执行');
+  assert.equal(tools.batchSummary([access, complete]).detail, '部分操作未执行');
+  for (const cancelled of [truncated, access]) {
+    const html = tools.batchHtml([cancelled, complete], 'mixed-commands', false);
+    assert.match(html, /ntool-batch-detail">部分操作未执行/);
+    assert.doesNotMatch(html, /build|ntool-batch-body/);
+  }
+  assert.match(tools.render({ ...truncated, name: 'write_file', args: { path: 'synthetic.txt' } }).body,
+    /模型输出被截断，此工具调用尚未执行。/);
+  for (const item of [{ ...truncated, isError: true }, { ...truncated, isError: undefined },
+    { ...truncated, isError: 0 }, { ...truncated, cancelReason: 'unknown' }]) {
+    assert.equal(tools.batchSummary([truncated, item]).state, 'error');
+    assert.equal(tools.batchSummary([item]).errors, 1);
+    assert.match(tools.render(item).title, /异常/);
+  }
+});
+
 test('closing during preload releases the abandoned extension runtime without creating a session', async () => {
   const resources = deferred(), rules = require('../main/access-control/policy');
   const cwd = require('node:os').tmpdir(), policy = rules.create('standard', cwd);

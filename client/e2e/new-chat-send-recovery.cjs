@@ -60,11 +60,11 @@ if (typeof electron === 'string') {
   }
   async function open(options) {
     assert.ok(!options.chatId, 'This fixture must create a new native session through the first send');
-    assert.equal(options.adapterId, 'harness2');
+    assert.equal(options.adapterId, 'kimi');
     const scenario = activeScenario;
     assert.equal(scenario.opens++, 0, 'Only one native session may be opened per new conversation');
     const alias = 'first-send-' + scenario.name;
-    const ref = _uuidV5('9af442c8-cd1d-4b91-a668-22da2b2635bf', 'chat:' + alias + ':harness2');
+    const ref = _uuidV5('9af442c8-cd1d-4b91-a668-22da2b2635bf', 'chat:' + alias + ':kimi');
     const cwd = path.join(root, scenario.name); fs.mkdirSync(cwd);
     const runtime = {async rpc(op, input, timeoutMs) {
       calls.push({scenario:scenario.name, op, ref:input.ref || '', dispatchId:input.dispatchId || ''});
@@ -98,7 +98,7 @@ if (typeof electron === 'string') {
       if (op === 'job.comment') { scenario.comments++; throw Error('This fixture must not replay or continue a prior send'); }
       throw Error('Unexpected synthetic Runner operation: ' + op);
     }};
-    const adapter = createRunnerRuntimeAdapter({runtimeSpec:catalog.runtime('harness2'), runnerRuntime:runtime,
+    const adapter = createRunnerRuntimeAdapter({runtimeSpec:catalog.runtime('kimi'), runnerRuntime:runtime,
       modelConfig:{fetchModel:async () => ({ok:true, model:{id:'fixture-model', key:'fixture-only', baseUrl:'http://fixture.invalid'}})}});
     const session = await adapter.createSession({identity:{}, native:{runner:{openOptions:{...options, ref:alias, cwd}}}});
     sessions.push(session);
@@ -118,7 +118,7 @@ if (typeof electron === 'string') {
     activeScenario = value; return value;
   }
   async function prepare() {
-    await js(`NativeChat.reset();NativeChat.prepare({adapterId:'harness2',modelName:'fixture-model'});void 0;`);
+    await js(`NativeChat.reset();NativeChat.prepare({adapterId:'kimi',modelName:'fixture-model'});void 0;`);
     await until('Boolean(document.querySelector("#nchatInput"))', 'new composer');
     assert.equal(await js('NativeChat.hasSession()'), false, 'Preparing a new empty chat must not initialize an Agent');
     assert.equal(await js('document.querySelector("#nchatInput").value'), '');
@@ -153,7 +153,7 @@ if (typeof electron === 'string') {
     for (const [channel, value] of Object.entries({
       'pi-session-history':{ok:true, chats:[]}, 'pi-session-release':{ok:true},
       'pi-session-outputs':{ok:true, items:[], artifacts:[]},
-      'pi-session-runtimes':{ok:true, runtimes:[{id:'harness2', displayName:'Google Harness²', modelMode:'managed', accessControl:support}]},
+      'pi-session-runtimes':{ok:true, runtimes:[{id:'kimi', displayName:'Kimi Code', modelMode:'managed', accessControl:support}]},
       'access-preferences-get':{ok:true, mode:'standard', revision:0},
       'conversation-delivery-inspect':{ok:false, reason:'Not exercised by this isolated fixture'},
       'work-preview-show':{ok:true}, 'work-preview-hide':{ok:true}, 'work-preview-destroy':{ok:true}, 'work-preview-reset-embedded':{ok:true},
@@ -174,7 +174,8 @@ if (typeof electron === 'string') {
     for (const file of ['agent-brand', 'compose-candidate-navigation', 'chat-plugin-mention-model', 'chat-plugin-mention'])
       await js(read('components/panels/' + file + '.js') + '\nvoid 0;');
     for (const script of scripts) await js(script + '\nvoid 0;');
-    await js(`SoduWorkAPI.taskStorageKey=()=> 'isolated-first-send-recovery';void 0;`);
+    await js(`SoduWorkAPI.taskStorageKey=()=> 'isolated-first-send-recovery';
+      SoduWorkAPI.myModels=async()=>({usable:[{name:'fixture-model',label:'Isolated fixture'}]});void 0;`);
 
     const offline = scenario('offline-first');
     await prepare(); await click('#nchatInput'); await win.webContents.insertText('你好');

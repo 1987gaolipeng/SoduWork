@@ -167,7 +167,27 @@ function restoredRequirementCard(card, captured) {
   } catch (_) { return card; }
 }
 function visibleHistory(app, rows, identity) {
-  return require('./history-access').visible(app, rows, identity);
+  return require('./history-access').visible(app, rows, identity).map(row => {
+    // Draft selection is separate from the Pi archive format and execution
+    // provenance. Read only the bounded header, never card attachments.
+    let selected = '';
+    if (row.workOnly === true && !row.live && !row.cached && !row.cloud && !row.accountConversation &&
+        !row.accountProjection && !row.remoteProjection) {
+      try {
+        const prefix = metadataSnapshot.read(app.getPath('userData'), location(app, row.id),
+          { maxBytes: PROTECTION_PREFIX_BYTES, prefix: true, maxFileBytes: MAX_STORE_BYTES }).bytes.toString('utf8');
+        const boundary = prefix.indexOf(',"cards":');
+        if (boundary > 0) {
+          const record = JSON.parse(prefix.slice(0, boundary) + '}');
+          if (record.version === 1 && record.sessionId === row.id &&
+              scopeMatches(record.owner, identity, accountCandidates(app)) &&
+              Number.isSafeInteger(record.draftSelectionRevision) && record.draftSelectionRevision > 0 &&
+              record.draftSelection) selected = normalizeDraftSelection(record.draftSelection).adapterId;
+        }
+      } catch (_) { /* Missing legacy selection is not evidence of a chosen runtime. */ }
+    }
+    return { ...row, draftAdapterId: selected };
+  });
 }
 async function diskRecord(app, id) {
   try {
@@ -327,9 +347,10 @@ function create({ app, identityOf, session, accountHistory, sharedHistory, newCw
     } finally { await fsp.unlink(temp).catch(() => {}); }
     await guard(captured);
   }
-  function publicPresence(row) {
+  function publicPresence(row, selection) {
     const { workOwner, ...rest } = titles.decorate(app, row);
-    return { ...rest, workOnly: row.workOnly === true };
+    const workOnly = draftOnly(row.id, row);
+    return { ...rest, workOnly, draftAdapterId: workOnly ? selection?.adapterId || '' : '' };
   }
   async function reserve(raw = {}) {
     return attempt(async () => {
@@ -370,11 +391,12 @@ function create({ app, identityOf, session, accountHistory, sharedHistory, newCw
         await guard(captured);
         let selected = { draftSelection: null, draftSelectionRevision: 0 };
         if (selection) {
-          selected = await saveDraftSelection(id, { selection, revision: 0 });
+          selected = await writeDraftSelection(id, { selection, revision: 0 }, false);
           if (!selected.ok) throw Error(selected.reason);
         }
         await guard(captured);
-        const presence = { id, title, cwd, adapterId: 'pi', at: Date.now(), count: 0, state: 'idle', workOnly: true };
+        const presence = publicPresence({ id, title, cwd, adapterId: 'pi', at: Date.now(), count: 0,
+          usedHarnesses: [], state: 'idle', workOnly: true }, selected.draftSelection);
         notify({ kind: 'work-conversation-created', sessionId: id, ref: '', presence });
         return { ok: true, sessionId: id, title, presence, workOnly: true,
           draftSelection: selected.draftSelection, draftSelectionRevision: selected.draftSelectionRevision,
@@ -434,7 +456,7 @@ function create({ app, identityOf, session, accountHistory, sharedHistory, newCw
       const cards = (record?.cards || []).map(card => restoredRequirementCard(card, captured));
       await guard(captured);
       const workOnly = draftOnly(id, latest);
-      return { ok: true, sessionId: id, cards, presence: publicPresence({ ...latest, workOnly }), workOnly,
+      return { ok: true, sessionId: id, cards, presence: publicPresence({ ...latest, workOnly }, record?.draftSelection), workOnly,
         draftSelection: workOnly ? record?.draftSelection || null : null,
         draftSelectionRevision: workOnly ? record?.draftSelectionRevision || 0 : 0 };
     });
@@ -457,12 +479,15 @@ function create({ app, identityOf, session, accountHistory, sharedHistory, newCw
           ...(previous?.draftSelection ? { draftSelection: previous.draftSelection,
             draftSelectionRevision: previous.draftSelectionRevision } : {}) });
         notify({ kind: 'work-card-saved', sessionId: id, ref: '', cardId: saved.id, revision: saved.revision,
-          presence: { ...publicPresence(row), at } });
+          presence: { ...publicPresence(row, previous?.draftSelection), at } });
         return { ok: true, card: saved };
       });
     });
   }
   async function saveDraftSelection(rawId, value) {
+    return writeDraftSelection(rawId, value, true);
+  }
+  async function writeDraftSelection(rawId, value, announce) {
     return attempt(async () => {
       const id = sessionId(rawId), captured = await auth();
       if (!value || typeof value !== 'object' || Array.isArray(value) ||
@@ -480,6 +505,8 @@ function create({ app, identityOf, session, accountHistory, sharedHistory, newCw
           draftSelection: selected, draftSelectionRevision: revision }, async (key, actor) => {
           const latest = await resolve(key, actor); assertDraftOnly(key, latest); return latest;
         });
+        if (announce) notify({ kind: 'work-draft-selection-saved', sessionId: id, ref: '',
+          presence: publicPresence(row, selected) });
         return { ok: true, draftSelection: selected, draftSelectionRevision: revision };
       });
     });

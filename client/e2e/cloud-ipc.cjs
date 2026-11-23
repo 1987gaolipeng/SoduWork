@@ -20,7 +20,7 @@ app.whenReady().then(async () => {
   // real account, background task or model request is made by this smoke test.
   win.webContents.session.protocol.handle('file', () => new Response('<!doctype html><meta charset="utf-8"><title>Cloud IPC acceptance</title>'));
   await win.loadFile(path.resolve(__dirname, '../desk.html'));
-  for (const agent of ['pi', 'opencode', 'codex-harness', 'dsh', 'qwen', 'codex', 'claude']) {
+  for (const agent of ['pi', 'opencode', 'codex-harness', 'dsh', 'qwen', 'codex']) {
     const result = await win.webContents.executeJavaScript('soduWorkAPI.conversationSession.cloud.targets(' + JSON.stringify(agent) + ')');
     assert.equal(result.ok, false);
     assert.match(result.reason, /登录|连接/);

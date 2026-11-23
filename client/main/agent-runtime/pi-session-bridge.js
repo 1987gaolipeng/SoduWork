@@ -63,6 +63,13 @@ function createPiSessionBridge(options) {
   registry.register(piAdapter);
   runnerAdapters.forEach((adapter) => registry.register(adapter));
 
+  // Archive providers survive catalog removal without registering execution.
+  const retiredHistory = Array.isArray(opts.historyAdapters) ? opts.historyAdapters
+    : Array.isArray(opts.runnerAdapters) || opts.runnerAdapter ? []
+      : ['claude', 'harness2'].map(adapterId =>
+        require('./runner-history.cjs').createRunnerHistoryProvider({ app: opts.app, adapterId }));
+  const historyAdapters = [...runnerAdapters, ...retiredHistory];
+
   const byRef = new Map();
   const bySessionId = new Map();
   const pendingDisposals = new Set();
@@ -222,6 +229,12 @@ function createPiSessionBridge(options) {
       for (const entry of new Set(byRef.values())) {
         if (entry.raw.snapshot?.().runtimeUnavailable) await closeEntry(entry);
       }
+      if ((legacyOptions.adapterId || 'pi') === 'pi' && legacyOptions.retainedHistoryId && replicaHistory?.indexedRow) {
+        // Disposal can flush a newer failed attempt after IPC read the initial row.
+        const indexed = await replicaHistory.indexedRow(legacyOptions.retainedHistoryId);
+        if (indexed) legacyOptions.retainedExecutionFailure =
+          (require('../conversation/execution-outcome.cjs').recover(indexed) || indexed).state === 'failed';
+      }
       ({ options: legacyOptions, row: restored } = switchable.resumeOptions(legacyOptions));
       if (legacyOptions.workConversation || legacyOptions.workConversationId) {
         workId = legacyOptions.workConversation?.id || legacyOptions.workConversationId;
@@ -231,6 +244,20 @@ function createPiSessionBridge(options) {
       }
       await legacyOptions.validateWorkConversation?.();
       const adapterId = String(legacyOptions.adapterId || 'pi');
+      if (!registry.get(adapterId)) {
+        // Removed runtimes can expose their authenticated transcript, but never
+        // acquire a replacement runtime, model credentials, or execution rights.
+        const historyId = restored?.id || legacyOptions.resumePath;
+        if (historyId && replicaHistory?.open) {
+          const view = await replicaHistory.open(historyId);
+          if (view) {
+            try { return { ok: true, resumed: true, localReplica: true, session: attachView(view) }; }
+            catch (error) { await view.close(); throw error; }
+          }
+        }
+        throw new RuntimeContractError('ADAPTER_NOT_FOUND',
+          '此执行底座已不可用，请选择其他底座新建会话；原历史记录仍然保留');
+      }
       if ((legacyOptions.intent === 'goal' || legacyOptions.mode === 'goal') &&
           runtimeCatalog.runtime(adapterId)?.goalMode !== 'native') {
         throw new RuntimeContractError('GOAL_MODE_UNSUPPORTED',
@@ -464,7 +491,7 @@ function createPiSessionBridge(options) {
     // navigation is in flight. Resolve its authenticated alias by exact ID.
     const cloud = !nativeOnly && (await externalRows({ includeAliases: true })).chats.find(row => row.id === wanted);
     if (cloud) return cloud;
-    const results = await Promise.all(runnerAdapters.map(async (adapter) => {
+    const results = await Promise.all(historyAdapters.map(async (adapter) => {
       try {
         return typeof adapter.historyEntry === 'function'
           ? await adapter.historyEntry(wanted, { strict }) : await adapter.history(Number.MAX_SAFE_INTEGER, { strict });
@@ -474,7 +501,7 @@ function createPiSessionBridge(options) {
     const row = results.flatMap(result => result.chats || [])
       .find(item => item && item.id === wanted);
     if (row) return row;
-    if (runnerAdapters.length && (strict ? results.some(result => !result?.ok || !Array.isArray(result.chats))
+    if (historyAdapters.length && (strict ? results.some(result => !result?.ok || !Array.isArray(result.chats))
       : !results.some(result => result && result.ok))) {
       const failed = results.find(result => result && result.reason);
       throw new RuntimeContractError('RUNNER_HISTORY_UNAVAILABLE',
@@ -632,7 +659,7 @@ function createPiSessionBridge(options) {
       const results = await Promise.allSettled([
         sessionModule.history(app, Number.MAX_SAFE_INTEGER),
         sessionModule.archivedHistory?.(app, Number.MAX_SAFE_INTEGER) || { ok: true, chats: [] },
-        ...runnerAdapters.map(adapter => adapter.history(Number.MAX_SAFE_INTEGER, { metadataOnly: true })),
+        ...historyAdapters.map(adapter => adapter.history(Number.MAX_SAFE_INTEGER, { metadataOnly: true })),
       ]);
       const records = new Map(runtimeSegments.list(app).map(record => [record.id, record]));
       const failures = [], inventory = [];
@@ -699,7 +726,7 @@ function createPiSessionBridge(options) {
         .catch((error) => ({ ok: false, reason: _reason(error), chats: [] })),
       // Apply the sidebar limit after filtering archives; archived recent runs
       // must not hide older visible conversations. The runner inventory is shared.
-      ...runnerAdapters.map((adapter) => Promise.resolve(adapter.history(Number.MAX_SAFE_INTEGER))
+      ...historyAdapters.map((adapter) => Promise.resolve(adapter.history(Number.MAX_SAFE_INTEGER))
         .catch((error) => ({ ok: false, reason: _reason(error), chats: [] }))),
     ]);
     if (replicaHistory) {
@@ -764,7 +791,7 @@ function createPiSessionBridge(options) {
         ? Promise.resolve(sessionModule.archivedHistory(app || opts.app, limit))
           .catch((error) => ({ ok: false, reason: _reason(error), chats: [] }))
         : Promise.resolve({ ok: true, chats: [] }),
-      ...runnerAdapters.map((adapter) => Promise.resolve(adapter.history(Number.MAX_SAFE_INTEGER))
+      ...historyAdapters.map((adapter) => Promise.resolve(adapter.history(Number.MAX_SAFE_INTEGER))
         .catch((error) => ({ ok: false, reason: _reason(error), chats: [] }))),
     ]);
     if (replicaHistory) {
@@ -879,7 +906,7 @@ function createPiSessionBridge(options) {
       if (deleted.ok) sessionModule.setArchived(app || opts.app, wanted, false);
       return deleted;
     }
-    const adapter = runnerAdapters.find(item => item && item.id === runner.adapterId);
+    const adapter = historyAdapters.find(item => item && item.id === runner.adapterId);
     if (!adapter || typeof adapter.forgetSession !== 'function') return { ok: false, reason: '这个执行底座不支持彻底删除会话' };
     const deleted = await adapter.forgetSession(wanted);
     if (deleted && (deleted.ok || deleted.notFound) && typeof sessionModule.setArchived === 'function') {
@@ -983,6 +1010,7 @@ function createPiSessionBridge(options) {
     try { runtimeCatalog.addRuntime(spec); }
     catch (error) { unregister(); throw error; }
     runnerAdapters.push(adapter);
+    historyAdapters.push(adapter);
     invalidateRuntimes();
     return spec;
   }
@@ -1064,7 +1092,7 @@ function createPiSessionBridge(options) {
       const row = await findRunnerRow(id, { nativeOnly: localOnly, strict: localOnly });
       if (!row) return { ok: false, notFound: true, reason: '这条会话不在执行底座的运行记录里' };
       if (!localOnly && row.cloud && externalHistory) return externalHistory.forget(id);
-      const adapter = runnerAdapters.find(item => item && item.id === row.adapterId);
+      const adapter = historyAdapters.find(item => item && item.id === row.adapterId);
       if (!adapter || typeof adapter.forgetSession !== 'function') {
         return { ok: false, reason: '这个执行底座不支持删除会话' };
       }

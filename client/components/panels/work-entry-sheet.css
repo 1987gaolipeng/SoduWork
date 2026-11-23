@@ -9,9 +9,12 @@
 .wes-layer.entered .wes-sheet{transform:none;opacity:1}
 .wes-layer.is-inline .wes-sheet,.wes-layer.is-dialog .wes-sheet{max-height:none}
 /* Right-aligned, full-height drawer with rounded left corners and a slide-in transition. */
-.pui-layer.wes-plugin-surface{place-items:stretch end;padding:0;overflow:hidden}
+.pui-layer.wes-plugin-surface{
+  --wes-titlebar:max(var(--window-menu-height,0px),env(titlebar-area-height,0px));
+  inset:var(--wes-titlebar) 0 0;place-items:stretch end;padding:0;overflow:hidden
+}
 .pui-layer.wes-plugin-surface .pui-dialog{
-  width:min(680px,100vw);height:100vh;margin:0;border-width:0 0 0 1px;border-radius:18px 0 0 18px;
+  width:min(680px,100vw);height:100%;margin:0;border-width:0 0 0 1px;border-radius:18px 0 0 18px;
   overflow:hidden;transform:translateX(18px)
 }
 .pui-layer.wes-plugin-surface.is-visible .pui-dialog{transform:none}
@@ -19,14 +22,11 @@
 .pui-layer.wes-plugin-surface~.catt-preview{z-index:2410}
 .pui-layer.wes-plugin-surface .pui-dialog-content,.wes-layer.is-dialog,.wes-layer.is-dialog .wes-sheet{height:100%;min-height:0}
 /*
- * In overlay-titlebar windows, start the drawer 10px below the system title bar and reduce
- * its height accordingly. Native-titlebar windows retain full-height drawers.
+ * Keep the backdrop below the shared titlebar, with an extra gap for the drawer
+ * in overlay-titlebar windows. Without a shared titlebar the drawer uses the full height.
  */
 html[data-window-titlebar="overlay"] .pui-layer.wes-plugin-surface{
-  padding-top:calc(10px + env(titlebar-area-height, 34px))
-}
-html[data-window-titlebar="overlay"] .pui-layer.wes-plugin-surface .pui-dialog{
-  height:calc(100vh - 10px - env(titlebar-area-height, 34px))
+  padding-top:10px
 }
 .wes-head{
   display:grid;grid-template-columns:38px minmax(0,1fr) 34px;align-items:start;gap:11px;

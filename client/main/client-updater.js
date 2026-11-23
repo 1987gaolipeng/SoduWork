@@ -113,7 +113,7 @@ async function _request(relative, options = {}, timeoutMs = 15000, consume = nul
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
     const headers = { ...(options.headers || {}), Authorization: 'Device ' + id.session };
-    const res = await fetch(id.hub + relative, { ...options, headers, signal: ctl.signal });
+    const res = await require('./device-auth-request').fetchWithDeviceAuthRetry(id, id.hub + relative, { ...options, headers, signal: ctl.signal });
     return consume ? await consume(res, id) : { res, id };
   } catch (error) {
     if (error && error.name === 'AbortError') throw new Error(TEXT.timeout);

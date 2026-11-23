@@ -4,13 +4,16 @@
 
 | 你想做什么 | 阅读入口 |
 | --- | --- |
+| 安装桌面客户端并开始首次对话 | [桌面客户端安装与首次使用](desktop-quickstart.md) |
 | 第一次运行桌面和管理端 | [从源码启动](getting-started.md) |
 | 配置模型接口、排查计费与协议错误 | [模型服务](model-services.md) |
+| 使用本人账号接入 CodeBuddy Code | [本机 ACP 接入](codebuddy-acp.md) |
 | 理解目录、开始修改代码 | [开发指南](development.md) |
 | 提交代码或补充翻译 | [贡献指南](contributing.zh-CN.md) |
 | 部署给团队使用 | [Docker 自托管](../ops/self-host/README.zh-CN.md) |
 | 编写插件或应用 | [插件开发协议](plugin-authoring.md) |
 | 确认首版包含什么 | [首版范围](release-scope.md) |
+| 验证 Linux 安装包签名 | [Linux 下载验签](linux-package-verification.md) |
 | 导出源码、准备公开仓库 | [源码分发](open-source.md) |
 | 报告安全问题 | [安全报告](security.zh-CN.md) |
 | 查看工程、SDK 与 OAuth 协议 | [桌面](../client/README.zh-CN.md)、[后端](../hub-backend/README.zh-CN.md)、[管理端](../hub-frontend/README.zh-CN.md)、[H5 SDK](../client/sdk/README.zh-CN.md)、[OAuth](../hub-backend/CONNECTOR_OAUTH.md) |

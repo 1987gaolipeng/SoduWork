@@ -46,6 +46,18 @@ function mergedCatalog(locale) {
     require(path.join(LOCALES, locale + '-gap-pages.js')));
 }
 
+test('Runner admission positions and long startup diagnostics translate without model-work claims', () => {
+  const status = require('../components/panels/panels-chat-status');
+  for (const [locale, expected] of [['en-US','Queued · Position 2'],['ja-JP','待機中 · 順番 2'],['ko-KR','대기 중 · 순서 2']]) {
+    loadI18n(locale);
+    assert.equal(status.work({status:'queued',execution:{queuePosition:2,running:false}}),expected);
+    const startup = status.work({status:'streaming',execution:{waitingForStart:true,
+      executionStartedAt:0,startupWaitSince:Date.now()-90001,running:false}});
+    assert.doesNotMatch(startup,/执行环境|理解|思考/);
+    assert.ok(startup.length>10,locale);
+  }
+});
+
 test('completed summaries explain missing timing in every supported non-Chinese locale', () => {
   const summary = require('../components/panels/chat-turn-summary');
   const expected = {'en-US': 'Not recorded', 'ja-JP': '未記録', 'ko-KR': '미기록'};
@@ -127,9 +139,26 @@ test('model interruption notices translate their system envelope and safe diagno
   const transient = events.statusText({ settled: true, lastStopReason: 'error', lastAssistantError: 'HTTP 503', modelRetry: { attempt: 2 } });
   const providerText = '客户原话：保存 $&';
   const unknown = events.statusText({ settled: true, lastStopReason: 'error', lastAssistantError: providerText });
-  const i18n = loadI18n('en-US');
+  loadI18n('en-US');
   const refusal = status.notice(denied), retry = status.notice(transient);
-  assert.ok(refusal.includes(i18n.translateText('model.detail.模型服务拒绝了当前凭据或模型权限')));
+  assert.match(refusal, /model request was rejected/i);
+  const toolDenied = denied.replace('模型请求被拒绝', '工具已完成，请求模型继续生成时被拒绝');
+  assert.match(status.notice(toolDenied), /tool completed.*request to continue generating was rejected/i);
+  for (const [locale, refusalText, continuationText] of [
+    ['ja-JP', 'モデルへのリクエストが拒否されました', 'ツールは完了しましたが、生成を続けるリクエストが拒否されました'],
+    ['ko-KR', '모델 요청이 거부되었습니다', '도구 실행은 완료되었지만 생성을 계속하는 요청이 거부되었습니다'],
+  ]) {
+    loadI18n(locale);
+    assert.ok(status.notice(denied).includes(refusalText), locale);
+    assert.ok(status.notice(toolDenied).includes(continuationText), locale);
+    assert.match(status.notice(toolDenied), /HTTP 403/);
+    const translatedRetry = status.notice(transient);
+    assert.match(translatedRetry, /HTTP 503/);
+    assert.match(translatedRetry, /2/);
+    assert.doesNotMatch(translatedRetry, /\{(?:reason|status|count)\}|模型服务在回答过程中|已有内容和工具结果/);
+    assert.ok(status.notice(unknown).includes(providerText));
+  }
+  loadI18n('en-US');
   assert.match(refusal, /HTTP 403/);
   assert.match(retry, /HTTP 503/);
   assert.match(retry, /Automatically retried 2 times/);
@@ -149,6 +178,26 @@ test('model interruption notices translate their system envelope and safe diagno
   loadI18n('zh-CN');
   assert.equal(status.notice(denied), denied);
   assert.equal(status.notice(transient), transient);
+});
+
+test('repair failure banners localize only catalog model diagnostics and retain unknown text', () => {
+  const status = require('../components/panels/panels-chat-status');
+  const reason = require('../main/pi-session/model-errors').describe('HTTP 403').publicText;
+  const unknown = 'Provider-specific text $&';
+  for (const [locale, expected] of [['en-US', 'The model request was rejected.'],
+    ['ja-JP', 'モデルへのリクエストが拒否されました。'], ['ko-KR', '모델 요청이 거부되었습니다.']]) {
+    loadI18n(locale);
+    for (const value of [reason, '这一轮没跑成（' + reason + '）']) {
+      assert.ok(status.notice(value).includes(expected), locale);
+      assert.match(status.notice(value), /HTTP 403/);
+      assert.doesNotMatch(status.notice(value), /这一轮没跑成|模型请求被拒绝|model\.detail/);
+    }
+    assert.equal(status.notice(unknown), unknown);
+    assert.ok(status.notice('这一轮没跑成（' + unknown + '）').includes(unknown));
+  }
+  loadI18n('zh-CN');
+  assert.equal(status.notice(reason), reason);
+  assert.equal(status.notice('这一轮没跑成（' + reason + '）'), '这一轮没跑成（' + reason + '）');
 });
 
 const EXPECT = {

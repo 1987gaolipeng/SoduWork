@@ -78,29 +78,45 @@ async def main() -> None:
     pressure = runner_main.Runner("http://127.0.0.1:9080", "", "", "pressure")
     pressure_seen = asyncio.Event()
     release_slot = asyncio.Event()
+    pressure_replies = []
+    pressure_executions = []
 
     async def accept_after_pressure(message):
         if message.get("op") == "job.dispatch":
+            pressure_executions.append(message.get("dispatchId"))
             pressure_seen.set()
 
+    async def record_pressure_reply(payload):
+        pressure_replies.append(json.loads(payload))
+
     pressure._on = accept_after_pressure
+    pressure._send_raw = record_pressure_reply
     blocker = asyncio.create_task(release_slot.wait())
     pressure._rpc_tasks.add(blocker)
     blocker.add_done_callback(pressure._rpc_tasks.discard)
     old_limit = runner_main.MAX_INFLIGHT_RPC
     runner_main.MAX_INFLIGHT_RPC = 1
     try:
-        admission = asyncio.create_task(pressure._queue_message(
-            {"op": "job.dispatch", "id": "wait-dont-reject"}, object()))
-        await asyncio.sleep(0)
-        assert not admission.done(), "conversation admission should apply backpressure"
+        message = {"op": "job.dispatch", "id": "retry-after-pressure", "dispatchId": "chat:bounded-retry"}
+        await asyncio.wait_for(pressure._queue_message(message, object()), timeout=1)
+        assert not pressure_seen.is_set(), "a rejected request must not reach business admission"
+        assert pressure_replies == [{
+            "op": "reply", "id": "retry-after-pressure", "ok": False,
+            "code": "RUNNER_BACKPRESSURE", "retryable": True, "uncertain": False,
+            "error": "执行机控制通道繁忙，本次请求未接收，请稍后重试",
+        }], pressure_replies
         release_slot.set()
-        await asyncio.wait_for(admission, timeout=1)
+        await blocker
+        await asyncio.sleep(0)
+        await pressure._queue_message(message, object())
         await asyncio.wait_for(pressure_seen.wait(), timeout=1)
+        assert pressure_executions == ["chat:bounded-retry"], pressure_executions
     finally:
         runner_main.MAX_INFLIGHT_RPC = old_limit
         release_slot.set()
         await asyncio.gather(blocker, *list(pressure._rpc_tasks), return_exceptions=True)
+        if hasattr(pressure, "_network_workers"):
+            pressure._network_workers.close()
 
     from app.services import skills as skill_service
     with tempfile.TemporaryDirectory(prefix="soduwork-skill-cache-") as local_skill:

@@ -30,10 +30,11 @@ def skill_files(project: Path) -> list[Path]:
 def runtime_resources(backend: Path) -> list[Path]:
     """Non-Python contracts embedded by the standalone Runner recipe."""
     names = ("app/agent_catalog.json", "app/services/dsh_session_storage.mjs",
+             "app/services/dsh_acp_settlement.mjs",
+             "app/services/kimi_acp_outcome.mjs",
+             "app/services/qwen_acp_outcome.mjs",
              "app/services/dsh_gateway_bundle/package.json",
-             "app/services/dsh_gateway_bundle/cordis.patch.yml",
-             "app/services/harness2_vendor/LICENSE",
-             "app/services/harness2_vendor/UPSTREAM.md")
+             "app/services/dsh_gateway_bundle/cordis.patch.yml")
     return [backend / name for name in names if (backend / name).is_file()]
 
 

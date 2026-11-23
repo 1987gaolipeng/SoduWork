@@ -284,7 +284,7 @@
           '<em>' + agents.length + ' 个 Agent / 模型组合</em></div>' + metricRows(agents, total, 'agent') + '</section>' +
       '</div>' +
       '<section class="usage-surface usage-recent"><div class="usage-surface-head"><div><span data-i18n="eyebrow.recent_activity">RECENT ACTIVITY</span><b>最近的 AI 工作</b></div>' +
-        '<em>点击任务记录查看完整链路</em></div><div class="usage-event-list">' +
+        '</div><div class="usage-event-list">' +
         recentRows(payload.recent || []) + '</div></section>' +
       '<footer class="usage-quality"><span class="usage-quality-dot' + (coverage >= 90 ? ' is-good' : '') + '"></span>' +
         '<b>数据可信度 ' + coverage + '%</b><span>已上报 ' + precise(quality.reported) +

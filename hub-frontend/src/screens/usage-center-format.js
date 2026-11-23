@@ -1,11 +1,15 @@
 import { translateText as tx, localeMap, getLocale } from '../i18n.js'
 const AGENT_NAMES = {
-  pi: 'Pi', opencode: 'OpenCode', codex: 'Codex', claude: 'Claude Code',
-  'codex-harness': 'Codex Harness', 'claude-code': 'Claude Code',
+  pi: 'Pi', opencode: 'OpenCode', codex: 'Codex',
+  // Retired runtime labels remain available for historical usage records only.
+  claude: 'Claude Code', 'claude-code': 'Claude Code', harness2: 'Google Harness²',
+  'codex-harness': 'Codex Harness',
 }
 
 export const numeric = (value) => Math.max(0, Number(value) || 0)
-export const precise = (value) => numeric(value).toLocaleString(getLocale())
+export const precise = (value) => (
+  typeof value === 'string' && /^\d+$/.test(value) ? BigInt(value) : numeric(value)
+).toLocaleString(getLocale())
 export const count = (value) => new Intl.NumberFormat(getLocale(), {
   notation: numeric(value) >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1,
 }).format(numeric(value))

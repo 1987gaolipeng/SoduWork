@@ -152,10 +152,12 @@ if (typeof electron === 'string') {
     let catalog = (await api('/api/v1/my-models')).body;
     const saved = await api('/api/v1/my-models', 'PUT', { expectedRevision: catalog.revision,
       providers: [{ id: 'custom-quota-personal', name: 'Personal fixture', kind: 'openai-compat', personal: true, baseUrl: ready.provider + '/v1' },
-        { id: 'custom-quota-keyless', name: 'Keyless fixture', kind: 'openai-compat', personal: true, authMode: 'none', baseUrl: ready.provider + '/v1' }],
-      keys: { 'custom-quota-personal': ready.personalKey },
+        { id: 'custom-quota-keyless', name: 'Keyless fixture', kind: 'openai-compat', personal: true, authMode: 'none', baseUrl: ready.provider + '/v1' },
+        { id: 'custom-quota-rotating', name: 'Rotating personal fixture', kind: 'openai-compat', personal: true, baseUrl: ready.provider + '/v1' }],
+      keys: { 'custom-quota-personal': ready.personalKey, 'custom-quota-rotating': ready.rotatingKey },
       models: [{ providerId: 'custom-quota-personal', name: 'personal-model', label: 'Personal fixture model' },
-        { providerId: 'custom-quota-keyless', name: 'keyless-model', label: 'Keyless fixture model' }] });
+        { providerId: 'custom-quota-keyless', name: 'keyless-model', label: 'Keyless fixture model' },
+        { providerId: 'custom-quota-rotating', name: 'rotating-model', label: 'Rotating personal fixture model' }] });
     assert.equal(saved.status, 200, JSON.stringify(saved.body));
     const admission = require('../main/conversation/quota-admission.cjs');
     const onQuotaExceeded = detail => {
@@ -211,7 +213,7 @@ if (typeof electron === 'string') {
     await js('openFixture()');
     const platformTicket = (await api('/api/v1/ai-proxy/config?model=platform-model&agent=pi')).body.key;
     assert.ok(platformTicket);
-    assert.equal((await send('quota fixture draft: create the first plugin draft')).ok, true);
+    assert.equal((await send('quota fixture draft: create plugin draft')).ok, true);
     await idle();
     await until(async () => (await control()).body.quota.used >= 56, 'actual usage ledger exhaustion');
     assert.match(fs.readFileSync(path.join(workspace, 'plugin-draft.txt'), 'utf8'), /QUOTA_DRAFT_MARKER/);
@@ -315,34 +317,51 @@ if (typeof electron === 'string') {
     const proxy = (ticket, name) => api('/api/v1/ai-proxy/v1/chat/completions', 'POST',
       { model: name, messages: [{ role: 'user', content: 'guard probe' }] },
       { Authorization: 'Bearer ' + ticket, 'content-type': 'application/json' });
+    const companyBefore = (await api('/api/v1/my-models')).body;
+    const callsBeforeCompanyWrite = (await control()).body.providerRequests.length;
+    const deniedOverride = await api('/api/v1/my-models', 'PUT', { expectedRevision: companyBefore.revision,
+      keys: { 'fixture-platform': ready.personalKey } });
+    assert.equal(deniedOverride.status, 403, JSON.stringify(deniedOverride.body));
+    const companyAfter = (await api('/api/v1/my-models')).body;
+    assert.equal(companyAfter.revision, companyBefore.revision);
+    assert.deepEqual(companyAfter.providers, companyBefore.providers);
+    assert.equal((await configFor('platform-model')).status, 403, 'a rejected company override cannot bypass exhausted platform quota');
+    assert.equal((await control()).body.providerRequests.length, callsBeforeCompanyWrite);
+    assert.equal((await control()).body.quota.used, before.quota.used);
+    mark('Company credential writes are rejected without changing the catalog, funding scope or exhausted platform allowance');
+
     assert.equal((await admin('/api/v1/admin/users/' + ready.userId, { tokenQuota: { mode: 'limited', limit: 10000 } })).status, 200);
-    await saveKeys({ 'fixture-platform': ready.personalKey });
+    const originalRotation = (await configFor('rotating-model')).body;
+    assert.equal(originalRotation.quotaScope, 'personal');
+    await saveKeys({ 'custom-quota-rotating': ready.rotatedKey });
     const countBeforeStale = (await control()).body.providerRequests.length;
-    assert.equal((await proxy(platformTicket, 'platform-model')).status, 409, 'old platform ticket must not silently switch to personal funding');
+    assert.equal((await proxy(originalRotation.key, 'rotating-model')).status, 409, 'a ticket issued before personal key rotation must not reach the provider');
     assert.equal((await control()).body.providerRequests.length, countBeforeStale);
-    await choose('platform-model');
+    await choose('rotating-model');
     assert.equal(await js('state.selection.model.quotaScope'), 'personal');
-    const samePersonal = (await configFor('platform-model')).body;
-    assert.equal(samePersonal.quotaScope, 'personal');
-    await send('same model name personal-key inference'); await idle();
-    await until(async () => (await control()).body.daily.some(row => row.model === 'platform-model' && row.scope === 'personal'), 'same-name personal receipt');
+    const rotatedConfig = (await configFor('rotating-model')).body;
+    assert.equal(rotatedConfig.quotaScope, 'personal');
+    await send('rotated personal-key inference'); await idle();
+    await until(async () => (await control()).body.daily.some(row => row.model === 'rotating-model' && row.scope === 'personal'), 'rotated personal receipt');
     current = (await control()).body;
-    assert.equal(current.providerRequests.at(-1).keyKind, 'personal');
+    assert.equal(current.providerRequests.at(-1).keyKind, 'personal-rotated');
     assert.equal(current.quota.used, before.quota.used);
-    await saveKeys({ 'fixture-platform': null });
+    await saveKeys({ 'custom-quota-rotating': null });
     const requestCount = (await control()).body.providerRequests.length;
-    assert.equal((await proxy(samePersonal.key, 'platform-model')).status, 409,
-      'cached personal ticket must be rejected even while organization budget remains');
+    assert.equal((await proxy(rotatedConfig.key, 'rotating-model')).status, 400,
+      'a revoked personal ticket must be rejected even while organization budget remains');
+    const revokedConfig = await configFor('rotating-model');
+    assert.ok(revokedConfig.status !== 200 || revokedConfig.body.ok !== true, 'a revoked private key cannot fall back to company credentials');
     assert.equal((await control()).body.providerRequests.length, requestCount);
-    const fallback = await configFor('platform-model');
-    assert.equal(fallback.status, 200); assert.equal(fallback.body.quotaScope, 'platform');
+    const platformConfig = await configFor('platform-model');
+    assert.equal(platformConfig.status, 200); assert.equal(platformConfig.body.quotaScope, 'platform');
     await choose('platform-model');
-    await send('same model name organization fallback after key removal'); await idle();
+    await send('explicit organization model inference after personal key removal'); await idle();
     await until(async () => (await control()).body.quota.used > before.quota.used, 'fresh organization inference billed to platform');
     current = (await control()).body;
     assert.equal(current.providerRequests.at(-1).keyKind, 'platform');
     assert.equal(current.quota.used, before.quota.used + 28);
-    mark('Same provider/model changes funding safely: old tickets reject, production catalog event refreshes SDK, removed key falls back and bills platform');
+    mark('Personal service key rotation refreshes the SDK and invalidates old tickets; revocation has no company fallback and explicit platform inference bills platform');
 
     const personalConfig = (await configFor('personal-model')).body;
     assert.ok(personalConfig.quotaUsageToken);
@@ -393,7 +412,7 @@ if (typeof electron === 'string') {
     const publicState = await js('(async()=>JSON.stringify({opened,reopened,selected,sent,published,snapshot:await quotaFixture.invoke("pi-session-snapshot",state.ref)}))()');
     assert.doesNotMatch(publicState, /quotaUsageToken/);
     assert.equal(publicState.includes(personalConfig.quotaUsageToken), false);
-    assert.equal(publicState.includes(samePersonal.quotaUsageToken), false);
+    assert.equal(publicState.includes(rotatedConfig.quotaUsageToken), false);
     mark('Real open/select/send/snapshot IPC and published session events never expose signed funding receipts');
     assert.deepEqual(await js('errors'), []);
     report.ok = true;

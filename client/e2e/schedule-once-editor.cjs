@@ -60,8 +60,37 @@ app.whenReady().then(async () => {
   assert.ok(cards[0].includes('仅一次') && !cards[0].includes('每天'));
   assert.ok(cards[1].includes('本次预约已触发') && cards[1].includes('不再自动触发'));
   report.checks.push('pending/manual history and consumed cards use authoritative once state');
+  await click('#schNew');
+  await click('[data-sch-create="manual"]');
+  await until('document.querySelector("#schEditorTitle")?.textContent === "新建自动化"');
+  assert.ok(await js('Math.abs(schWho.getBoundingClientRect().top - schModel.getBoundingClientRect().top) < 1'));
+  assert.equal(await js('document.querySelector(".sch-form").firstElementChild.textContent'), '任务说明');
+  assert.ok(await js(`schReloadAgents.getBoundingClientRect().left -
+    document.querySelector('label[for="schWho"]').getBoundingClientRect().right <= 8`));
+  await shot('create-editor');
+  await click('#schWho');
+  await until('schWho.matches(":open")');
+  assert.ok(await js(`Array.from(schWho.options).every(option => {
+    const row = option.getBoundingClientRect(), field = schWho.getBoundingClientRect();
+    return row.width > 0 && row.left >= field.left - 1 && row.right <= field.right + 1;
+  })`));
+  await shot('runtime-menu');
+  await click('#schWho option[value="local:codex"]');
+  await until('schWho.value === "local:codex" && !schWho.matches(":open")');
+  report.checks.push('runtime menu fits its field and accepts a pointer selection');
+  await js(`window.originalExecutionOptions = SoduWorkAPI.taskExecutionOptions;
+    window.refreshCount = 0;
+    SoduWorkAPI.taskExecutionOptions = (...args) => { refreshCount++; return originalExecutionOptions(...args); }; void 0;`);
+  await click('#schReloadAgents');
+  await until('refreshCount === 1 && !schReloadAgents.disabled');
+  await js('SoduWorkAPI.taskExecutionOptions = originalExecutionOptions; void 0;');
+  await click('.sch-editor-close');
+  report.checks.push('new drawer opens at the task fields and aligns the runtime and model controls');
   await edit('pending');
-  assert.equal(await js('document.getElementById("schRunAt").value'), '2099-10-15T00:30:15.123');
+  assert.equal(await js('document.getElementById("schRunAt").value'), '2099-10-15T00:30');
+  assert.ok(await js(`(()=>{const rect=id=>document.getElementById(id).getBoundingClientRect();
+    const cadence=rect('schEvery'), date=rect('schRunAt'), preview=rect('schPv');
+    return Math.abs(cadence.top-date.top)<1 && cadence.height===date.height && preview.top>=date.bottom;})()`));
   assert.equal(await js('getComputedStyle(document.getElementById("schHWrap")).display'), 'none');
   report.checks.push('editor uses saved New York zone and hides recurring clock');
   await shot('once-editor-wide');

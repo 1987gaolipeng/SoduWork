@@ -150,13 +150,18 @@ html[data-desk-panel] #mdPanel .sch-body>.md-master-detail{width:100%;max-width:
 #mdPanel .md-master-detail{min-height:0;grid-template-columns:300px minmax(0,1fr)}
 #mdPanel .cfg-master{background:color-mix(in srgb,var(--bg-1) 72%,var(--bg-2))}
 #mdPanel .cfg-master-head{padding:24px 20px 18px;border-bottom:0}
-#mdPanel .cfg-master-head>span:first-child{font:500 14.5px/1.5 var(--font-ui);letter-spacing:0;color:var(--ink-3)}
-#mdPanel .cfg-master-head strong{font-size:22px;font-weight:600;letter-spacing:-.025em}
+#mdPanel .md-master-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 8px;margin:0 0 12px;font:500 14.5px/1.5 var(--font-ui);color:var(--ink-3)}
+#mdPanel .cfg-master-head strong{font-size:22px;font-weight:600;letter-spacing:-.025em;white-space:normal;overflow-wrap:anywhere;text-wrap:balance}
 #mdPanel .cfg-master-head small{font-size:max(var(--font-min-readable, 14.5px), 12px);white-space:normal}
-#mdPanel .cfg-master-actions{padding:0 14px 12px;gap:6px}
+#mdPanel .cfg-master-actions{display:grid;grid-template-columns:minmax(0,1fr);padding:0 20px 12px}
+#mdPanel .cfg-master-search{min-width:0}
 #mdPanel .cfg-master-add,#mdPanel .md-model-add{font:550 14.5px/1.4 var(--font-ui);border:1px solid var(--line-3);border-radius:var(--r-md);background:var(--bg-0);color:var(--ink-2);padding:8px 11px;min-height:38px}
 #mdPanel .cfg-master-add:hover,#mdPanel .md-model-add:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
-#mdPanel .cfg-master-search .md-q{min-width:0;font:400 14.5px/1.5 var(--font-ui);border-radius:var(--r-md)}
+#mdPanel .md-master-toolbar .cfg-master-add{min-height:32px;max-width:100%;padding:4px 0;border:0;border-radius:var(--r-sm);background:transparent;color:var(--accent);white-space:normal;text-align:start}
+#mdPanel .md-master-toolbar .cfg-master-add:hover{text-decoration:underline;text-underline-offset:3px}
+#mdPanel .md-master-toolbar .cfg-master-add:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+#mdPanel .cfg-master-search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;color:var(--ink-3);pointer-events:none}
+#mdPanel .cfg-master-search .md-q{min-width:0;padding-left:35px;font:400 14.5px/1.5 var(--font-ui);border-radius:var(--r-sm);background:var(--bg-0);border-color:var(--line)}
 #mdPanel .cfg-nav-group{padding:10px 0}
 #mdPanel .cfg-nav-group>header{padding:0 12px 8px}
 #mdPanel .cfg-nav-item{min-height:72px;padding:12px 10px;gap:10px;border-radius:var(--r-lg)}
@@ -251,7 +256,8 @@ html[data-desk-panel] #mdPanel .sch-body>.md-master-detail{width:100%;max-width:
 #mdPanel .md-model-type{flex:none;padding:2px 6px;border-radius:999px;background:var(--bg-2);color:var(--ink-3);font:600 14.5px/1.4 var(--font-ui);font-style:normal}
 #mdPanel .md-model-type.is-image{background:var(--accent-soft);color:var(--accent)}
 #mdPanel .md-model-type.is-video{background:color-mix(in srgb,var(--s-urgent) 10%,var(--bg-1));color:var(--s-urgent)}
-#mdPanel .md-editor-danger{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:0;padding:20px 2px 4px;border:0;border-top:1px solid var(--line)}
+#mdPanel .md-editor-danger{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:20px;margin:0;padding:20px 2px 4px;border:0;border-top:1px solid var(--line)}
+#mdPanel .md-editor-danger>div{flex:1 1 14em;min-width:0}
 #mdPanel .md-editor-danger b{font-size:14.5px;color:var(--ink-2)}
 #mdPanel .md-editor-danger p{margin:6px 0 0;color:var(--ink-3);font-size:14.5px;line-height:1.5}
 #mdPanel .md-delete-service{flex:none;min-height:38px;padding:8px 14px;border:1px solid color-mix(in srgb,var(--s-urgent,var(--danger,#c83b45)) 45%,var(--line));border-radius:var(--r-md);background:transparent;color:var(--s-urgent,var(--danger,#c83b45));font:600 14.5px/1.4 var(--font-ui);cursor:pointer}

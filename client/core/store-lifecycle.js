@@ -41,14 +41,44 @@
   function cfgSyncPending() {
     try { return global.localStorage.getItem(LS_CFG_PENDING) === '1'; } catch (_) { return true; }
   }
-  const cfgSyncMark = () => { try { global.localStorage.setItem(LS_CFG_PENDING, '1'); } catch (_) {} };
-  const cfgSyncClear = () => { try { global.localStorage.removeItem(LS_CFG_PENDING); } catch (_) {} };
+  function pendingConfig(key) {
+    try {
+      const raw = key && global.localStorage.getItem(LS_CFG_PENDING + '@' + key);
+      if (raw) return JSON.parse(raw);
+    } catch (_) {}
+    return null;
+  }
+  function markConfig(key, config) {
+    try {
+      if (key) global.localStorage.setItem(LS_CFG_PENDING + '@' + key, JSON.stringify(config));
+      global.localStorage.setItem(LS_CFG_PENDING + '_scope', key);
+      global.localStorage.setItem(LS_CFG_PENDING, '1');
+    } catch (_) {}
+  }
+  function hasPendingConfig(key) {
+    try {
+      return Boolean(pendingConfig(key)) || (cfgSyncPending() &&
+        (!global.localStorage.getItem(LS_CFG_PENDING + '_scope') ||
+         global.localStorage.getItem(LS_CFG_PENDING + '_scope') === key));
+    } catch (_) { return true; }
+  }
+  function clearPendingConfig(key) {
+    try {
+      if (key) global.localStorage.removeItem(LS_CFG_PENDING + '@' + key);
+      const owner = global.localStorage.getItem(LS_CFG_PENDING + '_scope');
+      if (!owner || owner === key) {
+        global.localStorage.removeItem(LS_CFG_PENDING);
+        global.localStorage.removeItem(LS_CFG_PENDING + '_scope');
+      }
+    } catch (_) {}
+  }
   const registered = row => Boolean(row && row.ok !== false && !row.activationRequired &&
     (!row.authState || row.authState === 'active') &&
     (row.ok === true || (row.id && row.authState === 'active')));
 
   function install(store, hooks) {
     const api = () => global.SoduWorkAPI;
+    const canPoll = () => !['pending', 'quota'].includes(api()?.clientAuthSnapshot?.().state);
     const emit = (type, detail) => {
       try { global.dispatchEvent(new global.CustomEvent(type, { detail })); } catch (_) {}
     };
@@ -91,6 +121,7 @@
         hooks.render();
       },
       beginEnvironmentSwitch() {
+        clearTimeout(this._syncC); this._syncC = null;
         this._taskEpoch++; this._remoteReady = false; this._hasTaskSnapshot = false;
         this._waitingHeartbeat = false; this._hydratePromise = null; this._configPromise = null;
         this._reconnectPromise = null; this._heartbeatPromise = null; this._snapshotEvents = null; this._startupPromise = null;
@@ -124,18 +155,23 @@
       },
       saveCfg() {
         if (this._initializing) return;
-        this._cfgRevision++; global.localStorage.setItem(LS_CFG, JSON.stringify(this._cfg)); cfgSyncMark();
+        const key = scope(), epoch = this._taskEpoch;
+        this._cfgRevision++; global.localStorage.setItem(LS_CFG, JSON.stringify(this._cfg)); markConfig(key, this._cfg);
         global.WinSync?.pushCfg();
         clearTimeout(this._syncC);
-        this._syncC = setTimeout(() => { this._syncC = null; this._syncCfgToHub(); }, 400);
+        this._syncC = setTimeout(() => { this._syncC = null; if (current(epoch, key)) this._syncCfgToHub(); }, 400);
       },
       _syncCfgToHub() {
         if (!api()?.syncConfig) return;
-        const epoch = this._taskEpoch, revision = this._cfgRevision;
+        const epoch = this._taskEpoch, revision = this._cfgRevision, key = scope();
+        const pending = pendingConfig(key);
+        if (pending && JSON.stringify(pending) !== JSON.stringify(this._cfg)) return;
+        const draftAtStart = JSON.stringify(pending);
+        const sameDraft = () => JSON.stringify(pendingConfig(key)) === draftAtStart;
         const done = ok => {
-          if (epoch !== this._taskEpoch || revision !== this._cfgRevision) return;
+          if (!current(epoch, key) || revision !== this._cfgRevision) return;
           if (ok) {
-            cfgSyncClear();
+            if (sameDraft()) clearPendingConfig(key);
             if (this._cfgSyncWarned) { this._cfgSyncWarned = false; global.petSay?.('设置已同步到后台'); }
           }
           else if (!this._cfgSyncWarned) {
@@ -143,7 +179,17 @@
             global.petSay?.('设置已保存到本机；后台暂不可达，稍后自动重试');
           }
         };
-        try { Promise.resolve(api().syncConfig(stripServerOwned(Object.assign({}, this._cfg)))).then(value => done(value !== false), () => done(false)); }
+        try {
+          Promise.resolve(api().syncConfig(stripServerOwned(Object.assign({}, this._cfg)))).then(value => {
+            if (!value?.conflict) return done(value !== false);
+            if (!current(epoch, key) || revision !== this._cfgRevision || !sameDraft()) return;
+            this._applyConfigPatch(value.current);
+            value.accept(this._cfg);
+            markConfig(key, this._cfg);
+            global.petSay?.('设置已在其他窗口更新，请核对后重新保存。');
+            this._syncCfgToHub();
+          }, () => done(false));
+        }
         catch (_) { done(false); }
       },
       _applyConfigPatch(patch) {
@@ -184,7 +230,7 @@
         this._cfg.locale = locale;
         try {
           global.localStorage.setItem(LS_CFG, JSON.stringify(stripServerOwned(Object.assign({}, this._cfg))));
-          cfgSyncMark();
+          markConfig(scope(), this._cfg);
         } catch (_) {}
         global.SoduWorkI18n?.setLocale(locale, { persist: false, broadcast: false });
         return true;
@@ -192,10 +238,21 @@
       _loadConfig(revision) {
         if (this._configPromise || !api()?.getConfig) return;
         const epoch = this._taskEpoch, key = scope();
-        const job = Promise.resolve().then(() => api().getConfig()).then(apiCfg => {
+        if (hasPendingConfig(key)) {
+          const draft = pendingConfig(key);
+          if (draft) {
+            // The shared desktop preferences may have been hydrated by another signed account.
+            for (const field of Object.keys(this._cfg)) if (!(field in draft)) delete this._cfg[field];
+            Object.assign(this._cfg, stripServerOwned(draft));
+          }
+          this._syncCfgToHub();
+          return;
+        }
+        const job = Promise.resolve().then(() => api().getConfig(
+          () => current(epoch, key) && this._cfgRevision === revision && !hasPendingConfig(key))).then(apiCfg => {
           if (!current(epoch, key)) return;
           this._localLocaleIntent = localLocaleIntent();
-          if (cfgSyncPending()) this._syncCfgToHub();
+          if (hasPendingConfig(key)) this._syncCfgToHub();
           else if (this._cfgRevision === revision && apiCfg && Object.keys(apiCfg).length) {
             const previous = JSON.stringify(this._cfg);
             const incoming = stripServerOwned({ ...apiCfg });
@@ -289,6 +346,7 @@
         return job;
       },
       heartbeat() {
+        if (!canPoll()) return Promise.resolve({ online: false, authenticationRequired: true });
         if (this._heartbeatPromise) return this._heartbeatPromise;
         const epoch = this._taskEpoch, key = scope();
         const job = (async () => {
@@ -311,13 +369,14 @@
     });
 
     function connectRealtime() {
-      if (!api()?.connectWS || store._wsOff) return;
+      if (!canPoll() || !api()?.connectWS || store._wsOff) return;
       store._wsOff = api().connectWS(event => store.applyServerEvent(event));
     }
     async function startup() {
       const revision = store._cfgRevision, epoch = store._taskEpoch;
       try { await api().registerClient(); } catch (_) {}
       if (epoch !== store._taskEpoch) return { online: false, stale: true };
+      if (!canPoll()) return { online: false, authenticationRequired: true };
       const result = await store.hydrate(false, revision);
       if (result.stale) return result;
       hooks.syncBindings();
@@ -326,6 +385,22 @@
       return result;
     }
     global.addEventListener?.('soduwork-data-scope-changed', () => { store.beginEnvironmentSwitch(); hooks.scopeChanged(); });
+    function syncAuthLifecycle() {
+      if (!canPoll()) {
+        clearInterval(store._hbTimer); store._hbTimer = null;
+        if (store._wsOff) { store._wsOff(); store._wsOff = null; }
+        store._startupPromise = null;
+        return;
+      }
+      if (store._localReady) {
+        if (!store._hbTimer) store._hbTimer = setInterval(() => { void store.heartbeat(); }, 20000);
+        // Enrollment itself publishes auth state. Defer startup so its original
+        // caller can install the single-flight promise before this listener runs.
+        Promise.resolve().then(() => { if (!store._startupPromise && canPoll()) store._startupPromise = startup(); });
+      }
+    }
+    global.addEventListener?.('soduwork-device-auth', syncAuthLifecycle);
+    global.addEventListener?.('soduwork-client-auth-required', syncAuthLifecycle);
     global.addEventListener?.('soduwork-ws-open', () => {
       if (store._remoteReady && !store._waitingHeartbeat) void store.refreshTasks();
       global.MateNoticeSync?.tick(true);
@@ -336,6 +411,7 @@
     global.initData = async function initData() {
       store.initLocal(); hooks.syncBindings();
       if (!api()) return;
+      if (!canPoll()) return;
       if (!store._hbTimer) store._hbTimer = setInterval(() => { void store.heartbeat(); }, 20000);
       if (!store._startupPromise) store._startupPromise = startup();
     };

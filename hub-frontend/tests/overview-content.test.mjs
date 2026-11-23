@@ -8,7 +8,21 @@ const file = new URL('../src/screens/Overview.jsx', import.meta.url)
 const dependencies = {
   '../api.js': { api: {}, can: () => true },
   '../ui.jsx': {}, './overview.css': {}, './requirement-governance.js': governance,
+  './FirstChatChecklist.jsx': 'FirstChatChecklist',
 }
+
+test('only an identified integration administrator mounts the checklist, even if governance metrics fail', async t => {
+  for (const [allowed, id, expected] of [[true, 'admin', 1], [false, 'reader', 0], [true, '', 0]]) {
+    const host = await createComponentHarness(file, { props: { me: { id } }, dependencies: {
+      ...dependencies, '../api.js': { api: {}, can: perm => perm === 'task.view' || (allowed && perm === 'integration.manage') },
+      '../ui.jsx': { ErrorState: 'ErrorState', useAsync: () => ({ error: new Error('offline') }) },
+    } })
+    const checklists = host.nodes(n => n.type === 'FirstChatChecklist')
+    assert.equal(checklists.length, expected)
+    if (expected) assert.equal(checklists[0].key, id)
+    host.unmount()
+  }
+})
 
 test('built-in source types switch languages while external names remain verbatim', async (t) => {
   const host = await createComponentHarness(file, { exportName: 'overviewSourceLabel', dependencies })
@@ -30,7 +44,7 @@ test('built-in source types switch languages while external names remain verbati
 test('source distribution retains unusual business labels and integration status does not imply incoming work', async (t) => {
   setLocale('en-US')
   const data = {
-    clients: [], orgs: [], users: [], unassigned: [], deliveryBoard: {},
+    operationsOverview: { work: { pendingApprovals: 1 } }, clients: [], orgs: [], users: [], unassigned: [], deliveryBoard: {},
     tasks: [{ id: 'a', source: '__proto__', origin: 'external', status: 'todo' }],
     integrations: [{ id: 'empty', name: '客户集成', enabled: true, taskCount: 0 }, { id: 'received', name: 'Other', enabled: true, taskCount: 7 }, { id: 'off', name: 'Off', enabled: false, taskCount: 0 }],
   }
@@ -53,7 +67,7 @@ test('source distribution retains unusual business labels and integration status
 
 test('language changes never merge a system source with an identically named external source', async (t) => {
   const data = {
-    clients: [], orgs: [], users: [], unassigned: [], integrations: [], deliveryBoard: {},
+    operationsOverview: { work: { pendingApprovals: 1 } }, clients: [], orgs: [], users: [], unassigned: [], integrations: [], deliveryBoard: {},
     tasks: [{ id: 'cloud', origin: 'cloud-conversation', status: 'todo' },
       { id: 'ticket', origin: 'ticket', source: 'Cloud conversation', status: 'todo' },
       { id: 'ticket-2', origin: 'ticket', source: 'Cloud conversation', status: 'todo' }],
@@ -80,8 +94,9 @@ test('language changes never merge a system source with an identically named ext
 test('removed delivery gate never loads or contributes to governance risk', async (t) => {
   setLocale('zh-CN')
   let gateRequests = 0
+  let destination
   const data = {
-    clients: [], orgs: [], users: [], unassigned: [], integrations: [],
+    operationsOverview: { work: { pendingApprovals: 1 } }, clients: [], orgs: [], users: [], unassigned: [], integrations: [],
     tasks: [
       { id: 'overdue-and-failed', origin: 'local', status: 'doing', due: 1, ai: { state: 'failed' } },
       { id: 'failed-only', origin: 'local', status: 'todo', ai: { attentionRaised: true } },
@@ -92,14 +107,36 @@ test('removed delivery gate never loads or contributes to governance risk', asyn
   api.deliveryBoard = () => { gateRequests++; return { counts: { attention: 99 } } }
   const host = await createComponentHarness(file, { dependencies: {
     ...dependencies, '../api.js': { api, can: () => true },
-    '../ui.jsx': { Icon: 'svg', useAsync: read => ({ data: read(), loading: false }), AUTO: 5000 },
+    '../ui.jsx': { navTo: key => { destination = key }, Icon: 'svg', useAsync: read => ({ data: read(), loading: false }), AUTO: 5000 },
   } })
   t.after(() => { host.unmount(); setLocale('zh-CN') })
   const ledger = host.nodes(node => node.props.className === 'gov-ledger')[0]
-  const risk = ledger.props.children.find(node => node.props.label === '待处理风险')
+  const risk = ledger.props.children.find(node => node.props.label === '需求风险')
   assert.equal(risk.props.value, 2, 'overlapping overdue and execution risks count once, gates do not count')
   const list = host.nodes(node => node.props.className === 'gov-attention-list')[0]
   const rows = list.props.children.filter(Boolean)
-  assert.deepEqual(rows.map(row => [row.props.label, row.props.value]), [['逾期需求', 1], ['执行异常', 2]])
+  assert.deepEqual(rows.map(row => [row.props.label, row.props.value]), [['等待人审', 1], ['逾期需求', 1], ['执行异常', 2]])
+  const attention = host.nodes(node => node.props.className === 'gov-section gov-attention')[0]
+  assert.equal(attention.props.children[0].props.children[1].props.children, '3 项')
+  rows[0].props.children.props.onClick()
+  assert.equal(destination, 'operations')
   assert.equal(gateRequests, 0, 'overview must not depend on the removed delivery board endpoint')
+})
+
+test('task viewers without monitoring access only see issue risks', async t => {
+  setLocale('zh-CN')
+  const host = await createComponentHarness(file, { dependencies: {
+    ...dependencies,
+    '../api.js': { api: { tasks: () => [], operationsOverview: () => assert.fail('unauthorized request') },
+      can: permission => permission === 'task.view' },
+    '../ui.jsx': { Icon: 'svg', useAsync: read => {
+      const value = read()
+      return { data: value instanceof Promise ? null : value, loading: false }
+    }, AUTO: 5000 },
+  } })
+  t.after(() => { host.unmount(); setLocale('zh-CN') })
+  const attention = host.nodes(node => node.props.className === 'gov-section gov-attention')[0]
+  assert.equal(attention.props.children[0].props.children[1].props.children, '需求风险 0')
+  const list = host.nodes(node => node.props.className === 'gov-attention-list')[0]
+  assert.deepEqual(list.props.children.filter(Boolean).map(row => row.props.label), ['逾期需求', '执行异常'])
 })

@@ -39,7 +39,7 @@ function fixture(approval = {}, decide = async () => ({ok: true, request: {statu
     decideApproval: (...args) => { calls.push(args); return decide(...args); },
     getAcceptanceContext: async () => ({artifactVersionId:'fixed-v1', criteria:[{id:'c1', label:'Reviewable result'}]}),
   };
-  const context = {window: {petSay: text => notices.push(text), SoduWorkAPI: apiImpl,
+  const context = {document: {activeElement: null}, window: {petSay: text => notices.push(text), SoduWorkAPI: apiImpl,
     addEventListener: (name, handler) => { events[name] = handler; }}};
   vm.runInNewContext(source, context);
   const api = context.window.TaskTraceApproval;
@@ -149,6 +149,89 @@ test('automatic preflight uses frozen approval criteria and allows retry after c
   assert.equal(await f.api.openAcceptance({id:'task-1'}, {acceptanceMode:'auto'}), true);
   assert.equal(calls.length, 1);
   assert.equal(calls[0][2].acceptanceMode, 'auto');
+});
+
+function acceptanceCardFixture() {
+  const f = fixture({action: 'review'});
+  f.state.opts = {taskId: 'task-1'};
+  const sessionButton = mode => ({disabled: false, isConnected: true,
+    getAttribute: name => name === 'data-tfd-acceptance-session' ? mode : null,
+    closest: selector => selector === '.tfd-inline-approval' ? f.block :
+      selector === '[data-tfd-acceptance-session]' ? (mode === 'auto' ? auto : manual) : null});
+  const auto = sessionButton('auto'), manual = sessionButton('1');
+  const controls = [f.approve, f.reject, auto, manual];
+  f.block.querySelectorAll = selector => selector.includes('[data-tfd-approval-action]') ? controls : [];
+  f.root.querySelectorAll = () => [f.block];
+  f.block.getAttribute = name => name === 'data-tfd-approval-id' ? 'gate-1' :
+    name === 'data-tfd-consent' ? 'fixed-v1' : null;
+  return {...f, auto, manual};
+}
+
+test('missing automatic prerequisites disable the clicked action through rebind while manual review stays available', async () => {
+  const f = acceptanceCardFixture();
+  let reads = 0, opened = 0;
+  f.window.SoduWorkAPI.getAcceptanceContext = async () => {reads++; return {artifactVersionId:'fixed-v1', criteria:[]};};
+  f.window.openTaskConversation = async () => {opened++; return true;};
+  f.note.value = 'Keep this review note';
+  assert.equal(f.auto.disabled, false);
+  f.click(f.auto); await settle();
+  assert.match(f.error.textContent, /请切换为“手动验收”，核对交付成果后确认/);
+  assert.equal(f.error.hidden, false);
+  assert.equal(f.auto.disabled, true);
+  assert.equal(f.manual.disabled, false);
+  assert.equal(f.approve.disabled, false);
+  assert.equal(f.reject.disabled, false);
+  assert.equal(f.note.value, 'Keep this review note');
+  assert.equal(opened, 0);
+  f.api.bind(f.root, f.state);
+  f.selectMode('manual'); f.selectMode('auto');
+  assert.equal(f.auto.disabled, true);
+  f.window.SoduWorkAPI.approvalDetail = async () => ({item:{...f.item, assignment:{userId:'me', reasons:[]}}});
+  f.api.bind(f.root, f.state); await settle();
+  assert.equal(f.auto.disabled, true);
+  assert.equal(f.error.hidden, false);
+  f.click(f.auto); await settle();
+  assert.equal(reads, 1, 'Repeated clicks cannot rerun the same failed preflight');
+  f.click(f.manual); await settle();
+  assert.equal(opened, 1);
+});
+
+test('automatic review remains retryable after a temporary service or conversation error', async () => {
+  for (const failure of ['service', 'navigation']) {
+    const f = acceptanceCardFixture();
+    f.window.SoduWorkAPI.getAcceptanceContext = async () => {
+      if (failure === 'service') throw Error('Temporary service failure');
+      return {artifactVersionId:'fixed-v1', criteria:[{id:'c1', label:'Reviewable result'}]};
+    };
+    f.window.openTaskConversation = async () => false;
+    f.click(f.auto); await settle();
+    assert.equal(f.error.hidden, false);
+    assert.equal(f.auto.disabled, false, failure);
+  }
+});
+
+test('the automatic-review block follows only the same approval and fixed version through card replacement', async () => {
+  const f = acceptanceCardFixture();
+  f.window.SoduWorkAPI.getAcceptanceContext = async () => ({artifactVersionId:'fixed-v1', criteria:[]});
+  f.window.openTaskConversation = async () => true;
+  f.click(f.auto); await settle();
+  const message = f.error.textContent;
+  const replacement = (id, version) => ({dataset: {}, error: {hidden:true},
+    getAttribute: name => name === 'data-tfd-approval-id' ? id : name === 'data-tfd-consent' ? version : null,
+    querySelector(selector) {return selector === '[data-tfd-approval-error]' ? this.error : null;},
+    querySelectorAll: () => []});
+  for (const [id, version, blocked] of [['gate-1', 'fixed-v1', true], ['gate-1', 'fixed-v2', false], ['gate-2', 'fixed-v1', false]]) {
+    const block = replacement(id, version);
+    const current = {querySelectorAll: () => [f.block], replaceWith() {}};
+    const wanted = {outerHTML: 'changed-' + id + version, querySelectorAll: () => [block]};
+    f.api.patch(current, wanted);
+    assert.equal(Boolean(block.dataset.tfdAutoUnavailable), blocked);
+    if (blocked) {
+      assert.equal(block.dataset.tfdAutoUnavailable, message);
+      assert.equal(block.error.hidden, false);
+      assert.equal(block.error.textContent, message);
+    }
+  }
 });
 
 test('unavailable review context never navigates and a legacy bridge without that method still permits explicit manual review', async () => {

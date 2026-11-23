@@ -4,7 +4,9 @@ import asyncio
 import os
 import shutil
 import sys
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,7 +24,7 @@ sys.path.insert(0, BASE)
 
 from app import automation_models as am, models  # noqa: E402
 from app.db import SessionLocal, engine, init_db  # noqa: E402
-from app.services import ai_exec, plugin_evaluations, workflow_inputs  # noqa: E402
+from app.services import ai_exec, plugin_evaluations, runner_hub, workflow_inputs  # noqa: E402
 
 
 ORG = "o-smoke-plugin-evaluation"
@@ -40,6 +42,89 @@ def check(name, condition, extra=""):
     else:
         failed += 1
         print("FAIL", name, str(extra)[:500])
+
+
+async def check_runner_recovery(session, version, actor, state):
+    now = datetime.now(timezone.utc)
+    runner = SimpleNamespace(host="smoke-host")
+    online = False
+    file_available = False
+    archived = True
+    snapshot = {"ok": True, "done": True, "status": "done", "attachments": [
+        {"id": "report", "filename": "evaluation-result.md"}]}
+
+    def rpc(target, op, data, timeout):
+        nonlocal archived
+        assert target is runner and data["ref"] == run.external_ref
+        if op == "job.has":
+            archived = False
+            return {"ok": True, "data": {"has": True}}
+        if op == "job.file":
+            if not file_available:
+                return {"ok": False, "error": "Runner disconnected during transfer"}
+            return {"ok": True, "data": {"bytes": b"report", "eof": True, "size": 6, "offset": 0}}
+        assert op == "job.status"
+        if archived:
+            return {"ok": True, "data": {"ok": False, "error": "missing live session"}}
+        return {"ok": True, "data": snapshot}
+
+    async def sweep():
+        await plugin_evaluations.reconcile_once()
+        await session.refresh(run)
+
+    state["provider"] = "runner"
+    with patch.object(plugin_evaluations, "_now", side_effect=lambda: now), \
+         patch.object(runner_hub, "get", side_effect=lambda rid: runner if online and rid == "runner-smoke" else None), \
+         patch.object(runner_hub, "call_sync", side_effect=rpc):
+        run = await plugin_evaluations.start(session, version, "representative", actor)
+        await sweep()
+        assert run.state == "running" and run.result["lastProbe"]["ok"] is False
+        online = True
+        now += timedelta(seconds=30)
+        snapshot.update(done=False, status="running")
+        await sweep()
+        assert run.result["lastProbe"]["ok"] and "unavailableSince" not in run.result["lastProbe"]
+        now += timedelta(minutes=16)
+        snapshot.update(done=True, status="done")
+        await sweep()
+        assert run.state == "running" and run.result["lastProbe"]["ok"] is False
+        file_available = True
+        await sweep()
+        check("reconnected Runner delivers verified artifacts without a page refresh",
+              run.state == "completed" and run.result["contract"]["ok"] and not run.active_key)
+
+        online = False
+        run = await plugin_evaluations.start(session, version, "representative", actor)
+        await sweep()
+        now += timedelta(minutes=10)
+        await sweep()
+        assert run.state == "running"
+        now += timedelta(minutes=6)
+        await sweep()
+        assert run.state == "failed" and run.completed_at and run.error and not run.active_key
+        gate = await plugin_evaluations.publication_gate(session, version)
+        assert not gate["readyForApproval"]
+        online = True
+        new_run = await plugin_evaluations.start(session, version, "representative", actor)
+        check("persistent outage releases the case for a fresh evaluation",
+              new_run.id != run.id and new_run.external_ref != run.external_ref)
+        run = new_run
+        await sweep()
+        gate = await plugin_evaluations.publication_gate(session, version)
+        check("fresh evaluation completes and makes the version ready for review",
+              run.state == "completed" and gate["readyForApproval"])
+
+        now += timedelta(seconds=1)
+        run = await plugin_evaluations.start(session, version, "representative", actor)
+        snapshot.update(ok=False, done=True, status="failed", error="admission rejected")
+        async with SessionLocal() as slow_reader:
+            stale = await slow_reader.get(am.PluginEvaluationRun, run.id)
+            await sweep()
+            online = False
+            await plugin_evaluations.refresh(slow_reader, stale)
+            check("a stale refresh cannot overwrite an explicit terminal failure",
+                  stale.state == "failed" and stale.error == "admission rejected"
+                  and stale.result["lastProbe"]["status"] == "failed" and not stale.active_key)
 
 
 async def main():
@@ -113,7 +198,7 @@ async def main():
               any(item.get("path") == "evaluation-result.md"
                   for item in extra.get("expectedOutputs") or []))
         return {"ok": True, "issueId": "eval-ref-" + str(state["dispatches"]),
-                "provider": "local", "assigneeId": assignee["id"],
+                "provider": state.get("provider", "local"), "assigneeId": assignee["id"],
                 "assigneeName": assignee["name"], "model": "smoke-model"}
 
     def fake_status(_ctx, _ref):
@@ -195,11 +280,25 @@ async def main():
             check("contract-complete evaluation is ready for one-step release review",
                   not gate["ok"] and gate["readyForApproval"]
                   and gate["readyCount"] == 1, gate)
-            accepted = await plugin_evaluations.accept_ready_with_release_review(
+            async with SessionLocal() as competing:
+                stale = await competing.get(am.PluginEvaluationRun, run.id)
+                await competing.commit()
+                accepted = await plugin_evaluations.accept_ready_with_release_review(
+                    session, version, USER)
+                try:
+                    await plugin_evaluations.review(competing, stale, "failed", "second reviewer")
+                except ValueError:
+                    pass
+                else:
+                    check("a stale reviewer cannot replace the release verdict", False)
+                await competing.refresh(stale)
+                check("first reviewer and verdict remain final",
+                      stale.verdict == "passed" and stale.reviewed_by == USER)
+            accepted_again = await plugin_evaluations.accept_ready_with_release_review(
                 session, version, USER)
             gate = await plugin_evaluations.publication_gate(session, version)
             check("version review accepts ready evidence and opens publication gate",
-                  accepted == 1 and gate["ok"] and gate["passedCount"] == 1, gate)
+                  accepted == 1 and accepted_again == 0 and gate["ok"] and gate["passedCount"] == 1, gate)
 
             state["done"] = False
             rerun = await plugin_evaluations.start(
@@ -221,6 +320,8 @@ async def main():
             gate = await plugin_evaluations.publication_gate(session, version)
             check("human rejection has a distinct gate state",
                   not gate["ok"] and gate["cases"][0]["state"] == "review-failed", gate)
+
+            await check_runner_recovery(session, version, actor, state)
 
             no_cases = am.PluginVersion(
                 plugin_id=PLUGIN, version="1.0.1", checksum="f" * 64,

@@ -11,6 +11,8 @@ function fixture(workflow = false) {
   const handle = { ref: 'original', sessionId: 'native-original', cwd: '/fixture',
     submit: async () => { native++; return submitted(); } };
   const modules = {
+    '../requirement-diagnostics.cjs': require('../main/requirement-diagnostics.cjs'),
+    '../device-auth-request': require('../main/device-auth-request'),
     './skill-turn': require('../main/pi-session/skill-turn'),
     '../conversation/requirement-context': { assertOwner() {} },
     '../conversation/acceptance-session': { attach: async () => {}, assertTask: () => null },
@@ -21,6 +23,7 @@ function fixture(workflow = false) {
     updateWorkloads: { guard: () => ({ ok: true }) }, session: { get: () => handle },
     sendIdentityOf: async () => ({}), identityOf: async () => ({}), app: {}, memories: { assertOwner() {} },
     _cloudHandoff: { guard: () => false }, path, workDir: () => '/fixture',
+    firstTurnTitle: { prepare: () => null, accepted() {} },
     attachments: { stage: async () => ({ files: [], warnings: [] }) },
     pluginDebug: { guard: () => '', submitConversation: async () => { plugins++; return workflow ? submitted() : null; } },
     BrowserWindow: {}, _publish() {}, _uiWindow: { snapshot: () => ({}) }, _contextSnapshot: () => ({}),

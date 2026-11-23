@@ -550,5 +550,253 @@ console.log('guard verified');"""
                     local_base._RUNS.pop(ref, None)
 
 
+class NativeQuestionTests(unittest.TestCase):
+    """Kimi answers traverse the private channel without becoming permissions."""
+
+    # Reuse the isolated run fixture without inheriting the permission tests.
+    setUp = AccessPolicyTests.setUp
+    tearDown = AccessPolicyTests.tearDown
+
+    def channel_env(self, mode="standard"):
+        local_base._RUNS[self.ref]["cli"] = "kimi"
+        return AccessPolicyTests.channel_env(self, mode)
+
+    def question(self):
+        return {"sessionId": "isolated-session", "toolCall": {
+            "toolCallId": "same-question", "title": "AskUserQuestion", "kind": "other",
+            "content": [{"type": "content", "content": {
+                "type": "text", "text": "Which format should the report use?"}}]},
+            "options": [{"optionId": "q0_opt_0", "name": "PDF", "kind": "allow_once"},
+                        {"optionId": "q0_opt_1", "name": "HTML", "kind": "allow_once"}]}
+
+    def operation(self):
+        params = self.question()
+        return {"action": "native.question", "operationId": "same-question",
+                "title": "Which format should the report use?", "tool": "AskUserQuestion",
+                "options": params["options"], "allowSession": True}
+
+    def start_request(self, call):
+        results, errors = [], []
+        previous = set(self.channel.pending)
+
+        def run():
+            try:
+                results.append(call())
+            except Exception as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 3)
+        row = wait_for(lambda: next((row for key, row in self.channel.pending.copy().items()
+                                    if key not in previous), None))
+        self.assertFalse(errors, errors)
+        self.assertTrue(thread.is_alive(), "the question must wait for an explicit answer")
+        self.assertEqual(results, [])
+        return thread, results, errors, row
+
+    def finish_request(self, request, expected):
+        thread, results, errors, _row = request
+        thread.join(3)
+        self.assertFalse(thread.is_alive(), "the answer did not reach the bridge")
+        self.assertEqual(errors, [])
+        self.assertEqual(results, [expected])
+
+    def respond(self, row, decision, option_id=None, revision=1):
+        # Exercise the same RPC operation used by the desktop approval card.
+        import runner_main
+        runner = object.__new__(runner_main.Runner)
+        return asyncio.run(runner._job({"op": "job.permission", "ref": self.ref,
+            "requestId": row["requestId"], "decision": decision,
+            "policyRevision": revision, "optionId": option_id}))
+
+    def assert_no_permission_effects(self):
+        run = local_base._RUNS[self.ref]
+        self.assertFalse(self.channel.grants)
+        self.assertFalse(self.channel.denials)
+        self.assertFalse(run.get("_accessSessionGrants"))
+        self.assertFalse(run.get("_accessSessionDenials"))
+        self.assertFalse(run.get("permissionDenied"))
+
+    def test_second_answer_roundtrips_through_http_and_runner_in_every_mode(self):
+        for mode in ("standard", "full", "readonly"):
+            with self.subTest(mode=mode):
+                env = self.channel_env(mode)
+                with patch.dict(os.environ, {
+                        "SODUWORK_APPROVAL_CHANNEL": env["SODUWORK_APPROVAL_CHANNEL"]}):
+                    bridge = AcpBridge([], str(self.root), "kimi",
+                                       "readonly" if mode == "readonly" else "workspace")
+                self.addCleanup(bridge.close)
+                request = self.start_request(lambda: bridge._permission_result(self.question()))
+                row = request[-1]
+                self.assertEqual(row["action"], "native.question")
+                self.assertEqual(row["title"], "Which format should the report use?")
+                self.assertEqual(row["options"], self.question()["options"])
+                self.assertFalse(row["allowSession"])
+                status = ai_local.status_sync({}, self.ref)
+                self.assertEqual(status["pendingPermissions"][0]["options"], row["options"])
+                reply = self.respond(row, "answer", "q0_opt_1")
+                self.assertTrue(reply["ok"], reply)
+                self.assertEqual(reply["data"]["optionId"], "q0_opt_1")
+                self.finish_request(request, {
+                    "outcome": {"outcome": "selected", "optionId": "q0_opt_1"}})
+                self.assertFalse(self.respond(row, "answer", "q0_opt_0")["ok"])
+                self.assertFalse(self.channel.pending)
+                self.assertFalse(local_base._RUNS[self.ref]["permissionWaiting"])
+                self.assert_no_permission_effects()
+
+    def test_question_rejects_permission_decisions_invalid_choices_and_old_revisions(self):
+        env = self.channel_env()
+        access = acp_access.BridgeAccess(env["SODUWORK_APPROVAL_CHANNEL"], agent_name="kimi")
+        request = self.start_request(lambda: access.call("/request", self.operation()))
+        row = request[-1]
+        self.assertFalse(row["allowSession"], "callers cannot make an answer reusable")
+        for decision, option_id in (("once", "q0_opt_1"), ("session", "q0_opt_1"),
+                                    ("answer", None), ("answer", ""), ("answer", "unknown"),
+                                    ("answer", 1), ("answer", {"optionId": "q0_opt_1"})):
+            with self.subTest(decision=decision, option_id=option_id):
+                self.assertFalse(self.respond(row, decision, option_id)["ok"])
+                self.assertTrue(request[0].is_alive())
+                self.assertEqual(request[1], [])
+        for revision in (0, 2, "1", True):
+            with self.subTest(revision=revision):
+                reply = self.respond(row, "answer", "q0_opt_1", revision)
+                self.assertFalse(reply["ok"])
+                self.assertEqual(reply["code"], "PERMISSION_POLICY_CHANGED")
+        self.assertTrue(self.respond(row, "answer", "q0_opt_1")["ok"])
+        self.finish_request(request, {"decision": "answer", "optionId": "q0_opt_1"})
+        self.assert_no_permission_effects()
+
+    def test_same_named_tool_approval_stays_distinct_from_the_actual_question(self):
+        env = self.channel_env()
+        with patch.dict(os.environ, {
+                "SODUWORK_APPROVAL_CHANNEL": env["SODUWORK_APPROVAL_CHANNEL"]}):
+            bridge = AcpBridge([], str(self.root), "kimi", "workspace")
+        self.addCleanup(bridge.close)
+        gate = self.question()
+        gate["toolCall"]["rawInput"] = {"questions": [{
+            "question": "Which format should the report use?", "options": ["PDF", "HTML"]}]}
+        gate["options"] = [
+            {"optionId": "approve_once", "name": "Approve once", "kind": "allow_once"},
+            {"optionId": "approve_always", "name": "Always approve", "kind": "allow_always"},
+            {"optionId": "reject", "name": "Reject", "kind": "reject_once"}]
+        approval = self.start_request(lambda: bridge._permission_result(gate))
+        row = approval[-1]
+        self.assertEqual(row["action"], "native.tool")
+        self.assertEqual(row["title"], "AskUserQuestion")
+        self.assertTrue(row["allowSession"])
+        self.assertNotIn("options", row)
+        self.assertFalse(self.respond(row, "answer", "approve_once")["ok"])
+        self.assertTrue(self.respond(row, "session")["ok"])
+        # SoduWork owns the session grant and sends native one-time permission.
+        self.finish_request(approval, {"outcome": {"outcome": "selected", "optionId": "approve_once"}})
+        grants = set(self.channel.grants)
+        self.assertEqual(len(grants), 1)
+        question = self.start_request(lambda: bridge._permission_result(self.question()))
+        self.assertEqual(question[-1]["action"], "native.question")
+        self.assertFalse(question[-1]["allowSession"])
+        self.assertTrue(self.respond(question[-1], "answer", "q0_opt_1")["ok"])
+        self.finish_request(question, {"outcome": {"outcome": "selected", "optionId": "q0_opt_1"}})
+        self.assertEqual(self.channel.grants, grants)
+        self.assertFalse(self.channel.denials)
+        self.assertFalse(local_base._RUNS[self.ref].get("permissionDenied"))
+
+    def test_repeated_questions_need_independent_answers_after_answer_or_cancel(self):
+        env = self.channel_env()
+        access = acp_access.BridgeAccess(env["SODUWORK_APPROVAL_CHANNEL"], agent_name="kimi")
+        first = self.start_request(lambda: access.call("/request", self.operation()))
+        second = self.start_request(lambda: access.call("/request", self.operation()))
+        self.assertNotEqual(first[-1]["requestId"], second[-1]["requestId"])
+        self.assertTrue(self.respond(first[-1], "answer", "q0_opt_1")["ok"])
+        self.finish_request(first, {"decision": "answer", "optionId": "q0_opt_1"})
+        self.assertTrue(second[0].is_alive())
+        self.assertEqual(second[1], [])
+        self.assertTrue(self.respond(second[-1], "deny")["ok"])
+        self.finish_request(second, {"decision": "deny"})
+        third = self.start_request(lambda: access.call("/request", self.operation()))
+        self.assertTrue(self.respond(third[-1], "answer", "q0_opt_0")["ok"])
+        self.finish_request(third, {"decision": "answer", "optionId": "q0_opt_0"})
+        self.assert_no_permission_effects()
+
+    def test_cancel_returns_acp_cancelled_without_permission_denial(self):
+        env = self.channel_env("readonly")
+        with patch.dict(os.environ, {
+                "SODUWORK_APPROVAL_CHANNEL": env["SODUWORK_APPROVAL_CHANNEL"]}):
+            bridge = AcpBridge([], str(self.root), "kimi", "readonly")
+        self.addCleanup(bridge.close)
+        request = self.start_request(lambda: bridge._permission_result(self.question()))
+        self.assertTrue(self.respond(request[-1], "deny")["ok"])
+        self.finish_request(request, {"outcome": {"outcome": "cancelled"}})
+        self.assert_no_permission_effects()
+
+    def test_permission_change_withdraws_question_without_finishing_the_user_task(self):
+        env = self.channel_env()
+        with patch.dict(os.environ, {
+                "SODUWORK_APPROVAL_CHANNEL": env["SODUWORK_APPROVAL_CHANNEL"]}):
+            bridge = AcpBridge([], str(self.root), "kimi", "workspace")
+        self.addCleanup(bridge.close)
+        bridge.session_id = "isolated-session"
+        bridge.transition.resumable = True
+        bridge.transition.update({"sessionUpdate": "tool_call", "toolCallId": "same-question",
+                                  "status": "pending"})
+        # An answer can be withdrawn between ordinary event-loop control polls.
+        bridge.transition.next_poll = time.monotonic() + 60
+        request = self.start_request(lambda: bridge._permission_result(self.question()))
+        run = local_base._RUNS[self.ref]
+        with local_base._LOCK:
+            run["_accessTransition"] = {
+                "id": "trusted-change", "phase": "waiting",
+                "oldHash": self.policy["policyHash"], "previousPolicy": self.policy,
+                "targetPolicy": access_policy.normalize({**self.policy, "revision": 2, "mode": "full"})}
+        access_broker.wake(self.ref)
+        self.finish_request(request, {"outcome": {"outcome": "cancelled"}})
+        self.assertIn("same-question", bridge.transition.blocked)
+        update = {"sessionUpdate": "tool_call_update", "toolCallId": "same-question", "status": "failed"}
+        bridge.transition.update(update)
+        self.assertEqual(bridge.transition.result_fields(update), {
+            "state": "cancelled", "cancelReason": "access-change", "isError": False})
+        self.assertTrue(bridge.transition.complete({"stopReason": "end_turn"}))
+        self.assertEqual(run["_accessTransition"]["phase"], "ready")
+        self.assertFalse(run["_accessTransition"]["completed"],
+                         "withdrawing a question must preserve continuation of the user task")
+        self.assert_no_permission_effects()
+
+    def test_expired_or_closed_question_cancels_without_permission_denial(self):
+        self.channel_env()
+        request = self.start_request(lambda: self.channel.request(self.operation()))
+        with self.channel.condition:
+            request[-1]["expiresAt"] = time.time() - 1
+            reply = self.respond(request[-1], "answer", "q0_opt_1")
+            self.assertFalse(reply["ok"])
+            self.assertEqual(reply["code"], "PERMISSION_REQUEST_EXPIRED")
+            self.channel.condition.notify_all()
+        self.finish_request(request, {"decision": "deny"})
+        self.assert_no_permission_effects()
+        request = self.start_request(lambda: self.channel.request(self.operation()))
+        access_broker.close(self.ref)
+        self.finish_request(request, {"decision": "deny"})
+        self.assertFalse(self.respond(request[-1], "answer", "q0_opt_1")["ok"])
+        self.assert_no_permission_effects()
+
+    def test_malformed_question_choices_cannot_be_published_or_auto_answered(self):
+        self.channel_env("full")
+        valid = self.question()["options"][0]
+        for options in ([], [valid, valid], [{**valid, "optionId": 1}],
+                        [{**valid, "name": ""}], [{**valid, "kind": "allow_always"}]):
+            with self.subTest(options=options):
+                self.assertEqual(self.channel.request({**self.operation(), "options": options}),
+                                 {"decision": "deny"})
+                self.assertFalse(self.channel.pending)
+                self.assert_no_permission_effects()
+
+    def test_question_without_channel_is_cancelled_instead_of_selecting_first_answer(self):
+        with patch.dict(os.environ):
+            os.environ.pop("SODUWORK_APPROVAL_CHANNEL", None)
+            bridge = AcpBridge([], str(self.root), "kimi", "workspace")
+        self.addCleanup(bridge.close)
+        self.assertEqual(bridge._permission_result(self.question()),
+                         {"outcome": {"outcome": "cancelled"}})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -39,19 +39,12 @@ async def exercise(machine, agent, workspace, until, refs):
         expected_state = "done" if marker == "DIALOGUE_SUCCESS" else "failed"
         assert data["status"] == expected_state, (marker, data)
         if marker == "DIALOGUE_EMPTY":
-            # Harness2 has already emitted real planning progress in this turn;
-            # a missing final answer is incomplete work, not an empty execution.
-            expected_failure = "execution_incomplete" if agent == "harness2" else "execution_no_output"
+            expected_failure = "execution_no_output"
             assert data["failureKind"] == expected_failure and data["error"], data
-            if agent == "harness2":
-                current = [row for row in data["items"] if row.get("round") == data["round"]]
-                assert len([row for row in current if row.get("kind") == "usage"]) == 7, current
-                assert not any(row.get("kind") == "say" for row in current), current
         elif marker == "DIALOGUE_ERROR":
-            expected_error = {"pi": "模型调用失败，已有进度已保留；请重试或切换可用模型。",
-                              "harness2": "Google Harness² 调用模型失败"}.get(agent, "fixture provider failure")
+            expected_error = {"pi": "模型调用失败，已有进度已保留；请重试或切换可用模型。"}.get(agent, "fixture provider failure")
             assert expected_error in data["error"], data
-            if agent in {"pi", "harness2"}:
+            if agent == "pi":
                 assert "fixture provider failure" not in data["error"], "Raw provider errors must be sanitized"
         elif marker == "DIALOGUE_THINKING":
             assert data["failureKind"] == "execution_incomplete" and data["error"], data

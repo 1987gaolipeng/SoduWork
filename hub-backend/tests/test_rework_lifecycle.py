@@ -130,13 +130,58 @@ class ReworkLifecycleApi(_Base):
     async def test_manual_rejection_without_resumable_source_keeps_executor_rework_entry(self):
         async with self.sessions() as session:
             await self._fixture(session, task_id="t-manual", status="done", source_ref="")
-            await self._reject_via_api(session, task_id="t-manual", to_ai=True)
+            result, _ = await self._reject_via_api(session, task_id="t-manual", to_ai=True)
             fresh = await session.get(models.Task, "t-manual")
             self.assertEqual(fresh.status, "doing")
+            self.assertEqual(result["task"]["status"], fresh.status)
             pending = dict(fresh.work_routing or {}).get("reworkPending") or {}
             self.assertEqual(pending.get("feedback"), "驳回：缺少药材图谱")
             self.assertEqual(pending.get("state"), "awaiting_executor")
             self.assertEqual(pending.get("ref"), "")
+            resets = (await session.scalars(select(models.TaskEvent.detail).where(
+                models.TaskEvent.task_id == fresh.id, models.TaskEvent.kind == "status.reset_from_done"))).all()
+            self.assertEqual([(event["from"], event["to"]) for event in resets], [("done", "todo")])
+            audit = (await session.execute(select(models.AuditLog.detail).where(
+                models.AuditLog.target_id == fresh.id, models.AuditLog.action == "task.artifact_reject"))).scalar_one()
+            self.assertIs(result["rework"]["started"], False)
+            self.assertIs(audit["toAI"], False)
+
+    async def test_unapplied_reopen_does_not_record_a_reset(self):
+        from app.services import task_status
+        async with self.sessions() as session:
+            task = await self._fixture(session, status="done")
+            with patch.object(task_status, "engine_owns", return_value={task.id}):
+                self.assertFalse(await task_status.mark(session, task, "todo"))
+            await session.commit()
+            await session.refresh(task)
+            self.assertEqual(task.status, "done")
+            self.assertNotIn("status.reset_from_done", await self._kinds(session, task.id))
+
+    async def test_rejection_keeps_review_when_rework_cannot_enter_progress(self):
+        from app.services import task_status
+
+        mark = task_status.mark
+
+        async def decline_progress(session, task, status, **options):
+            if status == "doing":
+                return False
+            return await mark(session, task, status, **options)
+
+        async with self.sessions() as session:
+            task = await self._fixture(session, status="done")
+            note = "Please revise the delivery"
+            with patch.object(task_status, "mark", new=decline_progress):
+                result, _ = await self._reject_via_api(session, note=note)
+
+            decision = (await session.execute(select(am.ApprovalDecision).join(
+                am.ApprovalRequest, am.ApprovalRequest.id == am.ApprovalDecision.request_id
+            ).where(am.ApprovalRequest.task_id == task.id))).scalar_one()
+            self.assertEqual((decision.decision, decision.note), ("reject", note))
+            await session.refresh(task)
+            self.assertEqual(task.status, "done")
+            self.assertNotIn("status.reset_from_done", await self._kinds(session, task.id))
+            self.assertNotIn("reworkPending", task.work_routing or {})
+            self.assertFalse(result["rework"].get("waitingForExecutor"))
 
     async def test_online_runner_rejection_never_launches_or_retries_without_executor(self):
         from app.services import ai_exec, task_requirements, tasks

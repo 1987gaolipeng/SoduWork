@@ -67,7 +67,7 @@ app.whenReady().then(async () => {
     SoduWorkAPI.myModels=async()=>structuredClone(homeCatalog);
     ComposeRuntime.value=()=>homeRuntime;ComposeRuntime.location=()=>homeLocation;
     ComposeRuntime.catalog=()=>[{id:'pi',modelMode:'managed'},{id:'qwen',modelMode:'managed'},
-      {id:'codex',modelMode:'account'},{id:'claude',modelMode:'account'}];
+      {id:'codex',modelMode:'account'}];
     soduWorkAPI.conversationSession.runtimeModels=async id=>({ok:true,models:[{id:'account-'+id,label:'Account '+id}]});
     NativeChat.enter=async(...args)=>{homeSends.push(args);return false;};void 0;`);
   for (const source of ['local', 'Hub']) {
@@ -126,13 +126,13 @@ app.whenReady().then(async () => {
   assert.equal(await js('document.querySelector("#cpModelName").textContent'), '本机优先模型');
   mark('Multiple models choose local first; valid choices and Hub choices in partial catalogs are preserved; confirmed deletion selects a replacement');
 
-  for (const id of ['codex', 'claude']) {
+  for (const id of ['codex']) {
     assert.equal(await fresh(catalog(local, 'Private model', true), id), true);
     const selected = await js('ComposeModelPicker.value().modelName');
     assert.equal(selected, id === 'codex' ? 'account-codex' : '');
     assert.equal(await js('document.querySelector("#cpModelPop").innerHTML.includes(' + JSON.stringify(local) + ')'), false);
   }
-  mark('Codex and Claude keep independent account model behavior and never select the device model');
+  mark('Codex keeps independent account model behavior and never selects the device model');
   assert.equal(await fresh({ usable: [{ name: local, localOnly: true }, { name: 'cloud-hub', label: 'Cloud Hub' }] }, 'pi', 'cloud'), true);
   assert.equal(await js('ComposeModelPicker.value().modelName'), 'cloud-hub');
   assert.equal(await js('document.querySelector("#cpModelPop").innerHTML.includes(' + JSON.stringify(local) + ')'), false);

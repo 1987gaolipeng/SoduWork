@@ -13,6 +13,13 @@
 - Runner 保留 Python 依赖元数据和 wheel 内许可；Hub 保留本目录与项目 LICENSE。随附技能包含 `tools/distribution/PUBLIC-SOURCE.json` 声明的项目自有指南和已核对来源的上游开发技能。每个引入的技能保留原始许可、固定版本来源和适配记录，见[技能许可说明](../skills/THIRD-PARTY.zh-CN.md)。
 - 这些检查不是完整 SBOM、漏洞扫描或法律许可认证。
 
+## Runner 证书包
+
+独立 Runner 携带 [`certifi` 2026.10.23](https://pypi.org/project/certifi/2026.10.23/)
+提供的未修改 Mozilla CA 证书包，许可为 MPL-2.0。`runner.spec` 保留依赖原始许可及
+`cacert.pem`。macOS 的 WSS 连接在默认信任上下文中加入这份证书包，保留显式配置的
+私有 CA 和主机名校验。公开 Mac 构建同时检查隔离 TLS 握手和冻结 Runner 中的证书数据及加载模块。
+
 ## Hub 镜像中的 Python 依赖
 
 Hub 镜像构建时按 `hub-backend/requirements.txt` 用 pip 安装 Python 依赖。各依赖的原始许可文件随安装保留在镜像的 Python `site-packages` 中对应的 `*.dist-info` 目录里。

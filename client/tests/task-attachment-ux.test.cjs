@@ -43,6 +43,38 @@ test('only passive document types render inline', () => {
   ]) assert.equal(attachmentFiles.isInlinePreview(type), false, type);
 });
 
+test('native Markdown attachment preview renders Chinese punctuation bold without merging spans', () => {
+  const source = '**注意：**这里需要先登录。\n\n**步骤一：**打开设置。\n\n这是**重点（必读）**内容。\n\n' +
+    '**注意：**先登录，**步骤一：**打开设置。\n\n**结论**：对照。\n\n预算 100~200 元，工期 3~5 天。';
+  const html = attachmentFiles.renderMarkdownPreview('中文加粗.md', Buffer.from(source));
+  const expected = '<p><strong>注意：</strong>这里需要先登录。</p>\n' +
+    '<p><strong>步骤一：</strong>打开设置。</p>\n' +
+    '<p>这是<strong>重点（必读）</strong>内容。</p>\n' +
+    '<p><strong>注意：</strong>先登录，<strong>步骤一：</strong>打开设置。</p>\n' +
+    '<p><strong>结论</strong>：对照。</p>\n' +
+    '<p>预算 100~200 元，工期 3~5 天。</p>\n';
+  assert.equal(html.match(/<main data-user-content>([\s\S]*)<\/main>/)[1], expected);
+});
+
+test('native Markdown preview preserves code, escaped stars and passive document boundaries', () => {
+  const source = [
+    '`**注意：**这里`',
+    '```markdown\n这是**重点（必读）**内容。\n```',
+    String.raw`\*\*注意：\*\*这里。`,
+    '[说明](https://example.test/**path** "**注意：**这里")',
+    '[危险链接](javascript:alert)',
+    '<script>alert("**注意：**这里")</script>',
+    '![**注意：**这里](https://example.test/image.png)',
+  ].join('\n\n');
+  const html = attachmentFiles.renderMarkdownPreview('安全预览.md', Buffer.from(source));
+  assert.match(html, /<code>\*\*注意：\*\*这里<\/code>/);
+  assert.match(html, /<pre><code class="language-markdown">这是\*\*重点（必读）\*\*内容。\n<\/code><\/pre>/);
+  assert.match(html, /<p>\*\*注意：\*\*这里。<\/p>/);
+  assert.match(html, /href="https:\/\/example.test\/\*\*path\*\*" title="\*\*注意：\*\*这里" rel="noreferrer noopener">说明<\/a>/);
+  assert.doesNotMatch(html, /<(?:script|img)\b|href="javascript:|<strong>/);
+  assert.match(html, /&lt;script&gt;/);
+});
+
 test('download filenames cannot escape their selected destination', () => {
   assert.equal(attachmentFiles.safeFilename('CON.txt', 'safe.txt'), 'safe.txt');
   assert.equal(attachmentFiles.safeFilename('../../report?.docx', 'safe.txt'), 'report_.docx');

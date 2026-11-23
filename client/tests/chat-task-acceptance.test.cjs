@@ -44,13 +44,40 @@ test('返修新会话提供基于上一轮交付的修复草稿并保留精确�
   const draft = window.ChatTaskController.reworkDraft({id: 't-1', title: '修复导出页', attachments: [
     {id:'old', filename:'报告.md', role:'output', sourceRef:'conversation:old', createdAt:'2026-10-17T10:00:00Z', evidenceMeta:{round:1, verification:{state:'passed'}}},
     {id:'new', filename:'报告.md', role:'output', sourceRef:'conversation:new', createdAt:'2026-10-18T10:00:00Z', evidenceMeta:{round:1, verification:{state:'passed'}}},
+    {id:'added-brief', filename:'additional-brief.md', role:'input', createdAt:'2026-10-19T10:00:00Z'},
   ]}, '补充空状态与边界处理');
   assert.match(draft, /修复导出页/);
   assert.match(draft, /补充空状态与边界处理/);
   assert.match(draft, /附件 ID: new/);
   assert.match(draft, /交付批次: conversation:new/);
   assert.doesNotMatch(draft, /附件 ID: old/);
+  assert.doesNotMatch(draft, /附件 ID: added-brief/);
   assert.match(draft, /禁止从头重做/);
+});
+
+test('rework draft keeps undated delivery selection after a later material upload', () => {
+  const window = {};
+  vm.runInNewContext(source, {window});
+  const draft = window.ChatTaskController.reworkDraft({attachments: [
+    {id:'old', filename:'old.md', role:'output', sourceRef:'old-batch', round:2},
+    {id:'current', filename:'current.md', role:'output', sourceRef:'new-batch', round:1},
+    {id:'added-brief', filename:'additional-brief.md', role:'input'},
+  ]});
+  assert.match(draft, /附件 ID: current/);
+  assert.doesNotMatch(draft, /附件 ID: old|附件 ID: added-brief/);
+});
+
+test('rework draft retains legacy attachments without delivery version metadata', () => {
+  const window = {};
+  vm.runInNewContext(source, {window});
+  const draft = window.ChatTaskController.reworkDraft({attachments: [
+    {id:'legacy-output', filename:'result.md', role:'output', createdAt:100},
+    {id:'brief', filename:'brief.md', role:'input', createdAt:200},
+    {id:'old-rework', filename:'old-rework.md', role:'rework_input', createdAt:300},
+  ]});
+  assert.match(draft, /附件 ID: legacy-output/);
+  assert.match(draft, /附件 ID: brief/);
+  assert.doesNotMatch(draft, /附件 ID: old-rework/);
 });
 
 test('同人验收借用原执行会话时仍以验收上下文发送，不升级普通会话存储', () => {
@@ -115,6 +142,30 @@ function executionReviewFixture(bind) {
     open: (mode = 'manual',options={}) => controller._openTask(task.id, task.title, { task, source: 'acceptance',
       acceptanceExecutionSession: true, acceptanceMode: mode, approvalId: 'pending-review',...options }) };
 }
+
+test('a cached previous review cannot clear the newly opened acceptance context', async () => {
+ const f=executionReviewFixture();
+ f.ctx._collabTasks.get(f.task.id).trace={approvals:[{id:'old-review',action:'review',status:'rejected'}]};
+ let finish;
+ f.window.SoduWorkAPI.taskTrace=()=>new Promise(resolve=>finish=resolve);
+ assert.equal(await f.open('auto'),true);
+ await new Promise(setImmediate);
+ assert.equal(f.ctx._sessionOptions.acceptanceExecutionSession,true);
+ assert.equal(f.ctx._sessionOptions.approvalId,'pending-review');
+ finish({approvals:[{id:'pending-review',action:'review',status:'pending'}]});
+ await new Promise(setImmediate);
+ assert.equal(f.ctx._sessionOptions.acceptanceMode,'auto');
+});
+
+test('scoped acceptance clears only when its own approval is terminal', () => {
+ const window={}; vm.runInNewContext(source,{window});
+ const resolved=window.ChatTaskController.acceptanceResolution;
+ for (const status of ['approved','rejected','cancelled','revoked']) {
+  assert.equal(resolved({}, {approvals:[{id:'old',action:'review',status}]}, 'current'),false);
+  assert.equal(resolved({}, {approvals:[{id:'current',action:'review',status}]}, 'current'),true);
+ }
+ assert.equal(resolved({}, {approvals:[{id:'current',action:'review',status:'pending',myDecision:{decision:'approve'}}]}, 'current'),false);
+});
 
 const timeline=()=>({schemaVersion:1,revision:'revision-a',executionContextIncluded:true,rows:[
   {id:'original',kind:'requirement',at:null,text:'Original request: blue background'},

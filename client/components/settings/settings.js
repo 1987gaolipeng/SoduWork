@@ -82,7 +82,7 @@ function applyPetVisible() {
   const p = document.getElementById('pet');
   if (!p) return;                       /* Workspace windows have no desktop pet. */
   /* Visibility follows the persisted preference; no temporary override is applied. */
-  const on = cfg.petVisible !== false;
+  const on = cfg.petVisible === true;
   p.style.display = on ? '' : 'none';
   if (typeof SoduWorkPetSkin !== 'undefined') SoduWorkPetSkin.sync();
   if (typeof _syncSidebar === 'function') _syncSidebar();
@@ -96,7 +96,7 @@ function syncDeskFlagChks() {
   [['dockVisibleChk', 'dockVisible'], ['petVisibleChk', 'petVisible'],
    ['trayVisibleChk', 'trayVisible']].forEach(([id, key]) => {
     const el = document.getElementById(id);
-    if (el) el.checked = cfg[key] !== false;
+    if (el) el.checked = key === 'trayVisible' ? cfg[key] !== false : cfg[key] === true;
   });
   const note = document.getElementById('trayOffNote');
   if (note) note.style.display = cfg.trayVisible !== false ? 'none' : '';
@@ -297,17 +297,17 @@ function _bindSettingsEvents() {
   /* Persist desktop-pet visibility and broadcast it to the overlay window. */
   const pv = document.getElementById('petVisibleChk');
   if (pv) {
-    pv.checked = cfg.petVisible !== false;
+    pv.checked = cfg.petVisible === true;
     pv.addEventListener('change', () => {
       cfg.petVisible = pv.checked; saveCfg();
       applyPetVisible();
       petSay && petSay(pv.checked ? '我回来啦~' :
-        (cfg.dockVisible === false ? '藏起来了，从托盘图标能把我叫回来' : '藏起来了，竖条还在'));
+        (cfg.dockVisible !== true ? '藏起来了，从托盘图标能把我叫回来' : '藏起来了，竖条还在'));
     });
   }
   const dv = document.getElementById('dockVisibleChk');
   if (dv) {
-    dv.checked = cfg.dockVisible !== false;
+    dv.checked = cfg.dockVisible === true;
     dv.addEventListener('change', () => {
       cfg.dockVisible = dv.checked; saveCfg();
       applyDockVisible();
@@ -498,6 +498,16 @@ function _initSettings() {
   applyScale();        /* 应用保存的任务视图大小 */
   applyFontScale();    /* 字体大小是独立一档（用户定） */
   applyPetVisible();   /* 桌宠显隐（设置项） */
+  // Late saved preferences must refresh the originating renderer as well as
+  // the main-process cache; omitted widget flags retain their hidden defaults.
+  const syncVisibility = () => {
+    applyPetVisible();
+    applyDockVisible();
+    syncDeskFlagChks();
+    window.WinSync?.reportFlags?.();
+  };
+  window.addEventListener('soduwork-config-hydrated', syncVisibility);
+  window.addEventListener('soduwork-store-hydrated', syncVisibility);
   _syncSeg('scaleSeg', 'scale', cfg.uiScale || 'medium');
   _syncSeg('fontSeg', 'font', cfg.fontScale || 'medium');
   _syncLocaleSelect((cfg && cfg.locale) || (globalThis.SoduWorkI18n && SoduWorkI18n.getLocale && SoduWorkI18n.getLocale()) || 'zh-CN');

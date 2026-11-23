@@ -64,6 +64,21 @@ if (typeof electron === 'string') {
     report.layouts.push({ stage, label, ...data, value: data.value.length });
     return data;
   }
+  async function disclaimerGeometry(stage) {
+    return js(`(() => {
+      const chat = ${stage === 'chat'};
+      const panel = document.querySelector(chat ? '.nchat-main' : '.cp-task').getBoundingClientRect();
+      const disclaimer = document.querySelector(chat ? '.nchat-entry-dock>.ai-disclaimer' : '.cp-mid>.ai-disclaimer').getBoundingClientRect();
+      const composer = document.querySelector(chat ? '.nbox' : '.cp-box').getBoundingClientRect();
+      return { bottomGap: panel.bottom - disclaimer.bottom, topGap: disclaimer.top - composer.bottom, height: disclaimer.height };
+    })()`);
+  }
+  async function checkChatDisclaimer(reference) {
+    const chat = await disclaimerGeometry('chat');
+    assert.ok(Math.abs(chat.bottomGap - reference.bottomGap) < 1, 'The disclaimer keeps its new-conversation bottom inset: ' + JSON.stringify({ reference, chat }));
+    assert.ok(Math.abs(chat.topGap - chat.bottomGap) < 1, 'The disclaimer has equal space above and below');
+    assert.ok(Math.abs(chat.height - reference.height) < 1, 'Both stages use the same disclaimer line box');
+  }
   async function setText(stage, value, dispatch = true) {
     const selector = stage === 'chat' ? '#nchatInput' : '#cpInput';
     await js(`(()=>{const input=document.querySelector(${JSON.stringify(selector)});input.focus({preventScroll:true});input.value=${JSON.stringify(value)};input.setSelectionRange(input.value.length,input.value.length);${dispatch ? "input.dispatchEvent(new Event('input',{bubbles:true}));" : ''}})()`);
@@ -109,7 +124,7 @@ if (typeof electron === 'string') {
     assert.ok(Math.abs(before.top - upward.top) < 1 && upward.sendHit, 'Upward history scrolling keeps the composer anchored and usable');
     report.cases.push(label + ': native transcript scrollbar drags in both directions leave the editor and actions fixed');
   }
-  async function crowdedChat() {
+  async function crowdedChat(disclaimer) {
     await mount('chat');
     win.setContentSize(500, 500);
     await js(`(()=>{const box=document.querySelector('.nbox'),queue=document.querySelector('#nchatQueue');
@@ -118,6 +133,7 @@ if (typeof electron === 'string') {
       const plugins=document.createElement('div');plugins.dataset.fixture='true';plugins.className='nplugin-strip';plugins.innerHTML='<span class="nplugin-chip">已选插件</span>';box.prepend(plugins);
     })()`);
     await setText('chat', '完整需求\n'.repeat(100), false);
+    await checkChatDisclaimer(disclaimer);
     const g = await geometry('chat', 'crowded-narrow');
     expanded(g, '完整需求\n'.repeat(100));
     const details = await js(`(()=>{const scroll=document.querySelector('#nchatScroll'),tray=document.querySelector('[data-fixture].catt-tray');return{transcriptHeight:scroll.clientHeight,queueHeight:document.querySelector('.nqueue-items').clientHeight,attachmentHeight:tray.clientHeight,attachmentScroll:tray.scrollHeight,attachmentWidth:tray.clientWidth,attachmentScrollWidth:tray.scrollWidth}})()`);
@@ -134,8 +150,11 @@ if (typeof electron === 'string') {
     assert.ok(await js(`(()=>{const tray=document.querySelector('[data-fixture].catt-tray'),card=tray.firstElementChild;return tray.clientHeight>=card.offsetHeight&&tray.scrollHeight<=tray.clientHeight+1})()`), 'Image attachments remain fully visible beside queue and draft');
     report.cases.push('chat: complete image attachment remains visible with plugin, queue and expanded draft');
   }
-  async function exercise(stage) {
+  async function exercise(stage, reference) {
     await mount(stage);
+    const disclaimer = await disclaimerGeometry(stage);
+    if (stage === 'chat') await checkChatDisclaimer(reference);
+    else assert.ok(Math.abs(disclaimer.bottomGap - 5) < 1, 'The new-conversation disclaimer retains its existing inset');
     const initial = await geometry(stage, 'empty');
     await setText(stage, 'Short line\n'.repeat(6));
     const growing = await geometry(stage, 'growing');
@@ -178,6 +197,7 @@ if (typeof electron === 'string') {
     assert.ok(g.height <= initial.height + 1 && g.focused, 'Normal editing and input focus survive');
     assert.deepEqual(await js('errors'), []);
     report.cases.push(stage + ': clear/fold restores compact height and keeps focus for further editing');
+    return disclaimer;
   }
   fs.mkdirSync(out, { recursive: true });
   app.setPath('userData', path.join(profile, 'profile'));
@@ -188,13 +208,15 @@ if (typeof electron === 'string') {
     execution: { running: false, queue: [], turnQueue: {} } };
   app.whenReady().then(async () => {
     ipcMain.handle('pi-session-open', () => ({ ok: true, ref: 'height-fixture', sessionId: 'height-fixture', cwd: profile, snapshot: state }));
-    for (const [name, value] of Object.entries({ 'pi-session-history': { ok: true, chats: [] },
+    for (const [name, value] of Object.entries({ 'pi-session-open-application': { ok: true, handled: false },
+      'pi-session-history': { ok: true, chats: [] },
       'pi-session-outputs': { ok: true, files: [], artifacts: [] }, 'pi-session-runtimes': { ok: true, runtimes: [] },
       'pi-session-snapshot': { ok: true, snapshot: state }, 'pi-session-release': { ok: true },
       'access-preferences-get': { ok: true } })) ipcMain.handle(name, () => value);
-    await exercise('chat');
-    await exercise('compose');
-    await crowdedChat();
+    const disclaimer = await exercise('compose');
+    await exercise('chat', disclaimer);
+    await crowdedChat(disclaimer);
+    report.cases.push('chat: the disclaimer keeps the compose-stage bottom inset and equal spacing with a compact or expanded composer');
     assert.deepEqual(report.errors, []);
     report.ok = true;
   }).catch(error => { report.error = error.stack; process.exitCode = 1; }).finally(() => {

@@ -81,9 +81,9 @@ def run(output, *, dependency_overlay=None, expected_versions=None):
     children, logs = {}, []
     def launch(role):
         profile = root / (role + "-profile")
-        profile.mkdir()
+        profile.mkdir(exist_ok=True)
         env = _child_environment(root, role, overlay)
-        log = (root / (role + ".log")).open("wb")
+        log = (root / (role + ".log")).open("ab")
         logs.append(log)
         process = subprocess.Popen([sys.executable, str(FIXTURE), role, str(root)],
             cwd=root, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
@@ -151,16 +151,22 @@ def run(output, *, dependency_overlay=None, expected_versions=None):
                 "Concurrent terminal settlement duplicated output ingestion", completed["attachments"])
             wait_for(lambda: not pending_packets(), label="durable ACK clears Runner outbox")
             (root / "completed-without-client.json").write_text(json.dumps(completed), encoding="utf-8")
-            # The cold reader sees only database state; the Runner can be offline.
+            # The Hub owns the directory and settlement receipts. The original
+            # endpoint owns event bodies, even after the sending desktop exits.
             (root / "runner-stop").touch()
             assert children["runner"].wait(timeout=20) == 0
+            offline_reader = launch("offline-reader")
+            assert offline_reader.wait(timeout=60) == 0, "Offline read failed; inspect offline-reader.log"
+            (root / "runner-stop").unlink()
+            launch("runner")
+            wait_for(lambda: state()["runnerOnline"], label="original content endpoint reconnect")
             cold_reader = launch("reader")
             assert cold_reader.wait(timeout=60) == 0, "Cold reader failed; inspect reader.log"
             prompts = (workspace / ".cache/prompts.jsonl").read_text(encoding="utf-8").splitlines()
             assert len(prompts) == 1, "Transport reconnect must never launch the model twice"
         print("PASS independent observer exited; real Runner finished through WebSocket loss", flush=True)
         print("PASS events, durable ACK and verified delivery persisted without ai-status GET", flush=True)
-        print("PASS cold reader restored process and results while Runner was stopped", flush=True)
+        print("PASS cold reader found the offline receipt and read the original content after reconnect", flush=True)
     finally:
         (root / "runner-stop").touch()
         (root / "hub-stop").touch()

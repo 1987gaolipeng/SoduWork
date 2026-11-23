@@ -121,14 +121,14 @@ test('opening a stale menu refreshes once while typing and fresh reopen remain l
 });
 
 function apiFixture() {
-  let user = 'alice'; const values = new Map([['soduwork_work_hub_url', 'http://fixture.invalid']]);
+  let user = 'alice', sessionVersion = 0; const values = new Map([['soduwork_work_hub_url', 'http://fixture.invalid']]);
   const events = new Map(), notifications = [], calls = [];
   const f = { fetch: async () => new Response('{"ok":true}'), calls, notifications };
   class Event { constructor(type) { this.type = type; } }
   const g = { CustomEvent: Event, addEventListener(name, fn) { events.set(name, fn); },
     dispatchEvent(event) { notifications.push(event.type); events.get(event.type)?.(event); },
     soduWorkAPI: { deviceAuthBootstrap: async () => ({ ok: true, stored: true, clientId: 'device-1',
-      user: { id: user }, session: 'session-' + user, expiresIn: 1800 }) } };
+      user: { id: user }, session: 'session-' + user + '-' + ++sessionVersion, expiresIn: 1800 }) } };
   vm.runInNewContext(require('./renderer-source.cjs').readFileSync(path.join(__dirname, '../api.js'), 'utf8'), {
     window: g, User: { id: 'device-1' }, navigator: { platform: 'test' }, CustomEvent: Event,
     localStorage: { getItem: k => values.get(k) ?? null, setItem: (k, v) => values.set(k, String(v)), removeItem: k => values.delete(k) },
@@ -187,17 +187,37 @@ test('successful skill mutations notify mounted pickers; failed and silent refre
   assert.equal(f.notifications.filter(x => x === 'soduwork:skills-changed').length, mutations.length);
 });
 
-test('late mutation success cannot notify a different account or a later login of the same account', async () => {
+test('account changes cancel skill mutations and reject late success even after returning to the original account', async () => {
   for (const returnToA of [false, true]) for (const mutate of mutations) {
     const f = apiFixture(); await f.signIn('alice');
     let complete; f.fetch = () => new Promise(resolve => { complete = resolve; });
     const pending = mutate(f.api); await flush();
+    const rejected = assert.rejects(pending, { code: 'STALE_TASK_SCOPE' });
+    const signal = f.calls[0].options.signal;
+    assert.equal(signal.aborted, false);
     await f.signIn('bob'); if (returnToA) await f.signIn('alice');
+    assert.equal(signal.aborted, true);
     f.notifications.length = 0;
     complete(new Response('{"ok":true}'));
-    if (returnToA) await pending;
-    else await assert.rejects(pending, error => error.code === 'STALE_TASK_SCOPE');
+    await rejected;
+    assert.equal(f.calls.length, 1, 'an old mutation cannot replay under the new login');
     assert.equal(f.notifications.includes('soduwork:skills-changed'), false);
+  }
+});
+
+test('same-account session renewal preserves pending skill mutations and their single notification', async () => {
+  for (const mutate of mutations) {
+    const f = apiFixture(); await f.signIn('alice');
+    let complete; f.fetch = () => new Promise(resolve => { complete = resolve; });
+    const pending = mutate(f.api); await flush();
+    const signal = f.calls[0].options.signal;
+    await f.signIn('alice');
+    assert.equal(signal.aborted, false, 'renewing the same account must not cancel its request');
+    f.notifications.length = 0;
+    complete(new Response('{"ok":true}'));
+    assert.equal((await pending).ok, true);
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.notifications.filter(type => type === 'soduwork:skills-changed').length, 1);
   }
 });
 

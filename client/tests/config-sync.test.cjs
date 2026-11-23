@@ -10,6 +10,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8');
 const lifecycle = () => read('core', 'store-lifecycle.js');
@@ -22,15 +23,28 @@ test('store.js：定义服务端专属字段清单与剥离函数', () => {
 
 test('store：启动读入 localStorage 即剥离存量污染', () => {
   const store = read('core', 'store.js');
-  assert.match(
-    store,
-    /*
-     * Allow direct parsing or tolerant safeParseCfg, but require stripServerOwned around
-     * initial configuration.
-     */
-    /_cfg:stripServerOwned\(Object\.assign\(\{mode:'quad'[\s\S]{0,200}(?:JSON\.parse\(localStorage\.getItem\(LS_CFG\)\|\|'\{}'\)|safeParseCfg\(localStorage\.getItem\(LS_CFG\)\))\)\)/,
-    '_cfg 初始化必须过 stripServerOwned，历史污染启动即洗掉'
-  );
+  const expression = store.match(/^\s*_cfg:(.+),$/m)?.[1];
+  assert.ok(expression, 'The production configuration initializer must be present');
+  const scope = { window: {} };
+  vm.runInNewContext(lifecycle(), scope);
+  const { stripServerOwned, safeParseCfg } = scope.window.SoduWorkStoreLifecycle;
+  for (const visibility of [{}, { dockVisible: true, petVisible: true }, { dockVisible: false, petVisible: true }]) {
+    const saved = { theme: 'saved-theme', locale: 'ja-JP', userPreference: { keep: true },
+      modelProviders: [{ id: 'legacy-server-provider' }], ...visibility };
+    const persisted = JSON.stringify(saved);
+    const cfg = vm.runInNewContext(expression, { stripServerOwned, safeParseCfg,
+      LS_CFG: 'soduwork_work_cfg_v5', localStorage: { getItem(key) {
+        assert.equal(key, 'soduwork_work_cfg_v5');
+        return persisted;
+      } } });
+    assert.equal(Object.hasOwn(cfg, 'modelProviders'), false, 'Legacy server-owned data must be removed at startup');
+    assert.equal(cfg.theme, saved.theme);
+    assert.equal(cfg.locale, saved.locale);
+    assert.equal(cfg.userPreference.keep, true, 'Unrelated user preferences must survive sanitization');
+    assert.equal(cfg.dockVisible, visibility.dockVisible ?? false);
+    assert.equal(cfg.petVisible, visibility.petVisible ?? false);
+    assert.equal(JSON.stringify(saved), persisted, 'Reading configuration must not mutate the saved input');
+  }
 });
 
 test('store：hydrate 回灌合并前剥离后台下行值', () => {

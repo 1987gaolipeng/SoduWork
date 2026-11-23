@@ -231,8 +231,36 @@
   function refinePrompt(current, change) {
     return ['请根据用户补充更新这条自动化的标题、执行说明和完成标准。',
       '没有提到的内容必须保留；不要编造执行时间、Agent 或权限。',
-      '当前自动化：' + JSON.stringify({title:current.title,note:current.note,acceptance:current.acceptance || []}),
+      '用户明确修改时间时，删除或同步标题、说明和完成标准中的旧执行时间；不要把配置自动化本身作为执行任务或完成标准。',
+      '当前自动化：' + JSON.stringify({title:current.title,note:current.note,acceptance:current.acceptance || [],
+        every:current.every,runAt:current.runAt,atHour:current.atHour,atMinute:current.atMinute,timeZone:current.timeZone}),
       '用户补充：' + change].join('\n');
   }
-  global.WorkAutomationBindings = {resolve, candidates, fromContext, validate, refinePrompt, directiveText};
+  function syncRelativeTiming(value) {
+    const timing = value.relativeTiming;
+    if (!timing || timing.runAt !== value.runAt) return value;
+    const duration = '(?:[\\d零一二两三四五六七八九十百]+\\s*(?:分钟|小时|天)|半\\s*小时|一刻钟)';
+    const appointment = new RegExp('^(\\s*(?:(?:[-*]|\\d+[.、])\\s*)?(?:(?:执行|触发|运行)?时间\\s*[:：]\\s*)?(?:在\\s*)?)' + duration + '\\s*(?:之|以|过)?后');
+    const countdown = new RegExp('^(\\s*(?:(?:[-*]|\\d+[.、])\\s*)?确认)' + duration + '(?=倒计时的起始时间点)');
+    const update = text => {
+      let fence = false;
+      return String(text || '').split('\n').map(line => {
+        if (/^\s*(?:```|~~~)/.test(line)) { fence = !fence; return line; }
+        if (fence) return line;
+        const updated = line.replace(appointment, (_, prefix) => prefix + timing.minutes + '分钟后')
+          .replace(countdown, (_, prefix) => prefix + timing.minutes + '分钟');
+        return updated === line ? line : updated.replace(/自需求提出时刻起算/g, '自本次修改消息提交时刻起算');
+      }).join('\n');
+    };
+    return {...value, title:update(value.title), note:update(value.note), acceptance:(value.acceptance || []).map(update)};
+  }
+  function taskNeedsDetail(text) {
+    const content = trim(text).replace(/【自动化】[:：]?|\/自动化/g, '')
+      .replace(/(?:[零一二两三四五六七八九十\d]+\s*(?:分钟|小时)|半小时|一刻钟)(?:(?:之|以|过)?后|红)?/g, '')
+      .replace(/(?:今天|明天|后天|每天|每日)?(?:上午|下午|早上|晚上)?\s*[零一二两三四五六七八九十\d]+\s*[:：点时](?:[零一二两三四五六七八九十\d]+分?|半)?/g, '')
+      .replace(/(?:今天|明天|后天|每天|每日|执行一次|仅一次)|[\s，,。！!]/g, '');
+    return !content || /^(?:就是|是|对|没错|(?:把|将)?(?:执行时间|触发时间|时间)?(?:改为|改成|改到|设为)|(?:保存为)?(?:暂停|停用|启用)(?:状态)?)$/.test(content) ||
+      /^(?:请|麻烦)?(?:帮我|给我)?(?:做|创建|执行|安排)(?:一?个)?(?:任务|事情|事|自动化)$/.test(content);
+  }
+  global.WorkAutomationBindings = {resolve, candidates, fromContext, validate, refinePrompt, directiveText, taskNeedsDetail, syncRelativeTiming};
 })(window);

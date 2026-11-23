@@ -17,7 +17,7 @@ from test_model_runtime import IsolatedDatabase
 
 
 # All shipped managed runtimes, including Kimi, must satisfy the same gateway contract.
-AGENTS = {"pi", "opencode", "qwen", "codex-harness", "dsh", "harness2", "kimi"}
+AGENTS = {"pi", "opencode", "qwen", "codex-harness", "dsh", "kimi"}
 
 
 class MetadataTests(unittest.TestCase):
@@ -53,7 +53,7 @@ class ModelDefaultsTests(IsolatedDatabase):
             session.add_all([
                 User(id="fixture-user", username="fixture-user"),
                 Client(id="fixture", user_ref="fixture-user", auth_state="active",
-                       agent_models={"pi": "second", "qwen": "third", "harness2": "third"}),
+                       agent_models={"pi": "second", "qwen": "third", "kimi": "third"}),
                 ModelProvider(id="fixture", name="Fixture", api_key="fixture-company-private",
                               base_url="http://fixture.invalid/v1"),
                 *[ModelDef(id="fixture:" + name, provider_id="fixture", name=name)
@@ -115,7 +115,7 @@ class ModelDefaultsTests(IsolatedDatabase):
         self.assertEqual(metadata["defaultModel"], metadata["usable"][0]["name"])
         self.assertEqual(metadata["defaultModels"]["pi"], "second")
         self.assertEqual(metadata["defaultModels"]["qwen"], "third")
-        self.assertEqual(metadata["defaultModels"]["harness2"], "third")
+        self.assertEqual(metadata["defaultModels"]["kimi"], "third")
         self.assertEqual(metadata["defaultModelErrors"], {})
         self.assertEqual(set(metadata["defaultModels"]), AGENTS)
         self.assertNotIn("fixture-company-private", json.dumps(metadata))
@@ -200,8 +200,10 @@ class ModelDefaultsTests(IsolatedDatabase):
                 (await session.get(ModelDef, "fixture:" + name)).enabled = False
             client = await session.get(Client, "fixture")
             client.agent_models = {}
-            client.models = [{"providerId": "fixture", "name": "personal-chat"}]
-            client.model_keys = {"fixture": "fixture-personal-private"}
+            client.config = {**(client.config or {}), "modelProviders": [{"id": "custom-fixture", "name": "Personal",
+                "baseUrl": "https://personal.invalid/v1", "personal": True}]}
+            client.models = [{"providerId": "custom-fixture", "name": "personal-chat"}]
+            client.model_keys = {"custom-fixture": "fixture-personal-private"}
         metadata = await self.get("my-models")
         self.assertEqual(metadata["defaultModel"], "personal-chat")
         self.assertEqual(set(metadata["defaultModels"].values()), {"personal-chat"})

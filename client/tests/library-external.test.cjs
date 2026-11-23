@@ -4,6 +4,35 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+test('empty remote files open and reveal while missing or undecodable data is rejected', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'library-empty-'));
+  const handlers = {}, opened = [], revealed = [];
+  require('../main/library-external.cjs').install({
+    app: { getPath: () => root }, ipcMain: { handle: (id, fn) => { handlers[id] = fn; } },
+    BrowserWindow: { fromWebContents: () => ({ isDestroyed: () => false }) },
+    shell: { openPath: async file => { opened.push(file); return ''; }, showItemInFolder: file => revealed.push(file) }
+  });
+  const event = { sender: {} }, payload = { itemId: 'test-item-123', filename: 'empty.txt', data: '' };
+  try {
+    for (const action of ['library-open-external', 'library-reveal']) {
+      const result = await handlers[action](event, payload);
+      assert.equal(result.ok, true);
+      assert.equal(path.basename(result.path), 'empty.txt');
+      assert.equal(fs.statSync(result.path).size, 0);
+      for (const data of [undefined, null, false, 0, {}, '!!!']) {
+        await assert.rejects(handlers[action](event, { ...payload, data }));
+      }
+      const { data, ...missing } = payload;
+      await assert.rejects(handlers[action](event, missing));
+    }
+    assert.deepEqual(opened, revealed);
+    fs.writeFileSync(opened[0], 'local edits');
+    await handlers['library-open-external'](event, payload);
+    assert.equal(fs.readFileSync(opened[0], 'utf8'), 'local edits');
+    await assert.rejects(handlers['library-open-external'](event, { ...payload, filename: 'empty.exe' }));
+    assert.equal(opened.length, 2);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 test('library native handoff preserves bytes, reveals files and rejects unsafe IDs and programs', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'library-native-'));
   const handlers = {}, opened = [], revealed = [];

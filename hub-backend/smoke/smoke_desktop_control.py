@@ -14,6 +14,8 @@ from app.services import local_process
 
 class DesktopScopeTests(unittest.TestCase):
     def launch(self, ref, run, env):
+        # Dispatch and resume register an active run before entering spawn.
+        run = {'state': 'running', **run}
         captured, failures = [], []
         finished = threading.Event()
         def process(*args, **kwargs):

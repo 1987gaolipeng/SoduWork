@@ -132,7 +132,7 @@ export default {
   "代码源没有加载：": "Could not load code sources:",
   "仓库目录没有加载：": "Could not load repository catalog:",
   "分支列表暂不可用，可继续使用默认分支：": "Branch list unavailable; you can continue with the default branch:",
-  "请先接入 GitLab 代码源": "Connect a GitLab source first",
+  "请先接入代码源": "Connect a code source first",
   "请选择保存了代码账号的 SoduWork": "Select a SoduWork device with a saved code account",
   "仓库目录已同步：": "Repository catalog synced:",
   "仓库目录同步失败：": "Could not sync repository catalog:",

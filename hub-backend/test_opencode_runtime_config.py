@@ -1,4 +1,4 @@
-"""Managed OpenCode config stays separate from personal config and native data."""
+"""Managed OpenCode configuration and native state stay separate from personal data."""
 from __future__ import annotations
 
 import json
@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from app.services import acp_bridge, harness2_runtime, local_base, runner_sources
+from app.services import acp_bridge, local_base, runner_sources
 
 
 class OpenCodeRuntimeConfigTests(unittest.TestCase):
@@ -46,8 +46,13 @@ class OpenCodeRuntimeConfigTests(unittest.TestCase):
         self.assertEqual(list(expected.iterdir()), [])
         self.assertFalse(env.get("OPENCODE_CONFIG"))
         self.assertFalse(env.get("OPENCODE_CONFIG_DIR"))
-        for key in ("HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "OPENCODE_DB"):
-            self.assertEqual(env[key], self.environment[key], key)
+        self.assertEqual(env["HOME"], self.environment["HOME"])
+        base = expected.parent
+        for key, folder in (("XDG_DATA_HOME", "data"), ("XDG_STATE_HOME", "state"),
+                            ("XDG_CACHE_HOME", "cache")):
+            self.assertEqual(Path(env[key]), base / folder)
+            self.assertTrue(Path(env[key]).is_dir())
+        self.assertEqual(Path(env["OPENCODE_DB"]), base / "data" / "opencode" / "opencode.db")
         self.assertEqual(self.personal.read_bytes(), b"invalid personal config: PRIVATE-FIXTURE")
 
     def test_config_override_names_are_removed_case_insensitively(self):
@@ -60,7 +65,7 @@ class OpenCodeRuntimeConfigTests(unittest.TestCase):
         self.assertEqual(env["OPENCODE_CONFIG_CONTENT"], self.environment["OPENCODE_CONFIG_CONTENT"])
         self.assert_config(env)
 
-    def test_parent_environment_ignores_personal_config_and_keeps_native_state(self):
+    def test_parent_environment_isolates_personal_config_and_native_state(self):
         cfg = {"llm": {"base": "http://127.0.0.1/v1", "key": "fixture", "model": "fixture"},
                "runtimeSecrets": {"XDG_CONFIG_HOME": "FIXTURE_CONFIG_OVERRIDE"}}
         with patch.dict(os.environ, {**self.environment,
@@ -69,6 +74,225 @@ class OpenCodeRuntimeConfigTests(unittest.TestCase):
         self.assert_config(env)
         self.assertEqual(json.loads(env["OPENCODE_CONFIG_CONTENT"])["model"], "company/fixture")
         self.assertNotIn("agent", json.loads(env["OPENCODE_CONFIG_CONTENT"]))
+
+    def test_repeated_preparation_keeps_one_database_and_legacy_source(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        env = dict(self.environment)
+        prepare_environment(env, str(self.root / "runner"))
+        prepared = dict(env)
+        # Simulate the ACP subprocess after the parent replaced its XDG paths.
+        with patch.dict(os.environ, env, clear=True):
+            prepare_environment(env)
+        self.assertEqual(env, prepared)
+        self.assertEqual(env["SODUWORK_OPENCODE_LEGACY_DB"], self.environment["OPENCODE_DB"])
+
+    def test_legacy_default_and_case_insensitive_overrides_are_isolated(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        env = dict(self.environment)
+        del env["OPENCODE_DB"]
+        prepare_environment(env, str(self.root / "runner"))
+        self.assertEqual(Path(env["SODUWORK_OPENCODE_LEGACY_DB"]),
+                         Path(self.environment["XDG_DATA_HOME"]) / "opencode" / "opencode.db")
+        env = {**self.environment, "Opencode_Db": str(self.root / "override.db"),
+               "xdg_data_home": str(self.root / "override-data")}
+        prepare_environment(env, str(self.root / "runner"))
+        self.assertNotIn("Opencode_Db", env)
+        self.assertNotIn("xdg_data_home", env)
+        self.assertEqual(env["SODUWORK_OPENCODE_LEGACY_DB"], str(self.root / "override.db"))
+        self.assert_config(env)
+
+    def test_equivalent_private_path_does_not_become_its_own_legacy_source(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        env = dict(self.environment)
+        prepare_environment(env, str(self.root / "runner"))
+        private = Path(env["OPENCODE_DB"])
+        alternate = str(private.parent / ".." / "opencode" / private.name)
+        env["OPENCODE_DB"] = alternate.replace("\\", "/").upper() if os.name == "nt" else alternate
+        prepare_environment(env, str(self.root / "runner"))
+        self.assertEqual(env["SODUWORK_OPENCODE_LEGACY_DB"], self.environment["OPENCODE_DB"])
+        self.assertEqual(env["OPENCODE_DB"], str(private))
+
+    def test_managed_directory_links_cannot_redirect_into_personal_state(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        for folder in ("config", "data", "state", "cache", "config/opencode", "data/opencode",
+                       "state/opencode", "cache/opencode", ""):
+            with self.subTest(folder=folder or "agent root"):
+                runner = self.root / ("runner-" + folder.replace("/", "-") + "-links")
+                target = self.root / ("personal-" + folder.replace("/", "-") + "-state")
+                target.mkdir()
+                sentinel = target / "personal-marker"
+                sentinel.write_bytes(b"original-personal-state")
+                link = runner / "agents" / "opencode" / folder
+                link.parent.mkdir(parents=True)
+                link.symlink_to(target, target_is_directory=True)
+                env = dict(self.environment)
+                with self.assertRaisesRegex(OSError, "OpenCode") as caught:
+                    prepare_environment(env, str(runner))
+                self.assertNotIn(str(self.root), str(caught.exception))
+                self.assertEqual(list(target.iterdir()), [sentinel])
+                self.assertEqual(sentinel.read_bytes(), b"original-personal-state")
+                self.assertEqual(env, self.environment, "Rejected paths cannot become the next prepared environment")
+
+    def test_new_session_database_links_cannot_open_personal_history(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        source = Path(self.environment["OPENCODE_DB"])
+        source.write_bytes(b"original-personal-database")
+        for kind in ("symbolic", "hard"):
+            with self.subTest(kind=kind):
+                runner = self.root / ("runner-" + kind)
+                database = runner / "agents/opencode/data/opencode/opencode.db"
+                database.parent.mkdir(parents=True)
+                if kind == "symbolic":
+                    database.symlink_to(source)
+                else:
+                    os.link(source, database)
+                env = dict(self.environment)
+                with self.assertRaisesRegex(OSError, "OpenCode") as caught:
+                    prepare_environment(env, str(runner))
+                self.assertNotIn(str(self.root), str(caught.exception))
+                self.assertEqual(source.read_bytes(), b"original-personal-database")
+                self.assertEqual(env, self.environment)
+
+    def test_unknown_hard_link_target_is_rejected_even_without_a_legacy_override(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        source = self.root / "other-personal.db"
+        source.write_bytes(b"original-personal-database")
+        database = self.root / "runner/agents/opencode/data/opencode/opencode.db"
+        database.parent.mkdir(parents=True)
+        os.link(source, database)
+        env = dict(self.environment)
+        del env["OPENCODE_DB"]
+        with self.assertRaisesRegex(OSError, "OpenCode"):
+            prepare_environment(env, str(self.root / "runner"))
+        self.assertEqual(source.read_bytes(), b"original-personal-database")
+
+    def test_known_sqlite_destination_links_cannot_modify_personal_files(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        for database in ("opencode.db", "opencode.db.soduwork-migrate-lock"):
+            for suffix in ("", "-wal", "-shm", "-journal"):
+                for kind in ("symbolic", "hard"):
+                    with self.subTest(database=database, suffix=suffix, kind=kind):
+                        name = database + suffix + "-" + kind
+                        runner = self.root / ("runner-" + name)
+                        source = self.root / ("personal-" + name)
+                        source.write_bytes(b"original-personal-sqlite-file")
+                        destination = runner / "agents/opencode/data/opencode" / (database + suffix)
+                        destination.parent.mkdir(parents=True)
+                        if kind == "symbolic":
+                            destination.symlink_to(source)
+                        else:
+                            os.link(source, destination)
+                        env = dict(self.environment)
+                        with self.assertRaisesRegex(OSError, "OpenCode") as failure:
+                            prepare_environment(env, str(runner))
+                        self.assertNotIn(str(self.root), str(failure.exception))
+                        self.assertEqual(source.read_bytes(), b"original-personal-sqlite-file")
+                        self.assertEqual(env, self.environment)
+
+    def test_known_sqlite_destination_directories_are_rejected(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        for database in ("opencode.db", "opencode.db.soduwork-migrate-lock"):
+            for suffix in ("", "-wal", "-shm", "-journal"):
+                with self.subTest(database=database, suffix=suffix):
+                    runner = self.root / ("runner-directory-" + database + suffix)
+                    destination = runner / "agents/opencode/data/opencode" / (database + suffix)
+                    destination.mkdir(parents=True)
+                    env = dict(self.environment)
+                    with self.assertRaisesRegex(OSError, "OpenCode"):
+                        prepare_environment(env, str(runner))
+                    self.assertEqual(env, self.environment)
+
+    def test_regular_sqlite_destinations_remain_unchanged_during_environment_preparation(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        runner = self.root / "runner-regular-databases"
+        folder = runner / "agents/opencode/data/opencode"
+        folder.mkdir(parents=True)
+        files = []
+        for database in ("opencode.db", "opencode.db.soduwork-migrate-lock"):
+            for suffix in ("", "-wal", "-shm", "-journal"):
+                destination = folder / (database + suffix)
+                destination.write_bytes(b"regular-private-sqlite-file")
+                files.append(destination)
+        env = dict(self.environment)
+        prepare_environment(env, str(runner))
+        expected = dict(env)
+        prepare_environment(env)
+        self.assertEqual(env, expected)
+        for path in files:
+            self.assertEqual(path.read_bytes(), b"regular-private-sqlite-file")
+
+    def test_canonical_history_and_lock_paths_cannot_hide_companion_hard_links(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        for suffix in ("-wal", "-shm", "-journal", ".soduwork-migrate-lock",
+                       ".soduwork-migrate-lock-wal", ".soduwork-migrate-lock-shm",
+                       ".soduwork-migrate-lock-journal"):
+            with self.subTest(suffix=suffix):
+                runner = self.root / ("runner-canonical-history" + suffix)
+                database = runner / "agents/opencode/data/opencode/opencode.db"
+                database.parent.mkdir(parents=True)
+                actual = database.with_name("actual-native.db")
+                actual.write_bytes(b"private-history-fixture")
+                database.symlink_to(actual)
+                source = self.root / ("external-canonical-history" + suffix)
+                source.write_bytes(b"original-personal-sqlite-file")
+                os.link(source, actual.with_name(actual.name + suffix))
+                env = dict(self.environment)
+                with self.assertRaisesRegex(OSError, "OpenCode"):
+                    prepare_environment(env, str(runner))
+                self.assertEqual(source.read_bytes(), b"original-personal-sqlite-file")
+                self.assertEqual(env, self.environment)
+
+    def test_canonical_migration_lock_cannot_hide_companion_hard_links(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        for suffix in ("-wal", "-shm", "-journal"):
+            with self.subTest(suffix=suffix):
+                runner = self.root / ("runner-canonical-lock" + suffix)
+                database = runner / "agents/opencode/data/opencode/opencode.db"
+                database.parent.mkdir(parents=True)
+                actual = database.with_name("actual-lock.db")
+                actual.write_bytes(b"private-lock-fixture")
+                database.with_name(database.name + ".soduwork-migrate-lock").symlink_to(actual)
+                source = self.root / ("external-canonical-lock" + suffix)
+                source.write_bytes(b"original-personal-sqlite-file")
+                os.link(source, actual.with_name(actual.name + suffix))
+                env = dict(self.environment)
+                with self.assertRaisesRegex(OSError, "OpenCode"):
+                    prepare_environment(env, str(runner))
+                self.assertEqual(source.read_bytes(), b"original-personal-sqlite-file")
+                self.assertEqual(env, self.environment)
+
+    def test_internal_database_aliases_preserve_environment_idempotency(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        runner = self.root / "runner-database-aliases"
+        database = runner / "agents/opencode/data/opencode/opencode.db"
+        database.parent.mkdir(parents=True)
+        for path in (database, database.with_name(database.name + ".soduwork-migrate-lock")):
+            actual = path.with_name("actual-" + path.name)
+            actual.write_bytes(b"private-database-fixture")
+            path.symlink_to(actual)
+        env = dict(self.environment)
+        prepare_environment(env, str(runner))
+        expected = dict(env)
+        prepare_environment(env)
+        self.assertEqual(env, expected)
+
+    def test_runner_root_alias_and_internal_directory_alias_preserve_idempotency(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        actual = self.root / "actual-runner"
+        base = actual / "agents/opencode"
+        destination = base / "private-data"
+        destination.mkdir(parents=True)
+        (base / "data").symlink_to(destination, target_is_directory=True)
+        runner = self.root / "runner"
+        runner.symlink_to(actual, target_is_directory=True)
+        env = dict(self.environment)
+        prepare_environment(env, str(runner))
+        original = dict(env)
+        with patch.dict(os.environ, env, clear=True):
+            prepare_environment(env)
+        self.assertEqual(env, original)
+        self.assert_config(env)
+        self.assertEqual(Path(env["OPENCODE_DB"]).resolve(), destination / "opencode/opencode.db")
 
     def child_environment(self, agent, *, guarded=False):
         keys = [*self.environment]
@@ -110,79 +334,8 @@ class OpenCodeRuntimeConfigTests(unittest.TestCase):
                 self.assertEqual(env["OPENCODE_CONFIG_CONTENT"], self.environment["OPENCODE_CONFIG_CONTENT"])
                 self.assertFalse((self.root / "runner").exists())
 
-    def test_harness_uses_native_config_without_accepting_injected_lifecycle_root(self):
-        cfg = {"llm": {"base": "http://127.0.0.1/v1", "key": "fixture", "model": "fixture"}}
-        injected = {**self.environment, "SODUWORK_DATA_ROOT": str(self.root / "untrusted")}
-        with (patch.dict(os.environ, self.environment),
-              patch.object(local_base, "_env_for", side_effect=AssertionError("No nested agent environment")),
-              patch.object(local_base, "_opencode_bin", side_effect=AssertionError("No OpenCode lookup"))):
-            env = harness2_runtime.environment(injected, cfg)
-        self.assertEqual(env["SODUWORK_DATA_ROOT"], self.environment["SODUWORK_DATA_ROOT"])
-        self.assertEqual(json.loads(env[harness2_runtime.MODEL_ENV]), cfg["llm"])
-        self.assertFalse(any(key.startswith("OPENCODE_") for key in env))
-        self.assertEqual(env["XDG_CONFIG_HOME"], self.environment["XDG_CONFIG_HOME"])
-        self.assertFalse((self.root / "runner" / "agents" / "opencode").exists())
-        self.assertEqual(self.personal.read_bytes(), b"invalid personal config: PRIVATE-FIXTURE")
 
-    def test_harness_identity_is_private_and_native_environment_is_idempotent(self):
-        from copy import deepcopy
-        config = {
-            "model": "company/private-route",
-            "provider": {"company": {"options": {"apiKey": "{env:SODUWORK_LLM_KEY}"}}},
-            "permission": {"edit": "deny", "webfetch": "ask"},
-            "plugin": ["file:///fixture/policy.mjs"],
-            "agent": {"build": {"temperature": 0.2}, "review": {"prompt": "Review only."}},
-        }
-        original = deepcopy(config)
-        env = {**self.environment, "OPENCODE_CONFIG_CONTENT": json.dumps(config)}
-        with patch.object(local_base, "_data_root", return_value=str(self.root / "runner")):
-            harness2_runtime.prepare_executor_config(env)
-            first = dict(env)
-            harness2_runtime.prepare_executor_config(env)
-        self.assertEqual(env, first)
-        self.assertEqual(config, original)
-        self.assertFalse(any(key.startswith("OPENCODE_") for key in env))
-        self.assertEqual(env["SODUWORK_DATA_ROOT"], str(self.root / "runner"))
-        identity = harness2_runtime.EXECUTOR_PROMPT
-        self.assertIn("Google Harness²", identity)
-        self.assertIn("not a foundation-model identity", identity)
-        self.assertIn("internal model", identity)
-        self.assertIn("No other agent CLI executes this turn", identity)
-        self.assertNotIn("private-route", identity)
-        self.assertNotIn("apiKey", identity)
-        self.assertEqual(self.personal.read_bytes(), b"invalid personal config: PRIVATE-FIXTURE")
-        self.assertNotIn("agent", json.loads(self.environment["OPENCODE_CONFIG_CONTENT"]))
 
-    def test_harness_native_executor_preserves_model_scope_and_private_configuration(self):
-        from copy import deepcopy
-        config = {"llm": {"base": "http://127.0.0.1/v1", "key": "fixture",
-                          "model": "company/private-route"}, "networkAllowed": False}
-        original = deepcopy(config)
-        inherited = {**self.environment, harness2_runtime.EXECUTOR_ENV: "untrusted-cli"}
-        with (patch.dict(os.environ, self.environment),
-              patch.object(local_base, "_data_root", return_value=str(self.root / "runner")),
-              patch.object(local_base, "_store_dir", return_value=str(self.root / "session"))):
-            env = harness2_runtime.environment(inherited, config, runtime_ref="native-session")
-            repeated = harness2_runtime.environment(env, config, runtime_ref="native-session")
-        self.assertEqual(env, repeated)
-        self.assertEqual(config, original)
-        self.assertEqual(json.loads(env[harness2_runtime.MODEL_ENV]), config["llm"])
-        self.assertEqual(env[harness2_runtime.ROOT_ENV], str(self.root / "session" / "harness2"))
-        self.assertEqual(env[harness2_runtime.NETWORK_ENV], "0")
-        self.assertNotIn(harness2_runtime.EXECUTOR_ENV, env)
-        self.assertFalse(any(key.startswith("OPENCODE_") for key in env))
-        self.assertEqual(env["XDG_CONFIG_HOME"], self.environment["XDG_CONFIG_HOME"])
-        self.assertEqual(env["SODUWORK_DATA_ROOT"], str(self.root / "runner"))
-        self.assertEqual(inherited[harness2_runtime.EXECUTOR_ENV], "untrusted-cli")
-        self.assertEqual(self.personal.read_bytes(), b"invalid personal config: PRIVATE-FIXTURE")
-        identity = harness2_runtime.EXECUTOR_PROMPT
-        self.assertIn("Google Harness²", identity)
-        self.assertIn("not a foundation-model identity", identity)
-        self.assertIn("internal model", identity)
-        self.assertIn("No other agent CLI executes this turn", identity)
-        self.assertNotIn("private-route", identity)
-        self.assertNotIn("apiKey", identity)
-        self.assertNotIn("agent", json.loads(self.environment["OPENCODE_CONFIG_CONTENT"]))
 
     def test_source_bridge_redacts_opencode_invalid_config_diagnostic(self):
         diagnostic = "ConfigJsonError: EndOfFileExpected PRIVATE-FIXTURE apiKey=fixture-secret"

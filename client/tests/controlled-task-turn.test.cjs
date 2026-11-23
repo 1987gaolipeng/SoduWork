@@ -64,7 +64,7 @@ test('controlled Runner compares execution ref, not the database record id', asy
 });
 
 test('controlled dispatch retains the selected engine and attributes replayed output to the actual Hub receipt', async () => {
-  for (const engine of ['opencode', 'kimi', 'harness2']) {
+  for (const engine of ['opencode', 'kimi']) {
     const messages = [], calls = []; let page = 0;
     const adapter = create({ task: { id: 'assigned' },
       spec: { mode: 'dispatch', context: {}, agentId: 'runner:device:' + engine }, scope: {}, wait: async () => {},
@@ -165,6 +165,16 @@ test('assigned task model failures retain safe actionable diagnostics without re
     assert.equal(calls[0].body.assigneeId, 'runner:executor:pi');
     assert.equal(calls[0].body.model, 'unavailable-model');
   }
+});
+
+test('a remote 403 receipt with no request phase reports only the refusal', async () => {
+  const messages = [];
+  const adapter = create({ task: { id: 'assigned-task' }, spec: { mode: 'dispatch', context: {} }, scope: {},
+    request: async (_, body) => body ? { ref: 'assigned-run' } : { ref: 'assigned-run', status: 'failed',
+      error: '403 synthetic-prompt https://private.invalid Bearer synthetic-key', items: [] } });
+  const result = await adapter.execute({ appendTaskMessage: (...args) => messages.push(args), taskExecutionChanged() {} }, 'task', []);
+  assert.equal(result.reason, '模型请求被拒绝（HTTP 403）');
+  assert.equal(messages.at(-1)[1], result.reason);
 });
 
 test('failed task drains all output and retains its actual answer before surfacing the error', async () => {

@@ -217,7 +217,13 @@
     if (payload.source === 'rework' && task.canContinueExecution !== true) {
       throw new Error('只有执行人可以继续修正这条需求');
     }
-    if (task.canViewExecution === false) {
+    const reviewOnly = task.canViewExecution === false && task.canReview === true &&
+      payload.source === 'acceptance' && payload.acceptanceSession === true &&
+      !payload.reuseExecutionSession && !payload.acceptanceExecutionSession && text(payload.approvalId);
+    if (reviewOnly) {
+      // Resolve only an archive bound to this review below. Never reuse an execution chat ID.
+      payload.chatId = '';
+    } else if (task.canViewExecution === false) {
       if (global.RequirementsDetail && global.__deskPanel === 'workspace') return global.RequirementsDetail.open(id);
       return global.soduWorkAPI?.openDeskWindow?.({panel: 'workspace', view: 'history', requirementId: id}) || false;
     }
@@ -325,16 +331,20 @@
   function open(taskId, title, options) {
     const id = text(taskId);
     if (!id) return Promise.resolve(false);
-    if (pending.has(id)) return pending.get(id);
+    // Only identical navigation intents share a lookup. A review click must
+    // supersede an ordinary open of the same task, just as another task does.
+    const opts = options || {};
+    const key = JSON.stringify([id, title || '', Object.keys(opts).sort().map(name => [name, opts[name]])]);
+    if (pending.has(key)) return pending.get(key);
     const seq = ++generation;
     // A different navigation supersedes earlier lookups. Keeping their entries
     // would swallow A → B → A: the last click would reuse A's cancelled request.
     pending.clear();
-    const work = navigate(id, title, options || {}, seq).catch(() => {
+    const work = navigate(id, title, opts, seq).catch(() => {
       if (seq === generation && typeof global.petSay === 'function') global.petSay('会话暂时无法打开，请重试。需求和历史内容已保留。');
       return false;
-    }).finally(() => { if (pending.get(id) === work) pending.delete(id); });
-    pending.set(id, work);
+    }).finally(() => { if (pending.get(key) === work) pending.delete(key); });
+    pending.set(key, work);
     return work;
   }
   global.TaskConversationNavigation = {resolve, open, preferredConversation, forgetAcceptance(taskId, approvalId) {

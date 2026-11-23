@@ -216,7 +216,7 @@ test('Codex Harness queues follow-ups FIFO, keeps transcript order and supports 
     assert.equal(commented.payload.cfg.local_cli, 'codex-harness');
     assert.deepEqual(commented.payload.cfg.llm, {
       base: 'http://model.invalid', key: 'secret', model: 'fixture-coding-large-model',
-      maxOutputTokens: 65536,
+      maxOutputTokens: 16384,
       input: ['text', 'image'], imageRouting: 'native',
       contextWindow: 128000, contextWindowKnown: true,
       contextWindowEstimated: true, contextWindowSource: 'safe-default',
@@ -285,10 +285,14 @@ test('Runner admission queue is tracked as live work until resources start the A
     const sent = session.send({ text: '即使忙也要先接住' });
     await until(() => session.snapshot().status === 'queued');
     const queued = session.snapshot();
-    assert.equal(queued.running, true);
+    assert.equal(queued.running, false);
+    assert.equal(queued.execution.running, false);
+    assert.equal(queued.execution.active, true);
+    assert.equal(queued.execution.waitingForStart, true);
+    assert.equal(getRunnerSessionDetails(session).handle.inFlight(), true);
     assert.equal(queued.execution.queuePosition, 2);
     assert.equal(queued.execution.queueClass, 'interactive');
-    assert.match(queued.statusText, /前面 2 项/);
+    assert.match(queued.statusText, /第 2 项/);
     const result = await timeout(sent.completion, 4000);
     assert.equal(result.ok, true);
     assert.equal(polls, 3);
@@ -443,6 +447,35 @@ test('Codex Harness turns proxy JSON failures into a product error, not an answe
   assert.match(result.reason, /\u5f53\u524d\u6a21\u578b\u4e0d\u80fd\u76f4\u63a5\u8bfb\u53d6\u56fe\u7247/);
   assert.equal(snapshot.status, 'unreachable');
   assert.deepEqual(snapshot.messages.map((row) => row.role), ['user']);
+});
+
+test('a queued Runner admission remains cancellable without claiming model execution', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(),'soduwork-admission-cancel-'));
+  const alias = 'queued-cancel', expectedRef = _uuidV5(NAMESPACE,'chat:'+alias+':codex-harness');
+  const calls = [];
+  const adapter = createRunnerRuntimeAdapter({
+    modelConfig:{fetchModel:async()=>({ok:true,model:{id:'fixture',key:'synthetic'}})},
+    runnerRuntime:{async rpc(op) {
+      calls.push(op);
+      if(op==='job.dispatch')return {ok:true,data:{ref:expectedRef,state:'queued',queued:true}};
+      if(op==='job.session')return {ok:true,data:{ok:true,status:'queued',executionStartedAt:0,queuePosition:1,items:[]}};
+      if(op==='job.stop')return {ok:true,data:{ok:true,state:'cancelled'}};
+      throw Error('Unexpected fixture operation: '+op);
+    }},
+  });
+  let session;
+  try {
+    session=await adapter.createSession({native:{runner:{openOptions:{cwd:root,ref:alias}}}});
+    const sent=session.send({text:'Wait for admission'});
+    await until(()=>session.snapshot().status==='queued');
+    assert.equal(session.snapshot().execution.running,false);
+    assert.equal(session.snapshot().execution.active,true);
+    assert.deepEqual(session.cancel(),{ok:true});
+    assert.equal((await timeout(sent.completion)).cancelled,true);
+    await until(()=>calls.includes('job.stop'));
+    assert.equal(calls.filter(op=>op==='job.stop').length,1);
+    assert.equal(session.snapshot().status,'aborted');
+  } finally {await session?.dispose();fs.rmSync(root,{recursive:true,force:true});}
 });
 
 test('Codex Harness exposes the same long-tool and stall signals as Pi', async () => {
@@ -636,6 +669,7 @@ test('Codex Harness latches an immediate cancel until dispatch returns its real 
     assert.equal(sent.queued, false);
     assert.equal(session.snapshot().status, 'streaming');
 
+    await until(() => calls.some(row => row.op === 'job.dispatch'));
     assert.deepEqual(session.cancel(), { ok: true });
     assert.equal(session.snapshot().status, 'aborted');
     assert.equal(calls.filter((row) => row.op === 'job.stop').length, 0);
@@ -713,7 +747,7 @@ test('Codex Harness restores its in-memory model grant after Runner restart', as
       requiredCapabilities: ['terminal', 'files'],
       llm: {
         base: 'http://model.invalid', key: 'secret', model: 'dev-think-large-agent-soduwork',
-        maxOutputTokens: 65536,
+        maxOutputTokens: 16384,
         contextWindow: 128000, contextWindowKnown: true,
         contextWindowEstimated: true, contextWindowSource: 'safe-default',
       },
@@ -797,18 +831,21 @@ test('Runner goal pause keeps the native session and resumes without a fake user
   const alias = 'goal-native-loop';
   const expectedRef = _uuidV5(NAMESPACE, 'chat:' + alias + ':codex-harness');
   const calls = [];
-  let resumed = false;
+  let resumed = false, stopped = false;
   const runtime = {
     async rpc(op, payload) {
       calls.push({ op, payload });
       if (op === 'job.dispatch') return { ok: true, data: { ref: expectedRef } };
-      if (op === 'job.stop') return { ok: true, data: { ok: true } };
+      if (op === 'job.stop') { stopped = true; return { ok: true, data: { ok: true } }; }
       if (op === 'job.comment') {
         resumed = true;
+        stopped = false;
         return { ok: true, data: { ok: true } };
       }
       if (op === 'job.session') return { ok: true, data: {
-        ok: true, status: resumed ? 'done' : 'running', round: resumed ? 2 : 1,
+        ok: true, ref: expectedRef, status: stopped ? 'stopped' : resumed ? 'done' : 'running', round: resumed ? 2 : 1,
+        taskGoal: { status: stopped ? 'paused' : resumed ? 'completed' : 'working',
+          elapsedMs: 1000, steps: 1, budgetMs: 240 * 60000, maxSteps: 1000, continuations: 0 },
         items: resumed ? [{ seq: 1, kind: 'say', text: 'GOAL_DONE' }] : [],
       } };
       throw new Error('unexpected rpc: ' + op);
@@ -848,12 +885,14 @@ test('Runner goal pause keeps the native session and resumes without a fake user
     assert.equal((await timeout(continued.completion)).ok, true);
     const comment = calls.find((row) => row.op === 'job.comment').payload;
     assert.equal(comment.recordUser, false);
+    assert.equal(comment.taskGoalControl, 'continue');
     assert.match(comment.promptText, /原目标/);
     assert.deepEqual(session.snapshot().messages.map((row) => row.role),
       ['user', 'assistant']);
 
     const next = session.send({ text: 'RUN_AGAIN' });
     assert.equal(next.queued, false);
+    await until(() => calls.filter(row => row.op === 'job.comment').length === 2);
     assert.equal(session.controlGoal('pause').ok, true);
     assert.equal((await timeout(next.completion)).paused, true);
     await until(() => calls.filter((row) => row.op === 'job.stop').length === 2);

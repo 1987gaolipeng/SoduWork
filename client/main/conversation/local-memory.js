@@ -13,6 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const learning = require('./personal-learning');
+const { contextContent } = require('./memory-runtime-policy.cjs');
 const { redact } = require('./import-redaction');
 
 const MAX_BYTES = 256 * 1024;
@@ -487,7 +488,7 @@ function context({ app, owner = '', cwd = '', scopes = [] } = {}) {
     }
   }
   const unique = rows.filter((row, i, all) => all.findIndex(other => other.id === row.id) === i);
-  const prompt = unique.map(row => '--- ' + row.fileName + ' ---\n' + blockAwareSlice(row.content, 12000)).join('\n\n').slice(0, 28000);
+  const prompt = unique.map(row => '--- ' + row.fileName + ' ---\n' + blockAwareSlice(contextContent(row.content), 12000)).join('\n\n').slice(0, 28000);
   return { ok: true, items: unique.map(({ content, editableContent, ...row }) => row), prompt };
 }
 
@@ -519,7 +520,7 @@ function contextIds({ app, owner = '', cwd = '', ids = [] } = {}) {
     if (row) items.push({ ...row, scope: 'session' });
   }
   const unique = items.filter((row, i, all) => all.findIndex(other => other.id === row.id) === i);
-  return { ok: true, items: unique, prompt: unique.map(row => '--- ' + row.fileName + ' ---\n' + row.content).join('\n\n').slice(0, 28000) };
+  return { ok: true, items: unique, prompt: unique.map(row => '--- ' + row.fileName + ' ---\n' + contextContent(row.content)).join('\n\n').slice(0, 28000) };
 }
 
 function remove({ app, owner = '', cwd = '', id } = {}) {

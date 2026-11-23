@@ -504,19 +504,28 @@ class Lease:
                 if lost in done:
                     raise CapacityError("模型并发调度连接中断，请稍后重试", 503)
                 result = await operation
-                delivered = True
-                return result
-        finally:
-            operation.cancel()
+            # Joining the watcher is still a cancellation point. Keep ownership
+            # until it has settled; there must be no await after handoff.
             lost.cancel()
             with anyio.CancelScope(shield=True):
+                await asyncio.gather(lost, return_exceptions=True)
+            delivered = True
+            return result
+        finally:
+            async def reclaim():
+                operation.cancel()
+                lost.cancel()
                 await asyncio.gather(operation, lost, return_exceptions=True)
                 # A socket may finish opening in the same tick as cancellation.
-                if not delivered and not operation.cancelled() and not operation.exception():
+                if not operation.cancelled() and not operation.exception():
                     result = operation.result()
                     if hasattr(result, "aclose"):
                         with anyio.move_on_after(5):
                             await result.aclose()
+            if not delivered:
+                # Raw asyncio cancellation can interrupt even an AnyIO shield.
+                # Retain a separate cleanup owner across repeated cancellation.
+                await finish_cleanup(reclaim())
 
     async def close(self, outcome="completed"):
         if self.closed:

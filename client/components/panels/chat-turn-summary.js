@@ -5,6 +5,15 @@
     ((Number(snap.history?.messageStart) || 0) + index);
   const epoch = value => typeof value === 'number' ? value : Date.parse(value || '');
   const tx = value => global.SoduWorkI18n?.translateText?.(value) || value;
+  function stoppedText(elapsedMs) {
+    if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return tx('你已停止');
+    const total = Math.floor(elapsedMs / 1000);
+    const template = total >= 3600 ? '你在 {hours} 小时 {minutes} 分 {seconds} 秒后停止了'
+      : total >= 60 ? '你在 {minutes} 分 {seconds} 秒后停止了' : '你在 {seconds} 秒后停止了';
+    return tx(template).replace('{hours}', String(Math.floor(total / 3600)))
+      .replace('{minutes}', String(Math.floor(total / 60) % 60))
+      .replace('{seconds}', String(total % 60));
+  }
   function tokenInfo(messages, from, to, metric) {
     if (Number.isFinite(metric?.tokens)) return { tokens: metric.tokens, tokensEstimated: false };
     const counter = global.ChatStatus || (typeof require === 'function' ? require('./panels-chat-status') : null);
@@ -36,6 +45,7 @@
         (Number(tool.after) || 0) >= from && (Number(tool.after) || 0) <= to)) return;
       const absolute = owner(snap, index);
       const metric = (snap.turnMetrics || []).find(row => row.fromMessage <= absolute && row.toMessage >= absolute);
+      if (metric?.outcome) return;
       const start = messages[from]?.role === 'user' ? epoch(messages[from].sentAt) : NaN;
       const end = epoch(message.completedAt);
       const wallTime = Number.isFinite(start) && start > 0 && Number.isFinite(end) && end >= start ? end - start : null;
@@ -50,6 +60,17 @@
         wallTime: !latestCloud && !Number.isFinite(metric?.elapsedMs),
       });
     });
+    for (const metric of snap.turnMetrics || []) {
+      if (!['stopped', 'interrupted'].includes(metric.outcome)) continue;
+      const indices = messages.map((_, index) => index).filter(index =>
+        owner(snap, index) >= metric.fromMessage && owner(snap, index) <= metric.toMessage);
+      if (!indices.length) continue;
+      const to = indices.at(-1);
+      // A pending followup may start before its user message is echoed. The
+      // previous turn's receipt remains historical even while the chat is busy.
+      turns.push({ key: 'outcome:' + metric.fromMessage, from: indices[0], to,
+        outcome: metric.outcome, elapsedMs: metric.elapsedMs, finalIndex: -1, lastToolBlock: -1 });
+    }
     return turns;
   }
   function create(ctx) {
@@ -69,6 +90,12 @@
       return byIndex;
     }
     function html(turn, currentMetrics) {
+      if (turn.outcome) {
+        const text = turn.outcome === 'stopped'
+          ? stoppedText(turn.elapsedMs)
+          : tx('本轮已中断');
+        return '<div class="nturn-outcome" data-chat-node="turn-summary:' + ctx.esc(turn.key) + '">' + ctx.esc(text) + '</div>';
+      }
       const open = expanded.has(turn.key);
       const label = ctx.esc(tx(open ? '收起过程' : '展开过程'));
       // A completed turn owns immutable timing, including after switching or
@@ -100,14 +127,16 @@
       return '<div class="nturn-summary" data-chat-node="turn-summary:' + ctx.esc(turn.key) + '">' +
         '<button type="button" data-turn-toggle="' + ctx.esc(turn.key) + '" aria-expanded="' + open +
         '" title="' + label + '" aria-label="' + label + '">' +
-        '<span class="nturn-summary-values" title="' + ctx.esc(tx('包含深度思考与回复')) + '">' + values + '</span>' +
-        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button></div>';
+        '<span class="nturn-summary-values">' + values + '</span><span data-turn-label>' + label + '</span>' +
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>' +
+        '<p data-turn-empty hidden>' + ctx.esc(tx('本轮没有可显示的过程记录。')) + '</p></div>';
     }
     function apply(list) {
       if (!list?.querySelectorAll) return;
       list.querySelectorAll('[data-turn-hidden]').forEach(node => node.removeAttribute('data-turn-hidden'));
       list.querySelectorAll('[data-turn-process]').forEach(node => node.removeAttribute('data-turn-process'));
       const hide = node => node.setAttribute('data-turn-hidden', '');
+      const withProcess = new Set();
       for (const row of Array.from(list.children || [])) {
         const key = row.dataset.chatNode || '';
         const message = /^message:(\d+)$/.exec(key);
@@ -115,23 +144,33 @@
         const index = message ? Number(message[1]) : tools ? Number(tools[1]) :
           /^(?:(?:tools|process):tail|goal-progress:)/.test(key) ? (ctx._snap?.messages?.length || 1) - 1 : -1;
         const turn = byIndex.get(index);
-        if (!turn || expanded.has(turn.key) || row.classList.contains('user')) continue;
+        if (!turn || turn.outcome || row.classList.contains('user')) continue;
+        const open = expanded.has(turn.key);
         if (message) {
-          row.querySelectorAll(':scope > .nthink').forEach(hide);
-          row.querySelectorAll(':scope > .ntext').forEach(node => {
-            if (index !== turn.finalIndex || Number(node.dataset.block) <= turn.lastToolBlock) hide(node);
+          row.querySelectorAll(':scope > .nthink').forEach(node => {
+            if (open && node.querySelector('[data-thinking-body]')?.textContent.trim()) withProcess.add(turn.key);
+            else hide(node);
           });
-          if (index !== turn.finalIndex) {
+          row.querySelectorAll(':scope > .ntext').forEach(node => {
+            if (index === turn.finalIndex && Number(node.dataset.block) > turn.lastToolBlock) return;
+            if (!open) hide(node);
+            else if (node.textContent.trim() || node.querySelector('img,video,audio')) withProcess.add(turn.key);
+          });
+          if (!open && index !== turn.finalIndex) {
             row.querySelectorAll(':scope > .nmessage-footer').forEach(hide);
             row.setAttribute('data-turn-process', '');
           }
-        } else row.setAttribute('data-turn-process', '');
+        } else if (!open) row.setAttribute('data-turn-process', '');
+        else if (row.childElementCount) withProcess.add(turn.key);
       }
-      list.querySelectorAll('[data-turn-toggle]').forEach(button => {
+      list.querySelectorAll(':scope > .nturn-summary > button[data-turn-toggle]').forEach(button => {
         const open = expanded.has(button.dataset.turnToggle);
         button.setAttribute('aria-expanded', String(open));
         button.title = tx(open ? '收起过程' : '展开过程');
         button.setAttribute('aria-label', button.title);
+        const label = button.querySelector('[data-turn-label]');
+        if (label.textContent !== button.title) label.textContent = button.title;
+        button.parentElement.querySelector('[data-turn-empty]').hidden = !open || withProcess.has(button.dataset.turnToggle);
       });
       if (boundList === list) return;
       boundList = list;

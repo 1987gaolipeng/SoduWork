@@ -13,7 +13,8 @@ const taskControllerSource = fs.readFileSync(
 const markdownSource = fs.readFileSync(
   path.join(__dirname, '../components/panels/chat-markdown.js'), 'utf8');
 const markedSource = fs.readFileSync(
-  path.join(__dirname, '../vendor/markdown/marked.umd.js'), 'utf8');
+  path.join(__dirname, '../vendor/markdown/marked.umd.js'), 'utf8') + '\n' + fs.readFileSync(
+  path.join(__dirname, '../core/markdown.js'), 'utf8');
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({
@@ -624,9 +625,11 @@ test('desktop loads Markdown dependencies before the chat renderer', () => {
   const html = fs.readFileSync(path.join(__dirname, '../desk.html'), 'utf8');
   const rendererAt = html.indexOf('components/panels/chat-message-renderer.js');
   const markedAt = html.indexOf('vendor/markdown/marked.umd.js');
+  const markdownPolicyAt = html.indexOf('core/markdown.js');
   const purifierAt = html.indexOf('vendor/markdown/purify.min.js');
   const markdownAt = html.indexOf('components/panels/chat-markdown.js');
   assert.ok(markedAt >= 0 && purifierAt >= 0 && rendererAt > markedAt && rendererAt > purifierAt);
+  assert.ok(markdownPolicyAt > markedAt && markdownPolicyAt < markdownAt);
   assert.ok(markdownAt > purifierAt && markdownAt < rendererAt);
 });
 
@@ -754,7 +757,8 @@ for (const fileRead of [false, true]) test('streaming ' + (fileRead ? 'file read
   toolScope.window = toolScope;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/panels-chat-tools.js'), 'utf8'), toolScope);
   const tools = toolScope.ChatTools;
-  Object.assign(sandbox.ChatTools, { kind: tools.kind, isCommandTool: tools.isCommandTool, render: tools.render });
+  Object.assign(sandbox.ChatTools, { kind: tools.kind, isCommandTool: tools.isCommandTool,
+    render: tools.render, recordOwner: tools.recordOwner });
   let renders = 0;
   sandbox.ChatTools.appendTimeline = (parts, input, _previous, _anchor, _narrated, itemHtml) => {
     renders++; parts.push(...input.map(itemHtml));
@@ -767,7 +771,7 @@ for (const fileRead of [false, true]) test('streaming ' + (fileRead ? 'file read
   ctx._pending = ''; ctx._sessionOptions = {}; ctx._snap.tools = [command];
   renderer._render();
   assert.match(list.innerHTML, fileRead ? /data-tool-side="1"/ : /正在运行命令/);
-  if (!fileRead) assert.doesNotMatch(list.innerHTML, /ntool-body|ntool-caret|npm test|data-tool="live-command"/);
+  if (!fileRead) assert.doesNotMatch(list.innerHTML, /ntool-body|ntool-caret|npm test|data-tool="live-command"|data-command-record/);
   const before = renders;
   ctx._snap.usage = { input: 10, output: 20 };
   renderer._render();
@@ -775,7 +779,11 @@ for (const fileRead of [false, true]) test('streaming ' + (fileRead ? 'file read
   command.state = 'done'; renderer._render();
   assert.ok(renders > before, 'the completed title must still update at settlement');
   if (fileRead) assert.match(list.innerHTML, /读取/);
-  else { assert.match(list.innerHTML, /运行了命令/); assert.doesNotMatch(list.innerHTML, /ntool-body|ntool-caret|npm test|data-tool="live-command"/); }
+  else {
+    assert.match(list.innerHTML, /运行了命令/);
+    assert.match(list.innerHTML, /data-command-record="live-command"/);
+    assert.doesNotMatch(list.innerHTML, /ntool-body|ntool-caret|npm test|data-tool="live-command"/);
+  }
 });
 
 
@@ -814,11 +822,11 @@ test('one turn aggregates different runs and tool-only collaborators without lea
     { role: 'assistant', sourceAgent: { agentId: 'qwen', runId: 'second' }, blocks: [{ kind: 'text', text: 'Final answer' }], done: true },
     { role: 'user', text: 'Second request' },
     { role: 'assistant', sourceAgent: { agentId: 'pi' }, blocks: [{ kind: 'text', text: 'Next answer' }], done: true },
-  ], tools: [{ id: 'read', name: 'read', after: 1, state: 'done', sourceAgent: { agentId: 'claude' } }] };
+  ], tools: [{ id: 'read', name: 'read', after: 1, state: 'done', sourceAgent: { agentId: 'codex' } }] };
   renderer._render();
   assert.equal((list.innerHTML.match(/class="nchat-agent-source/g) || []).length, 2);
   assert.match(list.innerHTML, /agent-brand-qwen crew-sub/);
-  assert.match(list.innerHTML, /agent-brand-claude crew-sub/);
+  assert.match(list.innerHTML, /agent-brand-codex crew-sub/);
   assert.equal((list.innerHTML.match(/Initial explanation/g) || []).length, 1);
   assert.ok(list.innerHTML.indexOf('Initial explanation') < list.innerHTML.indexOf('Final answer'));
   assert.doesNotMatch(list.innerHTML.slice(list.innerHTML.indexOf('Second request')), /crew-sub/);
@@ -993,6 +1001,18 @@ test('work-card access failures keep the historical session reopen action', () =
   renderer._render();
   assert.match(list.innerHTML, /data-session-retry/);
   assert.doesNotMatch(list.innerHTML, /data-plugin-retry/);
+});
+
+test('a failed submission displays its diagnostic or recovery guidance', () => {
+  const { renderer, ctx, list } = setupRender();
+  ctx._pending = '';
+  ctx._snap = { status: 'failed', messages: [], tools: [], execution: { reason: 'Working directory unavailable' } };
+  renderer._render();
+  assert.match(list.innerHTML, /class="nbad show"/);
+  assert.match(list.innerHTML, />Working directory unavailable</);
+  delete ctx._snap.execution.reason;
+  renderer._render();
+  assert.match(list.innerHTML, />本轮执行失败，请检查工作目录和执行底座后重试。</);
 });
 
 test('permanent plugin capability denials offer a new chat handoff instead of same-session resume', () => {

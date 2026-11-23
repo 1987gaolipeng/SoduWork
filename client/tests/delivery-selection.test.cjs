@@ -122,6 +122,43 @@ test('explicit final links disambiguate drafts without losing referenced website
   assert.equal(result.manifest.entryPath, 'index.html');
 });
 
+test('rework receipts preserve requested paths and explicit replacements without promoting review notes', async t => {
+  const {requestedExtension} = require('../main/conversation/delivery-selection');
+  assert.equal(requestedExtension('Do not convert to HTML.', {explicitOnly:true}), '');
+  assert.equal(requestedExtension('Generate an analysis of the current HTML.', {explicitOnly:true}), '');
+  assert.equal(requestedExtension('Convert to HTML.', {explicitOnly:true}), '.html');
+  const f = fixture(t);
+  f.write('findings.md', 'The original is still incorrect.');
+  f.messages('Fix the original delivery.', 'Reviewed again: [findings](findings.md)');
+  let form;
+  t.mock.method(global, 'fetch', async (_url, options) => {
+    form = options.body;
+    return Response.json({ok:true});
+  });
+  async function replay(options) {
+    const payload = await taskDelivery.capture(f.handle, 'completed', {}, options);
+    await taskDelivery.send({hub:'https://fixture.invalid'}, '/tasks/test', {}, JSON.parse(JSON.stringify(payload)));
+    return form;
+  }
+  await replay();
+  assert.deepEqual(form.getAll('paths'), ['findings.md']);
+  assert.deepEqual(form.getAll('declaredPaths'), []);
+  assert.equal(form.get('replacements'), null);
+  f.manifest({deliverables:[{path:'findings.md'}]});
+  await replay();
+  assert.deepEqual(form.getAll('declaredPaths'), []);
+  assert.equal(form.get('replacements'), null);
+
+  f.write('site/index.html', '<link rel="stylesheet" href="theme.css">');
+  f.write('site/theme.css', 'body { color: navy }');
+  f.manifest({deliverables:[{path:'site/index.html', replaces:['docs/source.md']}]});
+  await replay({requestedFormat:'.html'});
+  assert.deepEqual(form.getAll('declaredPaths'), ['site/index.html']);
+  assert.deepEqual(JSON.parse(form.get('replacements')), {'site/index.html':['docs/source.md']});
+  await replay({paths:{required:new Set(['site/index.html']), named:new Set()}});
+  assert.deepEqual(form.getAll('declaredPaths'), ['site/index.html']);
+});
+
 test('website verification captures cannot enter a bundle through primary or supporting declarations', async t => {
   const f = fixture(t);
   f.write('index.html','<img src="assets/hero.png">'); f.write('assets/hero.png','page asset');
@@ -157,4 +194,93 @@ test('requested screenshots, explicit replacements, and summary-only work retain
   assert.deepEqual(names(runtime.snapshot(f.handle)), ['new.html']);
   f.manifest({presentation:'summary',deliverables:[]});
   assert.equal(await taskDelivery.capture(f.handle,'completed'), null);
+});
+
+function nativeTurn(acc, request, content) {
+  acc.push({type:'message_end', message:{role:'user',content:request}});
+  acc.push({type:'message_start', message:{role:'assistant'}});
+  for (const [index, block] of content.entries()) {
+    acc.push({type:'message_update',assistantMessageEvent:{type:block.kind + '_end',contentIndex:index,
+      ...(block.kind === 'toolcall' ? {toolCall:block.toolCall} : {content:block.text})}});
+  }
+  acc.push({type:'message_end',message:{role:'assistant',stopReason:'stop'}});
+  acc.push({type:'agent_settled'});
+}
+
+test('native rework final links exclude an edited intermediate document without erasing history', async t => {
+  const f=fixture(t), acc=require('../main/pi-session/event-stream').create();
+  f.handle.snapshot=()=>acc.snapshot();
+  f.write('report.md','# Original rejected report',true);
+  nativeTurn(acc,'Write a report',[{kind:'text',text:'[Original report](report.md)'}]);
+  f.write('report.md','# Intermediate revision');
+  f.write('report-v2.md','# Final revised report');
+  nativeTurn(acc,'Revise the report based on the review feedback',[
+    {kind:'thinking',text:'Maybe deliver [old draft](report.md)'},
+    {kind:'text',text:'[Final revised report](report-v2.md)'},
+  ]);
+  assert.equal(acc.snapshot().messages.at(-1).text,'','use the real public snapshot shape');
+  assert.deepEqual(names(runtime.snapshot(f.handle)),['report-v2.md']);
+  assert.deepEqual((await taskDelivery.capture(f.handle,'completed')).files.map(row=>row.name),['report-v2.md']);
+  assert.equal(acc.snapshot().messages.length,4,'both conversation turns remain');
+  assert.equal(fs.readFileSync(path.join(f.cwd,'report.md'),'utf8'),'# Intermediate revision');
+  assert.equal(runtime.snapshot(f.handle).items.some(row=>row.relative==='report.md'),true);
+});
+
+test('native final links retain multiple deliverables and their unchanged required resources', async t => {
+  const f=fixture(t), acc=require('../main/pi-session/event-stream').create();
+  f.handle.snapshot=()=>acc.snapshot();
+  f.write('report.md','# Intermediate revision');
+  f.write('report-v2.md','# Final report');
+  f.write('report-v2.html','<!doctype html><html><head><link rel="stylesheet" href="assets/style.css"></head><body>Final report</body></html>');
+  f.write('assets/style.css','body{color:purple}',true);
+  nativeTurn(acc,'Revise the report',[
+    {kind:'text',text:'[Final report](report-v2.md) and [Website](report-v2.html)'},
+  ]);
+  assert.deepEqual(names(runtime.snapshot(f.handle)),['report-v2.html','report-v2.md']);
+  assert.deepEqual((await taskDelivery.capture(f.handle,'completed')).files.map(row=>row.name),
+    ['assets/style.css','report-v2.html','report-v2.md']);
+  f.manifest({deliverables:[{path:'report.md'},{path:'report-v2.md'}]});
+  assert.deepEqual(names(runtime.snapshot(f.handle)),['report-v2.md','report.md'],
+    'an explicit complete manifest retains its declared multi-file set');
+  f.manifest({deliverables:[{path:'report.md'},{path:'report-v2.md',replaces:['report.md']}]});
+  assert.deepEqual(names(runtime.snapshot(f.handle)),['report-v2.md']);
+});
+
+test('delivery selection ignores pre-tool prose, hidden scopes and unfinished replies in native snapshots', t => {
+  const select=require('../main/conversation/delivery-selection');
+  const user={role:'user',text:'Revise the report'};
+  const blocks=[{kind:'text',text:'[Intermediate](report.md)',done:true},
+    {kind:'toolcall',toolCall:{name:'write',arguments:{content:'[Unrelated](other.md)'}}},
+    {kind:'thinking',text:'[Thought](thought.md)'},
+    {kind:'text',text:'[Final](report-v2.md)',done:true}];
+  const assistant={role:'assistant',text:'',blocks,done:true,stopReason:'stop',scope:'normal'};
+  const answer=value=>select.turn({messages:[user,value]}).answer;
+  assert.equal(answer(assistant),'[Final](report-v2.md)');
+  assert.equal(answer({...assistant,blocks:blocks.slice(0,2)}),'');
+  for (const scope of ['goal-progress','goal-execution','goal-review','runtime-notice'])
+    assert.equal(answer({...assistant,scope}),'',scope);
+  for (const patch of [{done:false},{errorMessage:'failed'},{stopReason:'error'},{stopReason:'length'},
+    {blocks:[{kind:'text',text:'[Partial](report.md)',done:false}]}])
+    assert.equal(answer({...assistant,...patch}),'');
+  assert.equal(answer({...assistant,scope:'goal-final'}),'[Final](report-v2.md)');
+});
+
+test('legacy empty-block and Runner block replies retain their final-file selection', async t => {
+  const f=fixture(t);
+  f.write('report.md','# Intermediate revision');f.write('report-v2.md','# Final revised report');
+  const final='[Final revised report](report-v2.md)';
+  for (const reply of [
+    {text:final,blocks:[]},
+    {content:final,blocks:[]},
+    {content:[{type:'text',text:final}],blocks:[]},
+    // Runner's public reply has blocks without scope or per-block done flags.
+    {blocks:[{kind:'text',text:final}],done:true},
+  ]) {
+    f.state.messages=[{role:'user',text:'Revise the report'},{role:'assistant',...reply}];
+    assert.deepEqual((await taskDelivery.capture(f.handle,'completed')).files.map(row=>row.name),['report-v2.md']);
+  }
+  f.state.messages=[{role:'user',text:'Revise the report'},
+    {role:'assistant',text:final,blocks:[{kind:'thinking',text:'Private deliberation'}]}];
+  assert.deepEqual((await taskDelivery.capture(f.handle,'completed')).files.map(row=>row.name).sort(),['report-v2.md','report.md'],
+    'nonempty structured blocks remain authoritative instead of falling back to stale flattened text');
 });

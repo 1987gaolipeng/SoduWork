@@ -17,6 +17,28 @@ function remoteRequirement() {
   location:{mode:'remote'},runner:{runnerId:'isolated-cloud'}}}};
 }
 
+test('an assigned review-only viewer can open the matching standalone review session', async () => {
+ const f=fixture({SoduWorkAPI:{getTask:async()=>({id:'review',canViewExecution:false,canReview:true})},
+   soduWorkAPI:{conversationSession:{history:async()=>({chats:[{id:'discussion',acceptanceReview:{
+     taskRef:'review',approvalId:'gate',acceptanceMode:'manual'}}]})}}});
+ await f.api.open('review','',{source:'acceptance',acceptanceSession:true,approvalId:'gate'});
+ assert.equal(f.calls[0].payload.chatId,'discussion');
+ assert.equal(f.calls[0].payload.acceptanceSession,true);
+});
+
+test('acceptance intent supersedes an overlapping ordinary navigation for the same task', async () => {
+ let finish, reads=0;
+ const f=fixture({SoduWorkAPI:{getTask:id=>++reads===1 ? new Promise(r=>finish=r) : Promise.resolve({id})}});
+ const ordinary=f.api.open('req','',{source:'task-list'});
+ const review=f.api.open('req','',{source:'acceptance',acceptanceSession:true,acceptanceMode:'auto',approvalId:'gate'});
+ finish({id:'req'});
+ assert.equal(await review,true);
+ assert.equal(await ordinary,false);
+ assert.equal(f.calls.length,1);
+ assert.equal(f.calls[0].payload.acceptanceMode,'auto');
+ assert.equal(f.calls[0].payload.approvalId,'gate');
+});
+
 test('fresh navigation reuses only the persisted matching review and approval',async()=>{
  const rows=[
   {id:'execution',taskId:'req',title:'Same'},

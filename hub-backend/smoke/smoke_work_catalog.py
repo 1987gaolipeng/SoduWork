@@ -12,6 +12,8 @@ _tmp = tempfile.TemporaryDirectory(prefix="soduwork-smoke-work-catalog-")
 os.environ["DATABASE_URL"] = (
     "sqlite+aiosqlite:///" + (Path(_tmp.name) / "catalog.db").as_posix())
 
+from fastapi import HTTPException  # noqa: E402
+from starlette.requests import Request  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
 from app import automation_models as am, models  # noqa: E402
@@ -69,7 +71,8 @@ async def main() -> None:
         await work_catalog.bootstrap(session)
 
         logged_in = await admin_api.login(
-            AdminLogin(user="developer", pw="smoke-pass"), session)
+            AdminLogin(user="developer", pw="smoke-pass"),
+            Request({"type": "http", "client": ("127.0.0.1", 0)}), session)
         ok(logged_in["user"]["id"] == user.id and logged_in.get("token"),
            "admin login runtime dependencies are broken")
 
@@ -229,7 +232,7 @@ async def main() -> None:
         ok("必须配置交付" in contract_error,
            "enabled scenario accepted an empty delivery contract")
         other_profile = await work_catalog.save_profession(session, {
-            "name": "其他企业专属职业", "category": "隔离测试",
+            "name": "其他企业专属职业", "category": "研发交付",
             "competencies": ["不可见"],
         }, outsider.id)
         visible = await work_catalog.profession_rows(session, child.id)
@@ -339,6 +342,41 @@ async def main() -> None:
         scoped = await rbac.list_positions(session, scope)
         ok(other_profile.id not in {row["id"] for row in scoped},
            "scoped profession API leaked another organization")
+
+    async def create_competing_scenario():
+        async with SessionLocal() as session:
+            try:
+                result = await work_catalog_api.create_scenario(
+                    {"key": "concurrent", "orgId": child.id, "name": "Concurrent scenario", "enabled": False},
+                    user, session,
+                )
+            except HTTPException as error:
+                return error.status_code, error.detail
+            return 200, result["id"]
+
+    attempts = await asyncio.gather(*(create_competing_scenario() for _ in range(12)))
+    winners = [detail for status, detail in attempts if status == 200]
+    ok(len(winners) == 1 and attempts.count((409, "这个场景标识已经存在")) == 11,
+       f"concurrent scenario creates produced unexpected responses: {attempts}")
+    async with SessionLocal() as session:
+        stored = await session.scalars(select(models.WorkScenario.id).where(
+            models.WorkScenario.org_id == child.id, models.WorkScenario.key == "concurrent"))
+        ok(stored.all() == winners, "concurrent scenario creation did not preserve the winning row")
+
+    async with SessionLocal.begin() as session:
+        marker = models.OrgUnit(id="conflict-txn", name="Pending")
+        session.add(marker)
+        await session.flush()
+        try:
+            await work_catalog.save_scenario(
+                session, {"key": "concurrent", "name": "Duplicate", "enabled": False}, child.id)
+        except work_catalog.ScenarioKeyConflict:
+            marker.name = "Completed"
+        else:
+            raise AssertionError("duplicate scenario key unexpectedly succeeded")
+    async with SessionLocal() as session:
+        name = await session.scalar(select(models.OrgUnit.name).where(models.OrgUnit.id == "conflict-txn"))
+        ok(name == "Completed", "duplicate scenario rolled back the caller's transaction")
 
     await engine.dispose()
 

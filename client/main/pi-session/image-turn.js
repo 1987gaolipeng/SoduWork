@@ -1,6 +1,7 @@
 'use strict';
 const { randomUUID } = require('crypto');
 const media = require('./media-artifacts');
+const { ImageResultError, prepare } = require('./generated-image.cjs');
 const { imageChoice } = require('./image-model');
 const { fetchWithDeviceAuthRetry } = require('../device-auth-request');
 
@@ -24,6 +25,7 @@ async function generate({ handle, identity, choice, text, submissionId, signal, 
   handle.appendTaskTool({ ...event, type: 'tool_execution_start' }, '');
   emit({ kind: 'image-generation' });
   try {
+    await prepare(signal);
     const response = await fetchWithDeviceAuthRetry(identity,
       hub + '/api/v1/conversations/' + encodeURIComponent(handle.sessionId) + '/images', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args), redirect: 'error',
@@ -46,7 +48,8 @@ async function generate({ handle, identity, choice, text, submissionId, signal, 
     return { ok: true, artifact: file };
   } catch (error) {
     const cancelled = signal.aborted;
-    const reason = generated ? '图片已在服务端生成，本地下载未完成；重新打开会话可恢复成果。' :
+    const reason = generated && error instanceof ImageResultError ? '图片未通过本地校验。' + error.message :
+      generated ? '图片已在服务端生成，本地下载未完成；重新打开会话可恢复成果。' :
       cancelled ? '已停止等待图片生成。已提交的请求可能仍在模型服务处理，重新生成前请先检查成果。' :
         String(error?.message || '图片生成失败').slice(0, 400);
     handle.appendTaskTool({ ...event, type: 'tool_execution_end', isError: true,

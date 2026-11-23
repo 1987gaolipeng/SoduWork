@@ -128,6 +128,7 @@
         typeof current.controller.refine === 'function') {
       const updated = await current.controller.refine(detail, {
         instruction: typed,
+        requestedAt: options?.requestedAt ?? Date.now(),
         model, attachmentContext: options && options.attachmentContext || [],
         conversationContext: options && options.conversationContext || null,
         bindingContext,
@@ -151,6 +152,7 @@
         text: typed,
         parseText: detail,
         instruction: typed,
+        requestedAt: options?.requestedAt ?? Date.now(),
         source: options && options.source || '本次对话',
         model,
         attachmentContext: options && options.attachmentContext || [],
@@ -178,6 +180,7 @@
 
   async function route(options, context) {
     const o = options || {};
+    const requestedAt = o.requestedAt ?? Date.now();
     const ctx = context || {};
     const submittedFiles = o.attachments?.files?.().slice() || [];
     const identity = file => global.ConversationAttachments?.fileIdentity?.(file) ?? file;
@@ -197,11 +200,14 @@
     }
     const current = activeController();
     // An open requirement form must never claim an ordinary chat turn. The
-    // composer only routes to a work form when the user explicitly selected
-    // that action; otherwise the message belongs to the normal conversation.
+    // requirement composer only routes when that action is explicitly selected.
+    // Automation drafts expose a visible editing mode and saved receipts accept
+    // explicit edit requests, independently of the cleared capability picker.
     // This also prevents arbitrary follow-up text from refining/submitting an
     // unfinished requirement after the user has cleared the action picker.
-    if (!command) return { handled: false, accepted: false };
+    const automationFollowup = (!command || command.id === 'work.automation.create') &&
+      global.WorkAutomationSheet?.acceptsFollowup?.(detail);
+    if (!command && !automationFollowup) return { handled: false, accepted: false };
     const bindingContext = bindingsOf(o, ctx, true);
 
     const input = o.input;
@@ -260,10 +266,15 @@
         command = Object.assign({}, command, { parseText: parts.join('\n\n') });
       }
       if (!currentView()) return { handled: true, accepted: false };
-      accepted = command
-        ? await ctx.open(command, { attachmentContext, conversationContext, bindingContext })
+      accepted = automationFollowup
+        ? await global.WorkAutomationSheet.refine(parts.join('\n\n'), {
+          instruction:detail, requestedAt, model:typeof ctx.model === 'function' ? ctx.model() : '',
+          attachmentContext, bindingContext, conversationContext,
+        }) : command
+        ? await ctx.open(command, { attachmentContext, conversationContext, bindingContext, requestedAt })
         : await current.controller.refine(parts.join('\n\n'), {
           instruction: detail,
+          requestedAt,
           model: typeof ctx.model === 'function' ? ctx.model() : '', attachmentContext,
           bindingContext, conversationContext,
         });

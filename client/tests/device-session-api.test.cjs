@@ -9,7 +9,7 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'api.js'), 'utf8');
 test('active renderer uses only the short device session for HTTP and WebSocket', async () => {
   const values = new Map([
     ['soduwork_work_device_secret', 'legacy-key-that-must-leave-renderer'],
-    ['soduwork_work_hub_url', 'http://127.0.0.1:18989'],
+    ['soduwork_work_hub_url', 'https://service.soduwork.ai'],
   ]);
   const calls = [];
   const runnerConfigs = [];
@@ -93,7 +93,7 @@ test('active renderer uses only the short device session for HTTP and WebSocket'
 test('pending renderer removes the long-lived key as soon as secure storage owns it', async () => {
   const values = new Map([
     ['soduwork_work_device_secret', 'legacy-key-that-must-leave-renderer'],
-    ['soduwork_work_hub_url', 'http://127.0.0.1:18989'],
+    ['soduwork_work_hub_url', 'https://service.soduwork.ai'],
   ]);
   const calls = [];
   const localStorage = {
@@ -136,7 +136,7 @@ test('pending renderer removes the long-lived key as soon as secure storage owns
 });
 
 test('first authenticated request bootstraps the device session before it reaches the Hub', async () => {
-  const values = new Map([['soduwork_work_hub_url', 'http://127.0.0.1:18989']]);
+  const values = new Map([['soduwork_work_hub_url', 'https://service.soduwork.ai']]);
   const calls = [];
   let bootstraps = 0;
   const window = {
@@ -186,7 +186,7 @@ test('first authenticated request bootstraps the device session before it reache
 test('renderer never falls back to plaintext enrollment when secure storage refuses the key', async () => {
   const values = new Map([
     ['soduwork_work_device_secret', 'legacy-key-that-must-not-be-rewritten'],
-    ['soduwork_work_hub_url', 'http://127.0.0.1:18989'],
+    ['soduwork_work_hub_url', 'https://service.soduwork.ai'],
   ]);
   const calls = [];
   const localStorage = {

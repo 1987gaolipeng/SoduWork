@@ -69,9 +69,9 @@ test('task selectors never inject the company default into native-account agents
   const options = { defaultModel: 'company-default', substrates: [
     { key: 'local:pi', cli: 'pi', modelPick: true, modelSource: 'gateway' },
     { key: 'local:codex', cli: 'codex', modelPick: false, nativeModelPick: true, modelSource: 'native' },
-    { key: 'local:claude', cli: 'claude', modelPick: false, modelSource: 'agent' },
+    { key: 'local:codex', cli: 'codex', modelPick: false, modelSource: 'agent' },
   ] };
-  for (const cli of ['codex', 'claude']) {
+  for (const cli of ['codex']) {
     const context = Context.normalize(options, { agentId: 'local:' + cli, model: 'company-previous' });
     assert.equal(context.model, '');
     assert.equal(Context.execution(context).model, undefined);

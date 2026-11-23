@@ -76,7 +76,7 @@ test('missing selections use the first managed model when no local model is avai
 
 test('account runtimes never read or substitute SoduWork models', async () => {
   const select = createSelector({ localCatalog() { throw Error('must not read'); }, request() { throw Error('must not request'); } });
-  for (const adapter of ['codex', 'claude']) {
+  for (const adapter of ['codex']) {
     assert.equal(await select(identity, adapter, ''), '');
     assert.equal(await select(identity, adapter, 'native-model'), 'native-model');
   }
@@ -125,7 +125,7 @@ test('image selections retain the Pi-only execution boundary', async () => {
     image: [{ providerId: 'provider', name: first }],
   } }), request() { assert.fail('valid local image must not query Hub'); } });
   assert.equal(await select(identity, 'pi', imageName), imageName);
-  for (const adapter of ['qwen', 'harness2', 'opencode']) {
+  for (const adapter of ['qwen', 'opencode']) {
     await assert.rejects(select(identity, adapter, imageName), /不支持图片模型/);
   }
 });

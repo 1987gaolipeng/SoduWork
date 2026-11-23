@@ -9,16 +9,17 @@
   box-shadow:0 1px 2px rgba(20,30,48,.035),inset 0 1px 0 rgba(255,255,255,.72);
   color:var(--ink-3);
 }
-.agent-brand>img {display:block;width:64%;height:64%;object-fit:contain;pointer-events:none;user-select:none;}
-.agent-brand-pi {--agent-brand-accent:#6b7280;}
-.agent-brand-opencode {--agent-brand-accent:#111827;}
-.agent-brand-claude {--agent-brand-accent:#d97757;}
+.agent-brand>img {display:block;width:64%;height:64%;object-fit:contain;scale:var(--agent-brand-mark-scale,1);pointer-events:none;user-select:none;}
+/* Solid block marks need a smaller optical size than the lighter line artwork. */
+.agent-brand-pi {--agent-brand-accent:#6b7280;--agent-brand-mark-scale:.84;}
+.agent-brand-opencode {--agent-brand-accent:#111827;--agent-brand-mark-scale:.84;}
 .agent-brand-qwen {--agent-brand-accent:#6950ef;}
 .agent-brand-kimi {--agent-brand-accent:#111827;}
 .agent-brand-dsh {--agent-brand-accent:#5786fe;}
-.agent-brand-harness2 {--agent-brand-accent:#4285f4;}
-.agent-brand-codex,.agent-brand-codex-harness {--agent-brand-accent:#6f52b5;}
-.agent-brand-codex>img,.agent-brand-codex-harness>img {width:76%;height:76%;}
+/* Normalize the visible longest edge: the Codex mark occupies 15.5/24 of its SVG.
+   Keep the original artwork intact. */
+.agent-brand-codex,.agent-brand-codex-harness {--agent-brand-accent:#6f52b5;--agent-brand-mark-scale:calc(24 / 15.5);}
+.agent-brand-pi>img,.agent-brand-opencode>img,.agent-brand-kimi>img {filter:brightness(0) invert(42%);}
 html[data-desk-panel="chatbar"][data-composer-theme="dark"] .agent-brand {
   /* The bundled marks are intentionally unchanged; keep a light inner surface for dark mode. */
   background:#f7f8fb !important;border-color:rgba(255,255,255,.18) !important;color:#242936;

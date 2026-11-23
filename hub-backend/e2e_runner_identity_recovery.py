@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import secrets
 import shutil
 import socket
 import subprocess
@@ -18,6 +19,7 @@ import tempfile
 async def run(root, executable=None):
     os.environ.update(DATABASE_URL="sqlite+aiosqlite:///" + (root / "test.db").as_posix(),
                       AUTH_SECRET="isolated-runner-recovery-fixture-secret", CLUSTER_REDIS_URL="",
+                      ADMIN_PASS=secrets.token_urlsafe(24),
                       SODUWORK_DATA_ROOT=str(root / "hub-data"), SODUWORK_ENV="development")
     from fastapi import FastAPI, Request
     from fastapi.responses import StreamingResponse

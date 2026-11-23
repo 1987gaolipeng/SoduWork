@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import hashlib
+import json
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -258,11 +259,20 @@ with tempfile.TemporaryDirectory(prefix="soduwork-schema-") as directory:
             "(id, secret, user_ref, config, skills, model_keys, models, agent_models, git_creds, work_root) "
             "VALUES ('legacy-device', 'legacy-device-secret', 'legacy-user', '{}', '[]', '{}', '[]', '{}', '{}', '')")
         connection.execute("INSERT INTO app_setting (key, value) VALUES ('adoption-proof', 'preserved')")
+        connection.execute(
+            "INSERT INTO domain (id, name, sort, is_system) "
+            "VALUES ('legacy-domain-valid', 'Preserved rank', 7, 0), "
+            "('legacy-domain-invalid', 'Preserved domain', 'abc', 0)")
         connection.commit()
     ok(revision(legacy) == "", "legacy fixture should not already have a migration version")
     run_python(INIT_TWICE, legacy)
     ok(revision(legacy) == EXPECTED_REVISION, "legacy database was not stamped at head")
     with closing(sqlite3.connect(legacy)) as connection:
+        migrated_domains = connection.execute(
+            "SELECT id, name, sort, typeof(sort) FROM domain ORDER BY sort").fetchall()
+        domain_repair_audit = [json.loads(row[0]) for row in connection.execute(
+            "SELECT detail FROM audit_log WHERE action='domain.sort_repair' "
+            "AND target_id='legacy-domain-invalid'")]
         columns = {row[1] for row in connection.execute("PRAGMA table_info(task)")}
         client_columns = {row[1] for row in connection.execute("PRAGMA table_info(client)")}
         report_columns = {row[1] for row in connection.execute(
@@ -312,6 +322,13 @@ with tempfile.TemporaryDirectory(prefix="soduwork-schema-") as directory:
             connection.rollback()
             memory_duplicate_rejected = True
     ok("progress" in columns, "legacy missing column was not reconciled")
+    ok(migrated_domains == [("legacy-domain-valid", "Preserved rank", 7, "integer"),
+                           ("legacy-domain-invalid", "Preserved domain", 8, "integer")],
+       "legacy adoption did not preserve domains and repair the invalid rank")
+    ok(len(domain_repair_audit) == 1 and domain_repair_audit[0]["original"] == {
+        "storageType": "text", "encoding": "text", "value": "abc"}
+        and domain_repair_audit[0]["replacement"] == 8,
+       "legacy adoption must audit the original invalid rank exactly once")
     ok("flow_id" not in columns, "legacy retired task flow_id column was not removed")
     ok({"secret_hash", "auth_state", "auth_version"}.issubset(client_columns),
        "legacy device security columns were not reconciled")

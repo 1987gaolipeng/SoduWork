@@ -27,6 +27,7 @@ from ..memory_record_models import MemoryRecord
 from ..models import AppSetting, DailyReport, IdentityLink, User
 from ..session_memory_models import SessionMemory
 from . import library_storage
+from ..timestamps import iso_utc
 
 log = logging.getLogger(__name__)
 MAX_EXPORT_BYTES = 64 * 1024 * 1024
@@ -58,8 +59,8 @@ def cipher():
 
 def public_request(row):
     result = {"id": row.id, "kind": row.kind, "status": row.status,
-              "createdAt": row.created_at.isoformat(), "errorCode": row.error_code,
-              "expiresAt": row.expires_at.isoformat() if row.expires_at else None}
+              "createdAt": iso_utc(row.created_at), "errorCode": row.error_code,
+              "expiresAt": iso_utc(row.expires_at) if row.expires_at else None}
     if row.kind == "export" and row.status == "completed":
         result.update(filename="SoduWork-personal-data.zip",
                       downloadUrl=f"/api/v1/client-auth/me/exports/{row.id}/download")

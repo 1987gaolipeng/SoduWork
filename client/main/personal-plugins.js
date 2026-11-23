@@ -206,6 +206,31 @@ function read(app) {
   return { schemaVersion: SCHEMA, plugins: [] };
 }
 
+function pruneUnavailableInherited(app, rawIds) {
+  const ids = Array.isArray(rawIds) ? rawIds.slice() : [];
+  const builtins = new Set([BUILDER_ID, APP_DEVELOPER_ID, SKILL_STUDIO_ID, MCP_STUDIO_ID, PRODUCT_INCUBATOR_ID]);
+  const personalIds = ids.filter(id => id.startsWith('local:') && !builtins.has(id));
+  if (!personalIds.length) return ids;
+  let state;
+  try {
+    state = JSON.parse(fs.readFileSync(file(app), 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') state = { schemaVersion: SCHEMA, plugins: [] };
+    else throw new Error('本机插件列表暂时无法读取，请稍后重试');
+  }
+  // The permissive catalog reader cannot prove deletion: damaged or unreadable
+  // storage must never silently retire a conversation's capability selection.
+  if (!state || state.schemaVersion !== SCHEMA || !Array.isArray(state.plugins) ||
+      state.plugins.some(row => !row || typeof row.id !== 'string' || !row.id.trim() ||
+        row.enabled !== undefined && typeof row.enabled !== 'boolean') ||
+      new Set(state.plugins.map(row => row.id)).size !== state.plugins.length) {
+    throw new Error('本机插件列表暂时无法读取，请稍后重试');
+  }
+  const installed = new Map(state.plugins.map(row => [row.id, row]));
+  return ids.filter(id => !personalIds.includes(id) ||
+    installed.has(id) && installed.get(id).enabled !== false);
+}
+
 function write(app, value) {
   const target = file(app);
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -846,7 +871,7 @@ function install({ app, ipcMain, dialog, safeStorage, identityOf, fetchImpl }) {
 
 module.exports = {
   BUILDER_ID, APP_DEVELOPER_ID, SKILL_STUDIO_ID, MCP_STUDIO_ID, PRODUCT_INCUBATOR_ID, build, catalog, get, create, preflight, resolve, setVersion,
-  exportDraft, exportToFile, install, publisherIdentity, signPayload, normalizeInstallSetup, configure,
+  exportDraft, exportToFile, install, publisherIdentity, signPayload, normalizeInstallSetup, configure, pruneUnavailableInherited,
   preflightArchive, preflightCandidate, service,
   _canonicalBytes: canonicalBytes, _read: read, _publicPlugin: publicPlugin,
 };

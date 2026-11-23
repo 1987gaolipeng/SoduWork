@@ -18,6 +18,57 @@ from model_test_support import FakeResponse
 
 
 class OpenKeepaliveTests(unittest.IsolatedAsyncioTestCase):
+    async def test_output_limit_rejection_survives_json_and_sse_without_provider_text(self):
+        raw = "max_completion_tokens=65536 cannot be greater than max_model_len=32768; private-fixture-secret"
+        error = model_errors.UpstreamError(400, json.dumps({"error": {"message": raw}}))
+
+        async def boom():
+            raise error
+
+        expected = json.loads(ai_proxy._proxy_error(error).body)
+        self.assertEqual(expected["error"]["code"], "output_token_limit_exceeded")
+        self.assertEqual(expected["error"]["status"], 400)
+        for responses in (False, True):
+            streamed = await ai_proxy._open_then_stream(None, boom, responses=responses)
+            body = b"".join(await self._drain(streamed))
+            await streamed.background()
+            frames = [json.loads(line[6:]) for line in body.split(b"\n") if line.startswith(b"data: ")]
+            self.assertEqual(frames, [expected])
+            self.assertNotIn(b"private-fixture-secret", body)
+        for value in (expected, raw, f"The chat model rejected this request (400): {raw}",
+                      "422 max_tokens must be <= 32768"):
+            public = model_errors.public_failure(value)
+            self.assertIn("最大输出 Token", public)
+            self.assertIn("上下文窗口", public)
+            self.assertNotIn("private-fixture-secret", public)
+        for value in ("400 Unsupported parameter: max_tokens", "400 max_tokens must be a positive integer",
+                      "400 context_length_exceeded", "401 " + raw, "429 " + raw):
+            self.assertNotIn("最大输出 Token", model_errors.public_failure(value))
+
+    async def test_thinking_disabled_rejection_returns_actionable_message(self):
+        raw = json.dumps({"error": {"code": "InvalidParameter",
+                                    "message": "thinking.type `disabled` is not supported by this model",
+                                    "type": "BadRequest"}})
+        error = model_errors.UpstreamError(400, raw)
+
+        expected = json.loads(ai_proxy._proxy_error(error).body)
+        self.assertEqual(expected["error"]["code"], "thinking_disabled_unsupported")
+        self.assertEqual(expected["error"]["status"], 400)
+        self.assertIn("始终开启", expected["error"]["message"])
+
+        async def boom():
+            raise error
+
+        streamed = await ai_proxy._open_then_stream(None, boom)
+        body = b"".join(await self._drain(streamed))
+        await streamed.background()
+        frames = [json.loads(line[6:]) for line in body.split(b"\n") if line.startswith(b"data: ")]
+        self.assertEqual(frames, [expected])
+
+        public = model_errors.public_failure(f"400 {raw}")
+        self.assertIn("始终开启", public)
+        self.assertNotIn("始终开启", model_errors.public_failure("400 Unsupported parameter: max_tokens"))
+
     async def _drain(self, response, first=None, limit=64):
         it = response.body_iterator.__aiter__()
         chunks = [first] if first is not None else []

@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def apply(env: dict, key: str) -> None:
-    variable = {"kimi": "KIMI_SHELL_PATH", "claude": "CLAUDE_CODE_GIT_BASH_PATH"}.get(key)
+    variable = {"kimi": "KIMI_SHELL_PATH"}.get(key)
     if not variable:
         return
     configured = str(env.get(variable) or "")

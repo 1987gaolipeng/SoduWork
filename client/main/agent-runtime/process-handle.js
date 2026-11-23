@@ -9,16 +9,20 @@ const READ_METHODS = new Set(['snapshot', 'uiSnapshot', 'status', 'inFlight', 'h
 function createProcessHandle({ ref, invoke, setProperty, release, onClose, confirmStopped }) {
   const listeners = new Set();
   const state = { revision: 0, messages: [], tools: [], data: null };
-  let lost = null, closed = false, closing = null;
+  let lost = null, lostOutcome = null, interruptedWork = false, closed = false, closing = null;
   const local = { ref, adapterId: 'pi', displayName: 'Pi', ui: {} };
+  const failureView = () => ({ code: lost.code, reason: lost.message, interrupted: interruptedWork });
   function snapshot() {
     const value = { ...(state.data?.state || {}), messages: state.messages.slice(), tools: state.tools.slice() };
     if (!lost) return value;
-    return { ...value, status: 'failed', statusText: '执行已中断', pendingUi: null,
-      execution: { ...(value.execution || {}), running: false, paused: true, stopped: true, state: 'interrupted',
-        turnQueue: { ...(value.execution?.turnQueue || {}), active: null, blocked: true, paused: true } },
-      runtimeUnavailable: true, runtimeFailure: { code: lost.code, reason: lost.message },
-      completion: { ...(value.completion || {}), completed: false, reason: 'runtime-interrupted', retryable: false } };
+    // Runtime availability is independent of the last settled execution result.
+    return { ...value, pendingUi: null,
+      execution: { ...(value.execution || {}), running: false,
+        ...(interruptedWork ? { paused: true, stopped: true, state: 'interrupted',
+          turnQueue: { ...(value.execution?.turnQueue || {}), active: null, blocked: true, paused: true } } : {}) },
+      runtimeUnavailable: true, runtimeFailure: failureView(),
+      ...(interruptedWork ? { status: 'failed', statusText: '执行已中断',
+        completion: { ...(value.completion || {}), completed: false, reason: 'runtime-interrupted', retryable: false } } : {}) };
   }
   function call(method, args, options) {
     if (closed || lost) return Promise.reject(lost || failure());
@@ -34,11 +38,13 @@ function createProcessHandle({ ref, invoke, setProperty, release, onClose, confi
   Object.assign(local, {
     snapshot,
     uiSnapshot: options => windowed.limitSnapshot(snapshot(), options),
-    status: () => lost ? 'failed' : state.data?.status || 'idle',
+    status: () => lost ? snapshot().status || 'idle' : state.data?.status || 'idle',
     inFlight: () => !closed && !lost && Boolean(state.data?.inFlight),
     executionStopped: () => Boolean(confirmStopped?.()),
     historyRow: () => state.data?.history ? { ...state.data.history,
-      ...(lost ? { status: 'failed', state: 'failed' } : {}) } : null,
+      ...(lost ? { live: false, runtimeUnavailable: true, runtimeFailure: failureView(),
+        executionOutcome: lostOutcome,
+        ...(interruptedWork ? { status: 'failed', state: 'failed' } : {}) } : {}) } : null,
     goalView: () => state.data?.goal || { mode: 'chat', intent: '' },
     resumeLocation: () => state.data?.resumePath || '',
     on(listener) { if (typeof listener !== 'function') throw TypeError('Session listener must be a function');
@@ -89,6 +95,15 @@ function createProcessHandle({ ref, invoke, setProperty, release, onClose, confi
   }
   function interrupted(error) {
     if (closed || lost) return;
+    const valueBeforeLoss = state.data?.state, execution = valueBeforeLoss?.execution || {};
+    lostOutcome = Object.freeze({ version: 1, source: 'runtime',
+      state: state.data?.history?.state || '',
+      status: state.data?.history?.status || valueBeforeLoss?.status || state.data?.status || '' });
+    const queue = execution.turnQueue || {};
+    interruptedWork = !state.data || Boolean(state.data.inFlight || execution.running || valueBeforeLoss?.pendingUi ||
+      queue.active || queue.activeQueueId || execution.queue?.length || queue.queued?.length ||
+      ['starting', 'running', 'streaming', 'compacting', 'queued', 'waiting', 'waiting-user', 'responding']
+        .includes(valueBeforeLoss?.status || state.data.status));
     lost = Object.assign(failure(), { cause: error });
     const value = snapshot();
     for (const listener of listeners) { try { listener({ kind: 'runtime-unavailable', reason: lost.message }, value); } catch (_) {} }

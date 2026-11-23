@@ -37,9 +37,9 @@ const session = { sessionId: 'authoring', get cwd() { return control().cwd; },
     ...(control().pluginSince == null ? {} : { pluginSince: control().pluginSince }) }),
 };
 drafts.installIpc(productionIpc, { get: ref => ref === session.sessionId ? session : null, list: () => [session] });
-ipcMain.handle('pi-session-outputs', (_event, ref) => {
+ipcMain.handle('pi-session-outputs', async (_event, ref) => {
   if (ref !== session.sessionId) throw Error('Unknown fixture conversation');
-  const { got, delivery, items } = artifacts.snapshot(session);
+  const { got, delivery, items } = await artifacts.snapshotAsync(session);
   return { ok: true, files: got.files, delivery, deliverables: delivery.items,
     artifacts: artifacts.decorate(ref, { items }) };
 });

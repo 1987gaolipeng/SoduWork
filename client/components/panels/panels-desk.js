@@ -447,7 +447,7 @@ function _noticePresentation(n) {
   let text = String(legal && globalThis.LegalUpdates ? LegalUpdates.noticeText(n.legalUpdate) : translated).replace(/^[\s\u23f0\u21bb\u2705\ud83d\udce5]+/u, '').trim();
   if (mate && n.bodyText == null && n.senderName && text.startsWith(n.senderName + '：')) text = text.slice(n.senderName.length + 1).trim();
   const report = !mate && text.match(/^(日报已生成|周报已生成)[：:]\s*([\s\S]*)$/);
-  const labels = { task: '任务动态', remind: '提醒', recur: '循环任务', system: '系统通知', notice: '工作通知', mate_receipt: '消息回执', plugin_lifecycle: '发布状态更新' };
+  const labels = { task: '任务动态', remind: '提醒', recur: '循环任务', system: '系统通知', notice: '工作通知', client_update: '客户端更新', mate_receipt: '消息回执', plugin_lifecycle: '发布状态更新' };
   let title = esc(legal ? (globalThis.SoduWorkI18n?.translateText?.('系统消息') || '系统消息') : report ? report[1] : labels[n.kind] || '工作通知');
   if (n.kind === 'mate_receipt') {
     const status = { accepted: '已发送', delivered: '已送达', read: '已读' }[n.receiptStatus] || '消息回执';

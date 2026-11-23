@@ -1,5 +1,11 @@
-# DSH already composes this official adapter. Only declare the current route;
-# per-run values live in environment variables, never in this bundle.
+# DSH already composes these official plugins. Route and compaction values live
+# in per-run environment variables, never in this bundle.
 - id: llm-pi-ai
   config:
     providers: !!js "JSON.parse(process.env.SODUWORK_DSH_PROVIDERS || '{}')"
+
+# The ACP bundle disables compaction by default. Restore the native safe
+# boundary between completed tool steps with budgets for the current route.
+- id: compaction-basic
+  disabled: false
+  config: !!js "JSON.parse(process.env.SODUWORK_DSH_COMPACTION || '{}')"

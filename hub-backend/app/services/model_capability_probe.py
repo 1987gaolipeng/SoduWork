@@ -5,7 +5,6 @@ import asyncio
 import base64
 from datetime import datetime, timezone
 import json
-import re
 import secrets
 import struct
 import time
@@ -13,13 +12,16 @@ import zlib
 
 from . import model_transport
 from .model_capabilities import compatibility
-from .model_capability_wire import ProbeIssue, StreamEvidence, failure, meaningful, optional_parameter
+from .model_capability_wire import (
+    TRUNCATED_REASONS, ProbeIssue, StreamEvidence, failure, meaningful, optional_parameter, parse_json, response_choice,
+)
 from .model_errors import UpstreamError
+from .runtime_defaults import DEFAULT_OUTPUT
 
 CHECKS = ("connection", "imageInput", "toolCalling", "streaming")
 TIMEOUT = 30
 TOTAL_TIMEOUT = 120
-MAX_CALLS, MAX_NEGOTIATIONS = 5, 2
+MAX_CALLS, MAX_NEGOTIATIONS = 7, 2
 MAX_BYTES = 256 * 1024
 
 
@@ -56,8 +58,13 @@ def _settings(conf: dict) -> dict:
     return {**config, **{key: value for key, value in conf.items() if key != "config"}}
 
 
+def _output_limit(settings: dict) -> int:
+    return max(1, min(int(settings.get("maxOutputTokens") or DEFAULT_OUTPUT),
+                      int(settings.get("contextWindow") or 128000)))
+
+
 def _thinking(conf: dict) -> dict:
-    from .harness2_provider import thinking_options
+    from .model_thinking import thinking_options
     settings = _settings(conf)
     options = thinking_options(settings)
     # These formats use the same explicit provider switch as the desktop.
@@ -97,9 +104,8 @@ def _payload(conf: dict, check: str) -> tuple[dict, str]:
     compat = compatibility(conf.get("compatibility"))
     output = compat.get("maxTokensField") or ("max_completion_tokens" if settings.get("reasoning") is True
         and settings.get("thinkingFormat") == "openai" else "max_tokens")
-    limit = settings.get("maxOutputTokens") or 65536
     headroom = 2048 if settings.get("thinkingMode") == "always" or settings.get("thinkingAlwaysOn") else 512
-    budget = min(headroom, max(1, int(limit)), max(1, int(settings.get("contextWindow") or 128000)))
+    budget = min(headroom, _output_limit(settings))
     stream = check in ("streaming", "toolCalling")
     body = {"model": conf["model"], output: budget, "stream": stream}
     body.update(_thinking(conf))
@@ -111,15 +117,14 @@ def _payload(conf: dict, check: str) -> tuple[dict, str]:
                   {"type": "image_url", "image_url": {"url": image}}]
     if check == "toolCalling":
         expected = secrets.token_hex(8)
-        prompt = ("Call soduwork_capability_echo with value " + expected +
-                  ". This is a capability check. After receiving its synthetic tool result, reply only with its receipt.")
+        prompt = "Call soduwork_capability_echo with value " + expected + ". This is a capability check. After the tool responds, reply only with the tool result value."
         body.update({"tools": [{"type": "function", "function": {
-            "name": "soduwork_capability_echo", "description": "Echo the supplied check value; no side effects.",
+            "name": "soduwork_capability_echo", "description": "Return a supplied capability-test value without side effects.",
             "parameters": {"type": "object", "properties": {"value": {"type": "string"}},
                            "required": ["value"], "additionalProperties": False}}}],
-            "tool_choice": {"type": "function", "function": {"name": "soduwork_capability_echo"}}})
-        if compat.get("toolChoice") == "auto":
-            body["tool_choice"] = "auto"
+            "tool_choice": "auto"})
+        if compat.get("toolChoice") == "named":
+            body["tool_choice"] = {"type": "function", "function": {"name": "soduwork_capability_echo"}}
     body["messages"] = [{"role": "user", "content": prompt}]
     return body, expected
 
@@ -135,12 +140,13 @@ async def _stream(response, *, tools=False):
     evidence = StreamEvidence(MAX_BYTES)
     async for raw in response.chunks():
         evidence.feed(raw)
-    observed, reasoning = evidence.finish()
+    observed, reasoning = evidence.finish(require_output=not tools)
     if tools:
-        if evidence.finish_reason != "tool_calls" or set(evidence.calls) != {0}:
-            raise ProbeIssue("invalid_response")
         return {"choices": [{"message": evidence.message(), "finish_reason": evidence.finish_reason}],
-                "_reasoningStreamReported": reasoning}
+                "_reasoningStreamReported": reasoning, "_toolCallIndices": sorted(evidence.calls),
+                "_legacyCallObserved": evidence.legacy_call_observed}
+    if evidence.finish_reason not in ("stop", "tool_calls"):
+        raise ProbeIssue("invalid_response")
     return observed, reasoning
 
 
@@ -149,6 +155,7 @@ class _Budget:
         self.deadline = time.monotonic() + TOTAL_TIMEOUT
         self.calls = self.negotiations = 0
         self.variants = set()
+        self.candidate = {}
 
     def timeout(self):
         left = self.deadline - time.monotonic()
@@ -162,31 +169,36 @@ class _Budget:
         self.calls += 1
 
     def negotiate(self, error, body) -> bool:
-        parameter = optional_parameter(error)
+        return self.change_parameter(optional_parameter(error), body)
+
+    def change_parameter(self, parameter, body) -> bool:
         group = "output" if parameter in ("max_tokens", "max_completion_tokens") else parameter
         if (not parameter or parameter not in body or group in self.variants
-                or self.negotiations >= MAX_NEGOTIATIONS):
+                or self.negotiations >= MAX_NEGOTIATIONS
+                or parameter == "tool_choice" and body[parameter] == "auto"):
             return False
         self.variants.add(group)
         self.negotiations += 1
         if group == "output":
             other = "max_completion_tokens" if parameter == "max_tokens" else "max_tokens"
             body[other] = body.pop(parameter)
+            self.candidate["maxTokensField"] = other
         elif parameter == "tool_choice":
-            if body[parameter] == "auto":
-                return False
             body[parameter] = "auto"
+            self.candidate["toolChoice"] = "auto"
         elif parameter == "stream_options":
             body.pop(parameter)
+            self.candidate["streamOptions"] = False
         return True
 
 
-async def _exchange(conf, body, budget, working, *, stream=False, tools=False):
-    budget.start()
+async def _exchange(conf, body, budget, working, *, stream=False, tools=False,
+                    retry_reasoning_budget=False):
     while True:
         response = None
         try:
             timeout = budget.timeout()
+            budget.start()
             request_deadline = time.monotonic() + timeout
             async with asyncio.timeout(timeout) as deadline:
                 response = await model_transport.open_response(conf, "/chat/completions", json.dumps(body).encode(),
@@ -199,14 +211,8 @@ async def _exchange(conf, body, budget, working, *, stream=False, tools=False):
                         if len(raw) + len(chunk) > MAX_BYTES:
                             raise ProbeIssue("response_limit")
                         raw.extend(chunk)
-                    data = json.loads(raw)
-                    if not isinstance(data, dict) or data.get("error") is not None:
-                        raise ProbeIssue("invalid_response")
-                    choice = (data.get("choices") or [{}])[0]
-                    if choice.get("finish_reason") in ("length", "max_tokens", "max_output_tokens"):
-                        raise ProbeIssue("response_truncated")
-                    if not isinstance(choice.get("message"), dict):
-                        raise ProbeIssue("invalid_response")
+                    data = parse_json(raw)
+                    choice = response_choice(data, allow_truncated=retry_reasoning_budget)
                 # A transport may translate cancellation/socket closure into
                 # EOF. Terminal text does not make an expired request succeed.
                 if deadline.expired() or time.monotonic() >= request_deadline:
@@ -216,9 +222,12 @@ async def _exchange(conf, body, budget, working, *, stream=False, tools=False):
                 outcome = getattr(response, "outcome", "completed")
                 if outcome != "completed":
                     raise ProbeIssue("timeout" if outcome == "timeout" else "transport_interrupted")
+                if not stream and choice.get("finish_reason") in TRUNCATED_REASONS:
+                    if budget.calls >= MAX_CALLS or not _raise_reasoning_budget(conf, body, choice["message"]):
+                        raise ProbeIssue("response_truncated")
+                    retry_reasoning_budget = False
+                    continue
                 working["maxTokensField"] = "max_completion_tokens" if "max_completion_tokens" in body else "max_tokens"
-                if "tool_choice" in body:
-                    working["toolChoice"] = "named" if isinstance(body["tool_choice"], dict) else "auto"
                 if stream:
                     working["streamOptions"] = "stream_options" in body
                 return data
@@ -230,42 +239,81 @@ async def _exchange(conf, body, budget, working, *, stream=False, tools=False):
                 await response.aclose()
 
 
-async def _check(conf, check, budget, working):
-    body, expected = _payload({**conf, "compatibility": working}, check)
-    data = await _exchange(conf, body, budget, working, stream=body["stream"], tools=check == "toolCalling")
+def _raise_reasoning_budget(conf: dict, body: dict, message: dict) -> bool:
+    """Allow room for a final answer after a truncated reasoning trace."""
+    if not any(meaningful(message.get(key)) for key in ("reasoning_content", "reasoning", "thinking")):
+        return False
+    field = "max_completion_tokens" if "max_completion_tokens" in body else "max_tokens"
+    current = body[field]
+    larger = min(_output_limit(_settings(conf)), max(current * 4, 4096))
+    if larger <= current:
+        return False
+    body[field] = larger
+    return True
+
+
+async def _check(conf, check, budget, working, phase):
+    body, expected = _payload({**conf, "compatibility": {**working, **budget.candidate}}, check)
+    data = await _exchange(conf, body, budget, working, stream=body["stream"], tools=check == "toolCalling",
+                           retry_reasoning_budget=check in ("connection", "imageInput"))
+    if (check == "toolCalling" and isinstance(body.get("tool_choice"), dict)
+            and data["choices"][0].get("finish_reason") == "stop"
+            and meaningful(data["choices"][0]["message"].get("content"))
+            and not data["_toolCallIndices"] and not data["_legacyCallObserved"]
+            and budget.change_parameter("tool_choice", body)):
+        data = await _exchange(conf, body, budget, working, stream=True, tools=True)
     if check == "streaming":
         return data
+    if check in ("connection", "imageInput") and data["choices"][0].get("finish_reason") not in ("stop", "tool_calls"):
+        raise ProbeIssue("invalid_response")
     value = data["choices"][0]["message"]
     reported = bool(data.get("_reasoningStreamReported"))
     content = value.get("content")
     if check == "connection":
-        return meaningful(content) or meaningful(value.get("reasoning_content")), False
+        if not any(meaningful(value.get(key)) for key in ("content", "reasoning_content", "reasoning", "thinking")):
+            raise ProbeIssue("expected_output_missing", detail_code="expected_output_mismatch")
+        return True, False
     if check == "imageInput":
-        return isinstance(content, str) and re.sub(r"\D", "", content) == expected, False
+        if not isinstance(content, str) or content.strip() != expected:
+            raise ProbeIssue("expected_output_missing", detail_code="expected_output_mismatch")
+        return True, False
     calls = value.get("tool_calls") or []
-    if not isinstance(calls, list) or len(calls) != 1:
-        return False, reported
+    if not isinstance(calls, list) or len(calls) != 1 or data.get("_toolCallIndices") != [0]:
+        raise ProbeIssue("expected_output_missing", detail_code="tool_call_count_mismatch")
+    if data["choices"][0].get("finish_reason") != "tool_calls":
+        raise ProbeIssue("expected_output_missing", detail_code="tool_finish_reason_mismatch")
     call = calls[0]
     function = call.get("function") or {}
     if (call.get("type") != "function" or not meaningful(call.get("id")) or len(call["id"]) > 200
             or function.get("name") != "soduwork_capability_echo"):
-        return False, reported
-    arguments = json.loads(function.get("arguments") or "null")
+        raise ProbeIssue("expected_output_missing", detail_code="tool_call_invalid")
+    try:
+        arguments = parse_json(function.get("arguments") or "null")
+    except (ValueError, TypeError) as exc:
+        raise ProbeIssue("expected_output_missing", detail_code="tool_arguments_invalid") from exc
     if not isinstance(arguments, dict) or arguments != {"value": expected}:
-        return False, reported
-    receipt = secrets.token_hex(12)
+        raise ProbeIssue("expected_output_missing", detail_code="tool_arguments_invalid")
+    receipt = secrets.token_hex(8)
     assistant = {"role": "assistant", "content": content, "tool_calls": calls}
     if isinstance(value.get("reasoning_content"), str):
         assistant["reasoning_content"] = value["reasoning_content"]
-    followup, _ = _payload({**conf, "compatibility": working}, "connection")
+    followup, _ = _payload({**conf, "compatibility": {**working, **budget.candidate}}, "toolCalling")
+    followup.pop("tool_choice", None)
     followup["messages"] = [*body["messages"], assistant, {"role": "tool", "tool_call_id": call["id"],
-        "content": json.dumps({"value": expected, "receipt": receipt})}]
+        "content": receipt}]
     # This result is fabricated locally. No model-suggested function is executed.
-    final = await _exchange(conf, followup, budget, working)
+    phase["stage"] = "tool_result"
+    final = await _exchange(conf, followup, budget, working, stream=True, tools=True)
     final_choice = final["choices"][0]
     answer = final_choice["message"].get("content")
-    return (isinstance(answer, str) and answer.strip() == receipt
-            and final_choice.get("finish_reason") == "stop"), reported
+    if final_choice.get("finish_reason") != "stop":
+        raise ProbeIssue("expected_output_missing", detail_code="tool_result_finish_reason_mismatch")
+    if (not isinstance(answer, str) or answer.strip() != receipt
+            or final.get("_legacyCallObserved") or final_choice["message"].get("tool_calls")
+            or final_choice["message"].get("function_call")):
+        raise ProbeIssue("expected_output_missing", detail_code="tool_receipt_mismatch")
+    working["toolChoice"] = "named" if isinstance(body["tool_choice"], dict) else "auto"
+    return True, reported or bool(final.get("_reasoningStreamReported"))
 
 
 async def run(conf: dict, checks: list[str]) -> dict:
@@ -273,21 +321,26 @@ async def run(conf: dict, checks: list[str]) -> dict:
     working, budget = compatibility(conf.get("compatibility")), _Budget()
     for check in dict.fromkeys(checks):
         stamp = now()
+        phase = {"stage": "tool_call" if check == "toolCalling" else "stream" if check == "streaming" else "output"}
+        detail = None
         if conf.get("kind", "openai-compat") != "openai-compat":
-            results[check] = {"status": "inconclusive", "code": "protocol_not_tested", "checkedAt": stamp}
+            results[check] = {"status": "inconclusive", "code": "protocol_not_tested", "checkedAt": stamp, **phase}
             continue
         try:
-            passed, reported = await _check(conf, check, budget, working)
+            passed, reported = await _check(conf, check, budget, working, phase)
             reasoning = reasoning or reported
             status, code = ("passed", "verified") if passed else ("inconclusive", "expected_output_missing")
         except ProbeIssue as exc:
             status, code = exc.status, exc.code
+            detail = exc.detail_code
         except UpstreamError as exc:
             status, code = _failure(exc, check)
         except TimeoutError:
             status, code = "inconclusive", "timeout"
         except (ValueError, TypeError, KeyError, AttributeError, IndexError):
             status, code = "inconclusive", "invalid_response"
-        results[check] = {"status": status, "code": code, "checkedAt": stamp}
-    return {"reportVersion": 2, "apiFamily": "chat-completions", "checkedAt": now(), "checks": results,
+        results[check] = {"status": status, "code": code, "checkedAt": stamp, **phase}
+        if status != "passed" and detail:
+            results[check]["detailCode"] = detail
+    return {"reportVersion": 3, "apiFamily": "chat-completions", "checkedAt": now(), "checks": results,
             "reasoningStreamReported": reasoning, "compatibility": working}

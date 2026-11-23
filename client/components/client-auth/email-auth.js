@@ -22,12 +22,19 @@
     });
     input.addEventListener('input', () => normalizeSingleLineInput(input));
   }
+  function transitionMessage(error) {
+    if (error?.code === 'AUTH_TRANSITION_PENDING') return '正在完成账号切换，请稍后重试登录。';
+    if (['STALE_AUTH_OPERATION', 'STALE_TASK_SCOPE'].includes(error?.code) ||
+        (error?.error || error?.message) === '账号或服务已变化，请重新打开这条对话')
+      return '账号或服务已变化，请重新登录。';
+    return '';
+  }
   function mount(gate, hooks) {
     const ui = global.AccountUI;
     // Established accounts may use a username, employee number, or email.
     // Email verification is an explicit registration / recovery flow instead
     // of the default login mode.
-    let mode = 'password', policy = null, revision = 0, busy = false, sending = false;
+    let mode = 'password', policy = null, revision = 0, busy = false, sending = null, submission = null;
     let policyError = false;
     let legalLocales = {};
     let challenge = null, cooldownUntil = 0, clock = null, pendingPasswordMode = false;
@@ -247,6 +254,20 @@
       submit.querySelector('span').textContent = tx(label || (busy ? '正在处理…' : actionLabel()));
       submit.classList.toggle('is-busy', busy); refreshCooldown();
     }
+    function finishSubmission(state) {
+      if (submission !== state) return;
+      submission = null;
+      setBusy(false);
+    }
+    function invalidate() {
+      stopDelivery(); revision++; challenge = null; submission = null; sending = null;
+      cooldownUntil = 0;
+      if (clock) clearInterval(clock);
+      clock = null;
+      password.value = ''; confirm.value = ''; code.value = ''; password.type = 'password';
+      consent.checked = false; legalLocales = {};
+      setBusy(false); setStatus(''); refreshLocale();
+    }
     function changeMode(next) {
       if (busy) return;
       stopDelivery();
@@ -322,7 +343,7 @@
     send.addEventListener('click', async () => {
       if (!ui.email(account.value)) { setStatus('请输入有效的邮箱地址。', 'error'); account.focus(); return; }
       if (!canMail() || sending || busy || cooldownUntil > Date.now()) return;
-      const state = stamp(); sending = true; refreshCooldown(); setStatus('');
+      const state = stamp(); sending = state; refreshCooldown(); setStatus('');
       try {
         const result = ui.check(await api().clientAccountAction('emailChallenge', {
           email: state.email, purpose: mode === 'register' ? 'register' : mode === 'resetPassword' ? 'reset_password' : 'login'
@@ -346,9 +367,9 @@
             changeMode('register');
             setStatus('此邮箱尚未注册，请先创建账号。', 'working');
           }
-        } else setStatus(ui.error(error), 'error');
+        } else setStatus(transitionMessage(error) || ui.error(error), 'error');
       }
-      finally { sending = false; refreshCooldown(); }
+      finally { if (sending === state) { sending = null; refreshCooldown(); } }
     });
     form.addEventListener('submit', async event => {
       event.preventDefault();
@@ -375,28 +396,38 @@
         const read = legalLocales[kind];
         return [kind, (read?.version === policy?.requiredConsentVersions?.[kind] ? read.locale : selected?.locale) || ''];
       }));
+      submission = state;
+      let enteringWorkspace = false;
       setBusy(true); setStatus('');
       try {
         const result = ui.check(await (action === 'password' && (!ui.email(value) || (policy && !supportsEmail()))
           ? api().clientLogin({ account: value, password: password.value }) : api().clientAccountAction(action, payload)));
         // The API fences concurrent auth changes; first login can also establish the real device ID.
-        if (!current(state, true)) return;
+        if (submission !== state || !current(state, true)) return;
         password.value = ''; confirm.value = ''; code.value = ''; password.type = 'password';
         if (action === 'resetPassword') {
-          setBusy(false); changeMode('password'); setStatus('密码已重置，请用新密码登录。', 'success'); return;
+          finishSubmission(state); changeMode('password'); setStatus('密码已重置，请用新密码登录。', 'success'); return;
         }
-        setStatus('验证成功，正在进入工作区…', 'success'); hooks.success(result);
+        setStatus('验证成功，正在进入工作区…', 'success');
+        if (hooks.success(result) === false) throw new Error('暂未确认登录状态，请重试。');
+        enteringWorkspace = true;
       } catch (error) {
-        if (current(state) && error?.code === 'CONSENT_REQUIRED') {
+        if (submission === state && current(state) && error?.code === 'CONSENT_REQUIRED') {
           consent.checked = false;
-          try { const latest = await api().clientAuthPolicy(); if (current(state)) setPolicy(latest); } catch (_) {}
+          try { const latest = await api().clientAuthPolicy(); if (submission === state && current(state)) setPolicy(latest); } catch (_) {}
         }
-        if (current(state)) {
+        if (submission === state && current(state)) {
           password.value = ''; confirm.value = ''; password.type = 'password';
-          setBusy(false); refreshLocale();
+          finishSubmission(state); refreshLocale();
           if (action === 'password' && mode === 'password' && ['ACCOUNT_NOT_FOUND', 'PASSWORD_INCORRECT'].includes(error?.code)) {
             showLoginError(error.code);
-          } else setStatus(ui.error(error), 'error');
+          } else setStatus(transitionMessage(error) || ui.error(error), 'error');
+        }
+      } finally {
+        // A revoked request can retire its own lock, but cannot touch a new submission.
+        if (submission === state && !enteringWorkspace) {
+          if (current(state)) finishSubmission(state);
+          else invalidate();
         }
       }
     });
@@ -421,8 +452,8 @@
     changeMode('password');
     return { form, accountInput: account, passwordInput: password, displayInput: null,
       statusNode: status, submitButton: submit, setBusy, setPolicy, setPolicyError, setStatus,
-      invalidate() { stopDelivery(); revision++; challenge = null; password.value = ''; confirm.value = ''; code.value = ''; },
+      invalidate,
       dispose() { stopDelivery(); disposed = true; revision++; if (clock) clearInterval(clock); global.removeEventListener?.('soduwork-locale-change', onLocaleChange); gate._accountUiPasswordLocaleDispose?.(); delete gate._accountUiPasswordLocaleDispose; } };
   }
-  global.EmailAuth = { mount };
+  global.EmailAuth = { mount, transitionMessage };
 })(window);

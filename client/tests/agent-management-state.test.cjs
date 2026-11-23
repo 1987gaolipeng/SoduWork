@@ -27,7 +27,7 @@ test('managed Agent defaults disclose Anthropic incompatibility while account-ba
   assert.match(f.context._agModelHtml({ modelPick: true, key: 'pi', model: 'openai-model' }), /role="note"/);
   f.run("_agData={models:[{name:'openai-model',providerKind:'openai-compat'}]}");
   assert.doesNotMatch(f.context._agModelHtml({ modelPick: true, key: 'pi', model: 'openai-model' }), /ag-model-warn/);
-  assert.doesNotMatch(f.context._agModelHtml({ modelPick: false, key: 'claude', model: 'anthropic-model' }), /OpenAI 兼容/);
+  assert.doesNotMatch(f.context._agModelHtml({ modelPick: false, key: 'codex', model: 'anthropic-model' }), /OpenAI 兼容/);
 });
 
 test('Agent management renders only this client even when cloud and other instances share its label', () => {
@@ -42,6 +42,27 @@ test('Agent management renders only this client even when cloud and other instan
   assert.match(f.body.innerHTML, /本机 AI 助手/);
   assert.match(f.body.innerHTML, /data-ak="computer~opencode"/);
   assert.doesNotMatch(f.body.innerHTML, /data-ak="(?:cloud|other|unknown)~/);
+});
+
+test('empty Hub catalog warns only on a machine with blocked Agents and no testable Agent', () => {
+  const f = fixture();
+  const pi = { key: 'pi', name: 'Pi', installed: true, state: 'nollm' };
+  const codex = { key: 'codex', name: 'Codex', installed: true, state: 'ready' };
+  function render(machines, modelCount = 0) {
+    f.context.inventory = { machines, modelCount };
+    f.run('_agData = inventory');
+    f.context._agRender();
+    return f.body.innerHTML;
+  }
+  assert.match(render([machine([pi])]), /class="ag-warn"/);
+  const mixed = render([machine([pi, codex])]);
+  assert.doesNotMatch(mixed, /class="ag-warn"/);
+  assert.match(mixed, /data-agstate="nollm" data-ak="computer~pi"/);
+  assert.match(mixed, /data-agstate="ready" data-ak="computer~codex"/);
+  assert.doesNotMatch(render([machine([pi])], 1), /class="ag-warn"/);
+  assert.doesNotMatch(render([machine([])]), /class="ag-warn"/);
+  const cloud = { ...machine([codex]), runnerId: 'cloud', scope: 'personal-cloud' };
+  assert.match(render([machine([pi]), cloud]), /class="ag-warn"/);
 });
 
 test('cloud-only and legacy backend inventories cannot become a local fallback', () => {
@@ -215,9 +236,6 @@ test('legacy partial installs and bundled setup do not produce contradictory bad
   const f = fixture();
   const broken = { ...base, present: undefined, state: 'missing', installed: false, warnNow: '启动自检失败' };
   assert.equal(f.context._agPresentation(broken).state, 'broken');
-  const setup = { ...broken, key: 'harness2', name: 'Google Harness²', bundled: true,
-    warnNow: 'Google Harness² 需要 OpenCode 执行组件，请点「装上」自动准备。' };
-  assert.equal(f.context._agPresentation(setup).state, 'setup');
   assert.equal(f.context._agPresentation({ key: 'opencode', state: 'missing', installed: false,
     warnNow: '需要准备依赖' }).state, 'missing');
 });
@@ -255,7 +273,7 @@ test('legacy saved probes do not follow an observed model or version change', ()
 });
 
 test('unknown states are renderable and overview counts only complete installations', () => {
-  const f = fixture(), agents = [base, { ...base, key: 'harness2', state: 'setup', installed: false },
+  const f = fixture(), agents = [base, { ...base, key: 'qwen', state: 'setup', installed: false },
     { ...base, key: 'broken', state: 'broken', installed: false },
     { ...base, key: 'unknown', state: 'future-state', installed: false }];
   assert.equal(f.context._agPresentation(agents[3]).state, 'unknown');

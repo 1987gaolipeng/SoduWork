@@ -1,9 +1,8 @@
 """Runner follow-up admission, attachments and explicit executor selection."""
-import asyncio
 import os
 import uuid
 
-from . import ai_local, runner_admission
+from . import ai_local, runner_admission, runner_local_rpc
 
 
 def _duplicate(machine, ref, turn_id, message):
@@ -43,7 +42,7 @@ async def comment(machine, m, read_local_files, read_packet=None, drop_transfer=
         from . import execution_selection, runner_turn_selection
         try:
             raw = execution_selection.normalize(m["executionSelection"])
-            selected = await asyncio.to_thread(runner_turn_selection.validate, ref, raw, m.get("cfg"))
+            selected = await runner_local_rpc.to_thread(runner_turn_selection.validate, ref, raw, m.get("cfg"))
             from . import local_base
             with local_base._LOCK:
                 switching = selected != execution_selection.current(local_base._RUNS.get(ref) or {})
@@ -91,9 +90,9 @@ async def comment(machine, m, read_local_files, read_packet=None, drop_transfer=
         if read_packet is None:
             return {"ok": False, "error": "执行机不支持本轮材料"}
         try:
-            files = await asyncio.to_thread(read_packet, packet, "本轮补充文件")
+            files = await runner_local_rpc.to_thread(read_packet, packet, "本轮补充文件")
             inputs = [(meta["filename"], data, meta.get("contentType") or "application/octet-stream") for meta, data in files]
-            staged = await asyncio.to_thread(ai_local._stage_inputs, ref, inputs)
+            staged = await runner_local_rpc.to_thread(ai_local._stage_inputs, ref, inputs)
             if len(staged) != len(inputs):
                 return {"ok": False, "error": "本轮文件未完整保存，没有继续执行"}
             text += "\n\n【本轮补充文件】\n" + "\n".join("- %s：%s" % (item["name"], item["path"]) for item in staged)
@@ -103,21 +102,27 @@ async def comment(machine, m, read_local_files, read_packet=None, drop_transfer=
             if drop_transfer:
                 await drop_transfer(str(packet.get("transfer") or ""))
     if m.get("_localParent") and m.get("localFiles"):
-        files = read_local_files(m.get("localFiles") or [], "\u8865\u5145\u9644\u4ef6")
+        files = await runner_local_rpc.to_thread(
+            read_local_files, m.get("localFiles") or [], "\u8865\u5145\u9644\u4ef6")
         inputs = [(str(meta.get("filename") or "\u9644\u4ef6"), data,
                    str(meta.get("contentType") or "application/octet-stream"))
                   for meta, data in files]
-        staged = await asyncio.to_thread(ai_local._stage_inputs, ref, inputs)
+        staged = await runner_local_rpc.to_thread(ai_local._stage_inputs, ref, inputs)
         if staged:
             text += "\n\n\u3010\u672c\u8f6e\u8865\u5145\u6587\u4ef6\u3011\n" + "\n".join(
                 "- %s\uff1a%s" % (item.get("name") or "\u9644\u4ef6", item.get("path") or "")
                 for item in staged)
     if m.get("recordUser"):
-        await asyncio.to_thread(local_stream.record_user_sync, ref, user_text, staged,
+        await runner_local_rpc.to_thread(local_stream.record_user_sync, ref, user_text, staged,
                                 m.get("plugins"), m.get("sentAt"))
     from app.services import runtime_images
     try:
         cfg = {**dict(m.get("cfg") or {}), "_admissionKey": str(m.get("_admissionKey") or "")}
+        # Controls belong to the admitted message, never a renewable model grant.
+        for key in ("taskGoal", "taskGoalControl"):
+            cfg.pop(key, None)
+            if key in m:
+                cfg[key] = m[key]
         if prepared_skills is not None:
             cfg["skillSelection"] = prepared_skills["selection"]
         if prepared_plugins is not None:
@@ -126,11 +131,11 @@ async def comment(machine, m, read_local_files, read_packet=None, drop_transfer=
             cfg["pluginResourceBundles"] = []
         if selected is not None:
             cfg["_executionSelection"] = selected
-        turn_cfg = await asyncio.to_thread(runtime_images.prepare, cfg,
+        turn_cfg = await runner_local_rpc.to_thread(runtime_images.prepare, cfg,
             staged, os.path.join(ai_local._store_dir(ref), "inputs"))
     except (runtime_images.ImageInputError, OSError) as exc:
         return {"ok": False, "error": str(exc)}
-    result = await asyncio.to_thread(
+    result = await runner_local_rpc.to_thread(
         local_stream.comment_sync, turn_cfg, ref, text)
     return {"ok": bool(result.get("ok")), "data": result,
             "error": str(result.get("error") or "")}

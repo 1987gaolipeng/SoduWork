@@ -3,6 +3,50 @@ const assert = require('node:assert/strict');
 const R = require('../core/requirements.js');
 const Sync = require('../core/task-sync.js');
 
+test('a matching authorized review clears a stale unassigned hint without trusting another version or an empty gate', () => {
+  const value = {id:'t',status:'doing',requirementStage:'reviewing',canReview:true,
+    workRouting:{conversationTurn:{state:'completed',deliveryIssue:{code:'review_unassigned',artifactVersionId:'v1'}}}};
+  const gate = {action:'review',status:'pending',artifactVersionId:'v1'};
+  const ctx = {approvals:new Map([['t',gate]])};
+  assert.equal(R.deliveryProgress(value,ctx),null);
+  assert.equal(R.blocked(value,ctx),false);
+  assert.doesNotMatch(R.nextStep(value,ctx).text,/受阻/);
+  assert.equal(R.deliveryProgress({...value,canReview:false},ctx).blocked,true);
+  gate.artifactVersionId = 'v2';
+  assert.equal(R.deliveryProgress(value,ctx).blocked,true);
+  gate.artifactVersionId = 'v1'; gate.status = 'approved';
+  assert.equal(R.deliveryProgress(value,ctx).blocked,true);
+});
+
+test('delivery issue guidance is localizable independently of the server diagnostic', () => {
+  for (const code of ['capture_pending','capture_failed','review_unassigned']) {
+    const result = R.deliveryProgress({status:'doing',workRouting:{conversationTurn:{deliveryIssue:{code,reason:'原始诊断'}}}});
+    assert.ok(result.guidance);
+    assert.notEqual(result.guidance,result.reason);
+    assert.equal(result.reason,'原始诊断');
+  }
+});
+
+test('delivery progress distinguishes capture and sync receipts from execution and clears with a new turn', () => {
+  for (const [state, code, label, blocked] of [
+    ['waiting', 'capture_pending', '成果待同步', false],
+    ['waiting', 'sync_pending', '成果待同步', false],
+    ['failed', 'capture_failed', '交付受阻', true],
+  ]) {
+    const value = {status:'doing',workRouting:{conversationTurn:{state, deliveryIssue:{code,reason:'Retry delivery'}}}};
+    assert.equal(R.deliveryProgress(value).text, label);
+    assert.equal(R.deliveryProgress(value).blocked, blocked);
+    assert.equal(R.nextStep(value).text, R.deliveryProgress(value).guidance);
+    value.workRouting.conversationTurn = {state:'running'};
+    assert.equal(R.deliveryProgress(value), null);
+    assert.match(R.nextStep(value).text, /执行已安排/);
+  }
+  const hidden = {status:'doing',canViewExecution:false,
+    workRouting:{conversationTurn:{state:'completed',deliveryIssue:{code:'capture_failed',reason:'Private execution'}}}};
+  assert.equal(R.deliveryProgress(hidden), null);
+  assert.doesNotMatch(R.nextStep(hidden).text, /Private/);
+});
+
 test('only an unexecuted execution owner without a repository can change the business project', () => {
   const owner = {status:'todo',triageStage:'ready',canEditRequirement:true,readOnly:false,projectId:'business-a'};
   assert.deepEqual(R.editPatch(owner,{projectId:'business-b'}),{projectId:'business-b'});
@@ -197,7 +241,7 @@ test('human attention distinguishes assigned work, running agents, returned resu
   const requester={...task,myRoles:['requester'],ai:{state:'done'}};
   assert.equal(R.actionable(requester),false,'a role alone does not grant review permission');
   assert.equal(R.actionable(requester,ctx),false,'an executor/requester cannot approve delivery review');
-  assert.equal(R.nextStep(requester,ctx).text,'等待需求创建人确认交付');
+  assert.equal(R.nextStep(requester,ctx).text,'已提交验收，等待验收人处理');
   const creator={...task,myRoles:['creator'],ai:{state:'done'}};
   assert.equal(R.actionable(creator,ctx),true,'the requirement creator can approve delivery review');
   assert.equal(R.stage(requester),'delivering','agent completion is not business completion');

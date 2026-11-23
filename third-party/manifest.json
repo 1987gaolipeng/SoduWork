@@ -3,15 +3,6 @@
   "description": "审核过的原始许可快照；许可文件需随各自交付物分发，不能用此清单代替全文。",
   "notices": [
     {
-      "id": "harness2",
-      "name": "Google Research Harness²",
-      "version": "0.1.0",
-      "license": "Apache-2.0",
-      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335/LICENSE",
-      "path": "hub-backend/app/services/harness2_vendor/LICENSE",
-      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-    },
-    {
       "id": "pi",
       "name": "@earendil-works/pi-*",
       "version": "1.4.0",
@@ -156,94 +147,37 @@
       "source": "https://raw.githubusercontent.com/openai/codex/be6e8eac029b183056b7e4402879f15d2c85f61b/NOTICE",
       "path": "third-party/licenses/codex-hub-NOTICE.txt",
       "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+    },
+    {
+      "id": "deepseek-harness-acp-test-fixture",
+      "name": "@openma/deepseek-harness-acp prompt settlement and tool preview test fixtures",
+      "version": "0.4.40 / 0.4.41",
+      "license": "Apache-2.0",
+      "source": "https://www.npmjs.com/package/@openma/deepseek-harness-acp/v/0.4.41",
+      "path": "third-party/licenses/deepseek-harness-acp-LICENSE.txt",
+      "sha256": "877d3493a49af1fe61191dfd8f6b62036f1084a6b74009a288630d8abe597a85"
+    },
+    {
+      "id": "qwen-code-compatibility",
+      "name": "@qwen-code/qwen-code reviewed compatibility anchors",
+      "version": "0.27.4",
+      "license": "Apache-2.0",
+      "source": "https://www.npmjs.com/package/@qwen-code/qwen-code/v/0.27.4",
+      "path": "third-party/licenses/qwen-code-LICENSE.txt",
+      "sha256": "55367b61ccd2a016a0159ad886bd66a3ee6cb5e873d0c75c803c897dd245b075"
+    },
+    {
+      "id": "kimi-code-compatibility",
+      "name": "@moonshot-ai/kimi-code reviewed compatibility anchors",
+      "version": "2.6.2",
+      "license": "MIT",
+      "source": "https://www.npmjs.com/package/@moonshot-ai/kimi-code/v/2.6.2",
+      "path": "third-party/licenses/kimi-code-LICENSE.txt",
+      "sha256": "23cc68e17992e0b512ae2e80afc5787d7d8e0fbfbdb4fff54ec0245508fa400e"
     }
   ],
   "piVersion": "1.4.0",
   "vendored": [
-    {
-      "name": "Google Research Harness² embedded core",
-      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
-      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
-      "path": "hub-backend/app/services/harness2_vendor/UPSTREAM.md",
-      "sha256": "8a36f371dc814302c6dcbaf821d73b0484f03ad7aa9573fa4158fad598528d3e"
-    },
-    {
-      "name": "Google Research Harness² embedded core",
-      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
-      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
-      "path": "hub-backend/app/services/harness2_vendor/__init__.py",
-      "sha256": "de20a79ef3cf3974bf32cb6afdbb32608655676e749a466ffd6c7c173bb7e26a"
-    },
-    {
-      "name": "Google Research Harness² embedded core",
-      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
-      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
-      "path": "hub-backend/app/services/harness2_vendor/config.py",
-      "sha256": "f84cea040d353c0fa50e073fcad4d9fead5a27e479f3bf38c8ddd341e7a7d11c"
-    },
-    {
-      "name": "Google Research Harness² embedded core",
-      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
-      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
-      "path": "hub-backend/app/services/harness2_vendor/core/__init__.py",
-      "sha256": "ce487673e00fd8921139e3afb688c566fc43d9b07acba048d2102663a81f7151"
-    },
-    {
-      "name": "Google Research Harness² embedded core",
-      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
-      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
-      "path": "hub-backend/app/services/harness2_vendor/core/context.py",
-      "sha256": "c817f247a8529744b718d3d4a904bbee4a82b8017dee8f6c182ef97c9cda677d"
-    },
-    {
-      "name": "Google Research Harness² embedded core",
-      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
-      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
-      "path": "hub-backend/app/services/harness2_vendor/core/ledger.py",
-      "sha256": "7059de5d90fc9fb8d4b3b799ff075f09d34f182ba0fdb56eb9d8b8383d0bbf55"
-    },
-    {
-      "name": "Google Research Harness² embedded core",
-      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
-      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
-      "path": "hub-backend/app/services/harness2_vendor/core/prompts.py",
-      "sha256": "53b97d5a83570692520204736238a09eb9ba6897c830aae945a50c45fe2c2691"
-    },
-    {
-      "name": "Google Research Harness² embedded core",
-      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
-      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
-      "path": "hub-backend/app/services/harness2_vendor/core/prompts_base.py",
-      "sha256": "7784590bafc11f09184725f5f8acd3b6f250be4680daed0919f3de96cc2d52f6"
-    },
-    {
-      "name": "Google Research Harness² embedded core",
-      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
-      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
-      "path": "hub-backend/app/services/harness2_vendor/core/proposer.py",
-      "sha256": "286c0a0db1a03be1af1c6636a3416e1dc339c5264d2dd069bfde6a8d950f2488"
-    },
-    {
-      "name": "Google Research Harness² embedded core",
-      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
-      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
-      "path": "hub-backend/app/services/harness2_vendor/core/recursion.py",
-      "sha256": "169661067645b531d7d93d3ff4fb1a3b4d41b8e20ed3c616a47568584cc9e006"
-    },
-    {
-      "name": "Google Research Harness² embedded core",
-      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
-      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
-      "path": "hub-backend/app/services/harness2_vendor/core/spec.py",
-      "sha256": "f245ec9e314778e2a1a51594b906584255b9eed8340c073b864a8a6f2c8dc400"
-    },
-    {
-      "name": "Google Research Harness² embedded core",
-      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
-      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
-      "path": "hub-backend/app/services/harness2_vendor/core/tree.py",
-      "sha256": "40a5735d0fb30d8dae6a9b1c2c76bc3085995bcc6e84400df7437abac6a13844"
-    },
     {
       "name": "diff2html",
       "version": "3.4.56",

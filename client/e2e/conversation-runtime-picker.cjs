@@ -62,7 +62,7 @@ if (typeof electron === 'string') {
       await js('window.boundTask={id:"finished-requirement",status:' + JSON.stringify(status) +
         ',executionContext:{agent:{id:"runner:device:pi"}},workRouting:{conversationTurn:{conversationId:"same-conversation",executor:"dispatch"}}};' +
         'window.taskExecutions=[{taskId:"finished-requirement",executor:"dispatch",status:"completed",run:{engine:"pi"}}];state.busy=false;controls.render();void 0');
-      for (const agent of ['harness2', 'qwen', 'pi']) {
+      for (const agent of ['kimi', 'qwen', 'pi']) {
         await click('#nchatRuntime'); await until('document.querySelector("[data-runtime=' + agent + ']")');
         await click('[data-runtime=' + agent + ']'); await until('state.adapterId===' + JSON.stringify(agent));
         const badge = await js('({id:document.querySelector("#nchatRuntimeIcon [data-agent-brand]").dataset.agentBrand,' +
@@ -75,10 +75,10 @@ if (typeof electron === 'string') {
         await js('state.busy=true;controls.render();void 0');
         assert.equal(await js('document.querySelector("#nchatRuntimeIcon [data-agent-brand]").dataset.agentBrand'), agent);
         await js('state.busy=false;controls.render();void 0');
-        if (status === 'done' && agent === 'harness2') {
+        if (status === 'done' && agent === 'kimi') {
           const output = path.resolve(__dirname, '../../outputs/runtime-badge-20261110');
           fs.mkdirSync(output, { recursive: true });
-          fs.writeFileSync(path.join(output, 'completed-task-harness2.png'), (await win.webContents.capturePage()).toPNG());
+          fs.writeFileSync(path.join(output, 'completed-task-kimi.png'), (await win.webContents.capturePage()).toPNG());
         }
       }
     }

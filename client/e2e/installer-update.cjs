@@ -24,6 +24,14 @@ async function until(fn, ms = 30000) {
   while (Date.now() - start < ms) { if (await fn()) return; await delay(30); }
   throw Error('Timed out waiting for installer condition');
 }
+async function assertInstallContext(directory, from) {
+  const bytes = await fsp.readFile(path.join(directory, '.soduwork-install-context.ini'));
+  const text = bytes.toString(bytes[0] === 0xff && bytes[1] === 0xfe ? 'utf16le' : 'utf8');
+  const fields = Object.fromEntries(text.split(/\r?\n/).map(line => line.match(/^(schema|from|to)=(.*)$/))
+    .filter(Boolean).map(match => [match[1], match[2]]));
+  assert.deepEqual(fields, { schema: '1', from, to: '1.0.1' }, 'Setup must publish this installation context');
+  return fields;
+}
 function run(file, args, extraEnv = {}) {
   const env = { ...process.env, ...extraEnv };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -94,6 +102,7 @@ async function main() {
   const fresh = path.join(root, '首次安装 ' + productName + ' ' + Date.now());
   const freshStarted = Date.now();
   assert.equal(await run(setup, ['/S', '/currentuser', '/D=' + fresh], env).done, 0);
+  const freshContext = await assertInstallContext(fresh, '');
   const freshDetails = JSON.parse(await fsp.readFile(path.join(fresh, '.soduwork-update-details.json'), 'utf8'));
   assert.equal(freshDetails.ok, true);assert.ok(freshDetails.fileCount > 0);
   assert.match(await fsp.readFile(path.join(fresh, '.soduwork-update.log'), 'utf8'), /verifying/);
@@ -108,7 +117,7 @@ async function main() {
   assert.ok(path.join(nativeRoot, longResource).length > 350);
   assert.deepEqual(await fsp.readFile(path.join(nativeRoot, 'resources/runner/_internal/base_library.zip')), zipBytes);
   tests.push({ name: 'native extraction preserves Python ZIP and deep Unicode paths', pathLength: path.join(nativeRoot, longResource).length });
-  tests.push({ name: 'first install into an empty directory verifies payload and launches', elapsedMs: Date.now() - freshStarted, fileCount: freshDetails.fileCount });
+  tests.push({ name: 'first install into an empty directory verifies payload and launches', elapsedMs: Date.now() - freshStarted, fileCount: freshDetails.fileCount, context: freshContext });
   await fsp.cp(path.join(dist, 'win-unpacked'), installed, { recursive: true });
   const entry = path.join(installed, executable);
   const shortcut = path.join(root, 'SoduWork.lnk');
@@ -139,6 +148,10 @@ async function main() {
     assert.ok(fs.existsSync(entry), 'entry is already missing before upgrade: ' + name);
     const previous = fs.existsSync(path.join(installed, '.soduwork-active'))
       ? fs.readFileSync(path.join(installed, '.soduwork-active'), 'utf8') : '';
+    const fromVersion = previous ? await fsp.readFile(path.join(installed, '.soduwork-versions', previous, '.soduwork-release'), 'utf8')
+      : await fsp.readFile(path.join(installed, '.soduwork-release'), 'utf8').catch(error => {
+        if (error.code === 'ENOENT') return ''; throw error;
+      });
     let missing = 0, samples = 0;
     const missingDetails = []; let lastMissing;
     const start = Date.now();
@@ -188,6 +201,7 @@ async function main() {
         assert.equal(fs.existsSync(env.SODUWORK_UPDATE_E2E_OUTPUT), false, 'click during update must wait for commit');
       }
       const code = await child.done;
+      const context = await assertInstallContext(installed, fromVersion);
       sampleProgress();
       for (let i = 0; i < progress.length; i++) {
         assert.ok(progress[i].percent >= (progress[i - 1]?.percent || 0), 'real installation progress went backwards');
@@ -219,7 +233,7 @@ async function main() {
         assert.ok(progress.some(item => item.percent >= 70 && item.percent <= 98), 'missing real verification progress');
         assert.notEqual(fs.readFileSync(path.join(installed, '.soduwork-active'), 'utf8'), previous);
       }
-      tests.push({ name, code, elapsedMs: Date.now() - start, samples, missing, progress });
+      tests.push({ name, code, elapsedMs: Date.now() - start, samples, missing, progress, context });
       console.log('PASS:', mode, name, code, Date.now() - start, 'ms');
     } finally { clearInterval(watch); clearInterval(progressWatch); }
   }

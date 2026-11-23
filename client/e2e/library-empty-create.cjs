@@ -219,7 +219,10 @@ if (typeof electron === 'string') {
     await checkActions('create', 'nfs');
     await js('fixture.showFolder = true; void 0;');
     await click('[data-library-scope=all]'); await loaded();
+    await enter('[data-library-search]', '现有文件夹');
     await click('[data-library-folder=fixture-folder]'); await loaded();
+    assert.equal(await js('document.querySelector("[data-library-search]").value'), '',
+      'Opening a folder search result starts an unfiltered listing of its contents');
     assert.equal(await js('document.querySelector("[data-library-menu-toggle=empty-create]")'), null,
       'Preserve the folder view with one toolbar create entry');
     await checkActions('create', 'nfs', 'fixture-folder');

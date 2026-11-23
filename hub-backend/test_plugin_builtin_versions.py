@@ -17,8 +17,9 @@ from app.services import plugin_packages, plugin_service
 
 
 PLUGINS = Path(__file__).resolve().parent / "plugins"
-# Versions in the first public release and the v1.13.15 draft source.
+# Previously bundled versions and their replacement candidates.
 UPGRADES = {
+    "autonomous-dev-iterator": ("1.0.1", "1.0.2"),
     "project-validation-release": ("1.5.6", "1.5.7"),
     "soduwork-fast-change": ("1.0.2", "1.0.3"),
     "software-delivery": ("1.7.6", "1.7.7"),

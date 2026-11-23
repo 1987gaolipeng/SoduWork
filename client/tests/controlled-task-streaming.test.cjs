@@ -77,11 +77,11 @@ test('finished requirements cannot relabel the selected conversation runtime wit
 test('unfinished review and rework retain the assigned executor after a completed dispatch turn', () => {
   for (const status of ['todo', 'doing', undefined]) {
     const task = { id: 'task', status, requirementStage: 'reviewing',
-      executionContext: { agent: { id: 'runner:device:harness2' } }, workRouting: {
+      executionContext: { agent: { id: 'runner:device:kimi' } }, workRouting: {
         conversationTurn: { conversationId: 'chat', executor: 'dispatch', state: 'completed' },
         reworkPending: { feedback: 'Revise the original deliverable' },
       } };
-    assert.equal(context.executionRuntime(task, 'chat', []), 'harness2');
+    assert.equal(context.executionRuntime(task, 'chat', []), 'kimi');
     assert.equal(context.executionRuntime(task, 'chat', [{ taskId: 'task', executor: 'dispatch',
       status: 'completed', run: { engine: 'qwen' } }]), 'qwen');
   }

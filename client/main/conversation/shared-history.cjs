@@ -1,8 +1,24 @@
 'use strict';
 
 const path = require('node:path');
+const crypto = require('node:crypto');
 const access = require('./history-access');
 const { accountId } = require('../device-auth-request');
+const executionOutcome = require('./execution-outcome.cjs');
+
+const capturedCopyId = (hub, account, id) => 'copy-' + crypto.createHash('sha256')
+  .update(JSON.stringify([hub, account, id])).digest('hex');
+function cloudCacheSourceId(row, identity) {
+  const source = row.source;
+  if (!row.cached || row.importDigest || row.importedHistory || !source?.id ||
+      (row.locationMode !== 'remote' && row.location !== 'cloud') ||
+      !source.account || source.account !== accountId(identity)) return '';
+  try { if (new URL(source.hub).origin !== new URL(identity.hub).origin) return ''; }
+  catch (_) { return ''; }
+  // Capture has always used this exact key. Recognize existing automatic caches
+  // without migrating data or treating independent imports as identity aliases.
+  return row.id === capturedCopyId(source.hub, source.account, source.id) ? source.id : '';
+}
 
 function create({ app, session, identityOf = () => require('./requirement-context').cachedIdentity(app), store = require('./replica-store.cjs').createWorker(
   path.join(app.getPath('userData'), 'conversation-replicas', 'history.sqlite')) }) {
@@ -20,9 +36,9 @@ function create({ app, session, identityOf = () => require('./requirement-contex
     return current;
   }
   const isNative = row => row && !row.accountProjection && !row.remoteProjection && !row.cloud;
-  async function register(rows) {
+  async function register(rows, options) {
     const result = [];
-    for (let i = 0; i < rows.length; i += 200) result.push(...await store.register(rows.slice(i, i + 200)));
+    for (let i = 0; i < rows.length; i += 200) result.push(...await store.register(rows.slice(i, i + 200), options));
     return result;
   }
   async function projectRows(rows, archived = false, records) {
@@ -36,10 +52,19 @@ function create({ app, session, identityOf = () => require('./requirement-contex
       ])].filter(id => id !== row.id) };
     });
     for (const row of native) if (row.historyAliasIds.length) await store.join(row.id, row.historyAliasIds);
-    const registered = await register(native);
+    let registered = await register(native);
+    const actor = scoped.actor();
+    registered = await Promise.all(registered.map(async row => {
+      const recovered = executionOutcome.recover(row);
+      if (!recovered || row.state === recovered.state && row.status === recovered.status && row.live === false ||
+          !scoped.readable(row, actor)) return row;
+      scoped.guard(actor);
+      const [saved] = await register([recovered], { expectedRevision: row.revision });
+      scoped.guard(actor); return saved;
+    }));
+    registered = registered.filter(Boolean);
     const byId = new Map();
     for (const row of registered) for (const id of [row.id, ...row.historyAliasIds]) byId.set(id, row);
-    const actor = scoped.actor();
     return rows.map(row => byId.get(row.id) || row).filter(row => !row.deleted && (row.archived === true) === archived && scoped.readable(row, actor));
   }
   async function resolveRaw(id) {
@@ -60,7 +85,7 @@ function create({ app, session, identityOf = () => require('./requirement-contex
     const current = currentActor(captured);
     return row && scoped.readable(row, current) ? row : null;
   }
-  async function lifecycle(id, action, identity) {
+  async function lifecycle(id, action, identity, options) {
     const captured = scoped.actor();
     if (identity && access.readScope(identity) !== captured.readScope) throw Error('账号或服务已切换，请重新读取会话');
     const row = await resolve(id, captured);
@@ -73,8 +98,27 @@ function create({ app, session, identityOf = () => require('./requirement-contex
     }
     scoped.guard(captured);
     const result = await store.lifecycle(row.id, action, { account: accountId(captured.identity),
-      hub: captured.identity?.hub, device: captured.identity?.clientId });
+      hub: captured.identity?.hub, device: captured.identity?.clientId }, options);
     scoped.guard(captured); return result;
+  }
+  async function deleteCloudCaches(sourceIds) {
+    const captured = scoped.actor(), ids = [...new Set(sourceIds)], removed = [];
+    for (let offset = 0; offset < ids.length; offset += 200) {
+      const batch = ids.slice(offset, offset + 200);
+      const copies = await store.sourceCopies(batch);
+      currentActor(captured);
+      for (const copy of copies) {
+        // Reuse the display proof: an import or explicitly saved copy is not
+        // the automatic cache, even when it points at the same cloud source.
+        if (!batch.includes(cloudCacheSourceId(copy, captured.identity))) continue;
+        currentActor(captured);
+        const result = await lifecycle(copy.id, 'delete', captured.identity, { preserveCopies: true });
+        currentActor(captured);
+        if (!result?.ok) throw Error('清理云端会话的自动缓存失败，请重试');
+        removed.push(copy.id);
+      }
+    }
+    return removed;
   }
   async function accountDisplayLinks(items, identity) {
     if (!identity?.clientId || !identity?.session || !accountId(identity)) return [];
@@ -220,16 +264,32 @@ function create({ app, session, identityOf = () => require('./requirement-contex
     await save();
     if (job.body.deleted) await store.lifecycle(id, 'delete', { account: accountId(identity), hub: job.hub });
   }
-  async function capture(handle, identity) {
+  async function capture(handle, identity, { initialReplay = false } = {}) {
     if (closed || handle.localReplica || typeof handle.snapshot !== 'function') return;
     const snapshot = handle.snapshot(), original = handle.historyRow?.(snapshot);
     if (!original?.id) return;
     // A cache has its own identity so deleting it cannot delete or hide the
     // account-authorized cloud original in the cloud directory.
     const remote = original.cloud || original.accountProjection;
-    const id = remote ? 'copy-' + require('node:crypto').createHash('sha256').update(
-      JSON.stringify([identity?.hub, accountId(identity), original.id])).digest('hex') : original.id;
-    const displayed = remote ? original : require('./acceptance-session').projectHistory(app, original);
+    const id = remote ? capturedCopyId(identity?.hub, accountId(identity), original.id) : original.id;
+    let displayed = remote ? original : require('./acceptance-session').projectHistory(app, original);
+    if (!remote) {
+      let retainedFailure = false;
+      if (initialReplay) {
+        const previous = await store.get(id);
+        // An older successful answer cannot disprove a later preflight failure.
+        if (previous?.state === 'failed' && executionOutcome.recover(previous)?.state !== 'completed' && displayed.state === 'completed') {
+          displayed = { ...displayed, state: previous.state, status: previous.status };
+          retainedFailure = true;
+        }
+      }
+      const outcome = original.runtimeUnavailable && !retainedFailure ? original.executionOutcome : {
+        version: 1, source: 'runtime', state: displayed.state || '', status: displayed.status || snapshot.status || '',
+      };
+      displayed = { ...displayed, runtimeUnavailable: original.runtimeUnavailable === true,
+        runtimeFailure: original.runtimeUnavailable ? original.runtimeFailure : null,
+        executionOutcome: outcome ? { ...outcome, owner: accountId(identity), hub: identity?.hub } : null };
+    }
     const [row] = await register([{ ...displayed, id, cloud: false, accountProjection: false,
       accountConversation: false,
       ...(remote ? { historyProtection: 'account' } : {}),
@@ -256,7 +316,7 @@ function create({ app, session, identityOf = () => require('./requirement-contex
   }
   function observe(handle, identity) {
     if (!handle || observed.has(handle) || handle.localReplica) return;
-    let pending, timer, disposed = false, error = '', dirty = false;
+    let pending, timer, disposed = false, error = '', dirty = false, executionObserved = false;
     const flush = () => {
       if (timer) clearTimeout(timer); timer = null;
       dirty = true;
@@ -264,13 +324,14 @@ function create({ app, session, identityOf = () => require('./requirement-contex
       pending = (async () => {
         while (dirty) {
           dirty = false;
-          try { await capture(handle, identity); error = ''; }
+          try { await capture(handle, identity, { initialReplay: !executionObserved }); error = ''; }
           catch (failure) { error = failure.message; handle.localHistoryError = error; }
         }
       })().finally(() => { pending = null; });
       return pending;
     };
-    const dispose = handle.on?.(() => {
+    const dispose = handle.on?.(event => {
+      if (['run', 'turn-queued', 'turn-dequeued', 'turn-finished'].includes(event?.kind)) executionObserved = true;
       if (disposed || timer) return;
       timer = setTimeout(() => { timer = null; void flush(); }, 1000); timer.unref?.();
     });
@@ -301,14 +362,22 @@ function create({ app, session, identityOf = () => require('./requirement-contex
     scoped.guard(captured);
     return scoped.directory(after, limit, captured);
   }
-  return { resolve, read, open, register, projectRows, lifecycle, remoteLifecycle, accountDisplayLinks, capture, observe, store, directory, preserveLegacyOutbox,
+  return { resolve, read, open, register, projectRows, lifecycle, deleteCloudCaches, remoteLifecycle, accountDisplayLinks, capture, observe, store, directory, preserveLegacyOutbox,
     captureScope: () => scoped.actor(), guardScope: captured => scoped.guard(captured),
     async indexedRow(id) {
       const captured = scoped.actor(), row = await store.get(id);
       scoped.guard(captured); return row && scoped.readable(row, captured) ? row : null;
     },
     list: options => scoped.list(options),
-    page: options => scoped.page(options),
+    async page(options) {
+      const captured = scoped.actor(), result = await scoped.page(options, captured);
+      scoped.guard(captured);
+      return { ...result, chats: result.chats.map(row => {
+        const { displayCloudSourceId: ignored, ...entry } = row;
+        const source = cloudCacheSourceId(row, captured.identity);
+        return source ? { ...entry, displayCloudSourceId: source } : entry;
+      }) };
+    },
     lifecycleRows: () => scoped.lifecycleRows(),
     async indexedRows(archived, limit) {
       const captured = scoped.actor();

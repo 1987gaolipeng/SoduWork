@@ -17,13 +17,13 @@ test('all local managed runtimes inherit device defaults without sending them to
   t.mock.method(defaults, 'fromIdentity', (_, agent) => { selections.push(agent); return { configured: true, modelName: reference }; });
   t.mock.method(localModels, 'resolve', name => name === reference ? model : null);
   const network = () => { throw Error('Must not contact Hub'); };
-  for (const agent of ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'harness2', 'codex-harness']) {
+  for (const agent of ['pi', 'qwen', 'opencode', 'dsh', 'kimi', 'codex-harness']) {
     const result = await config.fetchModel(null, '', 1000, network, false, agent, { allowLocal: true });
     assert.equal(result.ok, true, agent);
     assert.equal(result.model.id, reference, agent);
     assert.equal(result.model.localOnly, true, agent);
   }
-  assert.equal(selections.length, 7);
+  assert.equal(selections.length, 6);
 });
 
 test('deleted or unreadable local defaults cannot fall back to a Hub model', async t => {
@@ -44,8 +44,8 @@ test('deleted or unreadable local defaults cannot fall back to a Hub model', asy
 test('cloud and account model resolution never reads local Agent defaults', async t => {
   t.mock.method(defaults, 'configured', () => true);
   const read = t.mock.method(defaults, 'fromIdentity', () => { throw Error('Must not read device defaults'); });
-  for (const agent of ['pi', 'qwen', 'codex', 'claude']) {
-    const options = ['codex', 'claude'].includes(agent) ? { allowLocal: true, app: {} } : {};
+  for (const agent of ['pi', 'qwen', 'codex']) {
+    const options = ['codex'].includes(agent) ? { allowLocal: true, app: {} } : {};
     const result = await config.fetchModel(null, '', 1000, undefined, false, agent, options);
     assert.equal(result.ok, false);
   }

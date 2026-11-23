@@ -90,7 +90,7 @@ for (const agent of catalog.runnerRuntimes().filter(row => row.modelMode === 'ma
   });
 }
 
-for (const agent of ['codex', 'claude']) test(agent + ' cannot receive local references through open options', async () => {
+for (const agent of ['codex']) test(agent + ' cannot receive local references through open options', async () => {
   const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime(agent), runnerRuntime: { rpc: async () => ({ ok: true }) } });
   for (const modelName of [reference, 'image::private::' + reference]) {
     await assert.rejects(adapter.createSession({ native: { runner: { openOptions: {

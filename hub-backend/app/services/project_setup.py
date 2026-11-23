@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am, models
-from . import (approval_routing, code_creds, environment_service, plugin_service,
+from . import (approval_policies, approval_routing, code_creds, environment_service, plugin_service,
                preflight_evidence, release_control, runner_hub, workflow_runs)
 
 
@@ -288,7 +288,10 @@ async def _approval_plan(session: AsyncSession, project: models.Project,
         if key in seen:
             continue
         seen.add(key)
-        policy = await session.get(am.ApprovalPolicy, policy_id)
+        if environment_id:
+            policy = await approval_policies.for_environment(session, policy_id, envs[environment_id].org_id)
+        else:
+            policy = await session.get(am.ApprovalPolicy, policy_id)
         if policy is None or not policy.enabled:
             plan.append({"action": action, "environmentId": environment_id,
                          "environmentName": environment_name, "policyId": policy_id,

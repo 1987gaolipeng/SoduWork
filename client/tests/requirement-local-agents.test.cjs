@@ -69,10 +69,10 @@ test('missing enqueue, runtime catalog or probe capability never produces a loca
 });
 
 test('each successful probe reports one standard local Agent before the remaining probes finish', {timeout: 3000}, async () => {
-  const pi = deferred(), claude = deferred(), started = deferred();
-  const f = fixture({catalog: {ok: true, runtimes: [runtime('pi'), runtime('claude')]}, probe: id => {
-    if (id === 'claude') started.resolve();
-    return id === 'pi' ? pi.promise : claude.promise;
+  const pi = deferred(), codex = deferred(), started = deferred();
+  const f = fixture({catalog: {ok: true, runtimes: [runtime('pi'), runtime('codex')]}, probe: id => {
+    if (id === 'codex') started.resolve();
+    return id === 'pi' ? pi.promise : codex.promise;
   }});
   const reported = [], first = deferred();
   let complete = false;
@@ -83,11 +83,11 @@ test('each successful probe reports one standard local Agent before the remainin
   assert.equal(complete, false);
   assert.deepEqual(reported.map(row => row.key), ['local:pi']);
   await started.promise;
-  claude.resolve({ok: true});
+  codex.resolve({ok: true});
   const result = await pending;
   assert.equal(result.ok, true);
-  assert.deepEqual(Array.from(result.agents, row => row.key).sort(), ['local:claude', 'local:pi']);
-  assert.deepEqual(reported.map(row => row.key).sort(), ['local:claude', 'local:pi']);
+  assert.deepEqual(Array.from(result.agents, row => row.key).sort(), ['local:codex', 'local:pi']);
+  assert.deepEqual(reported.map(row => row.key).sort(), ['local:codex', 'local:pi']);
   assert.equal(f.calls.enqueue, 0);
 });
 
@@ -149,15 +149,15 @@ test('unavailable probe states remain excluded even when ok is true', async () =
 test('every discovery refresh probes again and preserves runtime model configuration', async () => {
   let available = true;
   const f = fixture({catalog: {ok: true, runtimes: [runtime('pi', {displayName: 'Pi'}),
-    runtime('claude', {displayName: 'Claude', modelMode: 'account'})]},
+    runtime('codex', {displayName: 'Codex', modelMode: 'account'})]},
     probe: async () => ({ok: available, version: 'fixture-version'})});
   const first = await f.api.localAgents(task, {});
   const pi = first.agents.find(row => row.key === 'local:pi');
-  const claude = first.agents.find(row => row.key === 'local:claude');
+  const codex = first.agents.find(row => row.key === 'local:codex');
   assert.equal(pi.name, 'Pi');
   assert.equal(pi.modelPick, true);
-  assert.equal(claude.name, 'Claude');
-  assert.equal(claude.modelPick, false);
+  assert.equal(codex.name, 'Codex');
+  assert.equal(codex.modelPick, false);
   for (const agent of first.agents) {
     assert.equal(agent.local, true);
     assert.equal(agent.remote, false);
@@ -168,7 +168,7 @@ test('every discovery refresh probes again and preserves runtime model configura
   const second = await f.api.localAgents(task, {});
   assert.equal(second.agents.length, 0, 'a previously successful probe cannot keep an unavailable Agent selectable');
   assert.equal(f.calls.runtimes, 2);
-  assert.deepEqual(f.calls.probe.slice().sort(), ['claude', 'claude', 'pi', 'pi']);
+  assert.deepEqual(f.calls.probe.slice().sort(), ['codex', 'codex', 'pi', 'pi']);
   assert.equal(f.calls.enqueue, 0);
 });
 
@@ -185,12 +185,12 @@ test('failed or malformed runtime catalogs never fall back to an invented Pi can
 
 test('multiple ready runtimes are selectable while connection failures retain actionable diagnostics', async () => {
   const ready = ['pi', 'qwen', 'codex', 'codex-harness', 'dsh'];
-  const f = fixture({catalog: {ok:true, runtimes:[...ready, 'opencode', 'claude'].map(id => runtime(id))},
-    probe: async id => id === 'opencode' ? {ok:false, state:'missing'} : id === 'claude'
+  const f = fixture({catalog: {ok:true, runtimes:[...ready, 'opencode', 'kimi'].map(id => runtime(id))},
+    probe: async id => id === 'opencode' ? {ok:false, state:'missing'} : id === 'kimi'
       ? {ok:false, reason:'Runner is not running: local runtime missing'} : {ok:true, state:'ok'}});
   const result = await f.api.localAgents(task, {});
   assert.deepEqual(Array.from(result.agents, row => row.key).sort(), ready.map(id => 'local:' + id).sort());
   assert.deepEqual(Array.from(result.failures, row => [row.id, row.reason]),
-    [['claude', 'Runner is not running: local runtime missing']]);
+    [['kimi', 'Runner is not running: local runtime missing']]);
   assert.equal(f.calls.enqueue, 0);
 });

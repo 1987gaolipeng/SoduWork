@@ -10,17 +10,20 @@ const RELEASE = Object.freeze({
   x64: Object.freeze({
     version: '2.55.0.4',
     url: 'https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.4/PortableGit-2.55.0.4-64-bit.7z.exe',
+    size: 58915456,
     sha256: '016e84230a3767f0c6b3788e79ba0c58a17377086801719d46700fca4f7b36b5',
   }),
   arm64: Object.freeze({
     version: '2.55.0.4',
     url: 'https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.4/PortableGit-2.55.0.4-arm64.7z.exe',
+    size: 59191568,
     sha256: 'd69d0c6a3c5445553565ef74f1d9e22a9869f57c246111db347dd96c252b4da5',
   }),
 });
 
 const clientRoot = path.resolve(__dirname, '..');
 const cacheRoot = path.join(clientRoot, '.runtime-cache');
+const STALE_GIT_DIRECTORY = /^git\.stale-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 // Retain the shell utilities, Git core, and HTTPS transport used by automation.
 // Remove optional Perl, editor, Tcl/Tk, magic-database, and graphical-terminal components.
@@ -65,6 +68,58 @@ function ensureInside(target, root) {
   const resolved = path.resolve(target);
   const base = path.resolve(root) + path.sep;
   if (!resolved.startsWith(base)) fail('unsafe path: ' + resolved);
+}
+
+function operationError(error, operation, target, destination) {
+  return `${error.code || 'UNKNOWN'} ${error.syscall || operation} ${error.path || target}` +
+    ((error.dest || destination) ? ' -> ' + (error.dest || destination) : '');
+}
+
+// Visit siblings even when a protected entry cannot be removed. lstat keeps
+// links/reparse points as leaves so cleanup never traverses their targets.
+function reclaimStaleRuntime(stale, root, log) {
+  function remove(target) {
+    ensureInside(target, root);
+    let operation = 'lstat';
+    try {
+      const stat = fs.lstatSync(target);
+      if (stat.isDirectory() && !stat.isSymbolicLink()) {
+        operation = 'readdir';
+        const names = fs.readdirSync(target);
+        for (const name of names) remove(path.join(target, name));
+        operation = 'rmdir';
+        fs.rmdirSync(target);
+      } else {
+        operation = 'unlink';
+        fs.unlinkSync(target);
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        log('[SoduWork shell runtime] retained stale entry: ' + operationError(error, operation, target));
+      }
+    }
+  }
+  remove(stale);
+}
+
+function reclaimStaleRuntimes(runtimeParent, log) {
+  let entries;
+  try {
+    if (!fs.lstatSync(runtimeParent).isDirectory()) return;
+    entries = fs.readdirSync(runtimeParent, { withFileTypes: true });
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      log('[SoduWork shell runtime] could not list stale runtimes: ' + operationError(error, 'readdir', runtimeParent));
+    }
+    return;
+  }
+  // Older releases used the same UUID suffix. Restrict cleanup to their
+  // directories and skip sibling junctions and other unrelated entries.
+  for (const entry of entries) {
+    if (STALE_GIT_DIRECTORY.test(entry.name) && entry.isDirectory()) {
+      reclaimStaleRuntime(path.join(runtimeParent, entry.name), runtimeParent, log);
+    }
+  }
 }
 
 function hash(file) {
@@ -118,7 +173,7 @@ async function prepareArchive(release, { cache = cacheRoot, environment = proces
     fs.writeFileSync(marker, source);
     log('[SoduWork shell runtime] downloading ' + downloadLabel(url));
     try {
-      await download(url, archive, { environment, resume: true, log });
+      await download(url, archive, { environment, expectedBytes: release.size, resume: true, log });
       if (hash(archive) !== release.sha256) {
         fs.rmSync(archive, { force: true });
         fs.rmSync(partial, { force: true });
@@ -138,7 +193,7 @@ async function prepareArchive(release, { cache = cacheRoot, environment = proces
   fail('PortableGit download failed: ' + lastError + '. Check HTTP_PROXY/HTTPS_PROXY, configure SODUWORK_PORTABLE_GIT_MIRROR, or use SODUWORK_PORTABLE_GIT_ARCHIVE');
 }
 
-function selfTest(root) {
+function selfTest(root, environment = process.env, run = spawnSync) {
   const bash = path.join(root, 'bin', 'bash.exe');
   if (!fs.existsSync(bash)) fail('archive does not contain bin/bash.exe');
   // Run actual Git init, commit, log, and utility operations after pruning.
@@ -153,12 +208,13 @@ function selfTest(root) {
     "find . -name probe.txt | grep -q probe; " +
     "tar -cf probe.tar probe.txt; tar -tf probe.tar | grep -q probe; " +
     'cd /; rm -rf "$work"';
-  const windowsRoot = process.env.SystemRoot || 'C:\\Windows';
-  const result = spawnSync(bash, ['-c', command], {
+  const windowsRoot = environment.SystemRoot || 'C:\\Windows';
+  const result = run(bash, ['-c', command], {
     encoding: 'utf8', timeout: 30000, windowsHide: true,
     env: {
-      SystemRoot: windowsRoot, WINDIR: process.env.WINDIR || windowsRoot,
+      SystemRoot: windowsRoot, WINDIR: environment.WINDIR || windowsRoot,
       PATH: path.join(windowsRoot, 'System32'), CHERE_INVOKING: '1', MSYS_NO_PATHCONV: '1',
+      ...Object.fromEntries(Object.entries(environment).filter(([key]) => /^(TMPDIR|TEMP|TMP)$/i.test(key))),
     },
   });
   if (result.status !== 0 || !String(result.stdout || '').includes('SODUWORK_SHELL_OK')) {
@@ -176,25 +232,47 @@ async function prepare({ platform = process.platform, environment = process.env,
     console.log('[SoduWork shell runtime] skipped: bundled Git for Windows is only used on Windows builds');
     return;
   }
-  const runtimeRoot = path.join(root, '.runtime', 'git'), cache = path.join(root, '.runtime-cache');
+  const runtimeParent = path.join(root, '.runtime');
+  const runtimeRoot = path.join(runtimeParent, 'git'), cache = path.join(root, '.runtime-cache');
   const item = RELEASE[arch];
   if (!item) fail('unsupported architecture: ' + arch);
   const manifestFile = path.join(runtimeRoot, '.soduwork-shell-runtime.json');
+  let ready = false;
   if (fs.existsSync(manifestFile)) {
     try {
       const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
       if (manifest.version === item.version && manifest.arch === arch &&
           manifest.sha256 === item.sha256 && manifest.prune === PRUNE_REV) {
-        test(runtimeRoot);
-        console.log('[SoduWork shell runtime] ready: Git for Windows ' + item.version + ' (' + arch + ')');
-        return;
+        test(runtimeRoot, environment);
+        ready = true;
       }
     } catch (error) { /* rebuild below */ }
+  }
+  if (ready) {
+    reclaimStaleRuntimes(runtimeParent, log);
+    console.log('[SoduWork shell runtime] ready: Git for Windows ' + item.version + ' (' + arch + ')');
+    return;
   }
   const archive = await archiveOf(selectRelease(arch, environment), { cache, environment, download, log });
 
   ensureInside(runtimeRoot, root);
-  fs.rmSync(runtimeRoot, { recursive: true, force: true });
+  try {
+    fs.rmSync(runtimeRoot, { recursive: true, force: true });
+  } catch (error) {
+    if (!['EPERM', 'EACCES'].includes(error.code)) throw error;
+    // Interrupted extraction can leave an undeletable reparse point.
+    const stale = runtimeRoot + '.stale-' + crypto.randomUUID();
+    ensureInside(stale, root);
+    try {
+      fs.renameSync(runtimeRoot, stale);
+    } catch (renameError) {
+      log('[SoduWork shell runtime] cleanup failed: ' + operationError(error, 'rm', runtimeRoot));
+      log('[SoduWork shell runtime] recovery rename failed: ' +
+        operationError(renameError, 'rename', runtimeRoot, stale));
+      throw renameError;
+    }
+    log('[SoduWork shell runtime] retained an unremovable previous runtime at ' + stale);
+  }
   fs.mkdirSync(runtimeRoot, { recursive: true });
   const extracted = run(archive, ['-y', '-o' + runtimeRoot], {
     cwd: root, encoding: 'utf8', timeout: 10 * 60 * 1000, windowsHide: true,
@@ -218,12 +296,13 @@ async function prepare({ platform = process.platform, environment = process.env,
     }
   }
   prune(runtimeRoot);
-  test(runtimeRoot);
+  test(runtimeRoot, environment);
   fs.writeFileSync(manifestFile, JSON.stringify({
     product: 'Git for Windows PortableGit', version: item.version, arch,
     sha256: item.sha256, source: item.url, prune: PRUNE_REV,
     preparedAt: new Date().toISOString(),
   }, null, 2) + '\n', 'utf8');
+  reclaimStaleRuntimes(runtimeParent, log);
   console.log('[SoduWork shell runtime] prepared: Git for Windows ' + item.version + ' (' + arch + ')');
 }
 

@@ -19,7 +19,7 @@ from .api import remote_screen
 from .api import conversation_projects
 from .api import account_conversations
 from .api import conversation_content_migrations
-from .api import cloud_execution_sync, personal_conversation_relay
+from .api import cloud_execution_sync, first_chat, personal_conversation_relay
 from .api import model_runtime as model_runtime_api
 from .api import model_capabilities as model_capabilities_api
 from .api import jiyong_data
@@ -61,6 +61,14 @@ async def lifespan(app: FastAPI):
     install_log_redaction()
     settings.validate_security()  # Reject missing or default credentials outside development.
     await init_db()
+    if settings.jiyong_database_url:
+        from .services import jiyong_cloud_database
+        try:
+            await jiyong_cloud_database.migrate_at_startup()
+            log.info("即用云端数据库迁移已完成")
+        except Exception as error:
+            log.error("即用云端数据库迁移失败，云端即用服务不可用: %s", error)
+            raise
     from .services import cluster_control, cluster_runtime
     from .services.cluster_bus import bus
     if bus.enabled:
@@ -137,7 +145,7 @@ async def lifespan(app: FastAPI):
     from .services import code_delivery
     from .services import schedule_loop
     from .services import deployments
-    from .services import workflow_engine
+    from .services import plugin_evaluations, workflow_engine
     # Supervise automatic milestone progression using each task's ms_auto flag.
     from .services import ms_auto
     from .services import org_memory
@@ -162,6 +170,7 @@ async def lifespan(app: FastAPI):
         ("automation_scheduler", schedule_loop.tick_loop),
         ("deployment_sweep", deployments.sweep_loop),
         ("plugin_workflow", workflow_engine.tick_loop),
+        ("plugin_evaluations", plugin_evaluations.tick_loop),
         ("ms_auto", ms_auto.tick_loop),
     ]
     if settings.im_enabled:
@@ -199,12 +208,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SoduWork Hub", version=settings.version, lifespan=lifespan)
 
+from .services.session_read_budget import SessionReadBudgetMiddleware
+app.add_middleware(SessionReadBudgetMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_list,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Request-ID", "Server-Timing"],
+    expose_headers=["X-Request-ID", "Server-Timing", "X-Error-Code"],
     allow_credentials=False,
 )
 
@@ -237,7 +249,22 @@ async def request_observability(request: Request, call_next):
         runtime_telemetry.record(request.method, route_path, 500, elapsed,
                                  request_id, type(exc).__name__,
                                  getattr(request.state, "model_timing", None))
-        raise
+        # Keep the response generic while retaining the request id for support
+        # correlation. The exception details are already present in the log.
+        from starlette.responses import PlainTextResponse
+        return PlainTextResponse(
+            "Internal Server Error",
+            status_code=500,
+            headers={
+                "X-Request-ID": request_id,
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY",
+                "X-XSS-Protection": "1; mode=block",
+                "Content-Security-Policy": "default-src 'self'; script-src 'self'",
+                "Referrer-Policy": "strict-origin-when-cross-origin",
+                "Cache-Control": "no-store",
+            }
+        )
     elapsed = (time.perf_counter() - started) * 1000
     route = request.scope.get("route")
     route_path = getattr(route, "path", None) or "__unmatched__"
@@ -247,6 +274,19 @@ async def request_observability(request: Request, call_next):
         getattr(request.state, "model_timing", None),
     )
     response.headers["X-Request-ID"] = request_id
+    # Apply defaults without replacing route-specific policies, such as the
+    # sandbox CSP and private cache policy used for attachment downloads.
+    security_headers = {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "X-XSS-Protection": "1; mode=block",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self'",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Cache-Control": "no-store",
+    }
+    for header, value in security_headers.items():
+        if header not in response.headers:
+            response.headers[header] = value
     timing = getattr(request.state, "model_timing", None) or {}
     parts = [f"app;dur={elapsed:.1f}"]
     for key, label in (("admissionMs", "model-admission"),
@@ -338,6 +378,7 @@ for _r in (cloud_execution_sync.router, legal_documents.router, legal_documents.
            capabilities.router, capabilities.admin_router, jiyong_data.router):
     app.include_router(_r)
 app.include_router(personal_conversation_relay.router)
+app.include_router(first_chat.router)
 app.include_router(conversation_content_migrations.router)
 from .api import desktop_capabilities
 app.include_router(desktop_capabilities.router)

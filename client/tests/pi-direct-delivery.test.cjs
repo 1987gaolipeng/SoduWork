@@ -182,6 +182,7 @@ test('stop, pause and disable during async goal evidence collection preserve the
     const waiting = new Promise(resolve => { entered = resolve; });
     t.mock.method(outputs, 'scanAsync', async (...args) => {
       const got = await scan(...args);
+      if (!f.requests.length) return got;
       await new Promise(resolve => { release = resolve; entered(); });
       return got;
     });

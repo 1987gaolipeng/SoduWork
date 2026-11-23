@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import uuid
+import weakref
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -36,8 +37,12 @@ RETRY_S = 5
 LOCAL_RPC_PREFIX = "@@SODUWORK_LOCAL_RPC@@"
 MAX_CONCURRENT_LIMIT = 20
 MAX_INFLIGHT_RPC = 256
+MAX_INFLIGHT_QUERY_RPC = 32
+MAX_INFLIGHT_CONTROL_RPC = 16
+MAX_INFLIGHT_PROBE_RPC = 8
+MAX_PENDING_RPC_REPLIES = 64
 from app.services.runner_release import RUNNER_VERSION
-from app.services import runner_admission
+from app.services import runner_admission, runner_local_rpc
 from app.services.runner_node import _node_major, ensure_node_shim as _ensure_node_shim
 from app.services.runner_handshake import HELLO_TIMEOUT_S, negotiate as _negotiate_hello
 from app.services.runner_identity_error import RunnerIdentityConflict
@@ -599,7 +604,13 @@ class Runner:
             self._telemetry_task = asyncio.create_task(self._capture_loop())
         # Admission reclaims native archives before launching any durable queue
         # item, so a surviving child process cannot race a replacement launch.
+        reconnect = runner_connection_status.ReconnectPolicy(base=RETRY_S)
+        self._retry_event = asyncio.Event()
         while not self._shutdown_event.is_set():
+            online_at = None
+            failure_code = "CONNECTION_FAILED"
+            closed_code = None
+            error_type = "ConnectionClosed"
             try:
                 runner_connection_status.report(self, "connecting")
                 headers = {}
@@ -611,10 +622,14 @@ class Runner:
                                     "X-SoduWork-Runner-Key": self.key})
                 if self.token:
                     headers["X-SoduWork-Runner-Token"] = self.token
+                from app.services.runner_tls import websocket_options
                 async with websockets.connect(self.url, max_size=8 * 1024 * 1024,
-                                              additional_headers=headers, proxy=None) as ws:
+                                              additional_headers=headers, proxy=None,
+                                              **websocket_options(self.url)) as ws:
                     self.ws = ws
                     prefetched = await self._hello()
+                    self._retry_event.clear()
+                    online_at = time.monotonic()
                     # Open the control channel before scanning local CLIs/Skills. A large
                     # or temporarily locked skill root must not make this Runner look offline.
                     initial = asyncio.create_task(self._report_beat())
@@ -623,11 +638,13 @@ class Runner:
                     push = asyncio.create_task(self._push_loop())
                     try:
                         await self._pump(prefetched)
+                        closed_code = getattr(ws, "close_code", None)
                     finally:
                         for job in (initial, beat, push):
                             job.cancel()
                         await asyncio.gather(initial, beat, push, return_exceptions=True)
             except RunnerIdentityConflict:
+                failure_code = "IDENTITY_CONFLICT"
                 runner_connection_status.report(self, "error", "IDENTITY_CONFLICT")
                 scope = getattr(self, "desktop_identity_scope", None)
                 if scope:
@@ -645,47 +662,51 @@ class Runner:
                     return
                 log.warning("执行机身份冲突，请检查独立执行机的登记配置")
             except Exception as e:  # noqa: BLE001
-                runner_connection_status.report(self, "error", runner_connection_status.error_code(e))
-                log.warning("连不上后台（%s: %s），%d 秒后重试",
-                            type(e).__name__, str(e)[:100], RETRY_S)
+                error_type = type(e).__name__
+                failure_code = runner_connection_status.error_code(e)
+                closed_code = runner_connection_status.close_code(e)
             self.ws = None
             if self._shutdown_event.is_set():
                 break
+            online_seconds = time.monotonic() - online_at if online_at is not None else 0
+            retry_seconds = reconnect.delay(failure_code, online_seconds)
+            runner_connection_status.report(self, "error", failure_code)
+            log.warning("Runner reconnect code=%s errorClass=%s closeCode=%s onlineSeconds=%.1f retrySeconds=%.1f",
+                        failure_code, error_type, closed_code, online_seconds, retry_seconds)
             # Keep terminals alive across connection loss for later reattachment.
-            try:
-                await asyncio.wait_for(self._shutdown_event.wait(), RETRY_S)
-            except asyncio.TimeoutError:
-                pass
+            if await runner_connection_status.wait_to_retry(
+                    self._shutdown_event, self._retry_event, retry_seconds):
+                reconnect.failures = 0
 
     async def _local_rpc_loop(self) -> None:
         """Serve one-line JSON RPC from the parent Electron process only."""
         from app.services.runner_lifecycle import parent_lines
-        async for line in parent_lines(sys.stdin.buffer):
-            if not line:
-                if getattr(self, "desktop_owned", False):
-                    self._shutdown_event.set()
-                return
-            try:
+        stopped = getattr(self, "_shutdown_event", None)
+        if not hasattr(self, "_pending_rpc_requests"):
+            self._pending_rpc_requests, self._pending_rpc_tails = {}, {}
+        server = runner_local_rpc.Server(self._local_rpc_dispatch, self._write_local_rpc,
+            LOCAL_RPC_PREFIX, on_failure=stopped.set if stopped is not None else None,
+            pending=self._pending_rpc_requests, tails=self._pending_rpc_tails)
+        try:
+            async for line in parent_lines(sys.stdin.buffer):
+                if not line:
+                    if getattr(self, "desktop_owned", False):
+                        self._shutdown_event.set()
+                    return
                 text = line.decode("utf-8", "replace").rstrip("\r\n")
-            except Exception:  # noqa: BLE001
-                continue
-            if not text.startswith(LOCAL_RPC_PREFIX):
-                continue
-            rpc_id = ""
-            try:
-                request = json.loads(text[len(LOCAL_RPC_PREFIX):])
-                rpc_id = str(request.get("id") or "")[:80]
-                result = await self._local_rpc_dispatch(dict(request.get("message") or {}))
-                reply = {"id": rpc_id, "ok": True, "result": result}
-            except Exception as exc:  # noqa: BLE001
-                reply = {"id": rpc_id, "ok": False,
-                         "error": str(exc)[:600] or type(exc).__name__}
-            blob = LOCAL_RPC_PREFIX + json.dumps(
-                reply, ensure_ascii=False, separators=(",", ":")) + "\n"
-            try:
-                await asyncio.to_thread(self._write_local_rpc, blob)
-            except Exception:  # noqa: BLE001
-                return
+                if not text.startswith(LOCAL_RPC_PREFIX):
+                    continue
+                rpc_id = ""
+                try:
+                    request = json.loads(text[len(LOCAL_RPC_PREFIX):])
+                    rpc_id = str(request.get("id") or "")[:80]
+                    await server.submit(rpc_id, dict(request.get("message") or {}))
+                except Exception as exc:  # noqa: BLE001
+                    server.reject(rpc_id, error=str(exc)[:600] or type(exc).__name__)
+                if server.failed:
+                    return
+        finally:
+            await server.close()
 
     @staticmethod
     def _write_local_rpc(blob: str) -> None:
@@ -708,9 +729,11 @@ class Runner:
             return self._content_stores[realm]
 
     async def _local_rpc_dispatch(self, message: dict) -> dict:
+        from app.services.runner_event_scope import ingress
+        message = ingress(message, local=True)
         if message.get("op") == "runtime.content.read":
             store = await self._conversation_content_store(message.get("realm"))
-            return await asyncio.to_thread(store.handle, {**message, "op": "content.read"})
+            return await runner_local_rpc.to_thread(store.handle, {**message, "op": "content.read"})
         op = str(message.get("op") or "")
         if op in {"agent.probe", "agent.job"}:
             if op == "agent.probe" and dict(message.get("llm") or {}).get("localOnly") is not True:
@@ -729,6 +752,13 @@ class Runner:
             # refresh performs discovery later and reports it to the Hub.
             self._agent_inventory_at = 0
             return {"ok": True, "data": result}
+        if op == "runtime.reconnect":
+            # Trusted desktop pipe only. This never interrupts live work or a
+            # healthy socket; it wakes a disconnected Runner after login.
+            retry = getattr(self, "_retry_event", None)
+            if self.ws is None and retry is not None:
+                retry.set()
+            return {"ok": True}
         if op == "runtime.ping":
             return {"ok": True, "data": {"version": RUNNER_VERSION, "pid": os.getpid()}}
         if op == "runtime.detect":
@@ -736,20 +766,20 @@ class Runner:
             key = str(message.get("key") or "")
             if key not in agent_setup._SPECS:
                 return {"ok": False, "error": "\u4e0d\u8ba4\u8bc6\u7684\u6267\u884c\u5e95\u5ea7\uff1a" + key}
-            item = await asyncio.to_thread(agent_setup.detect, key, has_model=True)
+            item = await runner_local_rpc.to_thread(agent_setup.detect, key, has_model=True)
             from app.services import access_policy
             item["accessControl"] = access_policy.capability(key)
             return {"ok": True, "data": item}
         if op == "runtime.sessions":
             from app.services import ai_local
-            return {"ok": True, "data": await asyncio.to_thread(
+            return {"ok": True, "data": await runner_local_rpc.to_thread(
                 ai_local.console_list_sync, {}, None)}
         if op == "runtime.session.forget":
             from app.services import local_stream
             ref = str((message.get("data") or {}).get("ref") or message.get("ref") or "")
             if not ref:
                 return {"ok": False, "error": "没有指定要移除的会话"}
-            return {"ok": True, "data": await asyncio.to_thread(
+            return {"ok": True, "data": await runner_local_rpc.to_thread(
                 local_stream.forget_sync, {}, ref)}
         if op == "runtime.shutdown":
             self._shutdown_event.set()
@@ -773,7 +803,8 @@ class Runner:
     def _ensure_admission_loop(self) -> None:
         if self._admission_task is not None and not self._admission_task.done():
             return
-        self._admission_task = asyncio.create_task(self._admission_loop())
+        self._admission_task = asyncio.create_task(
+            self._admission_loop(), context=runner_local_rpc.background_context())
 
     @staticmethod
     async def _drop_message_transfers(message, keep: set[str] | None = None) -> None:
@@ -798,7 +829,9 @@ class Runner:
             if item.state != "running":
                 continue
             state = states.get(item.ref)
-            if state == "running":
+            if state == "running" or (state == "recovering" and
+                    (ai_local._RUNS.get(item.ref) or {}).get("goalContract") and
+                    (ai_local._RUNS.get(item.ref) or {}).get("cli") != "pi"):
                 continue
             if state == "done":
                 self._admission.finish(item.key, "completed")
@@ -856,6 +889,16 @@ class Runner:
                 str(result.get("error") or "Agent launch failed"), result)
         self._admission_wake.set()
 
+    def _admission_load(self) -> dict:
+        from app.services import ai_local
+        from app.services.runner_event_scope import is_local
+        with ai_local._LOCK:
+            running_refs = {ref for ref, run in ai_local._RUNS.items() if run.get("state") == "running"}
+            local_refs = {ref for ref, run in ai_local._RUNS.items() if is_local(run, ref)}
+        return {"active": _busy_count() + self._admission.starting_count(),
+                "blocked_refs": running_refs, "hub_blocked": getattr(self, "_outbox_blocked", False),
+                "local_refs": local_refs}
+
     async def _admission_loop(self) -> None:
         from app.services import ai_local
         await asyncio.to_thread(ai_local.reclaim)
@@ -871,15 +914,8 @@ class Runner:
             self._resource_snapshot = resource
             self.max_concurrent = resource.limit
             while True:
-                from app.services import ai_local
-                with ai_local._LOCK:
-                    running_refs = {ref for ref, run in ai_local._RUNS.items()
-                                    if run.get("state") == "running"}
-                active = _busy_count() + self._admission.starting_count()
                 item = self._admission.claim_next(
-                    active, resource.limit,
-                    resource.can_start and not getattr(self, "_outbox_blocked", False),
-                    blocked_refs=running_refs)
+                    limit=resource.limit, can_start=resource.can_start, **self._admission_load())
                 if item is None:
                     break
                 task = asyncio.create_task(self._run_admitted(item))
@@ -894,6 +930,16 @@ class Runner:
 
     async def _admit(self, message: dict, *, key: str, ref: str,
                      category: str, operation: str) -> dict:
+        if runner_local_rpc.admission_cancelled():
+            await self._drop_message_transfers(message)
+            return {"ok": False, "code": "RUNNER_REQUEST_CANCELLED",
+                    "error": "本轮请求已停止，请重新发送"}
+        if operation == "comment":
+            from app.services import local_base, runner_event_scope
+            with local_base._LOCK:
+                run = dict(local_base._RUNS.get(ref) or {})
+            message = {**message, "_eventDestination":
+                       "local" if runner_event_scope.is_local(run, ref) else "hub"}
         try:
             accepted, reason, item = self._admission.submit(
                 key, ref, category, operation, message)
@@ -912,6 +958,9 @@ class Runner:
                 "error": "\u6267\u884c\u673a\u540e\u53f0\u961f\u5217\u5df2\u6ee1\uff08100/100\uff09\uff0c\u8bf7\u7b49\u5f85\u5df2\u6709\u4efb\u52a1\u5b8c\u6210",
                 "data": metrics,
             }
+        runner_local_rpc.admission_recorded()
+        if operation == "dispatch" and reason == "accepted":
+            log.info("dispatch accepted ref=%s queuePosition=%d", ref, self._admission.position(item.key))
         if reason == "duplicate":
             original = dict(item.payload or {})
             keep = {
@@ -920,6 +969,16 @@ class Runner:
                 if isinstance(packet, dict) and packet.get("transfer")
             }
             await self._drop_message_transfers(message, keep)
+        if operation == "comment" and reason != "duplicate":
+            from app.services import local_base, local_task_goal
+            with local_base._LOCK:
+                run = local_base._RUNS.get(ref)
+                if run and local_task_goal.active(run):
+                    # The admission queue has not delivered this human turn yet.
+                    # Yield at the next native boundary instead of racing it with
+                    # a controller-generated review/continuation.
+                    run["goalUserPending"] = key
+                    local_base._save_meta(ref)
         self._ensure_admission_loop()
         self._admission_wake.set()
         # Let an idle scheduler claim the item, but never wait for preflight or launch.
@@ -1070,25 +1129,72 @@ class Runner:
                 if self._session_ack is not False:
                     await self._capture_sessions()
             except Exception as exc:  # storage failure must not acknowledge or launch new work
+                self._capture_failed = True
                 self._outbox_blocked = True
                 log.warning("Runner event retention paused: %s", type(exc).__name__)
             await asyncio.sleep(0.5 if not self._outbox_blocked else 5)
 
     async def _capture_sessions(self) -> None:
         async with self._snap_lock:
+            if not hasattr(self, "_capture_pending"):
+                self._capture_pending = []
+
+            async def commit_pending():
+                while self._capture_pending:
+                    snapshot, mark = self._capture_pending[0]
+                    await asyncio.to_thread(self._event_outbox.append, snapshot, mark)
+                    self._apply_marks([mark])
+                    del self._capture_pending[0]
+
+            try:
+                await self._recover_local_events()
+            except Exception as exc:
+                # Recovery storage is separate from live Hub retention. A failed
+                # archive must preserve local packets without suppressing Hub facts.
+                log.warning("Local event recovery paused; retaining packets: %s", type(exc).__name__)
+            # Retry the bounded failed batch before collecting newer snapshots.
+            # An empty collection or free capacity cannot waive unsaved events.
+            await commit_pending()
             sessions, advances = await asyncio.to_thread(self._session_snapshots)
-            stored = False
-            for snapshot, mark in zip(sessions, advances):
-                if not snapshot.get("taskId"):
-                    continue
-                await asyncio.to_thread(self._event_outbox.append, snapshot, mark)
-                self._apply_marks([mark])
-                stored = True
-            if stored:
-                self._outbox_blocked = await asyncio.to_thread(self._event_outbox.at_capacity)
+            self._capture_pending.extend((snapshot, mark) for snapshot, mark in zip(sessions, advances)
+                                         if snapshot.get("taskId"))
+            await commit_pending()
+            # A successful empty pass can recover a transient collection or
+            # capacity-read failure after all known events are durable.
+            self._outbox_blocked = await asyncio.to_thread(self._event_outbox.at_capacity)
+            self._capture_failed = False
+
+    async def _recover_local_events(self) -> None:
+        """Called under the snapshot lock; retain evidence before freeing capacity."""
+        from app.services import ai_local, runner_event_scope
+        # Startup admission reclaim loads owned archives before scheduling.
+        with ai_local._LOCK:
+            bindings = runner_event_scope.local_bindings(ai_local._RUNS)
+        self._local_event_bindings = bindings
+        checked = getattr(self, "_local_event_bindings_checked", {})
+        pending = {ref: task for ref, task in bindings.items() if checked.get(ref) != task}
+        if not pending:
+            return
+        retired = await asyncio.to_thread(self._event_outbox.archive_local, pending)
+        self._local_event_bindings_checked = {**checked, **pending}
+        if retired:
+            full = await asyncio.to_thread(self._event_outbox.at_capacity)
+            self._outbox_blocked = bool(full or getattr(self, "_capture_failed", False)
+                                       or getattr(self, "_capture_pending", []))
+            log.warning("Archived %d desktop-local event packets; Hub retention blocked=%s",
+                        retired, self._outbox_blocked)
+            self._admission_wake.set()
 
     async def _deliver_sessions(self) -> None:
         """Retain packets until ACK; replay every packet on legacy connections."""
+        async with self._snap_lock:
+            try:
+                await self._recover_local_events()
+            except Exception as exc:
+                full = await asyncio.to_thread(self._event_outbox.at_capacity)
+                self._outbox_blocked = bool(full or getattr(self, "_capture_failed", False)
+                                           or getattr(self, "_capture_pending", []))
+                log.warning("Local event recovery paused; retaining packets: %s", type(exc).__name__)
         if self._session_ack:
             packets = [(None, packet) for packet in await asyncio.to_thread(
                 self._event_outbox.pending, 12, getattr(self, "_delivery_after_ref", ""))]
@@ -1103,6 +1209,8 @@ class Runner:
                 self._delivery_after_ref = packet["ref"]
             else:
                 self._legacy_delivery_cursor = replay_cursor
+            if getattr(self, "_local_event_bindings", {}).get(packet["ref"]) == packet["snapshot"].get("taskId"):
+                continue
             key = (packet["streamId"], packet["deliverySeq"])
             attempt, retry_at = self._delivery_attempts.get(key, (0, 0))
             if now < retry_at:
@@ -1177,6 +1285,11 @@ class Runner:
             ref = str(run.get("ref") or "")
             if not ref:
                 continue
+            from app.services.runner_event_scope import is_local
+            with local_base._LOCK:
+                owned_scope = dict(local_base._RUNS.get(ref) or run)
+            if is_local(run, ref) or is_local(owned_scope, ref):
+                continue
             state, seq = str(run.get("state") or ""), int(run.get("seq") or 0)
             # A silent Agent launch changes neither output sequence nor state
             # (preflight may already say running). Report its marker once too.
@@ -1190,9 +1303,15 @@ class Runner:
             live = ai_local.session_sync({}, ref, last_seq, 300)
             with local_base._LOCK:
                 owned_run = dict(local_base._RUNS.get(ref) or {})
-            private_model = runner_usage_receipts.private_model(owned_run)
+            if is_local(live, ref) or is_local(owned_run, ref):
+                continue
+            private_model = (runner_usage_receipts.private_model(owned_run)
+                             or run.get(runner_usage_receipts.PRIVACY_MARKER) is True
+                             or live.get(runner_usage_receipts.PRIVACY_MARKER) is True)
             public_usage = runner_usage_receipts.public_usage(owned_run)
-            live = runner_usage_receipts.public_snapshot(live, owned_run)
+            # A model switch cannot reclassify metadata captured before it.
+            projection_owner = {**owned_run, "modelLocalOnly": True} if private_model else owned_run
+            live = runner_usage_receipts.public_snapshot(live, projection_owner)
             state = str(live.get("status") or live.get("state") or state)
             seq = int(live.get("seq") or seq)
             items = []
@@ -1265,11 +1384,32 @@ class Runner:
             advances.append((ref, sent_seq, last_state if more else state_mark))
         return out, advances
 
-    async def _handle_message(self, message: dict, connection=None) -> None:
+    def _network_rpc_workers(self):
+        if not hasattr(self, "_pending_rpc_requests"):
+            self._pending_rpc_requests = {}
+        if not hasattr(self, "_pending_rpc_tails"):
+            self._pending_rpc_tails = {}
+        if not hasattr(self, "_network_workers"):
+            self._network_workers = runner_local_rpc.WorkerLanes(
+                self._pending_rpc_requests, self._pending_rpc_tails)
+        return self._network_workers
+
+    async def _handle_message(self, message: dict, connection=None, request=None) -> None:
         """Handle one Hub command and reply on the socket generation that received it."""
         token = self._send_target.set(connection) if connection is not None else None
+        workers = self._network_rpc_workers()
+        if request is None:
+            request = workers.accept(workers.lane_for(str(message.get("op") or "")),
+                                     runner_local_rpc.request_key(message), str(message.get("op") or ""))
         try:
-            await self._on(message)
+            with workers.context(request):
+                await workers.wait(request)
+                if request.cancelled:
+                    await self._send({"op": "reply", "id": message.get("id"), "ok": False,
+                                      "code": "RUNNER_REQUEST_CANCELLED",
+                                      "error": "本轮请求已停止，请重新发送"})
+                else:
+                    await self._on(message)
         except Exception as exc:  # noqa: BLE001
             log.exception("处理 %s 失败", message.get("op"))
             if message.get("id"):
@@ -1278,10 +1418,54 @@ class Runner:
                     "error": "%s: %s" % (type(exc).__name__, str(exc)[:120]),
                 })
         finally:
+            workers.finish(request)
             if token is not None:
                 self._send_target.reset(token)
 
+    def _reject_network_request(self, message, connection):
+        if not hasattr(self, "_rpc_rejections"):
+            self._rpc_rejections = set()
+        if not hasattr(self, "_rpc_retired_connections"):
+            self._rpc_retired_connections = weakref.WeakSet()
+        if connection in self._rpc_retired_connections:
+            return
+        identity = message.get("id")
+        retire = (not identity
+                  or len(self._rpc_rejections) >= MAX_PENDING_RPC_REPLIES)
+        if retire:
+            self._rpc_retired_connections.add(connection)
+
+        async def respond():
+            if retire:
+                await connection.close(code=1013, reason="Runner control capacity exceeded")
+                return
+            token = self._send_target.set(connection)
+            try:
+                await self._send_raw(json.dumps({
+                    "op": "reply", "id": identity, "ok": False,
+                    "code": "RUNNER_BACKPRESSURE", "retryable": True, "uncertain": False,
+                    "error": "执行机控制通道繁忙，本次请求未接收，请稍后重试",
+                }, ensure_ascii=False))
+            except Exception:
+                # The request was never accepted. Retire its original socket
+                # instead of attempting another reply through a broken writer.
+                if connection not in self._rpc_retired_connections:
+                    self._rpc_retired_connections.add(connection)
+                    await connection.close(code=1013, reason="Runner reply channel unavailable")
+            finally:
+                self._send_target.reset(token)
+
+        task = asyncio.create_task(respond())
+        self._rpc_rejections.add(task)
+        def done(completed):
+            self._rpc_rejections.discard(completed)
+            if not completed.cancelled():
+                completed.exception()
+        task.add_done_callback(done)
+
     async def _queue_message(self, message: dict, connection) -> None:
+        if connection in getattr(self, "_rpc_retired_connections", ()):
+            return
         op = str(message.get("op") or "")
         if op in {"session.ack", "session.nack"}:
             if (not getattr(self, "_session_ack", False) or connection is not self.ws
@@ -1292,41 +1476,42 @@ class Runner:
             if op == "session.ack":
                 if await asyncio.to_thread(self._event_outbox.acknowledge, message):
                     self._delivery_attempts.pop((message.get("streamId"), message.get("deliverySeq")), None)
-                    self._outbox_blocked = await asyncio.to_thread(self._event_outbox.at_capacity)
+                    full = await asyncio.to_thread(self._event_outbox.at_capacity)
+                    self._outbox_blocked = bool(full or getattr(self, "_capture_failed", False)
+                                               or getattr(self, "_capture_pending", []))
                     self._admission_wake.set()
             else:
                 log.warning("Runner event delivery awaits reconciliation: %s", str(message.get("code") or "")[:80])
             return
         if op in {"runner.probe", "job.dispatch"}:
             log.info("收到后台指令：%s", op)
-        if not message.get("id"):
-            await self._handle_message(message, connection)
+        if not hasattr(self, "_rpc_lanes"):
+            self._rpc_lanes = {}
+            self._rpc_keys = {}
+        lane = runner_local_rpc.WorkerLanes.lane_for(op)
+        key = runner_local_rpc.request_key(message)
+        limits = {"work": MAX_INFLIGHT_RPC, "query": MAX_INFLIGHT_QUERY_RPC,
+                  "control": MAX_INFLIGHT_CONTROL_RPC, "probe": MAX_INFLIGHT_PROBE_RPC}
+        inflight = sum(self._rpc_lanes.get(task, "work") == lane for task in self._rpc_tasks)
+        per_key = 1 if lane in {"query", "probe"} else 8
+        same_key = sum(self._rpc_lanes.get(task) == lane and self._rpc_keys.get(task) == key
+                       for task in self._rpc_tasks)
+        if inflight >= limits[lane] or same_key >= per_key:
+            # A rejected request has not reached business admission. Do not
+            # block the reader or claim that its operation was accepted.
+            self._reject_network_request(message, connection)
+            await asyncio.sleep(0)
             return
-        if len(self._rpc_tasks) >= MAX_INFLIGHT_RPC:
-            admission_ops = {"job.dispatch", "job.comment"}
-            control_ops = {
-                "runner.probe", "job.has", "job.status", "job.info",
-                "job.session", "job.stop",
-            }
-            if op in admission_ops:
-                # Admission is a product promise: messages wait behind control-plane
-                # pressure but are never rejected as "machine full".
-                await asyncio.wait(
-                    tuple(self._rpc_tasks), return_when=asyncio.FIRST_COMPLETED)
-            elif op not in control_ops:
-                token = self._send_target.set(connection)
-                try:
-                    await self._send({
-                        "op": "reply", "id": message["id"], "ok": False,
-                        "code": "RUNNER_BACKPRESSURE", "retryable": True,
-                        "error": "执行机控制通道繁忙，请稍后重试",
-                    })
-                finally:
-                    self._send_target.reset(token)
-                return
-        task = asyncio.create_task(self._handle_message(message, connection))
+        workers = self._network_rpc_workers()
+        request = workers.accept(lane, key, op)
+        task = asyncio.create_task(self._handle_message(message, connection, request))
+        task.add_done_callback(lambda done: workers.finish(request))
         self._rpc_tasks.add(task)
+        self._rpc_lanes[task] = lane
+        self._rpc_keys[task] = key
         task.add_done_callback(self._rpc_tasks.discard)
+        task.add_done_callback(lambda done: self._rpc_lanes.pop(done, None))
+        task.add_done_callback(lambda done: self._rpc_keys.pop(done, None))
         background_ops = {
             "runner.probe", "job.dispatch", "job.has", "job.status",
             "job.info", "job.session", "job.file", "job.open_dir",
@@ -1392,7 +1577,7 @@ class Runner:
                 return {"ok": False, "code": "LOCAL_MODEL_REMOTE_FORBIDDEN",
                         "error": "本地模型只能通过本机 SoduWork 执行"}
         if op in {"git.probe", "git.inspect", "git.merge"}:
-            blocked = _capability_gate(
+            blocked = await runner_local_rpc.to_thread(_capability_gate,
                 self.work_root, ["repository", "terminal"], self.capability_grants)
             if blocked:
                 return blocked
@@ -1400,7 +1585,7 @@ class Runner:
             func = {"git.probe": runner_scm.probe_sync,
                     "git.inspect": runner_scm.inspect_sync,
                     "git.merge": runner_scm.merge_sync}[op]
-            result = await asyncio.to_thread(func, dict(m.get("payload") or {}))
+            result = await runner_local_rpc.to_thread(func, dict(m.get("payload") or {}))
             return {"ok": bool(result.get("ok")), "data": result,
                     "error": str(result.get("error") or "")}
         from app.services import ai_local, runner_usage_receipts
@@ -1423,6 +1608,8 @@ class Runner:
             t = _Task(m.get("task") or {})
             cfg = dict(m.get("cfg") or {})
             cfg["_admissionKey"] = str(m.get("_admissionKey") or "")
+            from app.services.runner_event_scope import payload_destination
+            cfg["_eventDestination"] = payload_destination(m)
             cfg["local_cli"] = m.get("cli") or cfg.get("local_cli") or "opencode"
             ctx = dict(m.get("ctx") or {})
             from app.services import dispatch_identity, execution_capabilities
@@ -1436,7 +1623,8 @@ class Runner:
                 m.get("requiredCapabilities") or ctx.get("requiredAgentCapabilities") or [])
             requested_root = str(
                 dict(ctx.get("workspace") or {}).get("workRoot") or self.work_root or "")
-            blocked = _capability_gate(requested_root, required, self.capability_grants)
+            blocked = await runner_local_rpc.to_thread(
+                _capability_gate, requested_root, required, self.capability_grants)
             if blocked:
                 return blocked
             packet = m.get("files") or {}
@@ -1454,7 +1642,7 @@ class Runner:
             if not m.get("_admitted"):
                 if persisted:
                     await drop_transfers()
-                    status = await asyncio.to_thread(ai_local.status_sync, {}, expected_ref)
+                    status = await runner_local_rpc.to_thread(ai_local.status_sync, {}, expected_ref)
                     state = runner_admission.standard_state(status.get("status"))
                     return {"ok": True, "data": {
                         "ref": expected_ref, "state": state,
@@ -1479,13 +1667,13 @@ class Runner:
             self._dispatching_refs.add(dispatch_key)
             try:
                 bundled = []
-                skill_files = _read_packet(skill_packet, "插件技能包")
+                skill_files = await runner_local_rpc.to_thread(_read_packet, skill_packet, "插件技能包")
                 if len(skill_files) > 1:
                     raise ValueError("一次派活只能携带一个插件技能包")
                 if skill_files:
                     from app.services import runner_skills
                     meta, data = skill_files[0]
-                    bundled = await asyncio.to_thread(
+                    bundled = await runner_local_rpc.to_thread(
                         runner_skills.install, data, str(meta.get("sha256") or ""))
                 if bundled:
                     ctx["skills"] = [x for x in (ctx.get("skills") or [])
@@ -1503,7 +1691,7 @@ class Runner:
                     # Fail explicitly if loading fails rather than omitting the requested method.
                     from app.services import personal_plugin_runtime
                     try:
-                        await asyncio.to_thread(
+                        await runner_local_rpc.to_thread(
                             personal_plugin_runtime.apply, ctx,
                             {"base": self.http_base, "clientId": self.client_id,
                              "secret": self.secret}, t.id)
@@ -1519,7 +1707,7 @@ class Runner:
                     repo = _Repo(repo_data) if repo_data else None
                     root = str(workspace.get("workRoot") or self.work_root or "").strip()
                     workspace_policy = dict(ctx.get("workspacePolicy") or {})
-                    prepared = await asyncio.to_thread(
+                    prepared = await runner_local_rpc.to_thread(
                         workdirs.plan, root, repo, t.id,
                         str(workspace.get("devicePath") or ""), cfg.get("git"),
                         execution_key=(str(workspace_policy.get("isolationKey") or "")
@@ -1539,23 +1727,25 @@ class Runner:
                 personal_resources = ctx.pop('_personalPluginResources', [])
                 if personal_resources:
                     from app.services import plugin_resources
-                    bundle = await asyncio.to_thread(
+                    bundle = await runner_local_rpc.to_thread(
                         plugin_resources.materialize, personal_resources,
                         str(ctx.get('workDir') or self.work_root),
                         str(dict(ctx.get('personalPluginMeta') or {}).get('key') or ''))
                     from app.services.skill_read_scope import ReadScope
                     ctx['_resourceReadScope'] = ReadScope.capture([bundle['directory']])
                     ctx['personalPluginContext'] = str(ctx.get('personalPluginContext') or '') + '\n\n' + plugin_resources.guidance(bundle)
-                source_files = (_read_local_files(m.get("localFiles") or [], "\u8f93\u5165\u9644\u4ef6")
+                source_files = (await runner_local_rpc.to_thread(
+                                    _read_local_files, m.get("localFiles") or [], "\u8f93\u5165\u9644\u4ef6")
                                 if m.get("_localParent") and m.get("localFiles")
-                                else _read_packet(packet, "\u8f93\u5165\u9644\u4ef6"))
+                                else await runner_local_rpc.to_thread(
+                                    _read_packet, packet, "\u8f93\u5165\u9644\u4ef6"))
                 inputs = [(str(meta.get("filename") or "\u9644\u4ef6"), data,
                            str(meta.get("contentType") or "application/octet-stream"))
                           for meta, data in source_files]
                 if ctx.get("workspaceHandoff"):
                     from app.services import handoff_restore
                     try:
-                        ctx, inputs = await asyncio.to_thread(
+                        ctx, inputs = await runner_local_rpc.to_thread(
                             handoff_restore.restore_inputs, ctx, inputs, self.work_root)
                     except (ValueError, OSError) as exc:
                         return {"ok": False, "error": str(exc)}
@@ -1565,7 +1755,7 @@ class Runner:
                         await runner_turn_plugins.prepare_start(self, expected_ref, ctx, cfg)
                     except (ValueError, KeyError, TimeoutError) as exc:
                         return {"ok": False, "error": str(exc)}
-                r = await asyncio.to_thread(
+                r = await runner_local_rpc.to_thread(
                     ai_local.dispatch_sync, cfg, t, inputs,
                     {"id": "local:" + cfg["local_cli"]}, ctx,
                     capability_grants=self.capability_grants)
@@ -1601,7 +1791,7 @@ class Runner:
                 queued_item and queued_item.state in runner_admission.ACTIVE_STATES)
             if not admission_key and not inflight and ref not in ai_local._RUNS:
                 # Recover historical execution refs from local archives even when only Hub restarted.
-                await asyncio.to_thread(ai_local.reclaim)
+                await runner_local_rpc.to_thread(ai_local.reclaim)
             persisted = queued_item is not None or (not admission_key and ref in ai_local._RUNS)
             data = {
                 "has": inflight or persisted,
@@ -1620,7 +1810,7 @@ class Runner:
             from app.services import access_policy
             from app.services import access_transition
             change = access_transition.apply if m.get("applyDuringTurn") else access_policy.schedule
-            result = await asyncio.to_thread(change,
+            result = await runner_local_rpc.to_thread(change,
                 str(m.get("ref") or ""), m.get("accessPolicy"), m.get("expectedRevision"))
             return {"ok": bool(result.get("ok")), "data": result,
                     "error": result.get("error", ""), "code": result.get("code", "")}
@@ -1628,28 +1818,26 @@ class Runner:
             from app.services import access_broker
             result = access_broker.respond(
                 str(m.get("ref") or ""), str(m.get("requestId") or ""),
-                str(m.get("decision") or ""), m.get("policyRevision"))
+                str(m.get("decision") or ""), m.get("policyRevision"), m.get("optionId"))
             return {"ok": bool(result.get("ok")), "data": result,
                     "error": result.get("error", ""), "code": result.get("code", "")}
-        if op == "job.status":
+        if op in {"job.status", "job.info"}:
             ref = str(m.get("ref") or "")
             item = self._admission.latest_for_ref(ref, include_terminal=True)
             with ai_local._LOCK:
                 local_exists = ref in ai_local._RUNS
             if runner_admission.owns_status(item, local_exists):
-                return {"ok": True, "data": runner_admission.status_data(
-                    item, self._admission.position(item.key))}
-            data = await asyncio.to_thread(ai_local.status_sync, {}, ref)
-            return {"ok": True, "data": remote_snapshot(data, ref)}
-        if op == "job.info":
-            ref = str(m.get("ref") or "")
-            item = self._admission.latest_for_ref(ref, include_terminal=True)
-            with ai_local._LOCK:
-                local_exists = ref in ai_local._RUNS
-            if runner_admission.owns_status(item, local_exists):
-                return {"ok": True, "data": runner_admission.info_data(
-                    item, self._admission.position(item.key))}
-            data = await asyncio.to_thread(ai_local.runner_info_sync, {}, ref)
+                snapshot = runner_admission.status_data if op == "job.status" else runner_admission.info_data
+                data = snapshot(item, self._admission.position(item.key))
+                if item.state == "queued":
+                    resource = self._resource_budget.snapshot()
+                    reason = self._admission.wait_reason(
+                        item, limit=resource.limit, can_start=resource.can_start, **self._admission_load())
+                    if reason:
+                        data["waitReason"] = reason
+                return {"ok": True, "data": data}
+            reader = ai_local.status_sync if op == "job.status" else ai_local.runner_info_sync
+            data = await runner_local_rpc.to_thread(reader, {}, ref)
             return {"ok": True, "data": remote_snapshot(data, ref)}
         if op == "job.authorize":
             # Model credentials may be refreshed only by this desktop's private
@@ -1658,7 +1846,7 @@ class Runner:
             if not m.get("_localParent"):
                 return {"ok": False, "error": "只允许本机 SoduWork 恢复会话授权"}
             from app.services import local_stream
-            result = await asyncio.to_thread(
+            result = await runner_local_rpc.to_thread(
                 local_stream.authorize_sync, dict(m.get("cfg") or {}),
                 str(m.get("ref") or ""))
             return {"ok": bool(result.get("ok")), "data": result,
@@ -1674,16 +1862,16 @@ class Runner:
                 queued = runner_admission.queued_session(
                     item, self._admission.position(item.key), max(0, int(m.get("since") or 0)))
                 if item.operation == "comment" and item.state in {"failed", "cancelled"} and not item.launched:
-                    native = await asyncio.to_thread(ai_local.session_sync, {}, ref,
+                    native = await runner_local_rpc.to_thread(ai_local.session_sync, {}, ref,
                         max(0, int(m.get("since") or 0)), min(1000, max(1, int(m.get("limit") or 400))))
                     queued = runner_admission.with_native_history(queued, native)
                 return {"ok": True, "data": remote_snapshot(queued, ref)}
-            data = await asyncio.to_thread(
+            data = await runner_local_rpc.to_thread(
                 ai_local.session_sync, {}, ref,
                 max(0, int(m.get("since") or 0)),
                 min(1000, max(1, int(m.get("limit") or 400))))
             from app.services import local_stream
-            data["authorizationRequired"] = await asyncio.to_thread(
+            data["authorizationRequired"] = await runner_local_rpc.to_thread(
                 local_stream.authorization_required_sync, ref)
             if m.get("_localParent"):
                 from app.services import runner_usage_receipts
@@ -1692,12 +1880,12 @@ class Runner:
             return {"ok": True, "data": remote_snapshot(data, ref)}
         if op == "job.open_dir":
             ref = str(m.get("ref") or "")
-            info = await asyncio.to_thread(ai_local.runner_info_sync, {}, ref)
+            info = await runner_local_rpc.to_thread(ai_local.runner_info_sync, {}, ref)
             path = str((info or {}).get("workDirAbs") or "")
             if not path or not os.path.isdir(path):
                 return {"ok": False, "error": "这条活的工作目录不存在"}
             try:
-                await asyncio.to_thread(_open_dir, path)
+                await runner_local_rpc.to_thread(_open_dir, path)
             except Exception as e:  # noqa: BLE001
                 return {"ok": False, "error": "打不开目录（%s）" % type(e).__name__}
             return {"ok": True, "data": {"dir": path, "host": socket.gethostname()}}
@@ -1710,14 +1898,14 @@ class Runner:
             if ref:
                 log.info("产出分片开始 ref=%s file=%s offset=%d", ref[:12], aid[:160], offset)
                 try:
-                    run = await asyncio.to_thread(_run_snapshot, ai_local, ref)
+                    run = await runner_local_rpc.to_thread(_run_snapshot, ai_local, ref)
                 except Exception as e:  # noqa: BLE001
                     log.warning("读取会话状态失败 ref=%s: %s", ref[:12], e)
                     return {"ok": False, "error": str(e)[:500] or type(e).__name__}
                 root, rel = _artifact_location(run, aid) if run else ("", "")
             if not root:
                 # The legacy unscoped fallback handles small files only; normal ingestion uses execution-scoped retrieval.
-                b = await asyncio.to_thread(ai_local.fetch_attachment_sync, {}, aid) if not ref else None
+                b = await runner_local_rpc.to_thread(ai_local.fetch_attachment_sync, {}, aid) if not ref else None
                 if b is None:
                     log.warning("找不到产出文件 ref=%s file=%s run=%s ws=%s",
                                 ref[:12], aid[:160], bool(run), str((run or {}).get("ws") or "")[:300])
@@ -1726,7 +1914,7 @@ class Runner:
             else:
                 try:
                     piece = await asyncio.wait_for(
-                        asyncio.to_thread(_read_file_chunk, root, rel, offset, limit), timeout=35)
+                        runner_local_rpc.to_thread(_read_file_chunk, root, rel, offset, limit), timeout=35)
                 except Exception as e:  # noqa: BLE001
                     log.warning("读取产出分片失败 ref=%s file=%s: %s", ref[:12], aid[:160], e)
                     return {"ok": False, "error": str(e)[:500] or type(e).__name__}
@@ -1754,9 +1942,15 @@ class Runner:
             if item is not None:
                 self._admission_wake.set()
                 if mode == "cancelled" or mode == "starting":
-                    return {"ok": True, "data": runner_admission.status_data(
-                        item, self._admission.position(item.key))}
-            stopped = await asyncio.to_thread(local_stream.stop_sync, {}, ref)
+                    from app.services import local_base
+                    with local_base._LOCK:
+                        current = local_base._RUNS.get(ref) or {}
+                        goal_owned = bool(current.get("goalContract")) and current.get("cli") != "pi"
+                    if not goal_owned:
+                        return {"ok": True, "data": runner_admission.status_data(
+                            item, self._admission.position(item.key))}
+            stopped = await runner_local_rpc.to_thread(local_stream.stop_sync,
+                {"taskGoalControl": m.get("taskGoalControl")}, ref)
             if item is not None and stopped.get("ok"):
                 self._admission.finish(item.key, "cancelled")
             return {"ok": True, "data": stopped}
@@ -1831,15 +2025,15 @@ class Runner:
         op = str(m.get("op") or "")
         key = str(m.get("key") or "")
         if op == "agent.setup":
-            return {"ok": True, "data": {
-                "env": agent_setup.node_env(),
-                "agents": agent_setup.detect_all(has_model=bool(m.get("hasModel"))),
-            }}
+            def discover():
+                return {"env": agent_setup.node_env(),
+                        "agents": agent_setup.detect_all(has_model=bool(m.get("hasModel")))}
+            return {"ok": True, "data": await runner_local_rpc.to_thread(discover)}
         if op == "agent.job":
             job_id = str(m.get("jobId") or "")
             private = bool(m.get("_localParent"))
-            job = agent_setup.job(job_id, owner_id=str(m.get("ownerId") or ""),
-                                  **({"include_private": True} if private else {}))
+            job = await runner_local_rpc.to_thread(agent_setup.job, job_id,
+                owner_id=str(m.get("ownerId") or ""), **({"include_private": True} if private else {}))
             if job is not None and job.get("private"):
                 return {"ok": True, "data": job}
             if (job is not None and job.get("state") == "done"
@@ -1864,27 +2058,30 @@ class Runner:
                 return {"ok": False, "error": "不认识的操作"}
             if action == "login-cancel":
                 try:
-                    return {"ok": True, "data": agent_setup.cancel_login(str(m.get("jobId") or ""),
-                                                                        owner_id=str(m.get("ownerId") or ""))}
+                    return {"ok": True, "data": await runner_local_rpc.to_thread(
+                        agent_setup.cancel_login, str(m.get("jobId") or ""),
+                        owner_id=str(m.get("ownerId") or ""))}
                 except ValueError as exc:
                     return {"ok": False, "error": str(exc)}
             installer = str((agent_setup._SPECS.get(key) or {}).get("installer") or "npm")
             if not action.startswith("login") and not agent_setup.is_bundled(key) and installer == "npm":
-                env = agent_setup.node_env(key)
+                env = await runner_local_rpc.to_thread(agent_setup.node_env, key)
                 if not env.get("ok"):
                     return {"ok": False, "error": env.get("why") or "这台电脑没有 Node.js"}
-            jid = (agent_setup.start_install(key, action, owner_id=str(m.get("ownerId") or ""))
-                   if action.startswith("login") else agent_setup.start_install(key, action))
+            jid = await runner_local_rpc.to_thread(agent_setup.start_install, key, action,
+                **({"owner_id": str(m.get("ownerId") or "")} if action.startswith("login") else {}))
             return {"ok": True, "data": {"jobId": jid}}
         if op == "agent.probe":
             private = bool(m.get("_localParent") and llm.get("localOnly") is True)
             try:
-                jid = agent_setup.start_probe(key, llm, **({"private": True} if private else {}))
+                jid = await runner_local_rpc.to_thread(
+                    agent_setup.start_probe, key, llm, **({"private": True} if private else {}))
             except ValueError as exc:
                 return {"ok": False, "error": str(exc)}
             return {"ok": True, "data": {"jobId": jid, **({"private": True} if private else {})}}
         if op == "agent.configure":
-            return {"ok": True, "data": agent_setup.configure(key, dict(m.get("llm") or {}))}
+            return {"ok": True, "data": await runner_local_rpc.to_thread(
+                agent_setup.configure, key, dict(m.get("llm") or {}))}
         return {"ok": False, "error": "不认识的助手操作: " + op}
 
     async def _component(self, m: dict) -> dict:
@@ -1894,21 +2091,21 @@ class Runner:
         from app.services import runtime_components
         op = str(m.get("op") or "")
         if op == "component.list":
-            return {"ok": True, "data": runtime_components.status()}
+            return {"ok": True, "data": await runner_local_rpc.to_thread(runtime_components.status)}
         if op == "component.install":
             try:
-                jid = runtime_components.start_install(str(m.get("key") or ""))
+                jid = await runner_local_rpc.to_thread(runtime_components.start_install, str(m.get("key") or ""))
             except ValueError as exc:
                 return {"ok": False, "error": str(exc)}
             return {"ok": True, "data": {"jobId": jid}}
         if op == "component.job":
-            item = runtime_components.job(str(m.get("jobId") or ""))
+            item = await runner_local_rpc.to_thread(runtime_components.job, str(m.get("jobId") or ""))
             if item is None:
                 return {"ok": False, "error": "没有这个安装作业（Runner 可能重启过）"}
             if item.get("state") == "done":
-                item["capabilities"] = _capabilities(
-                    self.work_root, self.capability_grants)
-                item["components"] = runtime_components.status()
+                item["capabilities"] = await runner_local_rpc.to_thread(
+                    _capabilities, self.work_root, self.capability_grants)
+                item["components"] = await runner_local_rpc.to_thread(runtime_components.status)
             return {"ok": True, "data": item}
         return {"ok": False, "error": "不认识的能力组件操作: " + op}
 
@@ -1924,7 +2121,8 @@ class Runner:
             required = execution_capabilities.normalize(
                 m.get("requiredCapabilities") or ["files", "terminal"])
         if required:
-            blocked = _capability_gate(self.work_root, required, self.capability_grants)
+            blocked = await runner_local_rpc.to_thread(
+                _capability_gate, self.work_root, required, self.capability_grants)
             if blocked:
                 return blocked
         if op == "deploy.start":
@@ -1941,8 +2139,8 @@ class Runner:
         from app.services import runner_quality
         op = str(m.get("op") or "")
         if op == "quality.start":
-            blocked = _capability_gate(
-                self.work_root, ["repository", "terminal"], self.capability_grants)
+            blocked = await runner_local_rpc.to_thread(
+                _capability_gate, self.work_root, ["repository", "terminal"], self.capability_grants)
             if blocked:
                 return blocked
             return await asyncio.to_thread(
@@ -1953,10 +2151,8 @@ class Runner:
         return {"ok": False, "error": "不认识的质量门禁操作: " + op}
 
     async def _on(self, m: dict) -> None:
-        # This entry is network-owned. Only _local_rpc_dispatch may confer the
-        # parent-process marker; remote JSON must never impersonate that pipe.
-        m = dict(m)
-        m.pop("_localParent", None)
+        from app.services.runner_event_scope import ingress
+        m = ingress(m, local=False)
         op = str(m.get("op") or "")
         if op.startswith("content."):
             try:
@@ -2021,7 +2217,7 @@ class Runner:
                         "at": int(time.time()),
                     },
                 }
-            res = await asyncio.to_thread(probe)
+            res = await runner_local_rpc.to_thread(probe)
             await self._send({**res, "op": "reply", "id": m.get("id")})
             return
         if op == "skills.refresh":
@@ -2119,6 +2315,7 @@ class Runner:
         """
         from app.services import pty_term
         from app.services.terminal_environment import runner_environment
+        from app.services.opencode_session_migration import OpenCodeSessionMigrationError
         task = str(m.get("task") or "")
         okk, why = pty_term.available()
         if not okk:
@@ -2127,7 +2324,10 @@ class Runner:
         try:
             env = await asyncio.to_thread(
                 runner_environment, task, str(m.get("ref") or ""),
-                str(m.get("cli") or ""), self.work_root)
+                str(m.get("cli") or ""), self.work_root, str(m.get("mode") or "session"))
+        except OpenCodeSessionMigrationError as exc:
+            await self._send({"op": "reply", "id": m.get("id"), "ok": False, "error": str(exc)})
+            return
         except (ValueError, RuntimeError):
             await self._send({"op": "reply", "id": m.get("id"), "ok": False,
                               "error": "终端环境未就绪，请在原执行机重新连接会话"})
@@ -2235,14 +2435,7 @@ def main() -> None:
         from app.services import acp_bridge
         raise SystemExit(acp_bridge.main())
 
-    if len(sys.argv) > 1 and sys.argv[1] == "--harness2-native":
-        from app.services import harness2_native
-        raise SystemExit(harness2_native.main())
 
-    if len(sys.argv) > 1 and sys.argv[1] == "--harness2-bridge":
-        sys.argv = [sys.argv[0], *sys.argv[2:]]
-        from app.services import harness2_bridge
-        raise SystemExit(harness2_bridge.main())
 
     ap = argparse.ArgumentParser(description="SoduWork 执行机")
     ap.add_argument("--doctor", action="store_true", help="检查 CLI、真终端和内置技能后退出")

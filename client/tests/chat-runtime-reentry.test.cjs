@@ -164,7 +164,7 @@ test('cold remote requirement navigation restores work cards before opening its 
 });
 
 test('re-entering an already open conversation preserves every runtime and its fixed session resources', async () => {
-  for (const runtime of ['pi', 'opencode', 'qwen', 'codex-harness', 'codex', 'claude', 'dsh']) {
+  for (const runtime of ['pi', 'opencode', 'qwen', 'codex-harness', 'codex', 'dsh']) {
     const { ctx, opened, reset } = fixture(runtime);
     assert.equal(await ctx.enter('', 'saved-chat', { taskSession: true, taskRef: 'task' }), true);
     const options = ctx._sessionOptions, workspace = ctx._wd, caps = ctx._sessionCaps, inputs = ctx._sessionInputs;

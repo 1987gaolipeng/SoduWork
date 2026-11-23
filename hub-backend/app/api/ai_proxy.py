@@ -46,6 +46,11 @@ async def _resolve_catalog(session, client, model_name="", modality="chat", *, a
     narrow test double. Keep that supported while the real resolver receives
     the already-admitted rows and avoids a second provider/model query.
     """
+    ticket_provider = getattr(client, "_proxy_provider_id", "") if modality == "chat" else ""
+    if ticket_provider and available is not None:
+        available = [row for row in available if row.get("providerId") == ticket_provider]
+        if not available or (model_name and not any(row["name"] == model_name for row in available)):
+            raise HTTPException(409, "模型凭据已变化，请重新选择模型后继续")
     resolver = model_catalog.resolve
     try:
         parameters = inspect.signature(resolver).parameters.values()
@@ -104,7 +109,7 @@ def _upstream_message(status: int, detail: str, *, responses: bool = False) -> s
         return "模型服务当前繁忙或额度受限，请稍后重试"
     hint = {
         401: "密钥不对或已过期",
-        403: "这把密钥没有这个模型的权限",
+        403: "模型请求被拒绝",
         404: "网关地址、模型名或接口不对" if responses else "网关地址或模型名不对",
         405: "当前模型网关尚未开放 Responses 接口",
     }.get(status, "")
@@ -121,6 +126,15 @@ def _err(status: int, msg: str, upstream: str = "") -> JSONResponse:
     if billing:
         body["error"] = {"message": model_errors.billing_message(billing),
                          "type": "soduwork_proxy_error", "status": status, **billing}
+    elif status in (400, 422) and model_errors.output_limit_exceeded(diagnostic):
+        # SDKs may retain only message, so keep the safe classification there too.
+        body["error"] = {"message": "Output token limit exceeded (output_token_limit_exceeded).",
+                         "type": "soduwork_proxy_error", "status": status,
+                         "code": "output_token_limit_exceeded"}
+    elif status in (400, 422) and model_errors.thinking_disabled_unsupported(diagnostic):
+        body["error"] = {"message": model_errors.THINKING_DISABLED_MESSAGE,
+                         "type": "soduwork_proxy_error", "status": status,
+                         "code": "thinking_disabled_unsupported"}
     elif status in (400, 413, 422) and local_context_policy.OVERFLOW.search(diagnostic):
         window = local_context_policy.error_window(diagnostic)
         message = "Context length exceeded."
@@ -417,14 +431,29 @@ def _proxy_error(exc, *, responses=False):
                   _error_message(exc, responses=responses), exc.body)
     delay = getattr(exc, "retry_after", 0)
     payload = json.loads(result.body)
+    trace = str(getattr(exc, "diagnostic_id", ""))
+    headers = {}
+    if exc.status == 403 and payload["error"]["code"] == 403:
+        category = getattr(exc, "forbidden_category", "unclassified")
+        if category not in ("generic", "restricted"):
+            category = "unclassified"
+        # Older SDKs discard custom fields. Retain the same bounded category
+        # in error.message in both the JSON response and the SSE error frame.
+        payload["error"]["refusalCategory"] = category
+        payload["error"]["message"] = f"HTTP 403：模型请求被拒绝 [soduwork-refusal:{category}]"
+    if re.fullmatch(r"[a-f0-9]{32}", trace):
+        payload["error"]["diagnosticId"] = trace
+        payload["error"]["message"] += f" [soduwork-trace:{trace}]"
+        request_id = getattr(exc, "upstream_request_id", "")
+        if request_id:
+            payload["error"]["upstreamRequestId"] = request_id
     if (payload.get("error", {}).get("code") != "upstream_billing_error"
             and isinstance(delay, (int, float)) and 0 < delay <= 86400):
         payload["error"]["retry_after_ms"] = int(delay * 1000)
         # Preserve the hint for SDKs that retain only error.message.
         payload["error"]["message"] += f" Retry after {delay:g} seconds."
-        result = JSONResponse(status_code=result.status_code, content=payload,
-                              headers={"Retry-After": str(delay)})
-    return result
+        headers["Retry-After"] = str(delay)
+    return JSONResponse(status_code=result.status_code, content=payload, headers=headers)
 
 
 async def _release_catalog_connection(session):
@@ -503,29 +532,34 @@ async def proxy_config(
                 "reason": "此底座不使用企业模型配置，请检查执行底座"}
     # Match controlled dispatch: explicit choice > Agent preference > company
     # default. A removed preference is an actionable error, never a silent swap.
-    want = str(model or "").strip() or (
-        "" if custom_acp or ignore_preference else model_catalog.agent_model(client, cli)
-    )
+    want, provider = model_catalog.agent_choice(client, cli, model)
+    # History recovery may discard an obsolete name-only preference. A provider
+    # selection also identifies the account being billed and must survive recovery.
+    if custom_acp or (ignore_preference and not provider):
+        want, provider = str(model or "").strip(), ""
     # Signed proxy tickets and usage receipts bind funding to this exact runtime.
     client._proxy_quota_runtime = cli
     usable = await model_catalog.usable(session, client)
+    pinned_error = {"providerPinned": True} if provider else {}
+    if provider:
+        usable = [row for row in usable if row.get("providerId") == provider]
     if want and not any(item["name"] == want for item in usable):
-        return {"ok": False, "path": PROXY_PATH,
+        return {"ok": False, "path": PROXY_PATH, **pinned_error,
                 "reason": f"你选择的模型「{want}」现在不可用，请重新选择"}
     conf = await _resolve_catalog(session, client, want, available=usable)
     if not conf:
-        return {"ok": False, "path": PROXY_PATH,
+        return {"ok": False, "path": PROXY_PATH, **pinned_error,
                 "reason": "还没有可用的模型：去「我的模型」配一把自己的密钥，或让管理员配好共享模型服务"}
     if conf.get("kind") != "openai-compat":
         return {"ok": False, "path": PROXY_PATH, "code": "unsupported_model_protocol",
-                "protocol": conf.get("kind"), "supportedProtocols": ["openai-compat"],
+                **pinned_error, "protocol": conf.get("kind"), "supportedProtocols": ["openai-compat"],
                 "reason": _protocol_guidance(conf)}
     hit = next((m for m in usable if m["name"] == conf["model"]), {})
     image_models = await model_catalog.usable(session, client, "image")
     video_models = await model_catalog.usable(session, client, "video")
     from ..services import model_quota
     proxy_key, expires_in = device_auth.issue_proxy_ticket(client, quota_runtime=cli,
-        quota_binding=model_quota.binding(conf))
+        quota_binding=model_quota.binding(conf), provider_id=provider)
     mcp_key, mcp_expires_in = device_auth.issue_mcp_ticket(client)
     image_routing = model_catalog.normalize_image_routing(conf.get("imageRouting"))
     # Catalog values may come from an administrator-edited JSON payload. Keep

@@ -67,9 +67,12 @@ test('authentication replay retains the original timeout and cancellation signal
     session: 'synthetic-session-' + ++registrations, expiresIn: 1800 }) };
   const result = assert.rejects(f.api.getTask('task', { signal: caller.signal }), /请求超时/);
   await tick();
-  assert.equal(signals.length, 2); assert.equal(signals[0], signals[1]);
+  assert.equal(signals.length, 2);
+  assert.ok(signals.every(signal => !signal.aborted));
   assert.equal([...f.timers.values()].filter(row => row.ms === 8000).length, 1);
   f.timeout(); await result;
+  assert.ok(signals.every(signal => signal.aborted), 'both attempts share the caller deadline');
+  assert.equal(signals[0].reason, signals[1].reason);
   assert.equal(getEventListeners(caller.signal, 'abort').length, 0);
   assert.equal(f.timers.size, 0);
 });

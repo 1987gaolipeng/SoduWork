@@ -44,7 +44,7 @@ def _roster(aliases):
     """Return a synthetic online roster: four local runtimes and two remote runtimes matching ai_local/ai_remote event shapes."""
     out = []
     for key, label in (("pi", "Pi"), ("opencode", "OpenCode"),
-                       ("claude", "Claude Code"), ("codex", "Codex")):
+                       ("qwen", "Qwen Code"), ("codex", "Codex")):
         mk = agent_naming.machine_key(host=HERE)
         out.append({"id": "local:" + key, "cli": key, "cliName": label, "local": True,
                     "online": True, "host": HERE, "machineKey": mk,
@@ -132,7 +132,7 @@ async def main():
         chk("在线席位默认名认得出是哪台",
             sorted({d["name"] for d in live}) == sorted([
                 "012345abcdef(Linux) · OpenCode", "012345abcdef(Linux) · Pi",
-                "DESKTOP-FIXTURE · Claude Code", "DESKTOP-FIXTURE · Codex",
+                "DESKTOP-FIXTURE · Qwen Code", "DESKTOP-FIXTURE · Codex",
                 "DESKTOP-FIXTURE · OpenCode", "DESKTOP-FIXTURE · Pi"]),
             sorted({d["name"] for d in live}))
         chk("历史席位排在最后，不和在线的抢位置", desks[-1]["historyOnly"] is True)

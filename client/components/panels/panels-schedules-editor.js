@@ -40,6 +40,7 @@ function _schRecipeValues(item) {
     every: item.every || 'daily', atHour: item.atHour, atMinute: item.atMinute,
     ...(item.every === 'custom' ? {customRule: item.customRule || ''} : {}),
     weekday: item.weekday, timeZone: item.timeZone,
+    startDate: item.startDate || '', endDate: item.endDate || '',
     requiredCapabilities: item.requiredCapabilities || [], retryLimit: item.retryLimit,
     retryDelayMinutes: item.retryDelayMinutes, pluginBindingId: item.pluginBindingId || '',
     pluginInputs: item.pluginInputs || {},
@@ -176,7 +177,7 @@ function _schNormalizeLocalModelOptions(result) {
 function _schLocalModelAgent(agent) {
   if (!agent) return false;
   const runtime = String(agent.cli || agent.id || '').replace(/^local:/, '').replace(/^runner:[^:]+:/, '');
-  if (!runtime || ['codex', 'claude'].includes(runtime)) return false;
+  if (!runtime || ['codex'].includes(runtime)) return false;
   if (!String(agent.id || '').startsWith('local:') && !String(agent.id || '').startsWith('runner:')) return false;
   return agent.mode !== 'remote' && agent.locationMode !== 'remote';
 }
@@ -189,7 +190,7 @@ function _schModelOptionsFor(agentId) {
   const agent = _schAgents.find(item => String(item.id) === String(agentId || ''));
   if (agent && agent.nativeModelPick) return _schNativeOptionsFor(agent.id);
   const runtime = String(agent?.cli || agentId || '').replace(/^local:/, '').replace(/^runner:[^:]+:/, '');
-  if (['codex', 'claude'].includes(runtime)) return [];
+  if (['codex'].includes(runtime)) return [];
   const local = _schLocalModelAgent(agent) ? _schLocalModelOptions : [];
   return local.concat(_schModelOptions);
 }
@@ -295,16 +296,6 @@ async function _schLoadExecutionAgents(context) {
   return loading;
 }
 
-function _schAgentOptionLabel(agent) {
-  /* Translate option-label fragments when constructing them; retain names and timezones as data. */
-  const _tx = value => (window.SoduWorkI18n && window.SoduWorkI18n.translateText)
-    ? window.SoduWorkI18n.translateText(value) : value;
-  const suffix = [agent.locationLabel,
-    agent.onlineSeats ? _tx(agent.onlineSeats + ' 个在线席位') : '',
-    agent.available === false ? _tx('当前未就绪') : ''].filter(Boolean);
-  return String(agent.name || agent.id) + (suffix.length ? ' · ' + suffix.join(' · ') : '');
-}
-
 function _schAgentOptionsHtml(current) {
   const selected = String(current || _schDefaultAgentId());
   const rows = _schAgents.slice();
@@ -318,9 +309,7 @@ function _schAgentOptionsHtml(current) {
       ? window.SoduWorkI18n.translateText('当前设备没有可选执行底座') : '当前设备没有可选执行底座';
     return '<option value="">' + esc(empty) + '</option>';
   }
-  return rows.map(agent => '<option value="' + esc(agent.id) + '"' +
-    (String(agent.id) === selected ? ' selected' : '') + '>' +
-    esc(_schAgentOptionLabel(agent)) + '</option>').join('');
+  return rows.map(agent => window.WorkAutomationView.agentOptionHtml(agent, selected)).join('');
 }
 
 function _schEditorTx(value) {
@@ -336,7 +325,7 @@ function _schRefreshAgentField(preferred) {
   select.disabled = !_schAgents.length && !current;
   const hint = document.getElementById('schWhoHint');
   if (hint) hint.textContent = _schAgentReason || (_schAgents.length
-    ? '保存的是执行底座类型；每次运行会在当前设备选择可用席位'
+    ? ''
     : '请打开 Agent 管理，确认 Runner 已启动并已连接当前环境');
   // Refreshing a catalog must not impersonate a user's substrate change.
   const event = new Event('change', { bubbles: true }); event.catalogRefresh = true;
@@ -395,16 +384,11 @@ function _schModelFieldHtml(current, agentId) {
   if (!_schAgentAllowsModel(agentId, selected)) {
     return '<label class="sch-f-lbl" for="schModel">' + esc(_schEditorTx('模型')) +
       '</label><select class="sch-in" id="schModel" disabled>' +
-      '<option value="">' + esc(_schEditorTx('由底座自身管理模型')) + '</option></select>' +
-      '<small class="sch-executor-hint" id="schModelHint">' +
-      esc(_schEditorTx('当前底座不接受自动化单独指定模型。')) + '</small>';
+      '<option value="">' + esc(_schEditorTx('由底座自身管理模型')) + '</option></select>';
   }
   const options = _schModelOptionsFor(agentId);
   return '<label class="sch-f-lbl" for="schModel">' + esc(_schEditorTx('模型')) +
-    '</label><select class="sch-in" id="schModel" aria-describedby="schModelHint">' +
-    _schModelOptionsHtml(selected, options) + '</select>' +
-    '<small class="sch-executor-hint" id="schModelHint">' +
-    esc(_schEditorTx('模型与执行底座独立保存；每次自动化运行都使用这里选择的模型。')) + '</small>';
+    '</label><select class="sch-in" id="schModel">' + _schModelOptionsHtml(selected, options) + '</select>';
 }
 
 function _schRefreshModelField(preferred) {
@@ -434,11 +418,9 @@ function _schEditorDrawerHtml() {
   const isEdit = Boolean(editing && editing.id);
   return '<header class="sch-editor-head"><span class="sch-editor-mark" aria-hidden="true">' +
     '<svg viewBox="0 0 24 24"><path d="M7 3h7l3 3v15H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></svg></span>' +
-    '<span class="sch-editor-title"><small>自动化配置</small><h2 id="schEditorTitle">' +
-    (isEdit ? '编辑自动化' : '新建自动化') + '</h2><p>' +
-    (isEdit ? '调整触发方式、执行方法和运行条件，保存后按新设置生效。' :
-      '把重复工作交代清楚，SoduWork 会按时执行，并在对话中保留过程和结果。') +
-    '</p></span><button class="sch-editor-close" data-editor-close aria-label="关闭自动化配置">' +
+    '<span class="sch-editor-title"><h2 id="schEditorTitle">' +
+    (isEdit ? '编辑自动化' : '新建自动化') +
+    '</h2></span><button class="sch-editor-close" data-editor-close aria-label="关闭自动化配置">' +
     '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>' +
     '<div class="sch-editor-scroll">' + _schFormHtml(editing) + '</div>';
 }
@@ -478,13 +460,16 @@ function _schAgentFieldHtml(current) {
   const proposedModel = String(_schEditing?.modelName || '');
   const initialModel = _schEditing?.id ? _schEditing.modelName
     : proposedModel && !proposedModel.startsWith('unavailable:') ? proposedModel : _schDefaultModelFor(current);
-  return '<label class="sch-f-lbl" for="schWho">执行底座</label><select class="sch-in" id="schWho" aria-describedby="schWhoHint"' +
+  return '<div class="sch-executor-grid"><div><div class="sch-executor-label">' +
+    '<label class="sch-f-lbl" for="schWho">执行底座</label>' +
+    '<button type="button" class="automation-refresh-runtime" id="schReloadAgents" aria-label="刷新底座" title="刷新底座">' +
+    '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3A7 7 0 0 0 17.9 17"/></svg></button></div>' +
+    '<select class="sch-in" id="schWho" aria-describedby="schWhoHint"' +
     (!_schAgents.length && !current ? ' disabled' : '') + '>' + _schAgentOptionsHtml(current) + '</select>' +
-    '<div class="sch-executor-tools"><small class="sch-executor-hint" id="schWhoHint">' +
-    esc(_schAgentReason || (_schAgents.length ? '保存的是执行底座类型；运行时选择可用席位' :
+    '<small class="sch-executor-hint" id="schWhoHint">' +
+    esc(_schAgentReason || (_schAgents.length ? '' :
       '请打开 Agent 管理，确认 Runner 已启动并已连接当前环境')) + '</small>' +
-    '<button type="button" class="btn-mini" id="schReloadAgents">刷新底座</button></div>' +
-    _schModelFieldHtml(initialModel, current);
+    '</div><div>' + _schModelFieldHtml(initialModel, current) + '</div></div>';
 }
 
 async function _schPrepareEditor(value, source) {
@@ -686,7 +671,7 @@ function _schBindCreateMenu() {
 
 function _schOnceFieldsHtml(value) {
   const zone = value.timeZone || _schBrowserTimeZone();
-  const local = window.ScheduleTiming?.localInput(value.runAt, zone) || '';
+  const local = window.ScheduleTiming?.localMinute(value.runAt, zone) || '';
   return '<label class="sch-once-field" id="schOnceWrap"' + (value.every === 'once' ? '' : ' style="display:none"') + '>' +
     '<span>执行日期时间 · ' + esc(_schTimeZoneLabel(zone)) + '</span>' +
     '<input class="sch-in" id="schRunAt" type="datetime-local" step="60" value="' + esc(local) +
@@ -707,15 +692,9 @@ function _schReadTiming() {
   let runAt = '';
   if (every === 'once') {
     const local = document.getElementById('schRunAt')?.value || '';
-    const original = window.ScheduleTiming?.localInput(existing.runAt, timeZone) || '';
-    // Native datetime-local can shorten .120 to .12. Compare the wall fields,
-    // preserving the original ISO (including microseconds) when left unchanged.
-    const canonical = value => {
-      const parts = value.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/);
-      return parts ? parts[1] + ':' + (parts[2] || '00') + '.' + (parts[3] || '').padEnd(3, '0') : '';
-    };
-    const same = local && original && canonical(local) === canonical(original);
-    runAt = existing.every === 'once' && same ? existing.runAt
+    const original = window.ScheduleTiming?.localMinute(existing.runAt, timeZone);
+    // Preserve the stored instant when the displayed minute has not changed.
+    runAt = existing.every === 'once' && local && local === original ? existing.runAt
       : window.ScheduleTiming?.fromLocalInput(local, timeZone) || '';
   }
   const startControl = document.getElementById('schStartDate');

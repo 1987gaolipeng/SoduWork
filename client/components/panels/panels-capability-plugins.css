@@ -663,6 +663,22 @@
 .cap-local-checks span::before{content:"✓";font-size:max(var(--font-min-readable, 14.5px), 12px)}
 .cap-local-access{display:flex;align-items:baseline;gap:12px;padding:12px 0;border-block:1px solid var(--line);font-size:max(var(--font-min-readable, 14.5px), 13px)}.cap-local-access b{flex:none;font-weight:500}.cap-local-access>span{min-width:0;color:var(--ink-3);overflow-wrap:anywhere}
 .cap-local-note{margin:0;font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.65;color:var(--ink-3)}
+.cap-local-verification {
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 3%, var(--bg-0));
+  color: var(--ink-2);
+  font-size: max(var(--font-min-readable, 14.5px), 14px);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.cap-local-verification b {
+  color: var(--ink);
+  font-weight: 600;
+}
+.cap-local-verification p { margin: 8px 0 0; }
+.cap-local-verification p:last-child { color: var(--ink-3); }
 .cap-local-error{margin:0;padding:10px 12px;border:1px solid color-mix(in srgb,var(--s-urgent,#be2943) 20%,var(--line));border-radius:9px;background:color-mix(in srgb,var(--s-urgent,#be2943) 5%,var(--bg-0));color:var(--s-urgent,#be2943);font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.6;overflow-wrap:anywhere}.cap-local-error[hidden]{display:none}
 .cap-local-success{display:flex;align-items:center;gap:14px;padding:5px 0}.cap-local-success>span{display:grid;place-items:center;width:42px;height:42px;flex:none;border-radius:50%;background:var(--accent-soft);color:var(--accent)}.cap-local-success svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.cap-local-success b{font-size:16px;overflow-wrap:anywhere}.cap-local-success p{margin:5px 0 0;font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.6;color:var(--ink-3)}
 @media(max-width:420px){.cap-local-install-modal .cap-modal-head,.cap-local-install-modal .cap-modal-body{padding:16px}.cap-local-install-modal .cap-modal-foot{padding:12px 16px;gap:6px}.cap-local-install-modal .cap-modal-foot .btn-mini{font-size:max(var(--font-min-readable, 14.5px), 12px);padding-inline:9px}}

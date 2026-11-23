@@ -151,7 +151,7 @@ class AccountHomeTests(unittest.TestCase):
              patch.dict(codex_login_flow._PENDING, {}, clear=True):
             jid = agent_setup.start_install("codex", "login")
             spawn.assert_called_once_with(jid, agent_setup._run_codex_login)
-            for key in ["codex-harness", "pi", "opencode", "harness2"]:
+            for key in ["codex-harness", "pi", "opencode"]:
                 with self.assertRaises(ValueError):
                     agent_setup.start_install(key, "login")
 

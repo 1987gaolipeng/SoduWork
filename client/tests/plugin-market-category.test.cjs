@@ -175,3 +175,40 @@ test('全部内置插件都声明了合法的用途类（并发会话未提交�
   }
   assert.deepEqual(missing, [], '这些内置插件没有合法的 category：' + missing.join('、'));
 });
+
+test('market marks platform plugins already bundled as desktop built-ins as installed', () => {
+  const api = directory();
+  const cap = { hasWorkflow: false, executionMode: 'direct', skills: [], mcpServers: [] };
+  const catalog = {
+    items: [
+      { pluginId: 'local:skill-studio', key: 'skill-studio', name: 'Skill 创建与优化', personal: true,
+        builtIn: true, installed: true, capabilities: cap },
+      { pluginId: 'platform-skill-studio', key: 'skill-studio', scope: 'platform', name: 'Skill 创建与优化',
+        description: '把业务流程沉淀为可复用 Skill', sourceKind: 'soduwork', listed: true,
+        marketPolicy: { installation: 'available' }, capabilities: cap },
+      { pluginId: 'org-skill-studio', key: 'skill-studio', scope: 'organization', name: '企业同名插件',
+        description: '组织自己发布的同 key 插件', sourceKind: 'soduwork', listed: true,
+        marketPolicy: { installation: 'available' }, capabilities: cap },
+      { pluginId: 'platform-travel', key: 'travel-plan', scope: 'platform', name: '旅行计划撰写',
+        description: '旅行计划', sourceKind: 'soduwork', listed: true,
+        marketPolicy: { installation: 'available' }, capabilities: cap },
+    ],
+  };
+  const content = { innerHTML: '', querySelectorAll: () => [] };
+  api.renderMarket(content, '', { catalog });
+  const rows = content.innerHTML.split('<div class="cap-market-row').slice(1);
+  const row = name => rows.find(html => html.includes('>' + name + '<') || html.includes(name)) || '';
+  const bundled = row('把业务流程沉淀为可复用 Skill');
+  assert.match(bundled, /^ is-installed/, bundled);
+  assert.match(bundled, /data-cap-market-open="local:skill-studio"/, 'opening goes to the usable built-in');
+  assert.match(bundled, /已安装/);
+  assert.doesNotMatch(bundled, />安装</);
+  assert.doesNotMatch(row('组织自己发布的同 key 插件'), /^ is-installed/, 'only platform copies match built-ins');
+  assert.doesNotMatch(row('旅行计划'), /^ is-installed/);
+});
+
+test('plugin detail subtitle keeps the author name and version on one line', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'components', 'panels', 'panels-capabilities.css'), 'utf8');
+  assert.match(css, /\.cap-modal-head span\{display:block/, 'the subtitle itself stays on its own line');
+  assert.match(css, /\.cap-modal-head #capModalSub span\{display:inline/);
+});

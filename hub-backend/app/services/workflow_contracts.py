@@ -38,6 +38,23 @@ def blocked_failure_kind(reason_code: str) -> str:
     return _BLOCKED_KINDS.get(str(reason_code or "").strip(), "escalation")
 
 
+def stored_rework_policy(config: dict, field: str) -> dict:
+    """Read rework policies from immutable plugin versions, including legacy string targets."""
+    value = config.get(field)
+    if isinstance(value, str):
+        value = {"retryFrom": value}
+    if not isinstance(value, dict):
+        return {}
+    target = value.get("retryFrom")
+    if not isinstance(target, str) or not _KEY.fullmatch(target):
+        return {}
+    try:
+        rounds = int(value.get("maxRounds") or 2)
+    except (TypeError, ValueError, OverflowError):
+        return {}
+    return {"retryFrom": target, "maxRounds": rounds}
+
+
 class WorkflowContractError(ValueError):
     """Configuration or upstream output violates the workflow contract; an unchanged retry will not
     repair it.
