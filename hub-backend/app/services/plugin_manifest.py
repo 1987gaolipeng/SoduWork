@@ -9,13 +9,23 @@ import json
 import os
 import re
 
-from . import (execution_capabilities, execution_policy, plugin_input_contracts,
-               plugin_route_contracts, preflight_evidence, plugin_setup_contracts,
-               plugin_ui_contracts, plugin_icons, workflow_contracts, plugin_platforms)
+from . import (
+    execution_capabilities,
+    execution_policy,
+    plugin_app_contracts,
+    plugin_covers,
+    plugin_icons,
+    plugin_input_contracts,
+    plugin_platforms,
+    plugin_route_contracts,
+    plugin_setup_contracts,
+    plugin_ui_contracts,
+    plugin_window_contracts,
+    preflight_evidence,
+    workflow_contracts,
+)
 from .plugin_builtin import is_virtual_mcp
 from .workflow_contracts import validate_dependency_graph as _dag
-from . import plugin_app_contracts, plugin_covers, plugin_window_contracts
-
 
 _KEY = re.compile(r"^[a-z][a-z0-9-]{1,62}$")
 _NODE_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
