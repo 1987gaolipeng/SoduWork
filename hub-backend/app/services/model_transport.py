@@ -4,10 +4,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import time
-import weakref
 import re
+import time
 import uuid
+import weakref
 from datetime import timezone
 from email.utils import parsedate_to_datetime
 
