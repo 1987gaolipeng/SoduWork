@@ -302,6 +302,27 @@ class LocalSnapshotTests(unittest.TestCase):
         self.assertEqual(reply["segment"], 1)
         self.assertEqual(reply["admissionKey"], "")
 
+    def test_status_messages_stay_with_the_captured_round_during_file_reads(self):
+        self.run.update(state="done", round=1, lines=[
+            {"kind": "say", "text": "preview", "full": "first answer"},
+            {"kind": "tool", "text": "verify"},
+        ])
+
+        def next_turn(run):
+            run["round"] = 2
+            run["lines"].append({"kind": "say", "text": "second answer"})
+
+        def status():
+            return ai_local.status_sync({}, self.ref, read_only=True)
+
+        first = self.read_during_change(status, "_fresh_entries", next_turn)
+        second = status()
+        fields = ("round", "finalText", "comments", "last")
+        self.assertEqual(tuple(first[key] for key in fields),
+                         (1, "first answer", 2, "preview / verify"))
+        self.assertEqual(tuple(second[key] for key in fields),
+                         (2, "second answer", 3, "preview / verify / second answer"))
+
 
 class patch_budget:
     """Async context spelling keeps each HTTP client and its short test budget together."""

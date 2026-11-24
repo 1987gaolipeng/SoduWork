@@ -828,7 +828,19 @@ def status_sync(cfg: dict, ref: str, *, read_only: bool = False) -> dict:
     from . import local_task_goal
     with _LOCK:
         run = _RUNS.get(ref)
-        metadata = ({runner_usage_receipts.PRIVACY_MARKER: runner_usage_receipts.private_model(run),
+        if not run:
+            return {"ok": False, "error": "本地会话不在了"}
+        # Capture the displayed messages with their round before reading files.
+        lines = run.get("lines") or []
+        comments = len(lines)
+        last = " / ".join(item.get("text", "")[:80] for item in lines[-3:])
+        final_text = ""
+        for item in reversed(lines):
+            if item.get("kind") == "say":
+                final_text = str(item.get("full") or item.get("text") or "").strip()[:20000]
+                if final_text:
+                    break
+        metadata = {runner_usage_receipts.PRIVACY_MARKER: runner_usage_receipts.private_model(run),
                      'status': access_policy.visible_state(run),
                      'running': run['state'] == 'running', 'done': run['state'] != 'running',
                      'access': access_policy.snapshot(run),
@@ -842,9 +854,7 @@ def status_sync(cfg: dict, ref: str, *, read_only: bool = False) -> dict:
                          if run.get('goalContract') and run.get('cli') != 'pi' else {}),
                      'policyGuard': execution_policy.guard_status(run.get('executionPolicy'),
                          run.get('executionPolicyState'), run.get('executionPolicyViolation')),
-                     'contextReport': copy.deepcopy(run.get('contextReport') or {})} if run else {})
-    if not run:
-        return {"ok": False, "error": "本地会话不在了"}
+                     'contextReport': copy.deepcopy(run.get('contextReport') or {})}
     artifact_mode = str(run.get("artifactMode") or ("git" if run.get("codeTask") else "files"))
     code_task = artifact_mode == "git"
     # When the remote branch is authoritative, skip full repository snapshots and ZIP creation.
@@ -872,9 +882,6 @@ def status_sync(cfg: dict, ref: str, *, read_only: bool = False) -> dict:
         git_delivery = (run.get("gitDelivery") or {}) if read_only else _git_delivery(run)
     from . import workspace_guard
     guard = workspace_guard.evaluate(run["ws"], run.get("workspaceGuard"))
-    says = [str(item.get("full") or item.get("text") or "").strip()
-            for item in (run.get("lines") or []) if item.get("kind") == "say"]
-    final_text = next((text for text in reversed(says) if text), "")[:20000]
     attachments = ([{"id": bundle["id"], "filename": bundle["filename"]}] if bundle else [])
     attachments += [{"id": f, "filename": _rel_name(f)} for f in shown]
     return {
@@ -890,8 +897,8 @@ def status_sync(cfg: dict, ref: str, *, read_only: bool = False) -> dict:
         # Expose the provider completion signal used to advance the plugin DAG.
         # Otherwise a successfully exited session can remain stuck in running state.
         "done": metadata['done'],
-        "comments": len(run.get("lines") or []),
-        "last": " / ".join(x.get("text", "")[:80] for x in (run.get("lines") or [])[-3:]),
+        "comments": comments,
+        "last": last,
         # Stable cross-CLI result contract: only the last completed assistant message
         # counts as text delivery. Tool output and progress lines never satisfy it.
         "finalText": final_text,
