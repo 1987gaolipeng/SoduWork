@@ -256,7 +256,7 @@ class OpenCodeBridgeOutcomeTests(unittest.TestCase):
                     if native_reason is None:
                         finish.assert_not_called()
                     else:
-                        finish.assert_called_once_with()
+                        finish.assert_called_once_with(interrupted=False)
                     self.assertEqual(close.call_count, 1 if entry == 'main' else 0)
 
     def test_genuine_acp_protocol_failure_still_raises_and_main_reports_it(self):

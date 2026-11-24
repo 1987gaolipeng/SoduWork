@@ -141,7 +141,7 @@ class Observer:
             self.invocation = self.invocations.get(sid, 0) + 1
             self.invocations[sid] = self.invocation
 
-    def finish(self) -> str:
+    def finish(self, *, interrupted: bool = False) -> str:
         with self.condition:
             # stdout and stderr can race. Match the plugin's per-session prompt
             # ordinal, never the order in which the stderr reader catches up.
@@ -149,6 +149,8 @@ class Observer:
                 raise OutcomeError(MISSING)
             reason = self.reason
             self.sid = ""
+            if not self.invalid and interrupted and reason == "tool-calls":
+                return "cancelled"
             if self.invalid or reason not in {"stop", "length", "max_tokens"}:
                 raise OutcomeError(MISSING)
             return reason
