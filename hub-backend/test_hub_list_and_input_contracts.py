@@ -443,12 +443,49 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(rejected["detail"], "competencies 必须是数组")
                 created = await self.request("POST", path, json={**profile, "competencies": ["Planning"]})
                 endpoint = f"{path}/{created['id']}"
-                rejected = await self.request("PATCH", endpoint, 400, json={"competencies": 12345})
-                self.assertEqual(rejected["detail"], "competencies 必须是数组")
+                for value in (12345, 0, "Planning"):
+                    rejected = await self.request("PATCH", endpoint, 400, json={"competencies": value})
+                    self.assertEqual(rejected["detail"], "competencies 必须是数组")
                 unchanged = await self.request("PATCH", endpoint, json={"description": "Updated profile"})
                 self.assertEqual(unchanged["competencies"], ["Planning"])
                 updated = await self.request("PATCH", endpoint, json={"competencies": ["Writing"]})
                 self.assertEqual(updated["competencies"], ["Writing"])
+
+    async def test_scenario_writes_reject_invalid_fields_without_changing_the_draft(self):
+        route = "admin/work-catalog/scenarios"
+        draft = {"orgId": "row-0", "key": "draft-report", "name": "Report", "enabled": False}
+        contract = {"kind": "artifact", "summary": "Report", "deliverables": ["report.md"],
+                    "acceptance": ["Reviewed"]}
+        for value in (12345, "report", []):
+            rejected = await self.request("POST", route, 400, json={**draft, "outputContract": value})
+            self.assertIn("outputContract", rejected["detail"])
+        saved = await self.request("POST", route, json={**draft, "outputContract": contract})
+        endpoint = f"{route}/{saved['id']}"
+        for fields, invalid in (({"outputContract": 0}, "outputContract"),
+                                ({"outputContract": {"deliverables": "report.md"}}, "deliverables"),
+                                ({"outputContract": {"acceptance": 0}}, "acceptance"),
+                                ({"intentHints": "report"}, "intentHints"),
+                                ({"positionIds": 0}, "positionIds"),
+                                ({"requiredCapabilities": {}}, "requiredCapabilities")):
+            with self.subTest(fields=fields):
+                rejected = await self.request("PATCH", endpoint, 400, json=fields)
+                self.assertIn(invalid, rejected["detail"])
+        updated = await self.request("PATCH", endpoint, json={"name": "Renamed report"})
+        self.assertEqual(updated["outputContract"], contract)
+
+    async def test_catalog_reads_existing_empty_list_contract(self):
+        route = "admin/work-catalog/scenarios"
+        saved = await self.request("POST", route, json={
+            "orgId": "row-0", "key": "legacy-draft", "name": "Legacy draft", "enabled": False})
+        async with self.sessions() as session:
+            row = await session.get(models.WorkScenario, saved["id"])
+            row.output_contract = []
+            await session.commit()
+        catalog = await self.request("GET", "admin/work-catalog?orgId=row-0")
+        entry = next(scene for scene in catalog["scenarios"] if scene["id"] == saved["id"])
+        self.assertEqual(entry["outputContract"], saved["outputContract"])
+        updated = await self.request("PATCH", f"{route}/{saved['id']}", json={"name": "Renamed"})
+        self.assertEqual(updated["outputContract"], saved["outputContract"])
 
     async def test_existing_scenario_key_returns_conflict_in_its_organization(self):
         route = "admin/work-catalog/scenarios"
