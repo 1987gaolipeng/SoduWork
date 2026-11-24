@@ -12,6 +12,11 @@ const digest = value => crypto.createHash('sha256').update(JSON.stringify(value)
 const fields = ['id', 'title', 'adapterId', 'modelName', 'taskId', 'taskTitle', 'taskIds', 'taskBindings', 'activeTaskId',
   'createdAt', 'at', 'count', 'state', 'status', 'archived', 'creator', 'usedHarnesses'];
 function metadata(row) { return Object.fromEntries(fields.filter(key => row[key] !== undefined).map(key => [key, row[key]])); }
+function replayedUsage(snapshot, row) {
+  const usage = require('./used-harnesses');
+  const replayed = usage.fromTimeline(snapshot);
+  return replayed.length ? { usedHarnesses: usage.merge(replayed, row.usedHarnesses) } : {};
+}
 function assertSettled(data) {
   if (data?.coverage?.unresolvedTools?.length || native.unresolvedTools(data?.snapshot).length)
     throw Object.assign(Error('历史中有工具缺少终结回执，结果尚未确认，暂时只能查看，不能恢复执行或迁移'), { code: 'HISTORY_UNRESOLVED_TOOLS' });
@@ -103,7 +108,8 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
           current.deviceTransferId !== row.deviceTransferId) throw Error('历史记录已变化，请重新读取');
       const saved = await store.saveDeviceHistory(row.id, data, expected); check();
       if (!saved.ok) throw Object.assign(Error('历史记录已变化，请重新读取'), { code: 'HISTORY_CONCURRENT_UPDATE' });
-      await register([{ ...row, deviceHistory: true, historyContentState: 'available',
+      await register([{ ...current, deviceHistory: true, historyContentState: 'available',
+        ...replayedUsage(data.snapshot, current),
         ...(data.historyProtection ? { historyProtection: data.historyProtection } : {}) }], { expectedRevision: current.revision }); check();
       return { ...data, digest: saved.digest };
     })().finally(() => {
@@ -162,6 +168,8 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     if (data?.nativeConflict) data = { ...data, nativeReadError: data.nativeConflict };
     check(data?.historyProtection ? { historyProtection: data.historyProtection } : undefined);
     await readDialogue();
+    if (data?.snapshot && Array.isArray(data.coverage?.sources) && data.coverage.sources.length)
+      data = { ...data, snapshot: require('./native-agent-source.cjs').restoreRunnerSources(data.snapshot, data.coverage.sources) };
     if (data && transcriptError) return { ...data, coverage: { ...data.coverage, complete: false },
       nativeReadError: { code: transcriptError.code, reason: '设备对话记录校验失败，已显示可读取的执行记录' } };
     return dialogue.length && usesDeviceDialogue(check.evidence()) ? withTranscript(data, dialogue) : data;
@@ -194,7 +202,7 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       if (relative && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative))
         item.relativePath = relative.split(path.sep).join('/');
     }
-    const bundle = { schema: SCHEMA, conversation: { ...metadata(row), creator: row.creator || {
+    const bundle = { schema: SCHEMA, conversation: { ...metadata(row), ...replayedUsage(data.snapshot, row), creator: row.creator || {
       account: accountId(identity), hub: identity?.hub } }, snapshot: native.publicSnapshot(data.snapshot),
       coverage: data.coverage, attachments: references };
     check();

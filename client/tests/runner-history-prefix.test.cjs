@@ -68,6 +68,37 @@ for (const legacy of [false, true]) test('Runner history preserves durable evide
     assert.match(f.store.deviceHistory(f.id).coverage.sources[0].journalDigest, /^[a-f0-9]{64}$/);
   });
 });
+test('Runner replay and recovery retain the original runtime for each turn', async t => {
+  const f = fixture(t);
+  const parts = [{ sessionId: f.id, adapterId: 'opencode' }, { sessionId: 'second', adapterId: 'codex-harness' }];
+  for (const part of parts) f.logs.set(part.sessionId, [
+    { seq: 1, kind: 'user', text: 'Request' }, { seq: 2, kind: 'say', text: 'Reply' },
+    { seq: 3, kind: 'do', tool: 'read', callId: 'one' }, { seq: 4, kind: 'out', callId: 'one', text: 'Result' },
+  ]);
+  await segments.save(f.app, { id: f.id, version: 1, segments: [parts[0]], active: parts[1] });
+  const saved = await f.history.refresh(f.id);
+  function check(snapshot) {
+    assert.deepEqual(snapshot.messages.map(row => row.sourceAgent?.agentId),
+      [undefined, 'opencode', undefined, 'codex-harness']);
+    assert.deepEqual(snapshot.tools.map(row => row.sourceAgent?.agentId), ['opencode', 'codex-harness']);
+  }
+  check(saved.snapshot);
+  assert.deepEqual(f.store.get(f.id).usedHarnesses, ['opencode', 'codex-harness']);
+  // Simulate an older saved copy after its native journals are gone.
+  for (const item of [...saved.snapshot.messages, ...saved.snapshot.tools]) delete item.sourceAgent;
+  f.store.saveDeviceHistory(f.id, { snapshot: saved.snapshot, coverage: saved.coverage },
+    { expectedRevision: f.store.get(f.id).replicaRevision });
+  f.logs.clear(); await f.restart();
+  check((await f.history.prepareContinuation(f.id, { refresh: true })).prefix);
+  const prefix = saved.snapshot;
+  prefix.messages.push({ role: 'assistant', text: 'Unknown author' });
+  await segments.save(f.app, { id: f.id, version: 1, originAdapter: 'opencode', prefix,
+    segments: parts, active: { sessionId: 'unused', adapterId: 'kimi' } });
+  const record = segments.read(f.app, f.id);
+  assert.deepEqual(segments.row(record).usedHarnesses, ['opencode', 'codex-harness']);
+  assert.equal(record.prefix.messages.at(-1).sourceAgent, undefined);
+});
+
 test('loss of a runtime-switch manifest preserves all previously verified Runner segments', async t => {
   const f = fixture(t);
   f.logs.set('next-run', [{ seq: 1, kind: 'user', text: 'Second segment' }]);

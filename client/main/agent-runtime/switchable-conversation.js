@@ -204,7 +204,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
         if (block.toolCall?.id && ids.has(block.toolCall.id)) block.toolCall.id = ids.get(block.toolCall.id);
       const nextRecord = { version: 1, id: publicId, owner: record?.deviceShared ? record.owner : owner,
         ...(record?.deviceShared ? { deviceShared: true, executionOwner: owner } : {}),
-        ...(record?.deviceHistoryComplete ? { deviceHistoryComplete: true, deviceTransferId: record.deviceTransferId || '',
+        ...(record?.deviceHistoryComplete ? { deviceHistoryComplete: true, usedHarnesses: record.usedHarnesses, deviceTransferId: record.deviceTransferId || '',
           deviceHistoryContext: record.deviceHistoryContext, historyRecovery: record.historyRecovery } : {}),
         title: segments.title(record) || old.historyRow?.()?.title || '', cwd: old.cwd, originAdapter,
         at: Date.now(), prefix: historical, artifactHistory,

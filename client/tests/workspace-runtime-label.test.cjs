@@ -104,6 +104,16 @@ test('reused sidebar rows preserve offline cache labels and draft runtime select
   assert.equal(f.node('.ws-chat').dataset.sidebarChatId, 'draft');
 });
 
+test('history restores a tool-only first runtime ahead of later replies', () => {
+  const history = require('../main/conversation/runtime-segments');
+  const prefix = { messages: [{ role: 'user' }, { role: 'user' },
+    { role: 'assistant', sourceAgent: { agentId: 'qwen' } }],
+    tools: [{ after: 0, sourceAgent: { agentId: 'opencode' } }] };
+  const record = { id: 'tool-first', prefix, segments: [], deviceHistoryComplete: true,
+    active: { adapterId: 'kimi', started: false, usedHarnesses: [] } };
+  assert.deepEqual(history.row(record).usedHarnesses, ['opencode', 'qwen']);
+});
+
 test('persisted runtime manifest projects complete history icons without adding the selected unused runtime', () => {
   const history = require('../main/conversation/runtime-segments');
   const projected = history.row({id:'restored',title:'跨底座协作',cwd:'',at:1,

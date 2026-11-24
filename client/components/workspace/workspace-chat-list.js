@@ -40,6 +40,21 @@
       selected !== 'custom' && Object.hasOwn(harnessNames(), selected);
     return { ids: draft ? [selected] : ids, draft };
   }
+  // Fill gaps in the preferred timeline using the nearest shared runtime as an anchor.
+  function mergeUsage(observed, incoming, preferObserved = false) {
+    // With no shared anchor, retain the first observation of each runtime.
+    if (!incoming.some(id => observed.includes(id))) return [...new Set([...observed, ...incoming])];
+    const preferred = preferObserved ? observed : incoming;
+    const other = preferObserved ? incoming : observed;
+    const result = [...new Set(preferred)];
+    let before = result.length;
+    for (const id of [...new Set(other)].reverse()) {
+      const index = result.indexOf(id);
+      if (index >= 0) before = index;
+      else result.splice(before, 0, id);
+    }
+    return result;
+  }
   function create(ctx) {
   function accountOwner() {
     const api = global.SoduWorkAPI;
@@ -74,10 +89,10 @@
       // Durable indexing trails live presence. Execution provenance grows for
       // this identity even when a read starts after the event but before its write.
       // Never infer usage from an unexecuted runtime selection or another row.
-      const provenance = Array.isArray(current.usedHarnesses) ? { usedHarnesses: [...new Set([
-        ...current.usedHarnesses, ...(Array.isArray(row.usedHarnesses) &&
-          !(preserve && !current.usedHarnesses.length) ? row.usedHarnesses : []),
-      ])] } : {};
+      const incoming = Array.isArray(row.usedHarnesses) ? row.usedHarnesses : [];
+      const observed = current.usedHarnesses;
+      const provenance = Array.isArray(observed) ? { usedHarnesses: preserve && !observed.length ? [] :
+        mergeUsage(observed, incoming, newer) } : {};
       return { ...row, ...(preserve ? executionState(current) : {}), ...provenance };
     });
   }
@@ -417,9 +432,12 @@ function updateChatState(event) {
       return;
     }
     const presence = rememberChatName(event && event.presence);
-    const row = presence?.live ? { ...presence, workOnly: false, draftAdapterId: '' } : presence;
+    let row = presence?.live ? { ...presence, workOnly: false, draftAdapterId: '' } : presence;
     const id = String(event && event.sessionId || row && row.id || '');
     if (!id || !row) return;
+    const previous = ctx.chatItems.find(item => String(item.id || '') === id);
+    if (!row.workOnly && Array.isArray(row.usedHarnesses) && Array.isArray(previous?.usedHarnesses))
+      row = { ...row, usedHarnesses: mergeUsage(previous.usedHarnesses, row.usedHarnesses) };
     if (Object.hasOwn(row, 'state') || Object.hasOwn(row, 'status') || Object.hasOwn(row, 'draftAdapterId') ||
         Array.isArray(row.usedHarnesses)) {
       const canonical = canonicalLocalId(id) || id;
@@ -433,7 +451,6 @@ function updateChatState(event) {
       localRows = localRows.map(item => (canonicalLocalId(item.id) || item.id) === canonical
         ? { ...item, ...executionState(row) } : item);
     }
-    const previous = ctx.chatItems.find(item => String(item.id || '') === id);
     if (!row.emptyPlaceholder && !row.accountConversation && !row.remoteProjection &&
         (event.kind === 'renamed' || event.kind === 'history-lifecycle' ||
         !previous || ctx.chatState(previous) !== ctx.chatState(row) &&

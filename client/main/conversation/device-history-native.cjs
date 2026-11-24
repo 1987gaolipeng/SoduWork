@@ -170,13 +170,16 @@ function canonicalJson(value) {
 function runnerConflict() {
   return failure('NATIVE_HISTORY_DIVERGED', '执行记录与已保存的完整历史不一致，已保留本机副本。请恢复原档后继续');
 }
-function matchesLegacyRunner(id, snapshot, messages, tools, candidates) {
+function matchesLegacyRunner(id, adapterId, snapshot, messages, tools, candidates) {
   // Old replicas have only a cursor. Compare the public events at that exact
   // boundary, before a later delta or terminal event can modify the projection.
   const prefix = id + ':', oldMessages = snapshot.messages.filter(item => typeof item.id === 'string' && item.id.startsWith(prefix));
   const oldTools = snapshot.tools.filter(item => typeof item.id === 'string' && item.id.startsWith(prefix + prefix));
+  const nativeSource = require('./native-agent-source.cjs');
+  const sameProjection = (item, old) => canonicalJson(old.sourceAgent ?
+    { ...item, ...nativeSource.fields(item, adapterId) } : item) === canonicalJson(old);
   if (messages.length !== oldMessages.length || tools.length !== oldTools.length ||
-      messages.some((item, i) => canonicalJson(item) !== canonicalJson(oldMessages[i]))) return false;
+      messages.some((item, i) => !sameProjection(item, oldMessages[i]))) return false;
   const offset = oldMessages.length ? snapshot.messages.indexOf(oldMessages[0]) : oldTools[0]?.after || 0;
   for (const [index, item] of tools.entries()) {
     const old = { ...oldTools[index] }, current = { ...item, id: prefix + item.id, after: offset + item.after };
@@ -186,7 +189,7 @@ function matchesLegacyRunner(id, snapshot, messages, tools, candidates) {
         (old.state === 'done' || old.state === 'cancelled' && old.cancelReason === 'access-change')) {
       old.state = 'running'; delete old.cancelReason; delete old.isError;
     }
-    if (canonicalJson(old) !== canonicalJson(current)) return false;
+    if (!sameProjection(current, old)) return false;
   }
   return true;
 }
@@ -200,7 +203,7 @@ async function runner(runtime, id, adapterId, guard, previousToolReceipts, previ
   let prefixMatches = true;
   function compareCheckpoint() {
     prefixMatches = previousSource.journalDigest ? evidence.copy().digest('hex') === previousSource.journalDigest
-      : previousSnapshot && matchesLegacyRunner(id, previousSnapshot, messages, tools, candidates);
+      : previousSnapshot && matchesLegacyRunner(id, adapterId, previousSnapshot, messages, tools, candidates);
   }
   let after = 0, size = 0, target, localWorkspace;
   while (true) {
@@ -319,7 +322,8 @@ async function runner(runtime, id, adapterId, guard, previousToolReceipts, previ
       }
     }
   }
-  return { snapshot: { messages, tools }, source: { id, adapterId, revision: String(after), journalDigest: evidence.digest('hex') },
+  return { snapshot: require('./native-agent-source.cjs').snapshot({ messages, tools }, adapterId),
+    source: { id, adapterId, revision: String(after), journalDigest: evidence.digest('hex') },
     localToolReceipts, localWorkspace };
 }
 async function read({ app, session, row, guard, previousToolReceipts = [], previousSources = [], previousSnapshot,
