@@ -126,9 +126,13 @@ jobs:
           python -m venv hub-backend/.venv
           if [ "$RUNNER_OS" = Windows ]; then
             hub-backend/.venv/Scripts/python.exe -m pip install -r hub-backend/requirements-test.txt
-            choco install ripgrep --no-progress --yes
-            echo 'C:\\ProgramData\\chocolatey\\bin' >> "$GITHUB_PATH"
-            rg --version
+            cd "$(cygpath -u "$RUNNER_TEMP")"
+            archive=ripgrep-15.2.0-x86_64-pc-windows-msvc
+            curl --fail --location --retry 3 --output "$archive.zip" "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/$archive.zip"
+            echo "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5  $archive.zip" | sha256sum --check
+            unzip -q "$archive.zip" "$archive/rg.exe"
+            cygpath -w "$PWD/$archive" >> "$GITHUB_PATH"
+            "$archive/rg.exe" --version
           else
             hub-backend/.venv/bin/python -m pip install -r hub-backend/requirements-test.txt
             sudo apt-get update
