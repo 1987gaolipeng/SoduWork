@@ -200,7 +200,7 @@ export default function ModelCatalog({ me }) {
         }} />}
       {addM && <ModelForm providerId={addM.providerId} initial={addM.model || null}
         onClose={closeAddModel} onSaved={receipts => { closeAddModel(); modelsSaved(addM.provider, receipts) }} />}
-      {discover && <DiscoverForm provider={discover}
+      {discover && <DiscoverForm key={discover.id} provider={discover}
         onClose={closeDiscovery} onSaved={receipts => { closeDiscovery(); modelsSaved(discover, receipts) }} />}
       {del?.kind === 'p' && <ModelProviderDeletion key={del.id} providerId={del.id}
         onClose={() => setDel(null)} onDeleted={() => { setDel(null); toast(tx("已删除")); load() }} />}
@@ -486,7 +486,8 @@ function ProviderForm({ initial, onClose, onSaved }) {
         <input className="f-in" value={note} onChange={(e) => setNote(e.target.value)} placeholder={tx("一句话")} /></div>
       {connection && !connection.pending && <div role="status" className="hintline" style={{ marginTop: 12, overflowWrap: 'anywhere' }}>
         {connection.ok ? <>
-          {tx("连接成功，本次读取到 {0} 个模型。", [connection.models.length])}
+          {tx("连接成功，本次读取到 {0} 个模型。", [connection.counts?.total ?? connection.models.length])}
+          {tx("其中 {0} 个声明支持对话，{1} 个用途未确认。", [connection.counts?.chat ?? 0, connection.counts?.unknown ?? connection.models.length])}
           {connection.models.length > 0 && tx("示例：{0}。", [connection.models.slice(0, 3).join(', ')])}
           {tx("发消息前还需添加模型并确认额度。")}
         </> : serverMessage({ key: connection.code, params: connection.params, fallback: connection.detail })}
@@ -707,7 +708,8 @@ function ModelForm({ providerId, initial, onClose, onSaved }) {
 function DiscoverForm({ provider, onClose, onSaved }) {
   const uiLocale = useLocale();
   const [phase, setPhase] = useState('loading')   // loading | ready | empty | error
-  const [rows, setRows] = useState([])            // [{name, checked}]
+  const [rows, setRows] = useState([])
+  const [purpose, setPurpose] = useState('chat')
   const [detail, setDetail] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -717,7 +719,11 @@ function DiscoverForm({ provider, onClose, onSaved }) {
       .then((r) => {
         if (!alive) return
         if (!r.ok) { setDetail(r.code ? serverMessage({ key: r.code, params: r.params, fallback: r.detail }) : (r.detail || tx("读取失败"))); setPhase('error'); return }
-        const list = (r.models || []).map((name) => ({ name, checked: false }))
+        const metadata = new Map((r.candidates || []).map(item => [item.id, item]))
+        const list = (r.models || []).map(name => {
+          const candidate = metadata.get(name)
+          return { name, status: candidate?.status || 'unknown', purposes: candidate?.purposes || [], checked: false }
+        })
         if (list.length === 0) { setPhase('empty'); return }
         setRows(list); setPhase('ready')
       })
@@ -726,10 +732,20 @@ function DiscoverForm({ provider, onClose, onSaved }) {
   }, [provider.id])
 
   const [query, setQuery] = useState('')
-  const matches = row => row.name.toLowerCase().includes(query.trim().toLowerCase())
+  const supportsPurpose = row => row.status === 'declared' && row.purposes.includes(purpose)
+  const matches = row => (supportsPurpose(row) || row.status === 'unknown') && row.name.toLowerCase().includes(query.trim().toLowerCase())
   const filtered = rows.filter(matches)
   const checkedCount = rows.filter((r) => r.checked).length
-  function toggleAll(next) { setRows((current) => current.map(r => matches(r) ? { ...r, checked: next } : r)) }
+  function changePurpose(next) {
+    setPurpose(next)
+    setRows(current => current.map(row => row.checked ? { ...row, checked: false } : row))
+  }
+  function toggleAll(next) {
+    setRows(current => current.map(row => matches(row) && (!next || supportsPurpose(row)) ? { ...row, checked: next } : row))
+  }
+  function checkRow(name, checked) {
+    setRows(current => current.map(row => row.name === name ? { ...row, checked } : row))
+  }
 
   async function importSelected() {
     const picked = rows.filter((r) => r.checked)
@@ -740,7 +756,7 @@ function DiscoverForm({ provider, onClose, onSaved }) {
     for (const row of picked) {
       try {
         const saved = await api.saveModelDef({ providerId: provider.id, name: row.name,
-          label: row.name, expectedRevision: 'new', enabled: true })
+          label: row.name, modality: purpose, expectedRevision: 'new', enabled: true })
         added.push(saved)
       } catch (e) { failed += 1 }
     }
@@ -764,21 +780,33 @@ function DiscoverForm({ provider, onClose, onSaved }) {
         {phase === 'error' && <div className="model-discover-note">{detail}</div>}
         {phase === 'empty' && <div className="model-discover-note">{tx("这个服务的模型都已经在目录里了。")}</div>}
         {phase === 'ready' && <>
+          <label className="f-lbl" htmlFor="discovery-purpose">{tx("模型用途")}</label>
+          <SelectMenu id="discovery-purpose" className="f-in" aria-label={tx("模型用途")} disabled={busy}
+            value={purpose} onChange={event => changePurpose(event.target.value)}>
+            {MODEL_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </SelectMenu>
           <input type="search" className="f-in" aria-label={tx("按模型名称筛选")} placeholder={tx("按模型名称筛选")}
             value={query} onChange={event => setQuery(event.target.value)} />
           <div className="model-discover-toolbar">
-            <button type="button" className="admin-card-action" onClick={() => toggleAll(true)}>{tx("选择筛选结果")}</button>
-            <button type="button" className="admin-card-action" onClick={() => toggleAll(false)}>{tx("取消选择筛选结果")}</button>
+            <button type="button" className="admin-card-action" disabled={busy || !filtered.some(supportsPurpose)} onClick={() => toggleAll(true)}>{tx("选择筛选结果")}</button>
+            <button type="button" className="admin-card-action" disabled={busy || !filtered.some(row => row.checked)} onClick={() => toggleAll(false)}>{tx("取消选择筛选结果")}</button>
             <span className="muted">{tx("共 {0} 个", [filtered.length])}</span>
           </div>
           <p aria-live="polite">{tx("将在此服务下添加并启用 {0} 个模型。", [checkedCount])}</p>
           <div className="model-discover-list" role="region" tabIndex={0} aria-label={tx("发现的模型列表")}>
+            {!filtered.length && <p className="muted">{tx("没有符合当前用途和名称的模型。")}</p>}
             {filtered.map((row) => (
-              <label className="model-discover-row" key={row.name}>
-                <input type="checkbox" checked={row.checked}
-                  onChange={(e) => setRows((current) => current.map((r) => r.name === row.name ? { ...r, checked: e.target.checked } : r))} />
-                <code title={row.name}>{row.name}</code>
-              </label>
+              <div className="model-discover-row" key={row.name}>
+                <label>
+                  <input type="checkbox" checked={row.checked} disabled={busy || (row.status === 'unknown' && !row.checked)}
+                    onChange={event => checkRow(row.name, event.target.checked)} />
+                  <code title={row.name}>{row.name}</code>
+                  {row.status === 'unknown' && <span className="muted">{tx("用途未确认")}</span>}
+                </label>
+                {row.status === 'unknown' && !row.checked && <button type="button" className="admin-card-action" disabled={busy}
+                  aria-label={tx("确认 {0} 可用于{1}", [row.name, MODEL_TYPE_LABEL[purpose]])}
+                  onClick={() => checkRow(row.name, true)}>{tx("确认为{0}", [MODEL_TYPE_LABEL[purpose]])}</button>}
+              </div>
             ))}
           </div>
         </>}

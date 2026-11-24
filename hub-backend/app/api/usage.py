@@ -58,6 +58,7 @@ async def report_usage(
         for key, values in prepared:
             row, status = await usage_ledger.record_cumulative(session, key, values)
             receipts.append({**usage_ledger.to_api(row), "status": status})
+        await usage_ledger.verify_chat_receipts(session, receipts)
     except usage_ledger.InvalidUsageSource as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:

@@ -291,6 +291,8 @@ AI 代理的图片和视频生成接口按媒体类型接收创作参数，例�
 
 省略 `sourceType` 时使用 `chat`。允许的类型为 `chat`、`task`、`workflow`、`automation` 和 `system`，使用所列的小写拼写。任务和工作流上报须关联本设备拥有或当前账号获派的任务。无效类型返回 HTTP 422。每条回执均包含已入账的累计计数，以及 `created`（新建）、`updated`（计数增长）或 `duplicate`（计数没有增长）状态。
 
+聊天用量的 `sourceId` 和 `conversationId` 均表示本地会话 ID，可任选其一，同时提供时两者必须一致。同一回执在重试时保留首次上报的会话，归属冲突时整批返回 HTTP 422。仅提供幂等键也可以累计用量。Hub 按账号、设备和本地会话核对会话目录，匹配后，回执和用量明细返回会话 ID 及 `sourceVerification: "verified"`。尚未匹配时返回空 ID 和 `"unverified"`。如果会话晚于用量同步，下次查询即可看到核验结果。
+
 - 客户端契约（员工登录或管理员配对 → 短期 `Device` 会话，Hub 只保存设备密钥摘要）
   - `GET/POST /api/v1/tasks`、`GET/PATCH/DELETE /api/v1/tasks/{id}`
   - `POST /api/v1/tasks/batch-update`、`POST /api/v1/tasks/clear-done`（只清 done）
