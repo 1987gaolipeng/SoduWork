@@ -145,6 +145,8 @@ class CapabilityTests(IsolatedDatabase):
                 status, data = "400 Bad Request", b'{"error":{"message":"image input is not supported"}}'
             elif self.mode == "private-error":
                 status, data = "401 Unauthorized", b'{"error":{"message":"company-private secret internal response"}}'
+            elif self.mode == "plain-tools" and body.get("tools") and body.get("stream"):
+                status, data = "400 Bad Request", b'{"error":{"code":"tools_not_supported"}}'
             elif body.get("stream"):
                 content_type = "text/event-stream"
                 tool_result = next((row for row in body["messages"] if row["role"] == "tool"), None)
@@ -190,7 +192,8 @@ class CapabilityTests(IsolatedDatabase):
                     self.assertNotIn(self.challenge, body["messages"][0]["content"][0]["text"])
                     wrong = str((int(self.challenge[0]) + 1) % 10) + self.challenge[1:]
                     message = {"content": self.challenge if self.mode != "wrong-image" else wrong}
-                data = json.dumps({"choices": [{"message": message, "finish_reason": "stop"}]}).encode()
+                finish = "tool_calls" if "tool_calls" in message else "stop"
+                data = json.dumps({"choices": [{"message": message, "finish_reason": finish}]}).encode()
             writer.write(("HTTP/1.1 " + status + "\r\nContent-Type: " + content_type +
                           "\r\nContent-Length: " + str(len(data)) + "\r\nConnection: close\r\n\r\n").encode() + data)
             await writer.drain()
@@ -342,6 +345,21 @@ class CapabilityTests(IsolatedDatabase):
         self.assertEqual(result["capabilityProfile"]["toolCalling"]["state"], "unknown")
         self.assertEqual(result["checks"]["streaming"]["status"], "passed")
         self.assertTrue(self.requests[0][1]["stream"])
+
+    async def test_admin_verifies_plain_tool_round_trip_separately_from_text_streaming(self):
+        self.mode = "plain-tools"
+        response = await self.check(checks=["connection", "imageInput", "toolCalling", "streaming"])
+        self.assertEqual(response.status_code, 200)
+        report = response.json()
+        self.assertEqual(report["capabilityProfile"]["toolCalling"]["state"], "supported")
+        self.assertEqual(report["checks"]["toolCalling"]["stage"], "tool_result")
+        self.assertTrue(all(check["status"] == "passed" for check in report["checks"].values()))
+        tool_requests = [body for _, body in self.requests if "tools" in body]
+        self.assertEqual(len(tool_requests), 3)
+        self.assertTrue(tool_requests[0]["stream"])
+        for body in tool_requests[1:]:
+            self.assertEqual(set(body), {"model", "messages", "tools"})
+        self.assertEqual([row["role"] for row in tool_requests[2]["messages"]], ["user", "assistant", "tool"])
 
     async def test_organization_evidence_follows_org_credentials_and_runtime_revision_changes(self):
         async with self.sessions() as session:
