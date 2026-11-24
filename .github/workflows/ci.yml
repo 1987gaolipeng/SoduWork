@@ -126,15 +126,30 @@ jobs:
           python -m venv hub-backend/.venv
           if [ "$RUNNER_OS" = Windows ]; then
             hub-backend/.venv/Scripts/python.exe -m pip install -r hub-backend/requirements-test.txt
-            choco install ripgrep --no-progress --yes
-            echo 'C:\\ProgramData\\chocolatey\\bin' >> "$GITHUB_PATH"
-            rg --version
           else
             hub-backend/.venv/bin/python -m pip install -r hub-backend/requirements-test.txt
             sudo apt-get update
             sudo apt-get install -y xvfb xauth libgtk-3-0 libnss3 libasound2 ripgrep
             rg --version
           fi
+      - name: Prepare ripgrep for Windows client tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Get-Command rg -ErrorAction SilentlyContinue) {
+            rg --version
+            exit $LASTEXITCODE
+          }
+          $package = 'ripgrep-16.0.0-x86_64-pc-windows-msvc'
+          $archive = Join-Path $env:RUNNER_TEMP "$package.zip"
+          Invoke-WebRequest "https://github.com/BurntSushi/ripgrep/releases/download/16.0.0/$package.zip" -OutFile $archive -MaximumRetryCount 3
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne 'f418ae83e63046a94a7b5f3a44bf3a169f66e689164856ecee02547131c73931') {
+            throw 'The ripgrep archive SHA-256 does not match the pinned release.'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $env:RUNNER_TEMP
+          $bin = Join-Path $env:RUNNER_TEMP $package
+          Add-Content $env:GITHUB_PATH $bin
+          & (Join-Path $bin 'rg.exe') --version
       - name: Verify attachment storage names under native Windows rules
         if: runner.os == 'Windows'
         run: .venv/Scripts/python.exe -m unittest -v test_attachment_storage_names
