@@ -1,5 +1,6 @@
 // UI text added by the local admin refinements, merged with remote localization.
 export default {
+  "使用 8–128 个字符，不能全为空白。": "Use 8–128 characters, including at least one non-whitespace character.",
   '搜索部门名称或路径': 'Search department name or path',
   '未命名集成源': 'Unnamed integration source',
   '领域名称': 'Domain name',

@@ -63,7 +63,11 @@ class LibraryIntegrityTests(LibraryHttpTestCase):
             with self.assertRaises(IntegrityError):
                 await session.commit()
             await session.rollback()
-        long_name = await self.create_folder("a" * 200)
+        # Folder names exceeding 160 characters are now rejected (422).
+        long_response = await self.request("POST", "/folders", json={"name": "a" * 200})
+        self.assertIn(long_response.status_code, (422, 400), long_response.text)
+        # Names within the limit still work.
+        long_name = await self.create_folder("a" * 160)
         self.assertEqual(len(long_name["name"]), 160)
 
     async def test_invalid_edit_does_not_write_or_orphan_objects(self):

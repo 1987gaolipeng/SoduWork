@@ -91,6 +91,25 @@ class AdminProjectRouterTests(unittest.IsolatedAsyncioTestCase):
         await self.http.aclose()
         await self.engine.dispose()
 
+    async def test_project_name_validation_on_create_and_rename(self):
+        for invalid in ("P\u202eroject", "First\nLast", 123):
+            with self.subTest(invalid=invalid):
+                body = {"name": invalid}
+                created = await self.request("POST", "/projects", json={**body, "ownerUserId": "owner"})
+                renamed = await self.request("PUT", "/projects/project", json=body)
+                self.assertEqual(created.status_code, 422, created.text)
+                self.assertEqual(renamed.status_code, 422, renamed.text)
+        async with self.sessions() as session:
+            project = await session.get(models.Project, "project")
+            self.assertEqual(project.name, "Project")
+            project.name = "Legacy\u202ename"
+            await session.commit()
+        edited = await self.request("PUT", "/projects/project", json={"desc": "First\nSecond"})
+        self.assertEqual(edited.status_code, 200, edited.text)
+        self.assertEqual(edited.json()["name"], "Legacy\u202ename")
+        renamed = await self.request("PUT", "/projects/project", json={"name": "  مشروع جديد  "})
+        self.assertEqual(renamed.json()["name"], "مشروع جديد")
+
     async def test_creation_and_rename_reject_duplicate_names_within_owner_org(self):
         base = {"name": "Project", "ownerUserId": "owner"}
         for extra, status in (({"key": "ignored"}, 422), ({}, 409)):
@@ -190,6 +209,61 @@ class AdminProjectRouterTests(unittest.IsolatedAsyncioTestCase):
                 models.TaskEvent.kind == "release.approval_rerouted")))
             self.assertIsNone(await session.scalar(select(models.AuditLog.id).where(
                 models.AuditLog.action == "project.update")))
+
+    async def test_test_creator_project_and_repository_mappings_stay_out_of_business_lists(self):
+        from app.api import repositories
+        self.app.include_router(repositories.router)
+        async with self.sessions() as session:
+            manager = await session.get(models.User, "manager")
+            manager.is_test_account = True
+            session.add(am.ScmRepository(id="catalog", integration_id="fixture", org_id="child",
+                provider="gitlab", external_id="1", full_name="fixture/repo", display_name="Repo",
+                clone_url="https://git.example.test/repo.git", default_branch="main"))
+            await session.commit()
+        created = await self.request("POST", "/projects", json={
+            "name": "Test owner project", "ownerUserId": "owner", "dataSource": "business"})
+        self.assertEqual(created.status_code, 200, created.text)
+        pid = created.json()["id"]
+        self.assertEqual(created.json()["dataSource"], "test")
+        self.assertEqual({p["id"] for p in (await self.request("GET", "/projects")).json()}, {"project"})
+        managed = (await self.request("GET", "/projects?includeManaged=true")).json()
+        self.assertEqual({p["id"] for p in managed}, {"project", pid})
+        self.assertEqual(next(p for p in managed if p["id"] == "project")["dataSource"], "legacy")
+
+        async with self.sessions() as session:
+            (await session.get(models.User, "manager")).is_test_account = False
+            await session.commit()
+        project_repos = "/projects/" + pid + "/repos"
+        manual = await self.request("POST", project_repos, json={"name": "Manual"})
+        mapped = await self.request("POST", project_repos + "/from-catalog", json={"catalogId": "catalog"})
+        for response in (manual, mapped):
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["dataSource"], "test")
+        copied = await self.request("POST", "/repos/" + mapped.json()["id"] + "/copy",
+                                    json={"projectId": "project", "branch": "copy"})
+        self.assertEqual(copied.status_code, 200, copied.text)
+        self.assertEqual(copied.json()["dataSource"], "test")
+        async with self.sessions() as session:
+            # Before source labels existed, the mapping could predate the review of its parent.
+            (await session.get(models.Repo, mapped.json()["id"])).data_source = "legacy"
+            await session.commit()
+        historical = await self.request("POST", "/repos/" + mapped.json()["id"] + "/copy",
+                                        json={"projectId": "project", "branch": "historical"})
+        self.assertEqual(historical.json()["dataSource"], "test")
+        for path, count in ((project_repos, 2), ("/projects/project/repos", 2)):
+            self.assertEqual((await self.request("GET", path)).json(), [])
+            self.assertEqual(len((await self.request("GET", path + "?includeManaged=true")).json()), count)
+        async with self.sessions() as session:
+            (await session.get(models.Project, pid)).is_archived = True
+            await session.commit()
+        for path, body in (
+            (project_repos, {"name": "New mapping"}),
+            (project_repos + "/from-catalog", {"catalogId": "catalog", "branch": "new"}),
+            ("/repos/" + copied.json()["id"] + "/copy", {"projectId": pid, "branch": "to-archive"}),
+            ("/repos/" + mapped.json()["id"] + "/copy", {"projectId": "project", "branch": "from-archive"}),
+        ):
+            blocked = await self.request("POST", path, json=body)
+            self.assertEqual(blocked.status_code, 409, blocked.text)
 
     async def test_owner_change_reroutes_when_two_distinct_approvers_remain(self):
         request_id = await self._open_merge_approval("manager")
@@ -336,6 +410,32 @@ class AdminProjectRouterTests(unittest.IsolatedAsyncioTestCase):
                                      json={"name": "C:/display-name", "localDir": ""})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["localDir"], "")
+    async def test_repo_update_preserves_custom_dev_flow_steps(self):
+        """Updating a repository must keep customized development-flow steps.
+
+        devFlow.steps is a list of {key, title, detail} dicts. update_repo used to
+        stringify every override field before normalize(), which turned the list into
+        a Python repr string and silently discarded all customized steps on save.
+        """
+        steps = [
+            {"key": "s0", "title": "拉取基线", "detail": "从 {base} 拉取干净副本"},
+            {"key": "s1", "title": "QA 自定义步骤", "detail": "执行 {task} 的验证并留证"},
+        ]
+        created = await self.request("POST", "/projects/project/repos",
+                                     json={"name": "Flow", "devFlow": {"steps": steps}})
+        self.assertEqual(created.status_code, 200, created.text)
+        rid = created.json()["id"]
+        self.assertEqual(created.json()["devFlow"]["steps"], steps)
+        updated = await self.request("PUT", "/repos/" + rid, json={
+            "devFlow": {"steps": steps, "extra": "改完要跑迁移检查"}})
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["devFlow"]["steps"], steps)
+        self.assertEqual(updated.json()["devFlow"]["extra"], "改完要跑迁移检查")
+        # An empty steps list keeps inheriting the default flow: nothing is stored,
+        # so the API response omits the key entirely instead of persisting a string.
+        inherited = await self.request("PUT", "/repos/" + rid, json={"devFlow": {"steps": []}})
+        self.assertEqual(inherited.status_code, 200, inherited.text)
+        self.assertEqual(inherited.json()["devFlow"].get("steps", []), [])
 
 
 if __name__ == "__main__":

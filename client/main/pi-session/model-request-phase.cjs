@@ -2,18 +2,19 @@
 
 // Observe only requests from this foreground agent. The SDK supplies the LLM
 // context here after prepareRequest, transformContext and message conversion.
-function subscribe(session, listener) {
+function subscribe(session, listener, getFailureTarget) {
   const agent = session.agent;
   const stream = agent?.streamFunction;
   if (typeof stream !== 'function') return session.subscribe(listener);
   let toolResultId, request;
   function streamRequest(model, context, options) {
     const last = context.messages.at(-1);
-    request = null;
+    const current = { model, target: getFailureTarget?.(model), signal: options?.signal,
+      phase: last?.role === 'user' ? 'initial' : 'model' };
+    request = current;
     if (!toolResultId || last?.role !== 'toolResult' || last.toolCallId !== toolResultId ||
         model.api !== 'openai-completions') return stream.call(this, model, context, options);
-    const current = { confirmed: false, signal: options?.signal };
-    request = current;
+    current.toolId = toolResultId;
     const id = toolResultId;
     let firstPayload = true;
     return stream.call(this, model, context, { ...options, async onPayload(...args) {
@@ -32,8 +33,12 @@ function subscribe(session, listener) {
   const unsubscribe = session.subscribe(event => {
     if (event.type === 'message_end') {
       const message = event.message;
-      if (message?.role === 'assistant' && message.stopReason === 'error' && request?.confirmed && !request.signal?.aborted) {
-        event = { ...event, afterToolResult: true };
+      if (message?.role === 'assistant' && message.stopReason === 'error' && request && !request.signal?.aborted &&
+          message.model === request.model.id && message.provider === request.model.provider) {
+        event = { ...event, modelFailureTarget: request.target,
+          modelRequestPhase: request.confirmed ? 'tool-result' : request.phase,
+          ...(request.confirmed ? { afterToolResult: true, afterToolResultId: request.toolId,
+            failedModelRef: request.model.id } : {}) };
       }
       toolResultId = message?.role === 'toolResult' && !message.isError ? message.toolCallId : null;
       request = null;

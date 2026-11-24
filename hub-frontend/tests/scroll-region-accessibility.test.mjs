@@ -39,10 +39,15 @@ async function mountScreen(t, name) {
   api.operationsInsights = () => insightData
   api.operationsOverview = () => operationData
   const page = await createComponentHarness(new URL(`../src/screens/${name}.jsx`, import.meta.url), {
+    props: { rows: operationData.recentFailures },
     dependencies: {
       '../api.js': { api, can: () => true },
       './requirement-governance.js': requirementGovernance,
+      './FirstChatChecklist.jsx': 'FirstChatChecklist',
       './operations-copy.js': operationsCopy,
+      './OperationsApprovalQueue.jsx': 'ApprovalQueue', './OperationsFailures.jsx': 'OperationsFailures',
+      './PluginRunDialogs.jsx': { RunDrawer: 'RunDrawer' },
+      './plugin-foundation.css': {}, './plugin-workshop-dialogs.css': {}, './plugin-admin-polish.css': {},
       './insights-metrics.js': insightsMetrics,
       '../ui.jsx': { AUTO: 5000, Icon: 'Icon', Modal: 'Modal', Loading: 'Loading', ErrorState: 'ErrorState',
         navTo: () => {}, useAsync: (read) => ({ data: read(), loading: false, error: null }) },
@@ -68,7 +73,7 @@ const cases = [
   ['OperationsInsights', 'oi-table-wrap', '插件使用明细，可横向滚动'],
   ['OperationsCenter', 'ops-runner-list', '执行节点列表，可滚动'],
   ['OperationsCenter', 'ops-work-groups', '需求从执行到发布'],
-  ['OperationsCenter', 'ops-failures', '最近失败'],
+  ['OperationsFailures', 'ops-failures', '最近失败'],
   ['OperationsCenter', 'ops-route-list', '服务请求'],
 ]
 for (const [screen, className, label] of cases) {

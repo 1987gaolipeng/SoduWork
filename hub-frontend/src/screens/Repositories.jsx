@@ -1,3 +1,4 @@
+import { catalogRows, catalogSearchView, scheduleCatalogSearch } from './repository-catalog-search.js'
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
 /*
  * Enterprise repository catalog exposes sync health, search, and project attachment. Each
@@ -40,7 +41,8 @@ export default function Repositories() {
   const listRef = useViewportHeight()
   const uiLocale = useLocale();
   const [integrations, setIntegrations] = useState(null)
-  const [catalog, setCatalog] = useState([])
+  const [pages, setPages] = useState([])
+  const [searchResult, setSearchResult] = useState(null)
   const [loading, setLoading] = useState(true)
   const [catalogError, setCatalogError] = useState(null)
   const [query, setQuery] = useState('')
@@ -59,6 +61,7 @@ export default function Repositories() {
     (i) => supportsIssues(i.type) && i.enabled !== false), [integrations, uiLocale])
   const missingAccounts = sources.filter((source) => !source.pullAccountSet).length
 
+  const catalog = useMemo(() => catalogRows(pages), [pages])
   const load = useCallback(async () => {
     const request = ++loadRequest.current
     setLoading(true)
@@ -73,17 +76,18 @@ export default function Repositories() {
       if (usable.length) {
         const settled = await Promise.allSettled(usable.map((item) => api.repositoryCatalog(item.id)))
         if (request !== loadRequest.current) return
-        results = settled.filter((result) => result.status === 'fulfilled').map((result) => result.value)
+        results = settled.flatMap((result, index) => result.status === 'fulfilled'
+          ? [{ id: usable[index].id, name: usable[index].name || usable[index].id, items: result.value.items || [] }] : [])
         const failures = settled.flatMap((result, index) => result.status === 'rejected'
           ? [{ id: usable[index].id, name: usable[index].name || usable[index].id, detail: result.reason?.message || String(result.reason) }]
           : [])
         if (failures.length) setCatalogError({ failures, retained: results.length === 0 })
         if (!results.length) return
       } else {
-        results = [await api.repositoryCatalog()]
+        results = [{ id: '', items: (await api.repositoryCatalog()).items || [] }]
       }
       if (request !== loadRequest.current) return
-      setCatalog([...new Map(results.flatMap((result) => result.items || []).map((row) => [row.id, row])).values()])
+      setPages(results)
     } catch (e) { if (request === loadRequest.current) toast(tx("仓库目录没有加载：") + e.message) }
     finally { if (request === loadRequest.current) setLoading(false) }
   }, [manage])
@@ -142,11 +146,10 @@ export default function Repositories() {
     await finish()
   }
 
-  const shown = catalog.filter((row) => {
-    if (provider && String(row.provider) !== provider) return false
-    const q = query.trim().toLowerCase()
-    return !q || [row.fullName, row.displayName].some((v) => String(v || '').toLowerCase().includes(q))
-  })
+  const term = query.trim()
+  useEffect(() => scheduleCatalogSearch(pages, term, api.repositoryCatalog, setSearchResult), [pages, term])
+  const search = catalogSearchView(pages, term, searchResult)
+  const shown = search.rows.filter(row => !provider || row.provider === provider)
   const counts = useMemo(() => {
     const by = {}
     for (const row of catalog) by[row.provider] = (by[row.provider] || 0) + 1
@@ -170,14 +173,15 @@ export default function Repositories() {
     </div>}
 
     <div className={'rc-toolbar admin-filterbar' + (catalog.length ? '' : ' is-empty')}>
-      <FilterInput className="rc-search" type="search" aria-label={tx("搜索仓库名称或路径")} value={query} onChange={(e) => setQuery(e.target.value)} disabled={!catalog.length} placeholder={tx("搜索 ") + catalog.length + tx(" 个仓库（名称 / 路径）")} />
+      <FilterInput className="rc-search" type="search" aria-label={tx("搜索仓库名称或路径")} value={query} onChange={(e) => setQuery(e.target.value)} disabled={!catalog.length} placeholder={search.capped ? tx("搜索仓库名称或路径") : tx("搜索 ") + catalog.length + tx(" 个仓库（名称 / 路径）")} />
       <div className="rc-filters admin-segmented admin-filter-options" role="group" aria-label={tx("仓库来源")}>
         <button disabled={!catalog.length} aria-pressed={provider === ''} className={provider === '' ? 'on' : ''} onClick={() => setProvider('')}>{tx("全部")}<b>{catalog.length}</b></button>
         {Object.entries(counts).map(([p, n]) => <button disabled={!catalog.length} key={p} aria-pressed={provider === p} className={provider === p ? 'on' : ''} onClick={() => setProvider(p)}>{(PROVIDER_META[p] || {}).label || p}<b>{n}</b></button>)}
       </div>
     </div>
 
-    {loading ? <Loading /> : shown.length ? <div ref={listRef} className="rc-list" tabIndex="0" role="region" aria-label={tx("仓库列表，可滚动")}>
+    {search.failures.length > 0 && <div className="rc-source-err" role="alert">{tx("仓库目录没有加载：")}{search.failures.join(" · ")}</div>}
+    {loading || search.loading ? <Loading /> : shown.length ? <div ref={listRef} className="rc-list" tabIndex="0" role="region" aria-label={tx("仓库列表，可滚动")}>
       <div className="rc-table-head" role="row"><span>{tx("来源")}</span><span>{tx("仓库名称 / 路径")}</span><span>{tx("默认分支")}</span><span>{tx("状态")}</span><span>{tx("操作")}</span></div>
       {shown.map((row) => <div key={row.id} className="rc-row">
         <span className={'rc-mark rc-pv-' + row.provider}>{(PROVIDER_META[row.provider] || {}).mark || '↗'}</span>
@@ -196,12 +200,13 @@ export default function Repositories() {
           {can('task.dispatch') && <button className="admin-text-action" onClick={() => setMapping(row)}>{tx("挂进项目")}</button>}
         </span>
       </div>)}
-    </div> : (sources.length > 0 || catalog.length > 0 || !manage) ? <EmptyPanel icon="box" title={catalog.length ? tx("没有匹配的仓库") : tx("目录里还没有仓库")}
+    </div> : !search.failures.length && (sources.length > 0 || catalog.length > 0 || !manage) ? <EmptyPanel icon="box" title={catalog.length ? tx("没有匹配的仓库") : tx("目录里还没有仓库")}
       text={catalog.length ? tx("换个关键词试试。") : manage ? tx("请查看上方各代码源的同步状态。") : tx("请联系管理员同步仓库目录。")} /> : null}
 
     {manage && issueSettings && <RepositoryIssueSync key={issueSettings.id} row={issueSettings}
       onClose={() => setIssueSettings(null)}
-      onUpdated={(value) => setCatalog((items) => items.map((row) => row.id === issueSettings.id ? { ...row, issueSync: value } : row))} />}
+      onUpdated={(value) => setPages(current => current.map(page => ({ ...page, items: page.items.map(row =>
+        row.id === issueSettings.id ? { ...row, issueSync: value } : row) })))} />}
     {mapping && <MapToProjectModal row={mapping} onClose={() => setMapping(null)}
       onDone={() => { setMapping(null); toast(tx("已挂进项目，可在「项目与仓库」里继续配置流程")) }} />}
   </section>
@@ -382,9 +387,9 @@ function MapToProjectModal({ row, onClose, onDone }) {
     } catch (e) { toast(tx("没挂上：") + e.message) } finally { setBusy(false) }
   }
 
-  return <Modal scope="project-governance" title={tx("挂进项目：") + (row.displayName || row.fullName)} onClose={onClose} footer={
+  return <Modal scope="project-governance" title={tx("挂进项目：") + (row.displayName || row.fullName)} draft={[pid === projects[0]?.id ? '' : pid, form]} onClose={onClose} footer={dismiss =>
     <>
-      <button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+      <button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
       <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("正在挂载…") : tx("挂进项目")}</button>
     </>
   }>

@@ -522,11 +522,14 @@ async def create_task(
     status = str(data.get("status") or "todo")
     if status not in task_status.VALID:
         raise HTTPException(status_code=400, detail="需求状态不正确")
+    title = str(data.get("title") or "")
+    if not title.strip():
+        raise HTTPException(status_code=400, detail="请填写需求标题")
     identity = {"id": task_id} if task_id else {}
     t = models.Task(
         **identity,
         owner_client_id=owner_id,
-        title=(data.get("title") or "")[:500] or "未命名",
+        title=title[:500],
         source=(data.get("source") or "")[:500],
         note=(data.get("note") or "")[:50000],
         status=status,
@@ -919,10 +922,12 @@ async def clear_done(session: AsyncSession, owner_id: str) -> dict:
 
 
 async def batch_update(session: AsyncSession, owner_id: str, ids: list[str], patch: dict) -> dict:
-    count = rejected = 0
+    missing: list[str] = []
+    rejected = 0
     for tid in ids:
         result = await update_task(session, owner_id, tid, patch)
-        if result is not None:
-            count += 1
-            rejected += int(bool(result.get("statusTransition")))
-    return {"updated": count, "statusRejected": rejected}
+        if result is None:
+            missing.append(tid)
+        elif result.get("statusTransition"):
+            rejected += 1
+    return {"updated": len(ids) - len(missing), "statusRejected": rejected, "missing": missing}

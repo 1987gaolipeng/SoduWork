@@ -8,7 +8,21 @@ const file = new URL('../src/screens/Overview.jsx', import.meta.url)
 const dependencies = {
   '../api.js': { api: {}, can: () => true },
   '../ui.jsx': {}, './overview.css': {}, './requirement-governance.js': governance,
+  './FirstChatChecklist.jsx': 'FirstChatChecklist',
 }
+
+test('only an identified integration administrator mounts the checklist, even if governance metrics fail', async t => {
+  for (const [allowed, id, expected] of [[true, 'admin', 1], [false, 'reader', 0], [true, '', 0]]) {
+    const host = await createComponentHarness(file, { props: { me: { id } }, dependencies: {
+      ...dependencies, '../api.js': { api: {}, can: perm => perm === 'task.view' || (allowed && perm === 'integration.manage') },
+      '../ui.jsx': { ErrorState: 'ErrorState', useAsync: () => ({ error: new Error('offline') }) },
+    } })
+    const checklists = host.nodes(n => n.type === 'FirstChatChecklist')
+    assert.equal(checklists.length, expected)
+    if (expected) assert.equal(checklists[0].key, id)
+    host.unmount()
+  }
+})
 
 test('built-in source types switch languages while external names remain verbatim', async (t) => {
   const host = await createComponentHarness(file, { exportName: 'overviewSourceLabel', dependencies })

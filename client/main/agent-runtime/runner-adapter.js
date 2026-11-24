@@ -493,8 +493,11 @@ async function createRunnerHandle(request, defaults, initialSession) {
   let accessControl = { schema: 'soduwork.access-policy/v1', supported: false, modes: [], canChangeDuringSession: false };
   if (opts.accessPolicy) {
     const probe = await runtime.rpc('runtime.detect', { key: adapterId }, 15000);
+    if (!probe?.ok) {
+      throw new RuntimeContractError('RUNNER_PROBE_FAILED', '执行机探测失败，请检查执行机状态后重试');
+    }
     const capability = probe?.data?.accessControl;
-    if (!probe?.ok || !capability?.supported || capability.schema !== 'soduwork.access-policy/v1' || !capability.modes?.includes(opts.accessPolicy.mode)) {
+    if (!capability?.supported || capability.schema !== 'soduwork.access-policy/v1' || !capability.modes?.includes(opts.accessPolicy.mode)) {
       throw new RuntimeContractError('ACCESS_POLICY_UNSUPPORTED', '执行机尚未支持此权限模式，请更新执行机或选择兼容底座');
     }
     accessControl = capability;
@@ -508,7 +511,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
   // unreadable. Retry only resumed conversations with the current default; new
   // chats keep an explicit model failure visible so a typo is not silently changed.
   const canRecoverStaleModel = Boolean(resumedRef || opts.resumedConversation) && !modelName.startsWith('local:') &&
-    prepared?.code !== 'LOCAL_AGENT_DEFAULT_UNAVAILABLE';
+    !prepared?.providerPinned && prepared?.code !== 'LOCAL_AGENT_DEFAULT_UNAVAILABLE';
   const returnedModel = String(prepared?.model?.id || '').trim();
   const returnedDifferentModel = Boolean(prepared?.ok && modelName && returnedModel && returnedModel !== modelName);
   let resetSavedModel = false;

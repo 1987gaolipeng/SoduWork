@@ -108,7 +108,7 @@ const server=http.createServer(async(req,res)=>{
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const probe=net.createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));
 const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
-const child=spawn(path.join(client,'node_modules/electron/dist/electron.exe'),
+const child=spawn(require('electron'),
  [path.join(client,'e2e/fixtures/plugin-resource-window.cjs'),path.join(root,'profile'),'http://127.0.0.1:'+server.address().port,'--remote-debugging-port='+port],
  {windowsHide:true,env,stdio:'ignore'});
 let page;const checks=[];

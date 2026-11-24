@@ -9,6 +9,7 @@
 !hub-frontend/public/**
 !hub-backend/
 !hub-backend/requirements.txt
+!hub-backend/requirements-image.txt
 !hub-backend/requirements-runner.txt
 !hub-backend/alembic.ini
 !hub-backend/jiyong-alembic.ini

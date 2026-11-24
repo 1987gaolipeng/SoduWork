@@ -62,7 +62,7 @@ function fixture(t, { nativeHistory = false, nativeOutputs = false } = {}) {
       }
       archives.set(file, { raw, messages }); return { ok: true, session: raw };
     },
-    history: async () => ({ ok: true, chats: [...archives.values()].map(x => x.raw.historyRow()) }),
+    history: async () => ({ ok: true, chats: [...archives.values()].map(x => x.raw.historyRow()).filter(Boolean) }),
     historyEntry: async (_app, id) => {
       const found = [...archives.values()].find(x => x.raw.sessionId === id);
       return found ? { ok: true, entry: found.raw.historyRow() } : { ok: false, notFound: true };
@@ -108,6 +108,51 @@ function fixture(t, { nativeHistory = false, nativeOutputs = false } = {}) {
     set strictMissing(v) { strictMissing = v; }, set absence(v) { absence = v; },
     set unavailable(v) { unavailable = v; }, set busy(v) { busy = v; }, set gate(v) { gate = v; } };
 }
+
+test('switching an unused Qwen draft to Pi keeps its public ID out of local history until the first turn', async t => {
+  const f = fixture(t, { nativeHistory: true }), actor = options(f).identity;
+  const file = path.join(f.root, 'history.sqlite');
+  const store = require('../main/conversation/replica-store.cjs').create(file);
+  const history = require('../main/conversation/shared-history.cjs').create({
+    app: f.app, session: f.bridge, store, identityOf: () => actor });
+  f.bridge.setReplicaHistory(history);
+  try {
+    const opened = await f.bridge.open({ ...options(f), adapterId: 'qwen' });
+    assert.equal(opened.ok, true, opened.reason);
+    const handle = opened.session, id = handle.sessionId;
+    const switching = handle.selectAgent('pi');
+    assert.equal(handle.snapshot().runtimeSwitching, true);
+    await history.capture(handle, actor);
+    const result = await switching;
+    assert.equal(result.ok, true, result.reason);
+    assert.equal(store.get(id), null, 'a slow Agent switch is not an in-flight turn');
+    assert.equal(handle.historyRow(), null);
+    await history.capture(handle, actor);
+    assert.equal(await history.resolve(id), null);
+    assert.equal(store.get(id), null);
+    await f.restart();
+    f.bridge.setReplicaHistory(history);
+    const cold = await f.bridge.history(f.app, { source: 'local', refresh: true });
+    assert.equal(cold.ok, true, cold.reason);
+    assert.deepEqual(cold.chats, []);
+    assert.equal(await f.bridge.archivedConversation(f.app, id, { nativeOnly: true, strict: true }), null);
+    const resumed = await f.bridge.open({ ...options(f), runtimeConversationId: id });
+    assert.equal(resumed.ok, true, resumed.reason);
+    assert.equal(resumed.session.historyRow(), null);
+    await send(resumed.session, 'A real first turn');
+    await history.capture(resumed.session, actor);
+    assert.equal(store.get(id).count, 2);
+    assert.equal(resumed.session.sessionId, id);
+    // Simulate quitting after native storage saved the first turn but before its manifest update.
+    await segments.flush(f.app, id);
+    const saved = segments.read(f.app, id);
+    await segments.save(f.app, { ...saved, title: '', active: { ...saved.active, started: false, usedHarnesses: [] } });
+    const archived = await f.bridge.archivedConversation(f.app, id, { nativeOnly: true, strict: true });
+    assert.equal(archived.id, id);
+    assert.equal(archived.runtimeConversationId, id);
+    assert.equal(archived.count, 2);
+  } finally { await history.close(); }
+});
 
 test('successful execution stays completed after switching away from and back to a retained failed Pi conversation', async t => {
   const f = fixture(t, { nativeHistory: true }), actor = identity('owner');

@@ -430,6 +430,19 @@ class QuotaPlanTests(unittest.IsolatedAsyncioTestCase):
             audit = await session.scalar(select(models.AuditLog).where(models.AuditLog.action == "quota.member.assign"))
             self.assertEqual(audit.detail["after"]["custom"]["totalLimit"], 1)
 
+    async def test_member_offsets_past_filtered_results_return_empty_pages(self):
+        url = "/api/v1/admin/quotas/members"
+        params = {"q": "owner", "limit": 1}
+        first = await self.http.get(url, params=params, headers=self.headers)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(first.json()["total"], 1)
+        self.assertEqual([item["id"] for item in first.json()["items"]], ["owner"])
+        for offset in (1, 2**63 - 1, 2**63):
+            with self.subTest(offset=offset):
+                response = await self.http.get(url, params={**params, "offset": offset}, headers=self.headers)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json(), {"items": [], "total": 1, "offset": offset, "limit": 1})
+
     async def test_pagination_uses_bounded_group_queries_not_per_member(self):
         async with self.sessions() as session:
             for i in range(55):

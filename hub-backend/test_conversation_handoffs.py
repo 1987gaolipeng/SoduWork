@@ -198,6 +198,9 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
             async with db.SessionLocal() as session:
                 user = await session.get(models.User, "owner")
                 user.is_super = False
+                # Resume the handoff workflow with the original standalone registration.
+                node = await session.get(RunnerNode, self.runner.id)
+                node.client_id = self.runner.client_id
                 await session.commit()
         for field, value in (("personalPlugins", ["local-plugin"]), ("requiredSkills", ["computer-use"]),
                              ("requiredSkills", ["missing-skill"]), ("model", "invalid model"), ("workDir", "C:/unsafe")):
@@ -205,9 +208,16 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
                 response = await self.prepare("rejected-" + str(len(str(value))), **{field: value})
                 self.assertIn(response.status_code, [400, 409], response.text)
         with self.subTest("unknown abort fences late upload"):
-            aborted = await self.http.post("/api/v1/conversation-handoffs/late/abort")
-            self.assertEqual(aborted.json()["phase"], "aborted", aborted.text)
-            self.assertEqual((await self.prepare("late")).json()["phase"], "aborted")
+            async with db.SessionLocal() as session:
+                before = set((await session.scalars(select(models.Task.id))).all())
+            path = "/api/v1/conversation-handoffs/late"
+            retries = await asyncio.gather(self.http.post(path + "/abort"), self.http.post(path + "/abort"))
+            for response in [*retries, await self.prepare("late"), await self.http.get(path)]:
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["phase"], "aborted")
+                self.assertEqual(response.json()["taskId"], "")
+            async with db.SessionLocal() as session:
+                self.assertEqual(set((await session.scalars(select(models.Task.id))).all()), before)
         with self.subTest("abort wins an already in-flight prepare"):
             entered, release = asyncio.Event(), asyncio.Event()
             actual_destination = svc.destination
@@ -304,11 +314,16 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
             response = await self.http.post("/api/v1/conversation-handoffs/lost-ack/commit", json={"sha256": pending["sha256"]})
         self.assertEqual(response.json()["phase"], "committing", response.text)
         self.assertEqual((await self.http.post("/api/v1/conversation-handoffs/lost-ack/abort")).status_code, 409)
-        for _ in range(100):
-            recovered = await self.http.get("/api/v1/conversation-handoffs/lost-ack")
-            if recovered.json()["phase"] == "committed":
-                break
-            await asyncio.sleep(.05)
+        from app.services import cloud_recovery
+        status_path = "/api/v1/conversation-handoffs/lost-ack"
+        calls = list(self.peer.calls)
+        for _ in range(2):
+            snapshot = await self.http.get(status_path)
+            self.assertEqual(snapshot.json()["phase"], "committing", snapshot.text)
+        self.assertEqual(self.peer.calls, calls)
+        recovery = await cloud_recovery.recover_submissions()
+        self.assertEqual(recovery.get("confirmed"), 1, recovery)
+        recovered = await self.http.get(status_path)
         self.assertEqual(recovered.json()["phase"], "committed", recovered.text)
         await self.complete(recovered.json()["ref"])
         self.assertEqual(self.peer.calls.count("job.dispatch"), 2)
