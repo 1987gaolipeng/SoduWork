@@ -61,6 +61,57 @@ test('SDK file import is chunked and returns a resource URL without reading bina
   assert.ok(result.file.url);assert.equal(calls.filter(r=>r.method==='files.append').length,3);assert.equal(progress.at(-1),blob.size);assert.ok(!calls.some(r=>r.method==='data.assetGet'));
 });
 
+function nativeFileSdk(f,onRequest=()=>{}) {
+  const calls=[],window={addEventListener(){},soduWorkAppBridge:{async request(method,p){
+    const result=await f.call(method,p);calls.push({method,params:p,result});await onRequest(method,result);return result;
+  }}};
+  window.parent=window;
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../sdk/soduwork-app.js'),'utf8'),
+    {window,location:{origin:f.binding.origin},document:{referrer:''},URL,setTimeout,Uint8Array});
+  return {sdk:window.soduWorkApp,calls};
+}
+
+test('a pre-aborted SDK file import performs no native file I/O',async t=>{
+  const f=fixture(t);await f.open();const {sdk,calls}=nativeFileSdk(f),controller=new AbortController();
+  controller.abort();
+  await assert.rejects(()=>sdk.files.importFile(new Blob(['cancelled'],{type:'image/png'}),
+    {projectId:'cancelled',signal:controller.signal}),/取消/);
+  assert.deepEqual(calls,[]);
+});
+
+test('SDK cancellation before finalization removes native staging without publishing a file',async t=>{
+  for(const phase of ['empty-after-begin','during-read','after-last-progress'])await t.test(phase,async t=>{
+    const f=fixture(t);await f.open();const controller=new AbortController();
+    const {sdk,calls}=nativeFileSdk(f,method=>{if(phase==='empty-after-begin'&&method==='files.begin')controller.abort();});
+    const blob=new Blob([phase==='empty-after-begin'?'':'original file bytes'],{type:'image/png'});
+    const file=phase==='during-read'?{size:blob.size,type:blob.type,name:'cancelled.png',slice(start,end){
+      const part=blob.slice(start,end);return {async arrayBuffer(){const bytes=await part.arrayBuffer();controller.abort();return bytes;}};
+    }}:blob;
+    await assert.rejects(()=>sdk.files.importFile(file,{projectId:phase,signal:controller.signal,
+      onProgress(){if(phase==='after-last-progress')controller.abort();}}),/取消/);
+    assert.equal(calls.some(row=>row.method==='files.finish'),false);
+    assert.equal(calls.at(-1).method,'files.cancel');
+    if(phase==='during-read')assert.equal(calls.some(row=>row.method==='files.append'),false);
+    const start=calls.find(row=>row.method==='files.begin').result;
+    await assert.rejects(()=>f.call('files.finish',{id:start.id}),/不存在|取消/);
+    assert.deepEqual(fs.readdirSync(path.join(f.root,'jiyong-files'),{recursive:true})
+      .filter(name=>/\.(part|png|json)$/.test(String(name))),[],'cancelled imports retain no staged or published bytes');
+  });
+});
+
+test('uncancelled SDK empty and multi-chunk imports retain readable immutable native URLs',async t=>{
+  for(const size of [0,1100000])await t.test(String(size),async t=>{
+    const f=fixture(t);await f.open();const {sdk,calls}=nativeFileSdk(f),bytes=Buffer.alloc(size,42);
+    const result=await sdk.files.importFile(new Blob([bytes],{type:'image/png'}),
+      {projectId:'healthy',signal:new AbortController().signal});
+    assert.equal(result.ok,true);
+    const response=await f.request({url:result.file.url,method:'GET'});
+    assert.equal(response.status,200);assert.deepEqual(Buffer.from(await response.arrayBuffer()),bytes);
+    assert.equal(calls.filter(row=>row.method==='files.append').length,Math.ceil(size/(512*1024)));
+    assert.equal(calls.some(row=>row.method==='files.cancel'),false);
+  });
+});
+
 test('native picker preview and copy use opaque authorized references without renderer bytes',async t=>{
  const f=fixture(t);await f.open();const source=path.join(f.root,'桌面 image.png'),bytes=Buffer.from('desktop-picture');fs.writeFileSync(source,bytes);let picked=0;
  const options={dialog:{async showOpenDialog(){picked++;return {canceled:false,filePaths:[source]};}}};
