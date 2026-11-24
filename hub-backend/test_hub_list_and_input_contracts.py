@@ -68,6 +68,20 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, expected, (method, path, response.status_code))
         return response.json()
 
+    async def test_invalid_team_scope_preserves_setting_and_audit(self):
+        path = "admin/team-module-scope"
+        await self.request("PUT", path, json={"scope": " EVERYONE "})
+        for body in ({}, {"scope": None}, {"scope": []}, {"scope": "everyoen"}):
+            with self.subTest(body=body):
+                await self.request("PUT", path, expected=422, json=body)
+        self.assertEqual(await self.request("GET", path), {"scope": "everyone"})
+        async with self.sessions() as session:
+            audit_count = await session.scalar(select(func.count()).select_from(models.AuditLog)
+                                               .where(models.AuditLog.action == "team.module_scope"))
+            self.assertEqual(audit_count, 1)
+        saved = await self.request("PUT", path, json={"scope": "managers"})
+        self.assertEqual(saved["scope"], "managers")
+
     async def test_directory_reads_follow_admin_and_selector_permissions(self):
         self.user.is_super = False
         self.user._perms = set()

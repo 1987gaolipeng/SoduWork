@@ -2116,7 +2116,10 @@ async def put_team_module_scope(
     session: AsyncSession = Depends(get_session),
 ):
     from ..services import team as team_svc
-    scope = await team_svc.set_team_module_scope(session, str(body.get("scope") or ""))
+    requested_scope = body.get("scope")
+    if not isinstance(requested_scope, str) or requested_scope.strip().lower() not in ("everyone", "managers"):
+        raise HTTPException(status_code=422, detail="团队模块可见范围仅支持 everyone 或 managers")
+    scope = await team_svc.set_team_module_scope(session, requested_scope)
     await audit.log(session, user, "team.module_scope", "setting", None,
                     "团队模块可见范围", {"scope": scope})
     return {"ok": True, "scope": scope}
