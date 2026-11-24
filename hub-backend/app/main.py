@@ -10,7 +10,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
+from starlette.routing import get_route_path
 
 from .api import (
     account_conversations,
@@ -297,6 +298,7 @@ async def request_observability(request: Request, call_next):
     offered = str(request.headers.get("X-Request-ID") or "")
     request_id = offered if _REQUEST_ID.fullmatch(offered) else uuid.uuid4().hex
     request.state.request_id = request_id
+    path = get_route_path(request.scope)
     started = time.perf_counter()
     try:
         if bus.enabled and not bus.healthy and request.method not in ("GET", "HEAD", "OPTIONS"):
@@ -306,29 +308,8 @@ async def request_observability(request: Request, call_next):
         else:
             response = await call_next(request)
     except Exception as exc:
-        elapsed = (time.perf_counter() - started) * 1000
         request.state.exception_type = type(exc).__name__
-        route = request.scope.get("route")
-        route_path = getattr(route, "path", None) or "__unmatched__"
-        runtime_telemetry.record(request.method, route_path, 500, elapsed,
-                                 request_id, type(exc).__name__,
-                                 getattr(request.state, "model_timing", None))
-        # Keep the response generic while retaining the request id for support
-        # correlation. The exception details are already present in the log.
-        from starlette.responses import PlainTextResponse
-        return PlainTextResponse(
-            "Internal Server Error",
-            status_code=500,
-            headers={
-                "X-Request-ID": request_id,
-                "X-Content-Type-Options": "nosniff",
-                "X-Frame-Options": "DENY",
-                "X-XSS-Protection": "1; mode=block",
-                "Content-Security-Policy": "default-src 'self'; script-src 'self'",
-                "Referrer-Policy": "strict-origin-when-cross-origin",
-                "Cache-Control": "no-store",
-            }
-        )
+        response = PlainTextResponse("Internal Server Error", status_code=500)
     elapsed = (time.perf_counter() - started) * 1000
     route = request.scope.get("route")
     route_path = getattr(route, "path", None) or "__unmatched__"
@@ -351,6 +332,14 @@ async def request_observability(request: Request, call_next):
     for header, value in security_headers.items():
         if header not in response.headers:
             response.headers[header] = value
+    if path == "/api/v1/admin" or path.startswith("/api/v1/admin/"):
+        directives = response.headers["Cache-Control"].lower().split(",")
+        if "no-store" not in (directive.strip() for directive in directives):
+            response.headers["Cache-Control"] = "no-store"
+        vary = {field.strip().lower() for value in response.headers.getlist("Vary")
+                for field in value.split(",")}
+        if not vary.intersection({"authorization", "*"}):
+            response.headers.add_vary_header("Authorization")
     timing = getattr(request.state, "model_timing", None) or {}
     parts = [f"app;dur={elapsed:.1f}"]
     for key, label in (("admissionMs", "model-admission"),
