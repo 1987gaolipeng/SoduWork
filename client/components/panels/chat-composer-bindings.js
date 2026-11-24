@@ -65,7 +65,9 @@
       const access = runtime?.accessControl;
       const accessControl = devicePreview() && Array.isArray(access?.modes)
         ? { ...access, modes: access.modes.filter(value => value === 'readonly' || value === 'standard') } : access;
-      return {draftOnly:true, devicePreview:devicePreview(), draftId:ctx._sessionId || 'new:' + ctx._viewEpoch, adapterId, displayName:runtime?.displayName || (previewAdapter && ctx._snap.displayName) || ctx._sessionOptions.displayName,
+      return {draftOnly:true, devicePreview:devicePreview(), archivedModelName:ctx._sessionOptions.archivedModelName,
+        draftId:ctx._sessionId || 'new:' + ctx._viewEpoch, adapterId,
+        displayName:runtime?.displayName || (previewAdapter && ctx._snap.displayName) || ctx._sessionOptions.displayName,
         accessPolicy:accessControl?.supported && accessControl.modes?.includes(mode) ? {mode} : null,
         nextAccessPolicy:null, accessControl:accessControl || null,
         draftAccessHint:ctx._workCards?.draftSelectionError?.() || error || (!loaded ? '正在读取执行选项…' : ''),
@@ -461,6 +463,7 @@ function _bind(el) {
       renderQueue: () => ctx._renderQueue(el),
       updateQueue: ctx._updateQueueOrder,
       runtimeSelected: result => { const draft = draftControls.active();
+        delete ctx._sessionOptions.archivedModelName;
         if (result.snapshot) ctx._snap = result.snapshot;
         ctx._sessionOptions.adapterId = result.snapshot?.adapterId || result.adapterId;
         ctx._sessionOptions.displayName = result.snapshot?.displayName || result.displayName;
@@ -475,13 +478,16 @@ function _bind(el) {
         }
         if (ctx._snap) {
           ctx._snap = { ...ctx._snap, modelSelection: selection };
-          if (ctx._ref) ctx._rememberConversationSnapshot(ctx._sessionId, ctx._snap);
+          if (ctx._ref && !draft) ctx._rememberConversationSnapshot(ctx._sessionId, ctx._snap);
         }
         ctx._sessionOptions.modelName = selection.name;
         ctx._sessionOptions.modelLabel = selection.model?.label || selection.name;
         if (draft && ctx._snap?.workOnly) void ctx._workCards?.saveDraftSelection?.(); ctx._render(); },
-      modelAvailabilityChanged: selection => {
-        if (ctx._snap) ctx._snap.modelSelection = selection;
+      modelAvailabilityChanged: (selection, confirmedHubLabel) => {
+        if (ctx._snap) {
+          ctx._snap = { ...ctx._snap, modelSelection: selection };
+          if (confirmedHubLabel) ctx._rememberConversationSnapshot(ctx._sessionId, ctx._snap, true);
+        }
         ctx._render();
       },
       thinkingChanged: thinking => { if (ctx._snap) ctx._snap.thinking = thinking;

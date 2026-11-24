@@ -26,7 +26,9 @@ function fixture(settings = {}) {
   const requests = [], calls = [], selections = [];
   const window = { ...node(), innerWidth: 1000, innerHeight: 800, SoduWorkModelChoice: require('../core/model-choice'),
     setTimeout: settings.clock?.setTimeout || setTimeout, clearTimeout: settings.clock?.clearTimeout || clearTimeout,
-    SoduWorkAPI: { taskStorageKey: () => owner, myModels: () => { const item = deferred(); requests.push(item); return item.promise; } },
+    SoduWorkAPI: { taskStorageKey: () => owner, myModels: options => {
+      const item = { ...deferred(), options }; requests.push(item); return item.promise;
+    } },
     soduWorkAPI: { conversationSession: {
       runtimes: async () => settings.runtimes ? settings.runtimes() : ({ ok: true, runtimes: [{ id: 'pi', modelMode: 'managed' }, { id: 'qwen', modelMode: 'managed' }, { id: 'codex', modelMode: 'account' }] }),
       runtimeModels: async (id, ref) => { calls.push(id); return settings.runtimeModels ? settings.runtimeModels(id, ref) : { models: [{ id: 'account-choice' }] }; },
@@ -42,6 +44,7 @@ function fixture(settings = {}) {
   }) };
   vm.runInNewContext(source, { window, SoduWorkModelChoice: window.SoduWorkModelChoice, document: node(), AbortController });
   const controls = window.ChatComposerControls.create(el, { state: () => state, say() {},
+    draft: { ready: () => true, destroy() {}, selectModel: (name, label) => ({ ok: true, selection: { name, model: { id: name, label } } }) },
     modelSelected: selection => { state.selection = selection; },
     modelAvailabilityChanged: selection => { state.selection = selection; } }); controls.render();
   return { state, requests, calls, selections, field, label, controls, button, pop, changed: () => changed(),
@@ -50,6 +53,92 @@ function fixture(settings = {}) {
   };
 }
 const catalog = { usable: [{ name: 'managed', label: 'Managed choice' }, { name: 'local:private', localOnly: true, label: 'Private choice' }] };
+
+function preview(f, name, model = {}) {
+  Object.assign(f.state, { devicePreview: true, draftOnly: true, archivedModelName: name,
+    selection: { name, model: { id: name, label: name, ...model } } });
+  f.controls.render();
+}
+
+test('opening an authorized history shows the saved choice immediately and refreshes its exact Hub label', async () => {
+  const f = fixture(); preview(f, 'managed');
+  assert.equal(f.label.textContent, 'managed'); await tick();
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0].options.refreshManaged, true); assert.equal(f.requests[0].options.localDefaults, false);
+  f.requests[0].resolve(catalog); await tick();
+  assert.equal(f.label.textContent, 'Managed choice'); assert.equal(f.state.selection.name, 'managed');
+  assert.deepEqual(f.selections, []); f.controls.destroy();
+});
+
+test('an authoritative deletion blocks preview continuation until the user explicitly picks a model', async () => {
+  const f = fixture(); preview(f, 'deleted-hub', { label: 'Old choice' }); await tick();
+  f.requests[0].resolve(catalog); await tick();
+  assert.match(f.label.textContent, /不可用/); assert.equal(f.state.selection.model.unavailable, true);
+  const send = f.controls.waitForAccess(); await tick(); f.requests[1].resolve(catalog);
+  await assert.rejects(send, { code: 'MODEL_UNAVAILABLE' }); assert.equal(f.state.selection.name, 'deleted-hub');
+  const open = f.open(); await tick(); f.requests[2].resolve(catalog); await open;
+  assert.match(f.field.innerHTML, /Managed choice/);
+  await f.pop.handlers.get('click')({ stopPropagation() {}, target: {
+    closest: selector => selector === '[data-model-name]' ? { dataset: { modelName: 'managed' } } : null } });
+  assert.equal(f.state.selection.name, 'managed'); assert.deepEqual(f.selections, [], 'preview choices must not mutate a live handle');
+  const ready = f.controls.waitForAccess(); await tick(); f.requests.at(-1).resolve(catalog);
+  assert.equal(await ready, true); f.controls.destroy();
+});
+
+test('partial catalogs keep the saved Hub choice and a late reply cannot repaint the next account or conversation', async () => {
+  const f = fixture(); preview(f, 'managed', { label: 'Original' }); await tick();
+  f.state.ref = 'other-chat'; f.owner('other-hub/device/bob'); await tick();
+  assert.equal(f.requests.length, 2);
+  f.requests[1].resolve({ usable: [], managedCatalogUnavailable: true }); await tick();
+  f.requests[0].resolve({ usable: [{ name: 'managed', label: 'Alice private label' }] }); await tick();
+  assert.equal(f.label.textContent, 'Original'); assert.equal(f.state.selection.model.unavailable, undefined);
+  assert.deepEqual(f.selections, []); f.controls.destroy();
+});
+
+test('opening an archived local choice uses its supplied label without consulting the Hub', async () => {
+  for (const unavailable of [false, true]) {
+    const f = fixture(); preview(f, 'local:model-id', { label: unavailable ? '原本地模型已删除或不可用' : 'Local GLM', unavailable });
+    await tick(); assert.equal(f.requests.length, 0); assert.equal(f.calls.length, 0);
+    assert.equal(f.label.textContent, f.state.selection.model.label); assert.deepEqual(f.selections, []);
+    f.controls.destroy();
+  }
+});
+
+test('a model change refreshes a visible local history label and marks deletion without replacing its saved id', async () => {
+  const f = fixture(); preview(f, 'local:private', { label: 'Original local name' }); await tick();
+  assert.equal(f.requests.length, 0);
+  f.changed(); await tick(); assert.equal(f.requests.length, 1);
+  f.requests[0].resolve(catalog); await tick(); assert.equal(f.label.textContent, 'Private choice');
+  f.changed(); await tick(); f.requests[1].resolve({ usable: [{ name: 'replacement', label: 'Alternative' }] }); await tick();
+  assert.match(f.label.textContent, /不可用/); assert.equal(f.state.selection.name, 'local:private');
+  assert.equal(f.state.selection.model.unavailable, true); assert.deepEqual(f.selections, []); f.controls.destroy();
+});
+
+test('historical local aliases match only an authoritative catalog choice and keep the original archive selection', async () => {
+  const opaque = 'local:model-0123456789abcdef0123456789abcdef';
+  for (const image of [false, true]) {
+    const f = fixture();
+    const oldName = image ? 'image::demo::local:demo:glm' : 'local:demo:glm';
+    const catalogName = image ? 'image::device:demo::' + opaque : opaque;
+    const row = { providerId: 'device:demo', name: opaque, label: 'Current local label', localOnly: true };
+    const data = image ? { usable: [], mediaUsable: { image: [row] } } : { usable: [row] };
+    f.state.adapterId = 'pi'; preview(f, oldName);
+    const open = f.open(); await tick();
+    assert.equal(f.requests[0].options.historyChoice, oldName);
+    f.requests[0].resolve({ ...data, historyChoiceName: catalogName }); await open;
+    assert.match(f.label.textContent, /Current local label/);
+    assert.match(f.field.innerHTML, /aria-selected="true"/);
+    const ready = f.controls.waitForAccess(); await tick();
+    f.requests[1].resolve({ ...data, historyChoiceName: catalogName }); assert.equal(await ready, true);
+    assert.equal(f.state.selection.name, oldName); assert.deepEqual(f.selections, []);
+    if (image) preview(f, 'image::different-provider::' + opaque);
+    const blocked = f.controls.waitForAccess(); await tick();
+    f.requests[2].resolve({ ...data, historyChoiceName: '' });
+    await assert.rejects(blocked, { code: 'MODEL_UNAVAILABLE' });
+    assert.equal(f.state.selection.model.unavailable, true); assert.deepEqual(f.selections, []);
+    f.controls.destroy();
+  }
+});
 
 test('existing local managed conversations show both model sources while committed cloud conversations exclude device models', async () => {
   for (const cloud of [false, true]) {

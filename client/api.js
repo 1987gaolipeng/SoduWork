@@ -1202,12 +1202,12 @@
     var { localProviderId: _localProviderId, ...value } = row;
     return { ...value, providerId: deviceProviderId(value.providerId) };
   }
-  async function localModelCatalog() {
+  async function localModelCatalog(historyChoice) {
     var bridge = global.soduWorkAPI?.localModels;
     if (!bridge || typeof bridge.get !== 'function') return null;
     // A failed secure-store read is not an empty catalog. Keep ownership
     // unknown rather than forwarding desktop credentials or probes to Hub.
-    var catalog = await bridge.get();
+    var catalog = historyChoice ? await bridge.get(historyChoice) : await bridge.get();
     if (!catalog || catalog.ok === false || !Array.isArray(catalog.providers)) {
       throw new Error('本地模型配置无法读取，请检查系统安全存储后重试');
     }
@@ -1642,13 +1642,17 @@
     /* Personal model configuration returns availability and secret metadata, never plaintext keys. */
     async myModels(options) {
       var scope = domainScope();
-      var localCatalog = await localModelCatalog();
+      var historyChoice = isLocalModelChoice(options?.historyChoice) ? options.historyChoice : '';
+      var localCatalog = await localModelCatalog(historyChoice);
       if (!sameDomainScope(scope)) throw staleTaskScope();
       var localDefaults = options?.localDefaults === false ? null : await localAgentDefaults(scope);
       localCatalog = localCatalog || { providers: [], usable: [], myModels: [], mediaUsable: {} };
       var r, managedCatalogUnavailable = false;
       try {
-        r = await domainRead('models', '/my-models');
+        // A saved choice can outlive a push snapshot. Verify its availability
+        // against the current account before displaying it as removed.
+        r = options?.refreshManaged ? await jfetch('/my-models', { cache: 'no-store' })
+          : await domainRead('models', '/my-models');
         if (r?.ok === false) throw new Error('Hub 模型目录暂时无法读取');
         managedCatalogUnavailable = !Array.isArray(r?.usable);
       }
@@ -1658,6 +1662,7 @@
         managedCatalogUnavailable = true;
         r = { providers: [], usable: [], myModels: [], mediaUsable: {}, defaultModels: {} };
       }
+      if (options?.refreshManaged && !sameDomainScope(scope)) throw staleTaskScope();
       r = r || { providers: [], usable: [], myModels: [], mediaUsable: {} };
       localCatalog = projectLocalModelCatalog(localCatalog);
       var managedProviders = (r.providers || []).filter(row => row?.localOnly !== true && !deviceProvider(row?.id))
@@ -1675,6 +1680,7 @@
         // Keep offline local access without representing an unreadable Hub
         // catalog as proof that a saved Hub model was deleted.
         managedCatalogUnavailable,
+        ...(historyChoice ? { historyChoiceName: localCatalog.historyChoiceName || '' } : {}),
         defaultModels, defaultModelErrors,
         providers: (localCatalog.providers || []).concat(managedProviders),
         usable: (localCatalog.usable || []).concat(managedModels(r.usable)),

@@ -178,6 +178,17 @@ test('history navigation reads the authorized transcript before credentials and 
 test('sidebar previews restore the owner’s model from the selected Pi branch across A → B → A', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-preview-model-'));
   const app = { getPath: () => root }, owner = automationIdentity();
+  const localModels = require('../main/local-model-store.cjs');
+  let vaultReads = 0, locked = false;
+  localModels.configure({ app, safeStorage: { isEncryptionAvailable: () => true,
+    encryptString: text => Buffer.from(text), decryptString(buffer) {
+      vaultReads++;
+      if (locked) throw Error('Locked');
+      return buffer.toString();
+    } } });
+  t.after(() => localModels.configure(null));
+  const glm = localModels.save({ providers: [{ id: 'device', baseUrl: 'http://localhost/v1', authMode: 'none' }],
+    models: [{ providerId: 'device', name: 'glm', label: 'GLM Local' }] }).usable[0].name;
   let viewer = owner;
   const dir = path.join(root, 'pi-agent', 'sessions', 'fixture');
   fs.mkdirSync(dir, { recursive: true });
@@ -188,7 +199,7 @@ test('sidebar previews restore the owner’s model from the selected Pi branch a
     const entries = [{ type: 'session', id: row.id },
       { type: 'message', id: 'user', parentId: null, message: { role: 'user', content: 'hello' } }];
     if (row.id === 'chat-a') entries.push(
-      { type: 'custom', customType: 'soduwork.model.selection', id: 'pick', parentId: 'user', data: { name: 'glm' } },
+      { type: 'custom', customType: 'soduwork.model.selection', id: 'pick', parentId: 'user', data: { name: glm } },
       { type: 'custom', customType: 'soduwork.model.selection', id: 'abandoned', parentId: 'pick', data: { name: 'other-branch' } });
     entries.push({ type: 'message', id: 'answer', parentId: row.id === 'chat-a' ? 'pick' : 'user',
       message: { role: 'assistant', model: 'legacy-model', content: [{ type: 'text', text: 'reply' }] } });
@@ -204,11 +215,13 @@ test('sidebar previews restore the owner’s model from the selected Pi branch a
   const f = fixture({ app, session, sharedHistory: history, cachedIdentity: () => viewer,
     identityOf: async () => assert.fail('A history click cannot require model credentials'),
     openReply: handle => ({ ok: true, snapshot: handle.uiSnapshot() }) });
-  for (const [id, name] of [['chat-a', 'glm'], ['chat-b', 'legacy-model'], ['chat-a', 'glm']]) {
+  for (const [id, name, label] of [['chat-a', glm, 'GLM Local'], ['chat-b', 'legacy-model', 'legacy-model'],
+    ['chat-a', glm, 'GLM Local']]) {
     const result = await f.open({ chatId: id, historyIntent: 'view' });
     assert.equal(result.ok, true, result.reason);
     assert.equal(result.snapshot.execution.canContinueOnDevice, true);
     assert.equal(result.snapshot.modelSelection.name, name);
+    assert.deepEqual(result.snapshot.modelSelection.model, { id: name, label });
     assert.equal(result.snapshot.adapterId, 'pi');
   }
   live = { sessionId: 'chat-a', adapterId: 'qwen', usageIdentity: { accountScope: rows[0].workOwner },
@@ -217,10 +230,20 @@ test('sidebar previews restore the owner’s model from the selected Pi branch a
   assert.equal(warm.ok, true, warm.reason);
   assert.equal(warm.snapshot.adapterId, 'qwen');
   assert.equal(warm.snapshot.modelSelection.model.label, 'Warm model');
+  live = null;
+  localModels.save({ models: [{ providerId: 'device', name: 'glm', label: 'GLM Renamed' }] });
+  const reopened = async () => (await f.open({ chatId: 'chat-a', historyIntent: 'view' })).snapshot.modelSelection;
+  assert.equal((await reopened()).model.label, 'GLM Renamed');
+  localModels.save({ models: [] });
+  assert.deepEqual((await reopened()).model, { id: glm, label: '原本地模型已删除或不可用', unavailable: true });
+  locked = true;
+  assert.deepEqual((await reopened()).model, { id: glm, label: '本地模型配置无法读取' });
   viewer = automationIdentity('second');
+  const beforeShared = vaultReads;
   const shared = await f.open({ chatId: rows[0].id, historyIntent: 'view' });
   assert.equal(shared.ok, true, shared.reason);
   assert.equal(shared.snapshot.modelSelection.name, undefined);
+  assert.equal(vaultReads, beforeShared, 'A shared history preview never reads the model vault');
   assert.equal(f.calls.length, 0);
 });
 

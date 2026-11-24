@@ -12,7 +12,8 @@ async function create({ row, read, historyPreview = false, allowContinuation = f
   let value = { messages: [], tools: [], status: 'idle', adapterId,
     displayName: (adapterId === row.adapterId && row.displayName) ||
       require('../agent-runtime/runtime-catalog').runtime(adapterId)?.displayName || adapterId,
-    modelSelection: choice?.name ? { name: choice.name, model: { id: choice.name, label: choice.label } } : {},
+    modelSelection: choice?.name ? { name: choice.name, model: { id: choice.name, label: choice.label,
+      ...(choice.unavailable ? { unavailable: true } : {}) } } : {},
     accessControl: { mode: 'readonly', capabilities: [] },
     execution: { readOnly: true, localReplica: true, ...(historyPreview ? {
       canContinueOnDevice: allowContinuation && row.historyContentState === 'available' } : {}) }, localReplica: true };

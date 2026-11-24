@@ -15,6 +15,12 @@
     const effortView = () => global.ComposeModelPicker?.nativeEffort;
     const nativeMode = state => state.adapterId === 'codex' && !state.cloudHandoff && Boolean(effortView());
     let catalogScope = '', lastScope = '', catalogLoads = 0, catalogFlight = null, catalogVersion = 0;
+    let historyReadScope = '';
+    const savedChoice = state => Boolean(state.devicePreview && state.archivedModelName && state.selection?.name);
+    const localChoice = state => {
+      const name = state.selection?.name || '';
+      return state.selection?.model?.localOnly || (global.SoduWorkModelChoice?.imageChoice(name)?.name || name).startsWith('local:');
+    };
     const MODEL_WAIT_MS = 12000;
     const modelErrors = new WeakSet();
     const automaticSelections = new WeakMap();
@@ -126,6 +132,7 @@
       global.SoduWorkQuotaNotice?.modelChanged?.(selection.model || state.model, state.adapterId || 'pi', el);
       const identity = state.ref || (state.draftOnly ? 'draft:' + state.draftId : '');
       const scope = modelScope();
+      if (lastScope !== scope && historyReadScope) { historyReadScope = ''; supersedeCatalog(); }
       if (lastScope !== scope || lastIdentity !== identity || lastAdapter !== state.adapterId || state.runtimeSwitching) {
         close(false); rows = []; nativeModels = []; nativeReason = ''; nativeRetryable = false; nativeView = 'effort'; effortEpoch++; pendingEffort = null; effortPreview = null; effortRequest = null; modelRequest = null; selecting = false;
         pop.removeAttribute('aria-busy');
@@ -134,11 +141,13 @@
       lastIdentity = identity;
       lastAdapter = state.adapterId;
       const selectedName = selection.name || selection.model?.id || state.model?.id || '';
-      const updated = catalogScope === modelScope() && rows.find(row => row.name === selectedName);
+      const updated = catalogScope === modelScope() && rows.find(row => row.name === selectedName || row.historyAlias === selectedName);
       const selectedModel = selection.model || (!selection.name || selection.name === state.model?.id ? state.model : null);
-      const label = nativeMode(state) && !selectedName && !state.restoringHistory ? 'Codex 默认' :
+      let label = nativeMode(state) && !selectedName && !state.restoringHistory ? 'Codex 默认' :
         (selectedModel?.unavailable ? selectedModel.label : updated?.label) || selectedModel?.label ||
         selectedName || (state.restoringHistory ? '正在加载…' : '选择模型');
+      if (savedChoice(state) && selectedModel?.unavailable && !localChoice(state))
+        label += global.SoduWorkI18n?.translateText?.('（已保存，当前不可用）') || '（已保存，当前不可用）';
       button.querySelector('span').textContent = label;
       button.title = nativeMode(state) && nativeReason || '模型：' + label + ' · 用于之后发送的消息';
       button.setAttribute('aria-label', button.title);
@@ -154,7 +163,11 @@
         if (nativeMode(state) && nativeView === 'effort' && pop.querySelector('.cp-effort-card')) paintNativeEffort(state);
         else renderThinking(state);
       }
-      if ((!selectedName || selectedModel?.unavailable) && !['codex'].includes(state.adapterId) &&
+      if (savedChoice(state) && state.adapterId !== 'codex') {
+        if (!localChoice(state) && historyReadScope !== scope) {
+          historyReadScope = scope; void loadModels();
+        }
+      } else if ((!selectedName || selectedModel?.unavailable) && !['codex'].includes(state.adapterId) &&
           !catalogLoads && catalogScope !== scope) void loadModels();
     }
     function nativeSelection(state) {
@@ -213,7 +226,7 @@
       const selected = selection.name || selection.model?.id || state.model?.id || '';
       const visible = rows.filter(row => (row.label + ' ' + row.name + ' ' + (row.subtitle || '')).toLowerCase().includes(filter.trim().toLowerCase()));
       pop.querySelector('.nmodel-options').innerHTML = visible.length ? visible.map(row =>
-        '<button type="button" role="option" aria-selected="' + (row.name === selected) +
+        '<button type="button" role="option" aria-selected="' + (row.name === selected || row.historyAlias === selected) +
         '" data-model-name="' + esc(row.name) + '"><span class="nmodel-symbol" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m10 3 2 5 5 2-5 2-2 5-2-5-5-2 5-2Z"/></svg></span>' +
         '<span class="nmodel-row-copy"><b data-user-content>' + esc(row.label) + '</b>' +
         (row.subtitle ? '<small class="nmodel-row-subtitle" data-user-content>' + esc(row.subtitle) + '</small>' : '') + '</span>' +
@@ -259,7 +272,10 @@
       catalogLoads++;
       const current = options.state(), scope = flight.scope;
       const selectedAtStart = current.selection?.name || current.selection?.model?.id || current.model?.id || '';
-      const valid = () => !lifecycle.signal.aborted && !flight.invalidated && flight.version === catalogVersion && scope === modelScope();
+      const historyChoice = savedChoice(current);
+      const historyLocal = historyChoice && localChoice(current);
+      const valid = () => !lifecycle.signal.aborted && !flight.invalidated && flight.version === catalogVersion && scope === modelScope() &&
+        (!historyChoice || savedChoice(options.state()) && !options.state().readOnlyHistory);
       const stale = () => { flight.stale = true; return false; };
       const read = promise => bounded(Promise.race([promise, flight.superseded]), flight.deadline,
         () => modelError('MODEL_CATALOG_TIMEOUT', '读取模型列表超时，请检查连接后重试；输入已保留。'),
@@ -274,7 +290,8 @@
         if (!runtime) throw new Error('Agent catalog unavailable');
         const native = runtime.modelMode === 'account';
         const response = native ? (current.cloudHandoff ? { models: [] } : await read(global.soduWorkAPI.conversationSession.runtimeModels(adapter, current.devicePreview ? undefined : current.ref))) :
-          await read(global.SoduWorkAPI.myModels({ localDefaults: !current.cloudHandoff }));
+          await read(global.SoduWorkAPI.myModels(historyChoice && !historyLocal ? { localDefaults: false, refreshManaged: true } :
+            { localDefaults: !current.cloudHandoff, ...(historyLocal ? { historyChoice: selectedAtStart } : {}) }));
         if (!valid()) return stale();
         if (native) {
           const localCodex = adapter === 'codex' && !current.cloudHandoff;
@@ -301,12 +318,25 @@
           })));
           const latest = options.state(), selection = latest.selection || {}, selected = selection.name || selection.model?.id || latest.model?.id || '';
           const localReference = selected.startsWith('local:') ? selected : global.SoduWorkModelChoice?.imageChoice(selected)?.name;
-          const availableRow = rows.find(row => row.name === selected || !selected.startsWith('local:') &&
-            localReference?.startsWith('local:') && global.SoduWorkModelChoice?.imageChoice(row.name)?.name === localReference);
+          const availableRow = rows.find(row => row.name === selected || (historyLocal ? row.name === response.historyChoiceName :
+            !selected.startsWith('local:') && localReference?.startsWith('local:') && global.SoduWorkModelChoice?.imageChoice(row.name)?.name === localReference));
           if (selected !== selectedAtStart || selecting) { render(); return stale(); }
+          if (historyLocal && availableRow && availableRow.name !== selected) availableRow.historyAlias = selected;
           if (!availableRow && response.managedCatalogUnavailable === true && selected && !localReference?.startsWith('local:')) {
             // A partial local directory cannot establish that a Hub choice was deleted.
             managedChoiceBlocked = true; flight.error = catalogError();
+          } else if (historyChoice) {
+            // A passive history preview may refresh metadata, but only the user
+            // can replace its selection before continuing the conversation.
+            const model = selection.model || latest.model || { id: selected };
+            const savedHub = selected === latest.archivedModelName && !localChoice(latest);
+            if (!availableRow) {
+              managedChoiceBlocked = true; flight.error = modelError('MODEL_UNAVAILABLE', '原模型已不可用，请重新选择');
+              if (!model.unavailable) options.modelAvailabilityChanged?.({ ...selection, model: { ...model, unavailable: true,
+                ...(localChoice(latest) ? { label: '原本地模型已删除或不可用' } : {}) } }, savedHub);
+            } else if (savedHub || model.unavailable || model.label !== availableRow.label) {
+              options.modelAvailabilityChanged?.({ ...selection, model: { ...model, label: availableRow.label, unavailable: false } }, savedHub);
+            }
           } else if (!availableRow || (selection.model || latest.model)?.unavailable) {
             if (!rows.length) {
               options.modelAvailabilityChanged?.({ ...selection, name: selected, model: {
@@ -384,9 +414,10 @@
         return false;
       } finally { catalogLoads--; }
     }
+    const passiveLocalPreview = () => pop.hidden && savedChoice(options.state()) && localChoice(options.state());
     const offModels = global.soduWorkAPI?.conversationSession?.onModelsChanged?.(() => { void loadModels(true); });
     const refreshVisibleModels = () => {
-      if (!catalogLoads && el.isConnected && el.getClientRects().length && document.visibilityState !== 'hidden') void loadModels();
+      if (!passiveLocalPreview() && !catalogLoads && el.isConnected && el.getClientRects().length && document.visibilityState !== 'hidden') void loadModels();
     };
     on(global, 'focus', refreshVisibleModels);
     const modelTimer = global.setInterval?.(refreshVisibleModels, 60000);

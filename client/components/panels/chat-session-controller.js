@@ -272,6 +272,7 @@ async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() 
       if (openedSnapshot.execution?.canContinueOnDevice === true) {
         // A preview restores the model choice. Continuation resolves its own permissions.
         ctx._sessionOptions = { adapterId: ctx._sessionOptions.adapterId,
+          archivedModelName: openedSnapshot.modelSelection?.name || '',
           modelName: openedSnapshot.modelSelection?.name || '',
           modelLabel: openedSnapshot.modelSelection?.model?.label || '' };
       }
