@@ -29,11 +29,28 @@ function _block(id) {
   _anonymous.set(_sessionSlot(id.hub, id.clientId), _pending(id));
   if (id.hub === _activeHub) _onAuthUnavailable();
 }
-function _signedOut(app, id, value) {
+function _setLoginState(app, id, signedOut, autoLogin, owner) {
   const doc = _readDoc(app), row = doc.profiles[_slot(id.hub)];
-  if (!row || row.clientId !== id.clientId || !!row.signedOut === value) return;
-  if (value) row.signedOut = true; else delete row.signedOut;
+  if (!row || row.clientId !== id.clientId) throw new Error(TEXT.changed);
+  let restoreAccount = row.autoLoginAccountId;
+  if (!signedOut) {
+    if (autoLogin === true) {
+      if (!owner) throw new Error(TEXT.noSession);
+      restoreAccount = owner;
+    } else if (autoLogin === false || (restoreAccount && restoreAccount !== owner)) {
+      restoreAccount = '';
+    }
+  }
+  if (!!row.signedOut === signedOut && row.autoLoginAccountId === restoreAccount) return;
+  if (signedOut) row.signedOut = true; else delete row.signedOut;
+  if (restoreAccount !== undefined) row.autoLoginAccountId = restoreAccount;
   _writeDoc(app, doc);
+}
+
+function _needsLogin(row) {
+  // Cached sessions exist only in this process. An expired token can still be
+  // renewed here; after a restart, a manual-only profile needs a fresh login.
+  return row.signedOut || (row.autoLoginAccountId === '' && !_sessions.has(_sessionSlot(row.hub, row.clientId)));
 }
 const DEVICE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,63}$/;
 const TEXT = {
@@ -254,7 +271,8 @@ function _ensure(app, raw, allowLegacy = false) {
   if (requestedId && !DEVICE_ID.test(requestedId)) throw new Error(TEXT.badDevice);
   const preserveLegacy = !!(raw?.legacySecret || raw?.preserveLegacyIdentity);
   const doc = _readDoc(app, preserveLegacy), key = _slot(hub);
-  let row = doc.profiles[key] || null;
+  const savedProfile = doc.profiles[key];
+  let row = savedProfile || null;
   let changed = false;
   let clientId = row && String(row.clientId || '').trim();
   if (row && _credentials.platform === 'linux' &&
@@ -280,6 +298,11 @@ function _ensure(app, raw, allowLegacy = false) {
      */
     const recovered = _recoverRow(app, hub);
     if (recovered) {
+      // Recover the encrypted key without reverting today's login preference.
+      if (row.signedOut) recovered.signedOut = true;
+      if (row.autoLoginAccountId !== undefined) {
+        recovered.autoLoginAccountId = recovered.clientId === clientId ? row.autoLoginAccountId : '';
+      }
       doc.profiles[key] = recovered;
       row = recovered;
       clientId = String(row.clientId || '').trim();
@@ -304,6 +327,8 @@ function _ensure(app, raw, allowLegacy = false) {
     if (!DEVICE_ID.test(clientId)) throw new Error(TEXT.badDevice);
     secret = legacy || crypto.randomBytes(32).toString('base64url');
     row = credentialRow(hub, clientId, secret);
+    if (savedProfile?.autoLoginAccountId !== undefined) row.autoLoginAccountId = '';
+    if (savedProfile?.signedOut) row.signedOut = true;
     doc.profiles[key] = row;
     changed = true;
   }
@@ -348,7 +373,7 @@ function _completeCredentialMigration(app, id) {
   _writeDoc(app, doc);
 }
 
-function identity(app, hub = '', clientId = '') {
+function _storedIdentity(app, hub, clientId, forAuthControl) {
   if (!_credentials) return null;
   try {
     const fixed = require('./hub-endpoint.cjs').current(app);
@@ -370,11 +395,16 @@ function identity(app, hub = '', clientId = '') {
     if (!row) row = Object.values(doc.profiles).sort((a, b) =>
       String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null;
     if (!row || (clientId && row.clientId !== clientId)) return null;
+    if (!forAuthControl && _needsLogin(row)) return null;
     // Passive startup services must not initialize native secure storage before
     // the renderer is ready when this profile has no device credential to read.
     const secret = _decrypt(app, row);
     return secret ? { hub: row.hub, clientId: row.clientId, secret } : null;
   } catch (_) { return null; }
+}
+
+function identity(app, hub = '', clientId = '') {
+  return _storedIdentity(app, hub, clientId, false);
 }
 
 function selectHub(app, rawHub) {
@@ -487,7 +517,7 @@ function _failure(data, status) {
   };
 }
 
-async function _requestEnrollment(id, raw, app = null, generation = _generation(id), cache = true) {
+async function _requestEnrollment(id, raw, app = null, generation = _generation(id), cache = true, restoreAccount) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 8000);
   try {
@@ -522,6 +552,14 @@ async function _requestEnrollment(id, raw, app = null, generation = _generation(
       user: data.user || null, quota: data.quota || null,
     };
     if (data.session) {
+      if (restoreAccount && data.user?.id !== restoreAccount) {
+        // A Hub administrator can rebind the device. Consent from its former
+        // account cannot sign another user in on this desktop.
+        _invalidate(id);
+        _block(id);
+        _setLoginState(app, id, true);
+        return _pending(id);
+      }
       safe.session = String(data.session);
       safe.expiresIn = Math.max(30, Number(data.expiresIn) || 0);
       const workRoot = _workRoot(raw);
@@ -558,7 +596,8 @@ async function enroll(app, raw = {}) {
 
   const slot = _sessionSlot(id.hub, id.clientId);
   if (_authChanges.has(slot) || _logouts.has(slot)) return _transitionPending(id);
-  if (_readDoc(app).profiles[_slot(id.hub)]?.signedOut) return _pending(id);
+  const profile = _readDoc(app).profiles[_slot(id.hub)];
+  if (!profile || _needsLogin(profile)) return _pending(id);
   if (raw.recheckAuth === true) _anonymous.delete(slot);
   if (_anonymous.has(slot)) return _anonymous.get(slot);
   const current = _validSessionRow(app, id.hub, id.clientId);
@@ -576,7 +615,8 @@ async function enroll(app, raw = {}) {
      again. */
   const running = _enrollments.get(slot);
   if (running) return running;
-  const job = _requestEnrollment(id, raw, app).finally(() => {
+  const restoreAccount = profile.autoLoginAccountId === '' ? _sessions.get(slot)?.user?.id : profile.autoLoginAccountId;
+  const job = _requestEnrollment(id, raw, app, _generation(id), true, restoreAccount).finally(() => {
     if (_enrollments.get(slot) === job) _enrollments.delete(slot);
   });
   _enrollments.set(slot, job);
@@ -594,6 +634,9 @@ async function login(app, raw = {}, action = 'legacy') {
   const ctl = new AbortController();
   let timer;
   try {
+    // Hub login can activate a device before the local preference is saved.
+    // Keep it manual across a crash or write failure during that transition.
+    if (typeof raw.autoLogin === 'boolean') _setLoginState(app, id, true);
     // Enrollment may still report the previous account. Never expose that
     // intermediate session while an explicit account change is in flight.
     const enrolled = await _requestEnrollment(id, raw, app, generation, false);
@@ -631,13 +674,14 @@ async function login(app, raw = {}, action = 'legacy') {
       session: String(data.session || ''), expiresIn,
       created: !!data.created, user: data.user || null, quota: data.quota || null,
     };
+    if (!safe.session) return { ok: false, stored: true, error: TEXT.noSession };
+    _setLoginState(app, id, false, raw.autoLogin, safe.user?.id);
     _sessions.set(_sessionSlot(id.hub, id.clientId), {
       token: safe.session, expiresAt: Date.now() + expiresIn * 1000,
       localOwner: _advanceOwner(app, _sessions.get(_sessionSlot(id.hub, id.clientId)), id, safe.session),
       authState: 'active', activationRequired: false,
       workRoot: _workRoot(raw), user: safe.user, quota: safe.quota,
     });
-    _signedOut(app, id, false);
     _anonymous.delete(generation.slot);
     return safe;
   } catch (error) {
@@ -706,17 +750,17 @@ function clearSession(app, raw = {}, { matchSession = false } = {}) {
   if (matchSession && (!raw.expectedSession || raw.expectedSession !== _sessions.get(slot)?.token ||
       _authChanges.has(slot) || _logouts.has(slot))) return { ok: true, cleared: false };
   _invalidate(id);
-  if (matchSession) { _block(id); _signedOut(app, id, true); }
+  if (matchSession) { _block(id); _setLoginState(app, id, true); }
   return { ok: true, cleared: true, hub: id.hub, clientId: id.clientId };
 }
 
 async function logout(app, raw = {}) {
-  const id = identity(app, raw.hub || '', raw.clientId || '');
+  const id = _storedIdentity(app, raw.hub || '', raw.clientId || '', true);
   if (!id) return { ok: true, cleared: false };
   if (_logouts.has(_sessionSlot(id.hub, id.clientId))) return _transitionPending(id);
   const generation = _invalidate(id);
   _block(id);
-  _signedOut(app, id, true);
+  _setLoginState(app, id, true);
   _authChanges.set(generation.slot, generation);
   // A Hub switch invalidates local results, but an in-flight logout can still
   // affect that device on its original Hub until the request settles.
@@ -800,7 +844,7 @@ async function refreshProfile(app) {
 
 function notifySessionChanged(app, sender, result) {
   if (!result?.ok) return;
-  const id = identity(app);
+  const id = _storedIdentity(app, '', '', true);
   if (!id) return;
   try {
     for (const win of require('electron').BrowserWindow?.getAllWindows?.() || [])
@@ -813,8 +857,7 @@ function canConnect(app, hub = '', clientId = '') {
   const id = identity(app, hub, clientId);
   if (!id) return false;
   const slot = _sessionSlot(id.hub, id.clientId);
-  return !_anonymous.has(slot) && !_authChanges.has(slot) && !_logouts.has(slot) &&
-    !_readDoc(app).profiles[_slot(id.hub)]?.signedOut;
+  return !_anonymous.has(slot) && !_authChanges.has(slot) && !_logouts.has(slot);
 }
 
 function requestAdmission(app, previous) {
@@ -853,7 +896,7 @@ function install({ app, ipcMain, safeStorage, credentials, onAuthUnavailable }) 
   ipcMain.handle('device-auth-logout', (_event, raw) => logout(app, raw || {}));
   ipcMain.handle('device-auth-clear-session', (_event, raw) => clearSession(app, raw || {}, { matchSession: true }));
   ipcMain.handle('device-auth-status', (_event, hub, clientId) => {
-    const id = identity(app, hub, clientId);
+    const id = _storedIdentity(app, hub, clientId, true);
     return { ready: !!id, hub: id ? id.hub : '', clientId: id ? id.clientId : '',
       sessionReady: !!session(app, hub, clientId), secure: !!id && _available() };
   });

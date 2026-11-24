@@ -90,7 +90,9 @@ Some older records identify an account but lack verifiable information about the
 
 ## Start again and stop
 
-- Use the same launcher next time and sign in with the same account. Data and model settings are retained.
+- Use the same launcher next time to keep your data and model settings. Select **Remember account** to prefill your account on this device the next time you sign in to the same Hub.
+- Select **Sign in automatically on this device** to resume your session after a normal restart using the device’s encrypted credentials. Your password and verification codes are never saved. After you explicitly sign out, you need to sign in again.
+- Both options start off on a new setup. Devices with credentials saved before the update keep their previous restart behavior until you choose a preference.
 - Closing the workspace window leaves the desktop app running. Click its tray icon or run the same launcher again with `--desktop` and the same data directory to reopen the workspace. To end the local session, choose **Quit SoduWork** from the tray or press **Ctrl+C** in the original startup terminal.
 - For a web-only session, copy the management URL from the original terminal to reopen it in your browser.
 - Before updating source, stop the service and back up the entire data directory and any separate desktop profile. Then update the source and run the same launcher. Do not edit the managed application copy inside the data directory.
