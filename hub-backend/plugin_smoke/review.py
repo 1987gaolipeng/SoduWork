@@ -6,6 +6,7 @@ from app.services import plugin_service
 from app.services import release_control
 from app.services import workflow_control
 from app.services import workflow_engine
+from .fixtures import repository_fixture
 from .support import BASE, package
 
 
@@ -108,9 +109,14 @@ async def deployments(chk, actor):
     session, creator, box, task = actor.session, actor.creator, actor.box, actor.task
     creator_id, creator_name, box_id = creator.id, creator.display_name, box.id
     deploy_manifest = {**BASE, "key": "smoke-deploy-gate", "name": "发布门冒烟"}
+    project, repo, _ = await repository_fixture(session, box)
+    env = am.Environment(id="env-plugin-production", key="plugin-production",
+                         name="Production", tier="production")
+    target = am.DeploymentTarget(id="target-smoke", repo_id=repo.id,
+                                 environment_id=env.id, name="Production target")
     deploy_flow = {"nodes": [{
         "key": "production", "type": "deploy",
-        "config": {"environmentId": release_control.ENV_PRODUCTION},
+        "config": {"environmentId": env.id},
     }]}
     deploy_installed = await plugin_service.install(
         session, package(deploy_manifest, deploy_flow), creator, None)
@@ -122,8 +128,9 @@ async def deployments(chk, actor):
         session, deploy_plugin, {"versionId": deploy_version.id})
     deploy_task = models.Task(
         id="t-plugin-deploy", owner_client_id=box_id, title="发布生产环境",
+        repo_id=repo.id, project_id=project.id,
         created_by=creator_id, created_by_name=creator_name, status="doing")
-    session.add(deploy_task)
+    session.add_all([env, target, deploy_task])
     await session.flush()
     session.add(models.Attachment(
         id="att-plugin-deploy", task_id=deploy_task.id, filename="release.zip",
@@ -152,8 +159,8 @@ async def deployments(chk, actor):
         if run_row is None:
             run_row = am.DeploymentRun(
                 task_id=task_row.id, artifact_version_id=artifact_row.id,
-                environment_id=environment_id, target_id="target-smoke",
-                state="queued", attempt=1, idempotency_key=artifact_row.id + ":target-smoke")
+                environment_id=environment_id, target_id=target.id,
+                state="queued", attempt=1, idempotency_key=artifact_row.id + ":" + target.id)
             s.add(run_row)
             await s.commit()
         return {"ok": True, "pendingApproval": False, "runs": [{"id": run_row.id}]}
@@ -169,10 +176,11 @@ async def deployments(chk, actor):
         chk("生产发布节点先停在版本绑定审批门",
             deploy_node["state"] == "waiting_human" and deploy_node["output"].get("requestId"),
             deploy_node)
-        await release_control.decide(
+        decision = await release_control.decide(
             session, deploy_task, creator, action="deploy", decision="approve",
             artifact_version_id=deploy_artifact.id,
-            environment_id=release_control.ENV_PRODUCTION)
+            environment_id=env.id)
+        chk("生产发布审批接受当前任务的部署目标", decision.get("ok"), decision)
         await workflow_engine.tick(session)
         queued = await workflow_engine.run_api(session, deploy_workflow)
         chk("生产审批通过后真正进入部署等待而非直接成功",
