@@ -62,7 +62,8 @@ function _skillDirs(app) {
  */
 function _contextSnapshot(handle, snapshot) {
   const { usageReceipts, ...display } = snapshot || {};
-  return { ...display, ...(handle.requirementContext ? { requirementContext: handle.requirementContext } : {}),
+  const skillFailure = require('./skill-failure-context.cjs').summary(handle, display);
+  return { ...display, ...(skillFailure ? { skillFailure } : {}), ...(handle.requirementContext ? { requirementContext: handle.requirementContext } : {}),
     ...(handle.deliverySync ? { deliverySync: handle.deliverySync } : {}) };
 }
 function _send(win, handle, touched, snapshot, includeSnapshot, presenceSnapshot) {
@@ -171,6 +172,7 @@ function _discardRenderer(handle) {
 
 function _bindUsage(handle, identity, adapterId) {
   if (!handle || !identity) return;
+  require('./skill-failure-context.cjs').bind(_app, handle, identity);
   _deliverySync?.bind(handle, identity);
   _accountSync?.bind(handle, identity);
   handle.usageIdentity = {
@@ -215,6 +217,7 @@ function _attach(handle, win) {
 function _openReply(handle, extra) {
   const reply = require('./open-reply').openReply(_app, handle, extra);
   if (handle.localReplica === true) return reply;
+  reply.snapshot = _contextSnapshot(handle, reply.snapshot);
   const context = require('../conversation/requirement-context').publicContext(_app, handle.sessionId);
   if (context) {
     reply.requirementContext = context;
@@ -802,7 +805,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         accessPolicy: spec.accessPolicy,
         skillDirs: spec.skillDirs, optionalSkillDirs: spec.optionalSkillDirs,
         resolveSkills: skillTurn.resolver({ app, identity, identityOf: sendIdentityOf || identityOf,
-          skillDirs: () => _skillDirs(app) }),
+          skillDirs: () => _skillDirs(app),
+          onResolved: (submissionId, items) => require('./skill-failure-context.cjs').prepared(session.get(ref), submissionId, items) }),
         resolveConnectors: require('../conversation-connectors.cjs').resolver({ app, identity, identityOf: sendIdentityOf || identityOf,
           ref, allowed: (resolved.skills || []).some(row => row.name === 'mcp-tools'), explicitlySelected: spec.selectedSkills.includes('mcp-tools') }),
         taskRef: spec.taskRef, taskTitle: spec.taskTitle,
@@ -1142,7 +1146,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       projectId: String(taskTurn ? taskTurn.task.projectId || '' : rawOptions && rawOptions.projectId || '').slice(0, 36),
       repoId: String(taskTurn ? taskTurn.task.repoId || '' : rawOptions && rawOptions.repoId || '').slice(0, 36),
       submissionId: String(taskTurn?.acceptanceOnly ? taskTurn.submissionId : rawOptions && rawOptions.submissionId || '')
-        .replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64),
+        .replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64) || (selectedSkills.length || (rawOptions?.skills == null && s.ui?.selectedSkills?.length) ? require('crypto').randomUUID() : ''),
     };
     if (typeof authorizeAI === 'function') {
       // Resolve ownership for each captured turn, not the session's current
@@ -1178,6 +1182,10 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     if (!workflowTurn && typeof rawOptions?.nativeRelayGuard === 'function') {
       try { await rawOptions.nativeRelayGuard(); }
       catch (error) { return { ok: false, accepted: false, reason: String(error.message || error) }; }
+    }
+    if (!workflowTurn && rawOptions?.skills == null && s.ui?.selectedSkills?.length) {
+      const active = (s.ui.skills || []).filter(row => s.ui.selectedSkills.includes(row.name));
+      require('./skill-failure-context.cjs').prepared(s, sendOptions.submissionId, active);
     }
     const titleRequest = !workflowTurn && !taskId && !automationTurn && !appRequest && !rawOptions?.nativeRelayGuard
       ? firstTurnTitle.prepare(s, text) : null;

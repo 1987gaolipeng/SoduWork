@@ -21,7 +21,7 @@ function failure(error) {
     reason: '技能没能在发送前准备好：' + String(error?.message || error).slice(0, 500) };
 }
 
-function resolver({ app, identityOf, identity, skillDirs, fetchPolicy, ensure }) {
+function resolver({ app, identityOf, identity, skillDirs, fetchPolicy, ensure, onResolved }) {
   // Capture the owning account while its opening token is fresh. A long-lived
   // conversation must not compare the expiry of that old token on later turns.
   let owner, ownerError;
@@ -33,7 +33,7 @@ function resolver({ app, identityOf, identity, skillDirs, fetchPolicy, ensure })
       throw Error('账号或服务已变化，请重新打开这条对话');
     return current;
   };
-  return async selected => {
+  return async (selected, submissionId) => {
     const wanted = names(selected);
     if (!wanted.length) return { items: [] };
     const current = await currentIdentity();
@@ -49,6 +49,7 @@ function resolver({ app, identityOf, identity, skillDirs, fetchPolicy, ensure })
     await currentIdentity();
     const items = wanted.map(name => (synced.contracts || []).find(row => row.name === name));
     if (items.some(row => !row?.path || !row.installed)) throw Error('所选技能没有完整安装，请刷新技能列表后重试');
+    onResolved?.(submissionId, items);
     return { items };
   };
 }
@@ -58,7 +59,7 @@ async function prepare(options, turn, sdk) {
     const selected = names(turn?.skills);
     if (!selected.length) return { ok: true, names: [], dirs: [], skills: [], prompt: '', readScope: undefined };
     if (typeof options?.resolveSkills !== 'function') throw Error('当前会话没有技能授权解析器，请重新打开会话');
-    const resolved = await options.resolveSkills(selected);
+    const resolved = await options.resolveSkills(selected, turn?.submissionId);
     const items = selected.map(name => resolved?.items?.find(row => row.name === name));
     if (items.some(row => !row?.path)) throw Error('有技能在发送前已失效，请重新选择');
     const dirs = items.map(row => path.resolve(row.path));
@@ -84,7 +85,7 @@ async function prepareRunner(options, turn, runtime) {
     const selected = names(turn?.skills);
     if (!selected.length) return { ok: true, names: [], dirs: [], skills: [], prompt: '' };
     if (typeof options?.resolveSkills !== 'function') throw Error('当前会话没有技能授权解析器，请重新打开会话');
-    const resolved = await options.resolveSkills(selected);
+    const resolved = await options.resolveSkills(selected, turn?.submissionId);
     const items = selected.map(name => resolved?.items?.find(row => row.name === name));
     if (items.some(row => !row?.path)) throw Error('有技能在发送前已失效，请重新选择');
     return await (runtime || require('../agent-runtime/process-session')).prepareSkills(options.app, {

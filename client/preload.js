@@ -106,6 +106,7 @@ const conversationSession = {
   revealOutput: (ref, p) => ipcRenderer.invoke('pi-session-reveal-output', ref, p),
   openOutputFolder: (ref) => ipcRenderer.invoke('pi-session-open-output-folder', ref),
   readOutput: (ref, p) => ipcRenderer.invoke('pi-session-read-output', ref, p),
+  skillFailureContext: (ref, id) => ipcRenderer.invoke('pi-session-skill-failure-context', ref, id),
   toolDetail: (ref, id) => ipcRenderer.invoke('pi-session-tool-detail', ref, id),
   writeOutput: (ref, p, text) => ipcRenderer.invoke('pi-session-write-output', ref, p, text),
   readOutputBinary: (ref, p) => ipcRenderer.invoke('pi-session-read-output-binary', ref, p),
