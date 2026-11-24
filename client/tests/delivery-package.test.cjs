@@ -263,3 +263,53 @@ test('cloud identity is revalidated after package work and after the native save
   assert.equal(dialogs, 1);
   await assert.rejects(fs.stat(output), { code: 'ENOENT' });
 });
+
+test('literal examples remain in the original delivery without requiring example files', async t => {
+  const fence = '```';
+  const fixtures = [
+    ['report.html', '<!-- <img src="draft.png"><style>p{background:url(old.png)}</style> -->\n<h1>Report</h1>'],
+    ['guide.md', ['# Guide', '', fence + 'md', '[example](examples/report.md)', fence].join('\n')],
+  ];
+  for (const [name, text] of fixtures) {
+    const f = await fixture(t, { [name]: text });
+    const got = await packages.prepare(f.session, f.ids(name));
+    assert.deepEqual(got.manifest.files.map(file => file.path), [name]);
+    assert.deepEqual(got.bytes, Buffer.from(text));
+  }
+});
+
+test('HTML comment markers in attributes and script strings preserve real dependencies', () => {
+  const html = '<div title="<!--"><img src="one.png"></div>\n' +
+    '<script>const example = "<!--"; fetch("./data.json")</script>\n' +
+    '<!-- <link href="old.css"> -->\n<link href="real.css">';
+  assert.deepEqual(packages.references(html, '.html'), ['one.png', 'real.css', './data.json']);
+});
+
+test('Markdown fences preserve genuine links and images around code samples', () => {
+  const lines = ['[before](intro.md)', '> ~~~~md', '> [example](ignored.md)', '> ~~~', '> ~~~~',
+    '![image](photo.png)', '', '[after][report]', '', '[report]: reports/final.md'];
+  assert.deepEqual(packages.references(lines.join('\r\n'), '.markdown'), ['intro.md', 'photo.png', 'reports/final.md']);
+});
+
+test('missing references in live markup and Markdown prose still block delivery', async t => {
+  for (const [name, text, missing] of [
+    ['report.html', '<!-- old image -->\n<img src="required.png">', 'required.png'],
+    ['guide.md', '~~~\n[example](fake.md)\n~~~\n\n[document](required.md)', 'required.md'],
+  ]) {
+    const f = await fixture(t, { [name]: text });
+    await assert.rejects(packages.prepare(f.session, f.ids(name)), { message: '成果依赖缺失：' + missing });
+  }
+});
+
+test('packages real files next to literal examples and keeps source bytes intact', async t => {
+  for (const [entry, source, real] of [
+    ['report.html', '<!-- <img src="draft.png"> -->\n<link href="site.css"><script src="page.js"></script><img src="hero.png">', ['site.css', 'page.js', 'hero.png']],
+    ['guide.md', '~~~md\n[example](draft.md)\n~~~\n\n[Notes](notes.md) ![Plot](plot.png)', ['notes.md', 'plot.png']],
+  ]) {
+    const f = await fixture(t, { [entry]: source, ...Object.fromEntries(real.map(name => [name, 'fixture'])) });
+    const result = await packages.prepare(f.session, f.ids(entry));
+    assert.deepEqual(result.manifest.files.map(file => file.path).sort(), [entry, ...real].sort());
+    const file = result.manifest.files.find(row => row.path === entry);
+    assert.equal(file.sha256, require('node:crypto').createHash('sha256').update(source).digest('hex'));
+  }
+});

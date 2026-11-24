@@ -139,5 +139,59 @@ html[data-desk-panel="workspace"] #schPanel > .sch-body > :is(.sch-recipes,.sch-
   #schPanel .sch-i-state{grid-column:2;justify-self:end}
 }
 @media(prefers-reduced-motion:reduce){#schPanel :is(.sch-item,.sch-recipes button){transition:none!important}}
-.sch-once-field{display:flex;flex:1 1 240px;min-width:0;flex-direction:column;gap:5px;color:var(--ink-2);font-size:12px}
-.sch-once-field .sch-in{width:100%;min-width:0}.sch-once-field small{color:var(--ink-3);font-size:12px;line-height:1.5}
+.automation-refresh-runtime{
+  display:inline-grid;place-items:center;flex:none;width:24px;height:24px;box-sizing:border-box;
+  padding:0;border:0;border-radius:5px;background:transparent;color:var(--ink-3);cursor:pointer
+}
+.automation-refresh-runtime svg{fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.automation-refresh-runtime:enabled:hover,.automation-refresh-runtime:focus-visible{background:var(--bg-2);color:var(--ink)}
+.automation-refresh-runtime:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.automation-refresh-runtime:disabled{opacity:.5;cursor:default}
+@supports (appearance:base-select){
+  @media (forced-colors:none){
+    :is(#schWho,#wazAssignee),
+    :is(#schWho,#wazAssignee)::picker(select){appearance:base-select}
+    :is(#schWho,#wazAssignee){align-items:center;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+    :is(#schWho,#wazAssignee)::picker-icon{display:none}
+    :is(#schWho,#wazAssignee)::picker(select){
+      box-sizing:border-box;width:anchor-size(width);min-width:0;max-height:min(20rem,50vh);
+      margin-block:4px;padding:4px;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;
+      border:1px solid var(--line);border-radius:var(--r-md,10px);
+      background:var(--bg-0);color:var(--ink);box-shadow:0 6px 18px color-mix(in srgb,var(--ink) 12%,transparent)
+    }
+    :is(#schWho,#wazAssignee) option{
+      padding:7px 10px;border-radius:6px;font:inherit;line-height:1.45;
+      white-space:normal;overflow-wrap:anywhere;cursor:pointer
+    }
+    :is(#schWho,#wazAssignee) option:checked{background:var(--accent-soft);color:var(--accent)}
+    :is(#schWho,#wazAssignee) option:enabled:is(:hover,:focus-visible){background:var(--bg-2);color:var(--ink)}
+    :is(#schWho,#wazAssignee) option:disabled{color:var(--ink-4);cursor:default}
+    :is(#schWho,#wazAssignee) option:has(.automation-runtime-name){
+      display:grid;grid-template-columns:minmax(0,1fr) fit-content(40%) 14px;
+      column-gap:8px;row-gap:2px;padding:7px 9px;align-items:center
+    }
+    :is(#schWho,#wazAssignee) option::checkmark{grid-column:3;grid-row:1;align-self:center}
+    .automation-runtime-separator{display:none}
+    .automation-runtime-name{grid-column:1;grid-row:1;font-weight:600}
+    .automation-runtime-location{grid-column:1;grid-row:2;color:var(--ink-3);font-size:max(var(--font-min-readable,12px),.9em)}
+    .automation-runtime-status{
+      grid-column:2;grid-row:1 / span 2;justify-self:end;color:var(--ink-2);
+      font-size:max(var(--font-min-readable,12px),.86em);line-height:1.35;text-align:end;text-wrap:balance
+    }
+    :is(#schWho,#wazAssignee) option:has(.automation-runtime-location)::checkmark{grid-row:1 / span 2}
+  }
+}
+.sch-when-row:has(#schEvery option[value="once"]:checked){
+  align-items:flex-start;gap:10px 12px;padding:12px;border:1px solid var(--line-2);
+  border-radius:var(--r-md,10px);background:var(--bg-1)
+}
+.sch-when-row:has(#schEvery option[value="once"]:checked) .sch-cadence-field,
+.sch-once-field{display:flex;flex:1 1 13rem;min-width:0;flex-direction:column;gap:6px;color:var(--ink-2)}
+.sch-when-row:has(#schEvery option[value="once"]:checked) .sch-cadence-field>span{display:block}
+.sch-when-row:has(#schEvery option[value="once"]:checked) .sch-w-every,
+.sch-once-field .sch-in{width:100%;max-width:none;min-width:0;height:40px;flex:none}
+.sch-once-field .sch-in{font-variant-numeric:tabular-nums}
+.sch-once-field small{color:var(--ink-3);line-height:1.5}
+.sch-when-row:has(#schEvery option[value="once"]:checked) .sch-when-pv{
+  flex:1 0 100%;margin:0;padding:8px 0 0;border-radius:0;border-top:1px solid var(--line-2);background:transparent
+}

@@ -1,4 +1,4 @@
-import { translateText as tx, useLocale } from './i18n.js'
+import { t, translateText as tx, useLocale } from './i18n.js'
 import React, { useEffect, useId, useState } from 'react'
 import { api, setToken, setUser } from './api.js'
 
@@ -50,7 +50,9 @@ export default function Login({ onLogin, onBack, initialError = '' }) {
       const result = await api.login(user.trim(), pass)
       setToken(result.token); setUser(result.user); onLogin()
     } catch (error) {
-      setErr(error?.status === 401 || error?.status === 403 || error?.message === tx('登录已失效，请重新登录') ? tx('账号或密码不正确') : (error?.message || tx('登录失败，请稍后重试')))
+      if (error?.status === 403) setErr(t('login.restricted'))
+      else if (error?.status === 401) setErr(tx('账号或密码不正确'))
+      else setErr(error?.message || tx('登录失败，请稍后重试'))
     } finally { setBusy(false) }
   }
   return <div className="public-login public-theme workbench-login">
@@ -89,7 +91,11 @@ export default function Login({ onLogin, onBack, initialError = '' }) {
         <div className="login-field"><label className="f-lbl" htmlFor={`${formId}-account`}>{tx('账号')}</label><input id={`${formId}-account`} className="f-in" name="username" autoComplete="username" value={user} onBeforeInput={blockAccountLineBreak} onChange={event => updateSingleLineAccount(event, setAccount)} placeholder={tx('输入你的账号')} autoCapitalize="none" spellCheck={false} required autoFocus aria-describedby={err ? `${formId}-error` : undefined} /></div>
         <div className="login-field"><label className="f-lbl" htmlFor={`${formId}-password`}>{tx('密码')}</label><div className="login-password"><input id={`${formId}-password`} className="f-in" name="password" autoComplete="current-password" type={revealed ? 'text' : 'password'} value={pass} onChange={event => setPass(event.target.value)} placeholder={tx('输入你的密码')} required aria-describedby={err ? `${formId}-error` : undefined} /><button className="login-password-toggle" type="button" onClick={() => setRevealed(!revealed)} aria-label={revealed ? tx('隐藏密码') : tx('显示密码')} aria-pressed={revealed}>{revealed ? tx('隐藏') : tx('显示')}</button></div></div>
         <button type="submit" className="login-submit" disabled={busy}>{busy ? tx('正在登录…') : tx('进入控制台')}<span aria-hidden="true">→</span></button>
-        <p className="login-help">{tx('需要账号或登录帮助？请联系你的企业管理员。')}</p>
+        <details className="login-help">
+          <summary>{tx('忘记密码？')}</summary>
+          <p>{tx('已绑定邮箱的账号可在同一 Hub 的 SoduWork 客户端登录页选择「忘记密码」，通过邮件重置。')}</p>
+          <p>{tx('企业单点登录账号请在身份平台找回密码。其他账号请联系有成员管理权限的管理员，在成员列表中编辑账号并重置密码。')}</p>
+        </details>
       </form>
       <footer className="public-login-footer">{tx('权限由你的组织分配，工作在共同规则下展开。')}</footer>
     </main>

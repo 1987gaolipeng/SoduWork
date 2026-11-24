@@ -153,7 +153,8 @@
       '</b><em>' + esc(item.closedInPeriod || item.closedToday ? '已完成' : (item.statusCn || '有进展')) +
       '</em>' + ICON.chevron + '</summary><div>' + ((item.progress || []).length
         ? item.progress.map((text) => '<p>' + esc(text) + '</p>').join('')
-        : '<p>本周期办结，未单独填写进展说明。</p>') + '</div></details>').join('');
+        : (item.backlogOnly ? '<p>本周期没有新增进展，仍列入待办。</p>' : '<p>本周期办结，未单独填写进展说明。</p>')) +
+      '</div></details>').join('');
   }
 
   function emptyPersonal(mine) {

@@ -58,7 +58,7 @@ function changeParameter(parameter, state, body) {
   const current = state.compatibility.maxTokensField;
   const group = ['max_tokens', 'max_completion_tokens'].includes(parameter) ? 'output' : parameter;
   if (!parameter || !body || !Object.hasOwn(body, parameter) || state.variants.has(group) || group === 'output' && parameter !== current ||
-      parameter === 'tool_choice' && state.compatibility.toolChoice === 'auto' ||
+      parameter === 'tool_choice' && body.tool_choice === 'auto' ||
       parameter === 'stream_options' && !state.compatibility.streamOptions) return false;
   state.variants.add(group);
   if (group === 'output') state.compatibility.maxTokensField = current === 'max_tokens' ? 'max_completion_tokens' : 'max_tokens';
@@ -78,7 +78,8 @@ function failure(error, check, signal) {
     if (['APIConnectionTimeoutError', 'TimeoutError'].includes(cause.name)) return { status: 'inconclusive', code: 'timeout' };
   }
   if (['insufficient_quota', 'insufficient_balance', 'billing_hard_limit_reached', 'billing_not_active', '1113'].includes(code)) return { status: 'failed', code: 'billing_unavailable' };
-  if ([401, 403].includes(error?.status)) return { status: 'failed', code: 'credentials_or_access' };
+  if (error?.status === 401) return { status: 'failed', code: 'credentials_or_access' };
+  if (error?.status === 403) return { status: 'inconclusive', code: 'request_rejected' };
   if (error?.status === 404) return { status: 'failed', code: 'model_or_endpoint_missing' };
   if (error?.name === 'APIConnectionError') return { status: 'inconclusive', code: 'temporarily_unavailable' };
   if ([408, 429, 500, 502, 503, 504].includes(error?.status)) return { status: 'inconclusive', code: [408, 504].includes(error.status) ? 'timeout' : 'temporarily_unavailable' };

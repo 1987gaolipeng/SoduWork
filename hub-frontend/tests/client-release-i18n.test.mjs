@@ -29,3 +29,41 @@ test('upgrade status labels change with locale while filter values, rows and pro
   assert.deepEqual(changes, Array(5).fill('installed'))
   assert.equal(JSON.stringify(attempts), before)
 })
+
+test('activity failures retain only the current filter and tiny artifacts keep a nonzero size', async (t) => {
+  const pending = []
+  const sizes = [[1, '1 B'], [1023, '1023 B'], [1024, '1.0 KB'], [10240, '10.0 KB'],
+    [1048576, '1.0 MB'], [1073741824, '1.00 GB']]
+  const releases = sizes.map(([artifactSize], i) => ({ id: String(i), platform: 'win32',
+    version: '1.0', artifactName: 'installer-' + i, artifactSize }))
+  const api = {
+    clientReleases: async () => ({ releases }),
+    clientReleaseNotes: async () => ({ notes: [] }),
+    clientUpdateAttempts: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
+  }
+  const page = await createComponentHarness(new URL('../src/screens/ClientReleases.jsx', import.meta.url), {
+    dependencies: { '../api.js': { api, can: () => false }, '../ui.jsx': { Icon: 'Icon', Loading: 'Loading' },
+      './client-releases.css': {} },
+  })
+  t.after(() => page.unmount())
+  const panel = () => page.nodes(node => typeof node.props.onReleaseFilter === 'function')[0].props
+  page.render()
+  pending.shift().resolve({ attempts: [{ id: 'old' }], counts: { installed: 1 } })
+  await page.flush()
+  assert.deepEqual(page.nodes(node => node.props.className === 'cr-artifact')
+    .map(node => node.props.children[1].props.children), sizes.map(([, label]) => label))
+  panel().onRefresh()
+  pending.shift().reject(new Error('Service unavailable'))
+  await page.flush()
+  assert.equal(panel().error, 'Service unavailable')
+  assert.equal(panel().attempts[0].id, 'old')
+  panel().onRefresh()
+  const stale = pending.shift()
+  page.act(() => panel().onStateFilter('failed'))
+  assert.deepEqual(panel().attempts, [])
+  pending.shift().resolve({ attempts: [{ id: 'current' }], counts: { failed: 1 } })
+  stale.resolve({ attempts: [{ id: 'late' }] })
+  await page.flush()
+  assert.equal(panel().error, null)
+  assert.deepEqual(panel().attempts, [{ id: 'current' }])
+})

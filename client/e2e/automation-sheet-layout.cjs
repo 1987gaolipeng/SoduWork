@@ -56,7 +56,9 @@ if (typeof electron === 'string') {
     await win.loadFile(fixture);
     await js(`window.errors=[];addEventListener('error',e=>errors.push(e.message));
       window.saves=[];window._schmLoad=async()=>[{key:'report',name:'报告插件',version:'1.0.0',checksum:'a'.repeat(64),inputs:[]}];window.SoduWorkAPI={
-        taskExecutionOptions:async()=>({substrates:[{key:'local:pi',name:'Pi',available:true}],repos:[]}),
+        taskExecutionOptions:async()=>({substrates:['Pi','Codex Harness','OpenCode','Codex','Qwen Code','DeepSeek Harness','Kimi Code']
+          .map(name=>({key:'local:'+name.toLowerCase().replaceAll(' ','-'),name,available:true,
+            locationLabel:'本机 · 测试工作站',onlineSeats:1})),repos:[]}),
         preflightSchedule:async()=>({state:'ready',message:'执行条件已就绪',checks:[{label:'隔离验证，无真实 Runner'}]}),
         createSchedule:async body=>{saves.push(body);return {...body,id:'fixture'}}};void 0;`);
     for (const file of ['plugin-ui-host', 'schedule-timing', 'panels-forward-select', 'work-automation-bindings', 'work-automation-view', 'work-automation-card-state','work-automation-sheet'])
@@ -263,10 +265,51 @@ if (typeof electron === 'string') {
       assert.equal(await js('getComputedStyle(document.querySelector(".waz-body")).overflowY'), 'visible');
       assert.ok((await rect('.waz-sheet')).height > 800);
     });
+    await run('刷新按钮紧邻底座标签，可用键盘刷新', async () => {
+      await open(true);
+      for (const width of [1200, 390]) {
+        win.setContentSize(width, 800);
+        await delay(100);
+        const button = await rect('#wazForm [data-waz-reload-agents]'), label = await rect('label[for=wazAssignee]');
+        assert.ok(button.x >= label.right && button.x - label.right <= 8);
+        assert.ok(button.width >= 24 && button.height >= 24);
+      }
+      win.setContentSize(1200, 800);
+      await js(`window.originalExecutionOptions = SoduWorkAPI.taskExecutionOptions;
+        window.refreshCount = 0;
+        SoduWorkAPI.taskExecutionOptions = (...args) => { refreshCount++; return originalExecutionOptions(...args); };
+        document.querySelector('#wazForm [data-waz-reload-agents]').focus();`);
+      assert.ok(await js('document.activeElement.matches("[data-waz-reload-agents]")'));
+      await key('Space');
+      assert.equal(await js('refreshCount'), 1);
+      assert.equal(await js('document.querySelector("#wazForm [data-waz-reload-agents]").disabled'), false);
+      await js('SoduWorkAPI.taskExecutionOptions = originalExecutionOptions; void 0;');
+    });
+    await run('底座菜单在宽窄窗口内与字段对齐，Esc 保留原选择', async () => {
+      await open(true);
+      const original = await js('wazAssignee.value');
+      for (const width of [1200, 390]) {
+        win.setContentSize(width, 800);
+        await js('wazAssignee.scrollIntoView({block:"center"}); wazAssignee.focus(); wazAssignee.showPicker()');
+        await delay(100);
+        assert.ok(await js('wazAssignee.matches(":open")'));
+        const field = await rect('#wazAssignee'), row = await rect('#wazAssignee option:last-child');
+        assert.ok(row.width > 0 && row.x >= field.x - 1 && row.right <= field.right + 1);
+        const name = await rect('#wazAssignee .automation-runtime-name');
+        const location = await rect('#wazAssignee .automation-runtime-location');
+        const status = await rect('#wazAssignee .automation-runtime-status');
+        assert.ok(name.height > 0 && location.y >= name.bottom && status.x >= location.right);
+        fs.writeFileSync(path.join(out, 'runtime-menu-' + width + '.png'), (await win.webContents.capturePage()).toPNG());
+        await key('Escape');
+        assert.ok(await js('!wazAssignee.matches(":open")'));
+        assert.equal(await js('wazAssignee.value'), original);
+      }
+      win.setContentSize(1200, 800);
+    });
     await run('相对时间草稿允许补充，创建后修改原任务并可取消修改和停用', async () => {
       await js(fs.readFileSync(path.join(client,'components/panels/panels-chat-work-actions.js'),'utf8')+'\nvoid 0;');
       await js(`(async()=>{WorkAutomationSheet.close(true);window.originalNow=Date.now;
-        window.messageTime=Date.parse('2099-11-16T08:00:00Z');Date.now=()=>messageTime;
+        window.messageTime=Date.parse('2099-11-16T08:00:13.628Z');Date.now=()=>messageTime;
         window.updates=[];window.createdBefore=saves.length;
         SoduWorkAPI.parseTaskText=async text=>text.includes('生成日报')
           ? {title:'日报',note:'生成日报'} : {title:'待明确的任务',note:'帮我做个任务'};
@@ -277,6 +320,18 @@ if (typeof electron === 'string') {
         window.sendAutomationChange=async text=>ChatWorkActions.route({text,mention:{action:()=>null}},{});})()`);
       assert.equal(await js('document.querySelector("[name=every]").value'),'once');
       assert.equal(await js('document.querySelector("[name=runAt]").value'),'2099-11-16T16:05');
+      assert.equal(await js('document.querySelector("[name=runAt]").step'),'60');
+      await delay(350);
+      await js('automationControl(".waz-rhythm").scrollIntoView({block:"center",behavior:"instant"})');
+      await delay(150);
+      const cadence = await rect('[name=every]'), date = await rect('[name=runAt]');
+      assert.ok(Math.abs(cadence.y - date.y) < 1 && cadence.height === date.height);
+      fs.writeFileSync(path.join(out,'once-chat.png'),(await win.webContents.capturePage()).toPNG());
+      win.setContentSize(390, 800);
+      await delay(100);
+      assert.ok((await rect('[name=runAt]')).y >= (await rect('[name=every]')).bottom);
+      assert.ok((await rect('[name=runAt]')).right <= (await rect('.waz-rhythm')).right);
+      win.setContentSize(1200, 800);
       assert.equal(await js('document.querySelector("[data-waz-save]").disabled'),true);
       await js(`automationControl('[data-waz-chat-exit]').click();void 0;`);
       assert.equal(await js('WorkAutomationSheet.acceptsFollowup("普通聊天")'),false);
@@ -289,6 +344,7 @@ if (typeof electron === 'string') {
         JSON.stringify(await js('({snapshot:WorkAutomationSheet.capture(),probe:document.querySelector("#wazProbe").textContent})')));
       await js(`automationControl('[data-waz-save]').click();void 0;`);await delay(100);
       assert.equal(await js('saves.length-createdBefore'),1);
+      assert.equal(await js('saves.at(-1).runAt'),'2099-11-16T08:05:00.000Z');
       assert.equal(await js('!!automationControl("[data-waz-edit]")'),true);
       await js(`sendAutomationChange('改为十分钟后生成日报');`);
       assert.equal(await js('document.querySelector("[name=runAt]").value'),'2099-11-16T16:11');
@@ -400,6 +456,117 @@ if (typeof electron === 'string') {
       assert.equal(await js('document.querySelector("[name=title]").value'), '手动修改后的提醒');
       assert.equal(await js('saves.length-beforeCollapse'), 0);
     });
+    for (const file of ['compose-candidate-navigation', 'chat-plugin-mention-model', 'chat-plugin-mention']) {
+      await js(fs.readFileSync(path.join(client, 'components/panels', file + '.js'), 'utf8') + '\nvoid 0;');
+    }
+    await js(`WorkAutomationSheet.close(true);
+      const composer = document.createElement('section');
+      composer.innerHTML = '<textarea id="nchatInput"></textarea>';
+      document.body.append(composer);
+      const input = composer.querySelector('textarea');
+      const picker = ChatPluginMention.create({input, host:composer, actions:()=>PluginUIHost.actions(), catalog:async()=>({items:[]})});
+      const context = {mount:()=>document.body, dismissProposal(){}, bridge:()=>({}),
+        open:(command, options)=>ChatWorkActions.open(command, {...options, cardHost:document.querySelector('#inlineHost'),
+          proposal:{timeZone:'Asia/Shanghai'}}, context)};
+      const sentAt = Date.parse('2026-11-20T03:15:13.628Z');
+      Date.now = () => sentAt;
+      SoduWorkAPI.parseTaskText = async (text, model, attachments, options) => {
+        if (text === '5分钟发一首关于秋天的诗') {
+          window.poemInstruction = options.instruction;
+          return {title:'每5分钟发送一首关于秋天的诗', note:'实现每5分钟发送一首关于秋天的诗。',
+            checklist:['配置触发间隔为每五分钟','验证诗句发送结果']};
+        }
+        return {title:'示例任务', note:text};
+      };
+      window.sendExample = text => {
+        input.value = text; input.dispatchEvent(new Event('input', {bubbles:true}));
+        return ChatWorkActions.route({text, input, mention:picker, requestedAt:sentAt}, context);
+      };
+      window.activeExample = selector => document.querySelector('[data-plugin-surface="work-automation"]:not(.is-archived)').querySelector(selector);
+      window.selectAutomation = async () => {
+        WorkAutomationSheet.close(true);
+        input.value='/创建自动化'; input.focus();
+        input.dispatchEvent(new Event('input', {bubbles:true}));
+        await new Promise(resolve=>setTimeout(resolve, 30));
+        input.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true}));
+        return picker.action()?.actionId || picker.action()?.id;
+      };void 0;`);
+    const rule = 'DTSTART;TZID=Asia/Shanghai:20261201T090000\nRRULE:FREQ=HOURLY;INTERVAL=2;COUNT=3';
+    const examples = [
+      ['5分钟发一首关于秋天的诗', {every:'once', runAt:'2026-11-20T03:20:00.000Z'}],
+      ['5分钟后发秋天的诗', {every:'once', runAt:'2026-11-20T03:20:00.000Z'}],
+      ['明晚八点半发一首秋天的诗', {every:'once', runAt:'2026-11-21T12:30:00.000Z'}],
+      ['每早七点半提醒我喝水', {every:'daily', atHour:7, atMinute:30}],
+      ['每天下午三点一刻生成日报', {every:'daily', atHour:15, atMinute:15}],
+      ['每周一到周五上午九点发送日报', {every:'weekly', weekdays:[1,2,3,4,5], atHour:9, atMinute:0}],
+      ['每周一、三、五下午四点发送周报', {every:'weekly', weekdays:[1,3,5], atHour:16, atMinute:0}],
+      ['每个周末晚上八点发一首诗', {every:'weekly', weekdays:[6,7], atHour:20, atMinute:0}],
+      ['每个月一号，十五号上午九点发送月报', {every:'monthly', monthDays:[1,15], atHour:9, atMinute:0}],
+      ['每个月最后一天晚上八点生成月报', {every:'monthly', monthDays:[31], monthDayPolicy:'last_day', atHour:20, atMinute:0}],
+      ['每小时第十五分钟检查日志', {every:'hourly', atMinute:15}],
+      ['每小时整点提醒我喝水', {every:'hourly', atMinute:0}],
+      ['这个月25号到30号每天下午给我发一个写日报的提醒',
+        {every:'daily',startDate:'2026-11-25',endDate:'2026-11-30'}, /补充下午/],
+      ['本月二十五号至三十号每天下午三点发日报',
+        {every:'daily',startDate:'2026-11-25',endDate:'2026-11-30',atHour:15,atMinute:0}],
+      ['请在这个月25号到31号每天九点发送日报', {every:'daily',atHour:9,atMinute:0}, /结束日期无效/],
+      ['生成一份巡检摘要\n' + rule, {every:'custom', customRule:rule}],
+      ['每周上午九点发送日报', {every:'weekly', weekdays:[], atHour:9}, /星期/],
+      ['每小时第六十分检查日志', {every:'hourly'}, /分钟/],
+      ['改为每月三十号', {every:'monthly', monthDays:[30], monthDayPolicy:'skip', atHour:20, atMinute:0}],
+    ];
+    for (const [phrase, expected, error] of examples) {
+      await run(phrase, async () => {
+        assert.equal(await js('selectAutomation()'), 'work.automation.create');
+        if (phrase === '改为每月三十号') {
+          assert.ok((await js('sendExample("每个月最后一天晚上八点生成月报")')).accepted);
+        }
+        assert.ok((await js('sendExample(' + JSON.stringify(phrase) + ')')).accepted);
+        const draft = await js('WorkAutomationSheet.capture().proposal');
+        for (const [field, value] of Object.entries(expected)) assert.deepEqual(draft[field], value, field);
+        const before = await js('saves.length');
+        assert.ok(await js('Math.abs(activeExample("[name=assigneeId]").getBoundingClientRect().top - activeExample("[name=modelName]").getBoundingClientRect().top) < 1'));
+        assert.equal(await js('activeExample("[name=every]").value'), expected.every);
+        if (expected.startDate) {
+          assert.equal(await js('activeExample("[name=startDate]").value'), expected.startDate);
+          assert.equal(await js('activeExample("[name=endDate]").value'), expected.endDate);
+        }
+        assert.equal(await js('activeExample("[data-waz-save]").disabled'), Boolean(error));
+        await js('activeExample("[data-waz-save]").click();void 0;');
+        if (error) {
+          assert.match(await js('activeExample("#wazProbe").textContent'), error);
+          assert.equal(await js('saves.length'), before);
+          if (expected.startDate) {
+            assert.equal(await js('activeExample("[name=clockHour]").value'), '');
+            assert.ok((await js('sendExample("三点")')).accepted);
+            assert.equal(await js('activeExample("[name=clockHour]").value'), '15');
+            await js('activeExample("[data-waz-save]").click();void 0;');
+            const saved = await js('saves.at(-1)');
+            assert.equal(await js('saves.length'), before + 1);
+            assert.deepEqual([saved.startDate,saved.endDate,saved.atHour,saved.atMinute],
+              [expected.startDate,expected.endDate,15,0]);
+          }
+          if (phrase.includes('到31号')) {
+            await js(`const end = activeExample('[name=endDate]'); end.value = '2026-11-30';
+              end.dispatchEvent(new Event('change', {bubbles:true})); activeExample('[data-waz-save]').click();void 0;`);
+            assert.equal(await js('saves.length'), before + 1);
+            assert.deepEqual(await js('[saves.at(-1).startDate,saves.at(-1).endDate]'), ['2026-11-25','2026-11-30']);
+          }
+        } else {
+          assert.equal(await js('saves.length'), before + 1);
+          const saved = await js('saves.at(-1)');
+          if (phrase === '5分钟发一首关于秋天的诗') {
+            assert.equal(await js('poemInstruction'), '5分钟后发一首关于秋天的诗');
+            assert.equal(draft.title, '5分钟后发送一首关于秋天的诗');
+            assert.match(saved.note, /5分钟后发送一首关于秋天的诗/);
+            assert.match(saved.note, /配置触发时间为5分钟后/);
+            assert.doesNotMatch(saved.note, /每[5五]分钟/);
+          }
+          for (const [field, value] of Object.entries(expected)) assert.deepEqual(saved[field], value, field);
+        }
+      });
+    }
+    await js('Date.now=originalNow;void 0;');
     report.errors = await js('errors');
     report.ok = report.cases.every(row => row.ok) && !report.errors.length && !report.networkRequests.length;
   }).catch(error => { report.error = String(error.stack || error); }).finally(() => {

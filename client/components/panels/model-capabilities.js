@@ -5,6 +5,7 @@
   const statusNames = { passed: '检测通过', failed: '检测失败', unsupported: '不支持', inconclusive: '未能确认', running: '正在检测', cancelled: '已取消', skipped: '未执行' };
   const sources = { configured: '手动配置', 'legacy-native': '已有配置', verified: '实际检测', unknown: '未确认' };
   const diagnostics = {
+    request_rejected: '服务拒绝了检测请求，原因尚未确认',
     timeout: '服务响应超时，可稍后重试', temporarily_unavailable: '服务暂时不可用，可稍后重试',
     credentials_or_access: '请检查凭据及模型访问权限', model_or_endpoint_missing: '请检查模型 ID 和接口地址',
     capability_not_supported: '服务明确返回不支持此能力', request_not_accepted: '服务未接受检测请求，请检查协议配置',
@@ -90,6 +91,7 @@
   }
   function badgeLabel(kind, value) {
     const translate = text => global.SoduWorkI18n?.translateText?.(text) || text;
+    if (kind === 'recheck') return translate(diagnostics.legacy_recheck_required);
     if (kind === 'verified') return ['supported', 'unsupported'].includes(value)
       ? translate(value === 'supported' ? '上次验证：支持' : '上次验证：不支持') : '';
     const templates = { configured: '手动配置：{0}', 'legacy-native': '已有配置：{0}', latest: '最近检测：{0}' };
@@ -121,7 +123,8 @@
       const attributed = divergent && ['verified', 'configured', 'legacy-native'].includes(value.source);
       const label = attributed ? badgeLabelHtml('b', value.source, value.state)
         : '<b>' + e(knownMessage(states, value.state) || states.unknown) + '</b>';
-      const recent = lastLabel && (divergent || !knownState) ? badgeLabelHtml('small', 'latest', status) : '';
+      const recent = latest?.code === 'legacy_recheck_required' ? badgeLabelHtml('small', 'recheck', latest.code)
+        : lastLabel && (divergent || !knownState) ? badgeLabelHtml('small', 'latest', status) : '';
       return '<span class="md-cap-badge is-' + (value.state === 'supported' ? 'supported' : 'neutral') + '" title="' +
         e(knownMessage(sources, value.source) || sources.unknown) + '">' + names[key] + label + recent +
         (value.conflict ? '<small title="配置与最近检测结果不一致">配置冲突</small>' : '') + '</span>';

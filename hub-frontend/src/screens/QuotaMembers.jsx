@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { translateText as tx, useLocale } from '../i18n.js'
 import { api } from '../api.js'
+import { FilterSelect } from '../FilterControls.jsx'
 import { Icon } from '../ui.jsx'
 import { MemberEditor } from './QuotaEditors.jsx'
 import { usagePercent } from './quota-model.js'
@@ -14,28 +15,34 @@ function statusLabel(quota) {
   return tx('可使用')
 }
 
-export default function QuotaMembers({ config, revision }) {
+export default function QuotaMembers({ config, onConfig, revision }) {
   const locale = useLocale()
   const [q, setQ] = useState(''), [offset, setOffset] = useState(0), [refresh, setRefresh] = useState(0)
+  const [status, setStatus] = useState('active')
   const [page, setPage] = useState({ items: [], total: 0 }), [loading, setLoading] = useState(true), [error, setError] = useState('')
   const [editing, setEditing] = useState(null)
   useEffect(() => {
     let active = true
     setLoading(true); setError('')
     const timer = setTimeout(() => {
-      api.quotaMembers({ q: q.trim(), limit: PAGE_SIZE, offset }).then(next => {
+      api.quotaMembers({ q: q.trim(), limit: PAGE_SIZE, offset, ...(status ? { isActive: status === 'active' } : {}) }).then(next => {
         if (!active) return
         setPage(next); setLoading(false)
       }).catch(e => { if (active) { setError(e.message); setLoading(false) } })
     }, q ? 250 : 0)
     return () => { active = false; clearTimeout(timer) }
-  }, [q, offset, refresh, revision])
+  }, [q, status, offset, refresh, revision])
   const number = value => Number(value || 0).toLocaleString(locale)
   const date = value => value ? new Date(value).toLocaleDateString(locale) : '—'
   return <div className="qm-members">
     <div className="qm-toolbar">
       <label className="qm-search"><Icon name="search" /><input className="f-in" aria-label={tx('搜索姓名或账号')} placeholder={tx('搜索姓名或账号')} value={q} maxLength={100}
         onChange={e => { setQ(e.target.value); setOffset(0) }} /></label>
+      <FilterSelect aria-label={tx('账号状态')} value={status} resetValue="active" onChange={e => { setStatus(e.target.value); setOffset(0) }}>
+        <option value="active">{tx('启用中')}</option>
+        <option value="disabled">{tx('已停用')}</option>
+        <option value="">{tx('全部状态')}</option>
+      </FilterSelect>
       <button className="btn btn-ghost" disabled={loading} onClick={() => setRefresh(value => value + 1)}><Icon name="refresh" />{tx('刷新')}</button>
     </div>
     <p className="qm-help">{tx('按账号统一计量；切换套餐、增加额度或更换设备不会清空当前周期用量。')}</p>
@@ -67,6 +74,6 @@ export default function QuotaMembers({ config, revision }) {
         <span>{Math.floor(offset / PAGE_SIZE) + 1} / {Math.max(1, Math.ceil(page.total / PAGE_SIZE))}</span>
         <button className="btn btn-ghost" aria-label={tx('下一页')} disabled={loading || offset + PAGE_SIZE >= page.total} onClick={() => setOffset(value => value + PAGE_SIZE)}><Icon name="chevron-right" /></button></div>
     </div>
-    {editing && <MemberEditor member={editing} config={config} onClose={() => setEditing(null)} onSaved={() => setRefresh(value => value + 1)} />}
+    {editing && <MemberEditor member={editing} config={config} onConfig={onConfig} onClose={() => setEditing(null)} onSaved={() => setRefresh(value => value + 1)} />}
   </div>
 }

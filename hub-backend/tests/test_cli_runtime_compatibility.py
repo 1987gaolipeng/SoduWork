@@ -113,7 +113,7 @@ class CliRuntimeCompatibilityTests(unittest.TestCase):
 
     def test_node_entry_avoids_windows_shims_and_keeps_arguments_separate(self):
         for key, command in [('kimi', ['acp'])]:
-            with (patch.object(acp_agents.agent_npm_runtime, 'package_entry', return_value='space dir/entry.js'),
+            with (patch('app.services.agent_installation.selected_node_entry', return_value=('space dir/entry.js', '>=22.19.0')),
                   patch.object(acp_agents.agent_npm_runtime, 'node_env', return_value={'ok': True, 'nodePath': 'node dir/node.exe'})):
                 argv = acp_agents.command_argv(key, 'unsafe shim.cmd',
                     acp_agents.run_args('previous-session', 'work'), '.', {'requiredCapabilities': ['terminal']})

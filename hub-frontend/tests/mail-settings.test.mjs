@@ -24,13 +24,14 @@ async function fixture(overrides = {}) {
   } })
   page.render(); await page.flush()
   const button = text => page.nodes(node => node.type === 'button' && node.props.children === text)[0]
-  return { ...page, calls, notices, button }
+  const submit = id => page.act(() => page.nodes(node => node.props.id === id)[0].props.onSubmit({ preventDefault() {} }))
+  return { ...page, calls, notices, button, submit }
 }
 
 test('saved authorization stays write-only and blank preserves it on save', async () => {
   const page = await fixture()
   assert.equal(page.nodes(node => node.type === 'input' && node.props.type === 'password')[0].props.value, '')
-  page.act(() => page.button('保存配置').props.onClick()); await page.flush()
+  page.submit('mail-transport'); await page.flush()
   assert.equal(page.calls[0][1].password, '')
   assert.equal('passwordConfigured' in page.calls[0][1], false)
   assert.equal('ready' in page.calls[0][1], false)
@@ -39,10 +40,10 @@ test('saved authorization stays write-only and blank preserves it on save', asyn
 
 test('test mail uses the explicitly entered recipient and reports queued rather than received', async () => {
   const page = await fixture()
-  assert.equal(page.button('发送测试邮件').props.disabled, true)
+  assert.equal(page.nodes(n => n.props.placeholder === '输入接收测试邮件的地址')[0].props.required, true)
   const input = page.nodes(node => node.type === 'input' && node.props.placeholder === '输入接收测试邮件的地址')[0]
   page.act(() => input.props.onChange({ target: { value: 'receiver@example.com' } }))
-  page.act(() => page.button('发送测试邮件').props.onClick()); await page.flush()
+  page.submit('mail-test'); await page.flush()
   assert.deepEqual(page.calls, [['test', 'receiver@example.com']])
   assert.ok(page.notices.some(text => text.includes('已排队')))
   page.unmount()
@@ -62,7 +63,7 @@ test('126 preset only changes transport and retains operator input', async () =>
   const password = page.nodes(node => node.type === 'input' && node.props.type === 'password')[0]
   page.act(() => password.props.onChange({ target: { value: 'typed-authorization' } }))
   page.act(() => page.button('填入 126 邮箱配置').props.onClick())
-  page.act(() => page.button('保存配置').props.onClick()); await page.flush()
+  page.submit('mail-transport'); await page.flush()
   assert.equal(page.calls[0][1].host, 'smtp.126.com')
   assert.equal(page.calls[0][1].port, 465)
   assert.equal(page.calls[0][1].password, 'typed-authorization')
@@ -72,13 +73,13 @@ test('126 preset only changes transport and retains operator input', async () =>
 
 test('operator fields start empty and cannot save fictitious defaults', async () => {
   const page = await fixture()
-  assert.equal(page.button('保存运营信息').props.disabled, true)
+  assert.equal(page.nodes(node => node.type === 'input' && node.props.maxLength === '120')[0].props.required, true)
   const operator = page.nodes(node => node.type === 'input' && node.props.maxLength === '120')[0]
   assert.ok(operator, 'operator input must enforce the API limit of 120 characters')
   page.act(() => operator.props.onChange({ target: { value: '测试运营主体' } }))
   const inputs = page.nodes(node => node.type === 'input' && node.props.type === 'email')
   page.act(() => inputs.at(-1).props.onChange({ target: { value: 'privacy@example.com' } }))
-  page.act(() => page.button('保存运营信息').props.onClick()); await page.flush()
+  page.submit('mail-legal'); await page.flush()
   assert.deepEqual(page.calls, [['legal', { operatorName: '测试运营主体', contactEmail: 'privacy@example.com' }]])
   page.unmount()
 })
@@ -87,7 +88,7 @@ test('legacy operator settings honor the server edit capability', async () => {
   const page = await fixture({ accountLegal: async () => ({ operatorName: 'Published operator', contactEmail: 'privacy@example.test', canEdit: false }) })
   assert.equal(page.button('保存运营信息').props.disabled, true)
   assert.equal(page.nodes(node => node.type === 'input' && node.props.maxLength === '120')[0].props.disabled, true)
-  page.act(() => page.button('保存运营信息').props.onClick()); await page.flush()
+  page.submit('mail-legal'); await page.flush()
   assert.deepEqual(page.calls, [])
   page.unmount()
 })
@@ -120,7 +121,7 @@ for (const dependency of ['accountLegal', 'mailDeliveries']) test(dependency + '
   const sender = page.nodes(node => node.type === 'input' && node.props.placeholder === 'name@example.com')[0]
   assert.equal(sender.props.value, 'sender@126.com')
   assert.equal(page.button('保存配置').props.disabled, false)
-  page.act(() => page.button('保存配置').props.onClick()); await page.flush()
+  page.submit('mail-transport'); await page.flush()
   assert.equal(page.calls[0][1].username, 'sender@126.com')
   assert.equal(page.calls[0][1].enabled, true)
   assert.equal(page.calls[0][1].password, '')
@@ -131,7 +132,7 @@ test('pending delivery history does not block loading or saving SMTP settings', 
   let resolveHistory
   const page = await fixture({ mailDeliveries: () => new Promise(resolve => { resolveHistory = resolve }) })
   assert.equal(page.button('保存配置').props.disabled, false)
-  page.act(() => page.button('保存配置').props.onClick()); await page.flush()
+  page.submit('mail-transport'); await page.flush()
   assert.equal(page.calls[0][1].username, 'sender@126.com')
   page.unmount(); resolveHistory({ items: [] }); await new Promise(resolve => setImmediate(resolve))
 })
@@ -144,11 +145,11 @@ test('failed SMTP settings read blocks mutation until an explicit successful ret
   } })
   assert.equal(page.button('保存配置').props.disabled, true)
   assert.equal(page.button('填入 126 邮箱配置').props.disabled, true)
-  page.act(() => page.button('保存配置').props.onClick()); await page.flush()
+  page.submit('mail-transport'); await page.flush()
   assert.equal(page.calls.length, 0, 'the handler also rejects saving unknown server configuration')
   page.act(() => page.button('重试').props.onClick()); await page.flush()
   assert.equal(page.button('保存配置').props.disabled, false)
-  page.act(() => page.button('保存配置').props.onClick()); await page.flush()
+  page.submit('mail-transport'); await page.flush()
   assert.equal(page.calls[0][1].username, 'recovered@126.com')
   assert.equal(page.calls[0][1].enabled, true)
   page.unmount()
@@ -162,7 +163,7 @@ test('successful test submission remains acknowledged when refreshing its histor
   } })
   const input = page.nodes(node => node.type === 'input' && node.props.placeholder === '输入接收测试邮件的地址')[0]
   page.act(() => input.props.onChange({ target: { value: 'receiver@example.com' } }))
-  page.act(() => page.button('发送测试邮件').props.onClick()); await page.flush()
+  page.submit('mail-test'); await page.flush()
   assert.deepEqual(page.calls, [['test', 'receiver@example.com']])
   assert.ok(page.notices.some(text => text.includes('已排队')))
   assert.equal(page.nodes(node => node.props.role === 'alert' && node.props.children === 'history temporarily unavailable').length, 1)
@@ -199,7 +200,7 @@ test('Ali enterprise preset preserves the sender and authorization while changin
   page.act(() => password.props.onChange({ target: { value: 'typed-authorization' } }))
   assert.ok(page.button('填入阿里邮箱配置'))
   page.act(() => page.button('填入阿里邮箱配置').props.onClick())
-  page.act(() => page.button('保存配置').props.onClick()); await page.flush()
+  page.submit('mail-transport'); await page.flush()
   assert.equal(page.calls[0][1].host, 'smtp.qiye.aliyun.com')
   assert.equal(page.calls[0][1].port, 465)
   assert.equal(page.calls[0][1].security, 'ssl')

@@ -16,12 +16,13 @@ for (const vector of spec.cases) test('shared probe contract: ' + vector.name, a
       const result = body.messages.find(row => row.role === 'tool');
       if (result) {
         assert.equal(body.stream, spec.policy.followupStream);
-        assert.equal(body.tools, undefined);
+        assert.deepEqual(body.tools, [spec.policy.tool]);
         assert.equal(body.tool_choice, undefined);
-        assert.equal(body.messages.at(-1).content, spec.policy.receiptPrompt);
+        assert.equal(body.messages.at(-1).role, 'tool');
         assert.match(result.content, /^[a-f0-9]{16}$/);
         if (vector.replayedReasoning) assert.equal(body.messages.find(row => row.role === 'assistant').reasoning_content, vector.replayedReasoning);
-        return Response.json(JSON.parse(JSON.stringify(vector.followup).replaceAll('{{receipt}}', result.content)));
+        const choice = JSON.parse(JSON.stringify(vector.followup).replaceAll('{{receipt}}', result.content)).choices[0];
+        return streamEvent(choice.message, choice.finish_reason);
       }
       challenge = body.messages[0].content.match(/value ([a-f0-9]{16})/)[1];
       assert.equal(body.messages[0].content, spec.policy.toolPrompt.replaceAll('{{value}}', challenge));
@@ -114,7 +115,7 @@ test('cached named plain stop text retries auto and confirms only the safe recei
     fetchImpl: async (_url, options) => {
       const body = JSON.parse(options.body); requests.push(body);
       const result = body.messages.find(row => row.role === 'tool');
-      if (result) return Response.json({ choices: [{ message: { content: result.content }, finish_reason: 'stop' }] });
+      if (result) return streamEvent({ content: result.content });
       if (typeof body.tool_choice === 'object') return streamEvent({ content: 'Use automatic tool selection.' });
       return toolStream(body);
     },
@@ -125,7 +126,7 @@ test('cached named plain stop text retries auto and confirms only the safe recei
   assert.equal(typeof requests[0].tool_choice, 'object');
   assert.equal(requests[1].tool_choice, 'auto');
   assert.deepEqual(requests[0].messages, requests[1].messages);
-  assert.equal(requests[2].tools, undefined);
+  assert.deepEqual(requests[2].tools, requests[1].tools);
 });
 
 test('ambiguous text never confirms a tool choice or retries auto again', async () => {
@@ -147,8 +148,7 @@ test('a failed receipt preserves confirmed tool choice after text or HTTP fallba
     const report = await probe.run({ ...conf, compatibility: namedCompatibility }, ['toolCalling'], {
       fetchImpl: async (_url, options) => {
         const body = JSON.parse(options.body); requests.push(body);
-        if (body.messages.some(row => row.role === 'tool')) return Response.json({ choices: [
-          { message: { content: 'unrelated receipt' }, finish_reason: 'stop' }] });
+        if (body.messages.some(row => row.role === 'tool')) return streamEvent({ content: 'unrelated receipt' });
         if (typeof body.tool_choice === 'object') return rejection === 'http'
           ? Response.json({ error: { code: 'unsupported_parameter', param: 'tool_choice' } }, { status: 400 })
           : streamEvent({ content: 'ordinary text' });
@@ -186,7 +186,7 @@ test('named text repair obeys the shared seven-request and two-negotiation limit
         const body = JSON.parse(options.body); requests.push(body);
         if ('max_tokens' in body) return Response.json({ error: { code: 'unsupported_parameter', param: 'max_tokens' } }, { status: 400 });
         const result = body.messages.find(row => row.role === 'tool');
-        if (result) return Response.json({ choices: [{ message: { content: result.content }, finish_reason: 'stop' }] });
+        if (result) return streamEvent({ content: result.content });
         if (body.tools) return typeof body.tool_choice === 'object' ? streamEvent({ content: 'ordinary text' }) : toolStream(body);
         if (body.stream) return streamEvent({ content: 'OK' });
         return Response.json({ choices: [{ message: { content: Array.isArray(body.messages[0].content) ? '582941' : 'OK' }, finish_reason: 'stop' }] });
@@ -230,4 +230,20 @@ test('an absent optional parameter cannot spend a negotiation or alter later str
   assert.equal(requests.length, 2);
   assert.deepEqual(requests[1].stream_options, { include_usage: true });
   assert.equal(report.compatibility.streamOptions, true);
+});
+
+test('omitted continuation control rejection is not retried using cached named policy', async () => {
+  const requests = [];
+  const report = await probe.run({ ...conf, compatibility: namedCompatibility }, ['toolCalling'], {
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body); requests.push(body);
+      if (body.messages.at(-1).role === 'tool') return Response.json({ error: {
+        code: 'unsupported_parameter', param: 'tool_choice' } }, { status: 400 });
+      return toolStream(body);
+    },
+  });
+  assert.equal(report.checks.toolCalling.status, 'inconclusive');
+  assert.equal(report.checks.toolCalling.stage, 'tool_result');
+  assert.equal(report.compatibility.toolChoice, 'named');
+  assert.equal(requests.length, 2);
 });

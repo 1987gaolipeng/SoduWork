@@ -11,6 +11,20 @@ const blank = () => ({ id: '', name: '', description: '', title: '', note: '', e
   retryDelayMinutes: 5, pluginBindingId: '', enabled: true, startDate: '', endDate: '' })
 const capOptions = localeMap(() => ([['browser', '浏览网页'], ['computer', '操作电脑'], ['office', '办公文档']]))
 const rhythm = localeMap(() => ({ hourly: '每小时', daily: '每天', weekly: '每周' }))
+const examples = localeMap(() => ([
+  {
+    id: 'daily-report', name: '团队日报', every: 'daily',
+    note: "根据今天的工作记录生成一份日报，分为已完成、阻碍和明日计划三栏。\n每项已完成工作都要列出对应成果。没有记录的栏目写“暂无记录”。",
+  },
+  {
+    id: 'meeting-actions', name: '会议纪要转待办', every: 'daily',
+    note: "从会议记录中提取已商定的行动项，按任务、负责人和截止日期生成待办表。\n每项任务单列一行。记录未指定的负责人或日期写“待确认”。",
+  },
+  {
+    id: 'weekly-report', name: '团队周报', every: 'weekly',
+    note: "汇总本周的工作记录，按项目列出本周成果、遗留风险和下周计划。\n每项成果注明对应的工作记录，每个风险列出一个跟进动作。",
+  },
+]))
 // Optional locale maps supply employee display and prefill with base-field fallback.
 const localeFields = ['en-US', 'ja-JP', 'ko-KR'].map((locale) => [locale, LOCALES[locale]])
 
@@ -40,6 +54,7 @@ function templateErrors(value, items = []) {
 function Editor({ value, items = [], onChange, onCancel, onSave, busy, conflict, onReload }) {
   const formId = useId()
   const idRef = useRef(null), nameRef = useRef(null)
+  const noteRef = useRef(null), rhythmChosen = useRef(false)
   const startRef = useRef(null), endRef = useRef(null)
   const [touched, setTouched] = useState({})
   const [limitedDates, setLimitedDates] = useState(Boolean(value.startDate || value.endDate))
@@ -53,13 +68,29 @@ function Editor({ value, items = [], onChange, onCancel, onSave, busy, conflict,
   }, [errors.id, errors.name, errors.startDate, errors.endDate])
   const touch = key => setTouched(previous => ({ ...previous, [key]: true }))
   const set = (key, next) => onChange({ ...value, [key]: next })
+  function applyExample(example) {
+    let id = value.id
+    if (!id) {
+      const usedIds = new Set(items.map(item => item.id))
+      id = example.id
+      let suffix = 2
+      while (usedIds.has(id)) id = `${example.id}-${suffix++}`
+    }
+    onChange({ ...value, id, name: value.name || example.name, note: example.note,
+      every: rhythmChosen.current ? value.every : example.every })
+    noteRef.current?.focus()
+  }
   const toggleCap = (key) => set('requiredCapabilities', value.requiredCapabilities.includes(key)
     ? value.requiredCapabilities.filter((x) => x !== key) : [...value.requiredCapabilities, key])
-  return <Modal wide className="at-dialog" icon="activity" title={value.updatedAt ? tx("编辑自动化模板") : tx("新建自动化模板")} onClose={onCancel}
-    foot={<><label className="at-enabled modal-foot-note"><input type="checkbox" checked={value.enabled} onChange={(e) => set('enabled', e.target.checked)} />{tx("发布给员工使用")}</label>
-      <button type="button" className="btn btn-ghost" onClick={onCancel}>{tx("取消")}</button><button type="submit" form={formId} className="btn btn-primary" disabled={busy || conflict}>{busy ? tx("保存中…") : tx("保存模板")}</button></>}>
+  return <Modal draft={{ ...value, requiredCapabilities: [...value.requiredCapabilities].sort() }} wide className="at-dialog" icon="activity" title={value.updatedAt ? tx("编辑自动化模板") : tx("新建自动化模板")} onClose={onCancel}
+    foot={dismiss => <><label className="at-enabled modal-foot-note"><input type="checkbox" checked={value.enabled} onChange={(e) => set('enabled', e.target.checked)} />{tx("发布给员工使用")}</label>
+      <button type="button" className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button type="submit" form={formId} className="btn btn-primary" disabled={busy || conflict}>{busy ? tx("保存中…") : tx("保存模板")}</button></>}>
     {conflict && <div role="alert"><p>{tx("模板已被其他管理员修改。草稿已保留，请加载最新目录并核对后再保存。")}</p><button type="button" className="btn btn-ghost" onClick={onReload}>{tx("加载最新目录，保留草稿")}</button></div>}
-    <form id={formId} className="at-editor" onInvalidCapture={() => setTouched({ id: true, name: true, startDate: true, endDate: true })}
+    <form id={formId} className="at-editor" onInvalidCapture={event => {
+      const section = event.target.closest?.('details')
+      if (section) section.open = true
+      setTouched({ id: true, name: true, startDate: true, endDate: true })
+    }}
       onSubmit={(event) => {
         event.preventDefault()
         if (Object.keys(errors).length) {
@@ -69,6 +100,11 @@ function Editor({ value, items = [], onChange, onCancel, onSave, busy, conflict,
         }
         onSave()
       }}>
+    {!value.updatedAt && !value.note && <fieldset className="at-examples">
+      <legend>{tx("从样例开始")}</legend>
+      {examples.map(example => <button key={example.id} type="button" className="btn btn-ghost"
+        onClick={() => applyExample(example)}>{example.name}</button>)}
+    </fieldset>}
     <div className="at-editor-grid">
       <label><span>{tx("模板标识")}</span><input ref={idRef} name="id" required value={value.id}
         disabled={Boolean(value.updatedAt)} onChange={(e) => { set('id', e.target.value); touch('id') }} onBlur={() => touch('id')}
@@ -86,8 +122,11 @@ function Editor({ value, items = [], onChange, onCancel, onSave, busy, conflict,
         onChange={(e) => set('description', e.target.value)} placeholder={tx("让团队每天自动收到一份日报")} /></label>
       <label className="wide"><span>{tx("生成需求标题")}</span><input maxLength="200" value={value.title}
         onChange={(e) => set('title', e.target.value)} placeholder={tx("每日工作总结")} /></label>
-      <label className="wide"><span>{tx("交给 AI 的工作说明")}</span><textarea required maxLength="8000" rows="5" value={value.note}
-        onChange={(e) => set('note', e.target.value)} placeholder={tx("说明 AI 每次需要完成的工作、交付物和验收要求")} /></label>
+      <label className="wide"><span id={`${formId}-note-label`}>{tx("交给 AI 的工作说明")}</span>
+        <textarea ref={noteRef} required maxLength="8000" rows="5" value={value.note}
+          aria-labelledby={`${formId}-note-label`} aria-describedby={`${formId}-note-hint`}
+          onChange={(e) => set('note', e.target.value)} placeholder={tx("说明 AI 每次需要完成的工作、交付物和验收要求")} />
+        <small className="at-field-hint" id={`${formId}-note-hint`}>{tx("写法示例：把会议记录整理成待办表。每行列出任务、负责人和截止日期，缺失项写“待确认”。")}</small></label>
     </div>
     <LocalesEditor summary={tx("多语言（可选）")} languages={localeFields} value={value}
       onChange={(key, map) => set(key, map)}
@@ -96,9 +135,10 @@ function Editor({ value, items = [], onChange, onCancel, onSave, busy, conflict,
         { key: 'descriptionLocales', label: tx("一句话说明"), maxLength: 240, wide: true },
         { key: 'noteLocales', label: tx("交给 AI 的工作说明"), maxLength: 8000, textarea: true, rows: 3 },
       ]} />
+    <details className="loc-block"><summary>{tx("调度与执行设置")}</summary>
     <div className="at-section"><b>{tx("默认节奏")}</b><div className="at-rhythm">
       {Object.entries(rhythm).map(([key, label]) => <button type="button" key={key}
-        className={value.every === key ? 'on' : ''} onClick={() => set('every', key)}>{label}</button>)}
+        className={value.every === key ? 'on' : ''} onClick={() => { rhythmChosen.current = true; set('every', key) }}>{label}</button>)}
       <label className="at-time"><span>{tx("时")}</span><input type="number" min="0" max="23" value={value.atHour}
         onChange={(e) => set('atHour', Number(e.target.value))} /><i>:</i><input type="number" min="0" max="59" value={value.atMinute}
         onChange={(e) => set('atMinute', Number(e.target.value))} /></label>
@@ -130,6 +170,7 @@ function Editor({ value, items = [], onChange, onCancel, onSave, busy, conflict,
       <label><span>{tx("失败重试")}</span><input className="small" type="number" min="0" max="10" value={value.retryLimit} onChange={(e) => set('retryLimit', Number(e.target.value))} />{tx(" 次")}</label>
       <label><span>{tx("间隔")}</span><input className="small" type="number" min="1" max="1440" value={value.retryDelayMinutes} onChange={(e) => set('retryDelayMinutes', Number(e.target.value))} />{tx(" 分钟")}</label>
     </div></div>
+    </details>
     </form>
   </Modal>
 }

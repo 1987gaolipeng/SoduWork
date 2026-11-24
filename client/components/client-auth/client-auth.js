@@ -202,8 +202,9 @@
 
   function setRecoveryActions(reason) {
     var failed = isConnectionFailure(reason);
-    if (recoveryNode) recoveryNode.hidden = !failed;
-    if (retryButton) retryButton.hidden = !failed;
+    var recheck = failed || reason?.activationRequired === true || reason?.state === 'pending';
+    if (recoveryNode) recoveryNode.hidden = !recheck;
+    if (retryButton) retryButton.hidden = !recheck;
     /* Expand endpoint settings after connection failure to allow correction. */
     if (failed && connectionDetails) connectionDetails.open = true;
   }
@@ -359,7 +360,7 @@
     gate.setAttribute('aria-modal', 'true');
     gate.setAttribute('aria-labelledby', 'soduWorkAuthTitle');
     if (global.EmailAuth) {
-      emailView = global.EmailAuth.mount(gate, { api: api, retry: boot,
+      emailView = global.EmailAuth.mount(gate, { api: api, retry: function () { return boot({ recheckAuth: true }); },
         success: function (result) {
           if (!scheduleLoginReload(result.user)) return false;
           updateIdentity(result.user, result.quota);
@@ -439,7 +440,7 @@
     retryButton.addEventListener('click', function () {
       setBusy(true, '\u6b63\u5728\u91cd\u8bd5\u8fde\u63a5');
       setStatus('\u6b63\u5728\u91cd\u65b0\u8fde\u63a5\u5f53\u524d\u540e\u53f0\u2026', 'working');
-      boot();
+      boot({ recheckAuth: true });
     });
     return gate;
   }
@@ -961,14 +962,14 @@
     }
   }
 
-  async function boot() {
+  async function boot(options) {
     if (booting || !api()) return;
     booting = true;
     createGate();
     setBusy(true, '\u6b63\u5728\u6062\u590d\u767b\u5f55');
     setStatus('\u6b63\u5728\u5b89\u5168\u6062\u590d\u8fd9\u53f0\u7535\u8111\u7684\u767b\u5f55\u72b6\u6001\u2026', 'working');
     try {
-      var result = await api().registerClient();
+      var result = await api().registerClient(options?.recheckAuth === true ? { recheckAuth: true } : undefined);
       if (result && result.ok && result.user) {
         activate(result.user, result.quota);
         void api().clientAuthMe().then(function (fresh) { if (fresh?.user?.id === currentUser?.id) updateIdentity(fresh.user, fresh.quota); }).catch(function () {});

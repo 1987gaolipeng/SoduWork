@@ -44,6 +44,14 @@ function payloadOf(source) {
   try { return JSON.parse(source.slice(start)); } catch (error) { return null; }
 }
 
+function classificationText(source) {
+  const envelope = payloadOf(source);
+  if (!envelope || typeof envelope !== 'object') return source;
+  // Correlation labels are opaque metadata, not provider error semantics.
+  return source.slice(0, source.indexOf('{')) + JSON.stringify(envelope,
+    (key, value) => ['diagnosticId', 'upstreamRequestId'].includes(key) ? undefined : value);
+}
+
 function statusOf(source, payload, error) {
   const explicit = [error, payload].filter(Boolean)
     .flatMap(item => [item.status, item.statusCode, item.code]).map(Number)
@@ -53,20 +61,54 @@ function statusOf(source, payload, error) {
   return Number(match && match.slice(1).find(Boolean) || LEGACY_CAPACITY_STATUS.get(source) || 0);
 }
 
+const NEUTRAL_403 = /^(?:(?:http\s+)?403|(?:(?:http\s+)?403\b\s*[:：-]?\s*)?(?:forbidden|request[ _-]rejected|request[ _-]denied|upstream_error|status code \(no body\)|模型请求被拒绝)[.!。]?)$/i;
+function neutralForbiddenBody(payload) {
+  if (!payload || Array.isArray(payload)) return false;
+  const wrapped = Object.hasOwn(payload, 'error');
+  if (wrapped && Object.keys(payload).some(k => !['error', 'request_id', 'requestId'].includes(k))) return false;
+  const err = wrapped ? payload.error : payload;
+  if (typeof err === 'string') return NEUTRAL_403.test(err.trim());
+  if (!err || typeof err !== 'object' || Array.isArray(err)) return false;
+  let matched = false;
+  for (const [key, field] of Object.entries(err)) {
+    if (key === 'request_id' || key === 'requestId') continue;
+    if (!['status', 'statusCode', 'code', 'type', 'message', 'detail'].includes(key)) return false;
+    if (field == null) continue;
+    if (field !== 403 && !(typeof field === 'string' && NEUTRAL_403.test(field.trim()))) return false;
+    matched = true;
+  }
+  return matched;
+}
+
+function neutralForbidden(value, raw) {
+  if (value && typeof value === 'object' && !(value instanceof Error)) return neutralForbiddenBody(value);
+  if (value instanceof Error && value.error !== undefined && !neutralForbiddenBody({ error: value.error })) return false;
+  if (NEUTRAL_403.test(raw)) return true;
+  // SDK strings may prefix a JSON envelope with a status. Read the whole body.
+  const body = raw.replace(/^(?:http\s+)?403\b\s*[:：-]?\s*/i, '');
+  if (!body.startsWith('{')) return false;
+  try { return neutralForbiddenBody(JSON.parse(body)); } catch { return false; }
+}
+
 function describe(value, afterToolResult = false) {
   const raw = textOf(value).trim();
+  const source = classificationText(raw);
+  // The Hub issues an opaque correlation token; provider headers/bodies are
+  // never copied into chat. SDKs may retain only this fixed message marker.
+  const diagnosticId = raw.match(/\[soduwork-trace:([a-f0-9]{32})\]/)?.[1] || '';
   const payload = value && typeof value === 'object' ? value : payloadOf(raw);
   const error = payload && payload.error && typeof payload.error === 'object'
     ? payload.error : payload;
-  const quota = require('../../core/token-quota').detail(payload || raw);
+  const quota = require('../../core/token-quota').detail(
+    payload instanceof Error ? { ...payload, message: source } : payload || source);
   if (quota) return { raw, payload, type: 'quota', status: 403, proxy: true, transient: false,
     retryable: false, code: quota.code, quota: quota.quota,
     publicText: '当前 AI 使用额度暂不可用，请查看额度详情' };
   const type = String(error && error.type || '');
-  const status = statusOf(raw, payload, error);
+  const status = statusOf(source, payload, error);
   const upstream = String(error && error.upstream || '');
-  const combined = [raw, String(error && error.message || ''), upstream].join(' ');
-  const proxy = /soduwork(?:_work)?_proxy_error/i.test(type + ' ' + raw);
+  const combined = [source, classificationText(String(error && error.message || '')), upstream].join(' ');
+  const proxy = /soduwork(?:_work)?_proxy_error/i.test(type + ' ' + source);
   const providerCode = String(error?.providerCode || error?.code || '') === '1113' ||
     /供应商错误码\s*[:：]?\s*1113\b/.test(combined) ? '1113' : '';
   const billing = Boolean(providerCode) || /upstream_billing_error|billing_required|insufficient_quota|insufficient_balance|billing_hard_limit_reached|余额不足|计费额度不可用/i.test(combined);
@@ -79,6 +121,7 @@ function describe(value, afterToolResult = false) {
     [400,403,404,413,422].includes(status) || (status === 401 && !authExpired);
   const retryable = authExpired || (!permanent && (transient || proxy && status === 0));
 
+  let genericForbidden = false, hubGenericForbidden = false;
   let publicText = '';
   const privateResponse = PRIVATE_RESPONSE_RE.test(raw) || Boolean(payload && !(payload instanceof Error));
   if (billing || outputLimit || proxy || status || transient || privateResponse) {
@@ -87,14 +130,24 @@ function describe(value, afterToolResult = false) {
         '；请检查供应商账单、API Key 类型和接口地址';
     } else if (outputLimit) {
       publicText = OUTPUT_LIMIT_MESSAGE;
+    } else if ([400, 422].includes(status) && error?.code === 'thinking_disabled_unsupported') {
+      publicText = '该模型不支持关闭思考；请在模型高级设置把“思考能力”改为“始终开启”后重试';
     } else if (/context_length_exceeded|context length exceeded|prompt (?:is )?too long/i.test(combined)) {
       publicText = '当前上下文超过模型容量，历史和本轮输入已保留';
     } else if (IMAGE_REJECTION_RE.test(combined)) {
       publicText = '当前模型不接受图片输入，请切换支持图片的模型或启用视觉适配';
     } else if (status === 403) {
+      const classifiedCode = error?.code && !['403', 'forbidden', 'request_rejected', 'upstream_error'].includes(String(error.code).toLowerCase());
+      const specific = /(?:credential|api[ _-]?key|unauthori[sz]ed|permission|not (?:allowed|authori[sz]ed)|access denied|authentication|denied by policy|(?:invalid|expired|missing)[ _-](?:token|signature)|unsupported|rate[ _-]?limit|quota|balance|billing|model[_ -]not[_ -]found|insufficient|content[_ -]filter|凭据|密钥|权限|配额|额度|余额|无权|未授权|安全策略|策略拦截)/i;
+      const notice = String(error?.message || source);
+      hubGenericForbidden = /^(?:403\s+)?HTTP 403：模型请求被拒绝 \[soduwork-refusal:generic\] \[soduwork-trace:[a-f0-9]{32}\](?: Retry after [\d.]+ seconds\.)?$/i.test(notice) &&
+        (!error?.refusalCategory || error.refusalCategory === 'generic');
+      genericForbidden = !classifiedCode && !specific.test(combined) &&
+        (hubGenericForbidden || neutralForbidden(value, raw));
       publicText = afterToolResult ? '工具已完成，请求模型继续生成时被拒绝' : '模型请求被拒绝';
     } else if (status === 401) {
-      publicText = '模型服务拒绝了当前凭据或模型权限';
+      publicText = authExpired ? '模型服务拒绝了当前凭据或模型权限' :
+        '模型服务拒绝了当前凭据或模型权限。个人服务请在「我的模型」检查个人 Key，企业服务请联系管理员核对模型授权';
     } else if (status === 404) {
       publicText = '模型服务地址或模型不存在';
     } else if (status === 429) {
@@ -106,7 +159,11 @@ function describe(value, afterToolResult = false) {
     }
     if (status) publicText += '（HTTP ' + status + '）';
   }
+  if (publicText && diagnosticId) publicText += ' [soduwork-trace:' + diagnosticId + ']';
   return { raw, payload, type, status, proxy, transient, authExpired, retryable, publicText,
+    ...(genericForbidden ? { genericForbidden: true } : {}),
+    ...(genericForbidden && hubGenericForbidden ? { hubGenericForbidden: true } : {}),
+    ...(diagnosticId ? { diagnosticId } : {}),
     ...(billing ? { code: 'upstream_billing_error', providerCode } : {}),
     ...(outputLimit ? { code: 'output_token_limit_exceeded' } : {}) };
 }

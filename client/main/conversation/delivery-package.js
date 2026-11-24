@@ -51,7 +51,43 @@ function dependencyText(bytes, name) {
   }
   return bytes.toString('utf8');
 }
+// Keep the original file for export. Only hide HTML comments from the dependency scanners.
+function htmlDependencyText(text) {
+  if (!text.includes('<!--')) return text;
+  const markup = /<!--|<([a-z][\w:.-]*)(?=[\s/>])/gi;
+  const tagEnd = /"[^"]*"|'[^']*'|>/g;
+  const commentEnd = /--!?>/g;
+  const parts = [];
+  let start = 0, match;
+  while ((match = markup.exec(text))) {
+    if (!match[1]) {
+      commentEnd.lastIndex = markup.lastIndex;
+      const empty = /^-?>/.exec(text.slice(markup.lastIndex, markup.lastIndex + 2));
+      let end = text.length;
+      if (empty) end = markup.lastIndex + empty[0].length;
+      else if (commentEnd.test(text)) end = commentEnd.lastIndex;
+      parts.push(text.slice(start, match.index), ' ');
+      start = markup.lastIndex = end;
+      continue;
+    }
+    // A comment opener inside an attribute or raw-text element is literal.
+    tagEnd.lastIndex = markup.lastIndex;
+    let token;
+    do { token = tagEnd.exec(text); } while (token && token[0] !== '>');
+    if (!token) break;
+    markup.lastIndex = tagEnd.lastIndex;
+    const tag = match[1].toLowerCase();
+    if (/^(?:script|style|textarea|title|xmp|iframe|noembed|noframes)$/.test(tag)) {
+      const close = new RegExp('</' + tag + '(?=[\\s/>])[^>]*>', 'ig');
+      close.lastIndex = markup.lastIndex;
+      if (!close.test(text)) break;
+      markup.lastIndex = close.lastIndex;
+    }
+  }
+  return parts.length ? parts.join('') + text.slice(start) : text;
+}
 function references(text, extension, includeExternal = false) {
+  if (/^\.html?$/.test(extension)) text = htmlDependencyText(text);
   const result = [];
   const collect = pattern => { for (const m of text.matchAll(pattern)) result.push(m[1]); };
   if (/^\.(?:html?|svg)$/.test(extension)) {
@@ -74,7 +110,12 @@ function references(text, extension, includeExternal = false) {
     collect(/\b(?:import|export)\s+(?:[^;\n]*?\s+from\s*)?["']([^"']+)["']/g);
     collect(/\b(?:import|fetch|Worker)\s*\(\s*["']([^"']+)["']/g);
   }
-  if (/^\.(?:md|markdown)$/.test(extension)) collect(/!?\[[^\]]*\]\(\s*<?([^\s)>]+)>?(?:\s+[^)]*)?\)/g);
+  if (/^\.(?:md|markdown)$/.test(extension)) {
+    const markdown = require('../../core/markdown');
+    markdown.walkTokens(markdown.lexer(text), token => {
+      if (token.type === 'link' || token.type === 'image') result.push(token.href);
+    });
+  }
   return [...new Set(result)].filter(v => v && (includeExternal || !/^(?:[a-z][\w+.-]*:|\/\/|#)/i.test(v)));
 }
 async function prepare(session, ids, options = {}) {

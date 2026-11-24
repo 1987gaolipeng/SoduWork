@@ -11,10 +11,14 @@ os.environ["AUTH_SECRET"] = "memory-record-test-signing-key-not-for-production"
 import unittest
 from types import SimpleNamespace
 
+from fastapi import FastAPI, HTTPException
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from app import models
-from app.db import Base
+from app.api.memory_records import router
+from app.db import Base, get_session
+from app.deps import current_client
 from app.memory_record_models import MemoryRecord
 from app.services import memory_records as svc
 
@@ -98,12 +102,73 @@ class MemoryRecordTests(unittest.IsolatedAsyncioTestCase):
             })
             created = await svc.create(session, self.client_a, body)
             rid = created["item"]["id"]
-            with self.assertRaises(Exception):
-                await svc.delete(session, self.client_b, rid)
-            result = await svc.delete(session, self.client_a, rid)
+            revision = created["item"]["revision"]
+            with self.assertRaises(HTTPException) as foreign:
+                await svc.delete(session, self.client_b, rid, revision)
+            self.assertEqual(foreign.exception.status_code, 404)
+            result = await svc.delete(session, self.client_a, rid, revision)
             self.assertEqual(result, {"ok": True})
-            with self.assertRaises(Exception):
+            with self.assertRaises(HTTPException) as missing:
                 await svc.get(session, self.client_a, rid)
+            self.assertEqual(missing.exception.status_code, 404)
+
+    async def test_delete_respects_the_revision_seen_by_the_caller(self):
+        app = FastAPI()
+        app.include_router(router)
+
+        async def isolated_session():
+            async with self.sessions() as session:
+                yield session
+
+        app.dependency_overrides[get_session] = isolated_session
+        app.dependency_overrides[current_client] = lambda: self.client_a
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://fixture.test") as http:
+            response = await http.post("/api/v1/memories", json={
+                "key": "shared-note", "title": "Original", "fields": {"summary": "first"}, "confirmed": True,
+            })
+            self.assertEqual(response.status_code, 200, response.text)
+            original = response.json()["item"]
+            url = "/api/v1/memories/" + original["id"]
+            response = await http.put(url, json={
+                "title": "Edited", "fields": {"summary": "second"}, "confirmed": True,
+                "revision": original["revision"],
+            })
+            self.assertEqual(response.status_code, 200, response.text)
+            edited = response.json()["item"]
+
+            stale = await http.delete(url, params={"revision": original["revision"]})
+            self.assertEqual(stale.status_code, 409, stale.text)
+            self.assertEqual((await http.delete(url, params={"revision": 0})).status_code, 422)
+            self.assertEqual((await http.get(url)).json()["item"], edited)
+
+            deleted = await http.delete(url, params={"revision": edited["revision"]})
+            self.assertEqual(deleted.status_code, 200, deleted.text)
+            self.assertEqual((await http.get(url)).status_code, 404)
+
+            legacy = await http.post("/api/v1/memories", json={
+                "key": "legacy-note", "title": "Legacy", "fields": {"summary": "old client"}, "confirmed": True,
+            })
+            self.assertEqual(legacy.status_code, 200, legacy.text)
+            legacy_url = "/api/v1/memories/" + legacy.json()["item"]["id"]
+            self.assertEqual((await http.delete(legacy_url)).status_code, 200)
+            self.assertEqual((await http.get(legacy_url)).status_code, 404)
+
+    async def test_delete_checks_the_stored_revision_even_with_a_cached_record(self):
+        async with self.sessions() as reader, self.sessions() as writer:
+            item = (await svc.create(reader, self.client_a, svc.MemoryWrite(
+                key="cached-note", title="Original", fields={"summary": "first"}, confirmed=True,
+            )))["item"]
+            cached = await svc.get(reader, self.client_a, item["id"])
+            await reader.commit()
+            edited = await svc.edit(writer, self.client_a, item["id"], svc.MemoryPatch(
+                title="Edited", fields={"summary": "second"}, confirmed=True, revision=cached.revision,
+            ))
+            self.assertLess(cached.revision, edited["item"]["revision"])
+            with self.assertRaises(HTTPException) as conflict:
+                await svc.delete(reader, self.client_a, item["id"])
+            self.assertEqual(conflict.exception.status_code, 409)
+            saved = await svc.get(reader, self.client_a, item["id"])
+            self.assertEqual(svc.view(saved, True), edited["item"])
 
     async def test_scope_requires_opaque_key(self):
         with self.assertRaises(Exception):

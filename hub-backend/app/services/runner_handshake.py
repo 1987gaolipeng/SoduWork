@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 from .runner_identity_error import RunnerIdentityConflict
+from .runner_connection_status import RunnerAuthorizationRejected
 
 
 HELLO_TIMEOUT_S = 30.0
@@ -33,6 +34,8 @@ async def negotiate(ws, send, payload: dict, *, timeout: float = HELLO_TIMEOUT_S
             if op == "bye":
                 if message.get("code") == RunnerIdentityConflict.code:
                     raise RunnerIdentityConflict()
+                if message.get("code") == "AUTH_REQUIRED":
+                    raise RunnerAuthorizationRejected("后台拒绝了执行机授权")
                 raise ConnectionError(str(message.get("error") or "后台拒绝了执行机连接"))
             # Queue early recovery commands from older Hubs and process them in order after confirmation.
             prefetched.append(message)

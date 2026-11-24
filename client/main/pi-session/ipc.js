@@ -71,6 +71,7 @@ function _send(win, handle, touched, snapshot, includeSnapshot, presenceSnapshot
   const safePluginAuthorization = includeSnapshot && typeof eventPublication.pluginAuthorization === 'function'
     ? eventPublication.pluginAuthorization(touched?.pluginAuthorization) : undefined;
   try {
+    const presenceRow = typeof handle.historyRow === 'function' ? handle.historyRow(presenceSnapshot || snapshot) : null;
     win.webContents.send('pi-session-event', {
       ref: handle.ref, sessionId: handle.sessionId,
       kind: touched && touched.kind,
@@ -81,8 +82,8 @@ function _send(win, handle, touched, snapshot, includeSnapshot, presenceSnapshot
       ...(includeSnapshot ? require('../../core/token-quota').fields(touched) : {}),
       ...(safePluginAuthorization ? { pluginAuthorization: safePluginAuthorization } : {}),
       snapshot: includeSnapshot ? _contextSnapshot(handle, snapshot) : null,
-      presence: conversationTitles.decorate(_app, typeof handle.historyRow === 'function'
-        ? { ...handle.historyRow(presenceSnapshot || snapshot), ...(handle.requirementContext ? { requirementContext: handle.requirementContext } : {}) } : null),
+      presence: conversationTitles.decorate(_app, presenceRow
+        ? { ...presenceRow, ...(handle.requirementContext ? { requirementContext: handle.requirementContext } : {}) } : null),
       ...(handle.requirementContext ? { requirementContext: handle.requirementContext } : {}),
       taskId: String(touched && touched.taskId || snapshot && snapshot.execution && snapshot.execution.turnQueue && snapshot.execution.turnQueue.activeTaskId || ''),
       taskTitle: String(handle.taskTitle || ''),
@@ -261,6 +262,11 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       };
       return Reflect.get(target, property);
     },
+  });
+  const firstTurnTitle = require('../conversation/first-turn-title').create({
+    app, identityOf: sendIdentityOf || identityOf, authorizeAI,
+    isCurrent: handle => session.get(handle.ref) === handle && !_cloudHandoff.guard(handle) &&
+      !session.isArchived(app, handle.sessionId),
   });
   _deliverySync = require('../conversation/local-delivery-sync').create({
     notify: handle => _push(BrowserWindow, handle, { kind: 'delivery-sync' }, handle.snapshot()) });
@@ -920,6 +926,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         appRequest?.assertActive();
         const reply = _openReply(opened.session, { resumed: !!resume, seeded: opened.seeded || 0 });
         accessConsent?.commit();
+        if (!resume && !opts.sessionTitle && !spec.taskRef && !automationContext && !appRequest &&
+            !appPluginId && !opts.nativeRelay && !opened.seeded) firstTurnTitle.enroll(opened.session);
         return reply;
       } catch (error) {
         await closeFailedOpen(opened.session);
@@ -1171,6 +1179,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       try { await rawOptions.nativeRelayGuard(); }
       catch (error) { return { ok: false, accepted: false, reason: String(error.message || error) }; }
     }
+    const titleRequest = !workflowTurn && !taskId && !automationTurn && !appRequest && !rawOptions?.nativeRelayGuard
+      ? firstTurnTitle.prepare(s, text) : null;
     const submitted = workflowTurn || (typeof s.submit === 'function'
       ? await s.submit(text, staged.files, sendOptions)
       : { accepted: true, queued: false, completion: s.send(text, staged.files, sendOptions) });
@@ -1178,6 +1188,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       if (taskTurn?.afterTurn) await taskTurn.afterTurn('stopped').catch(() => {});
       return submitted.result || { ok: false, reason: '这条消息没有被接收' };
     }
+    if (!submitted.queued) void firstTurnTitle.accepted(s, titleRequest);
     if (observe) observe(Promise.resolve(submitted.completion));
     Promise.resolve(submitted.completion).then((r) => {
       if (!r || !r.ok) _publish(BrowserWindow, s, {

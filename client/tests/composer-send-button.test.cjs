@@ -88,6 +88,41 @@ test('chat composer markup has no second stop button', () => {
   assert.match(source, /id="nchatSend"/);
 });
 
+test('an unavailable model disables send with guidance but never disables stop', () => {
+  const send = { classList: { toggle() {} }, setAttribute() {} };
+  const root = { dataset: { modelCatalogBlocked: 'true', modelCatalogReason: 'Reload the model list' },
+    querySelector: id => id === '#nchatSend' ? send : { value: 'Preserved draft' } };
+  window.ChatTools.paintSendButton(root, false, null);
+  assert.equal(send.disabled, true);
+  assert.equal(send.title, 'Reload the model list');
+  window.ChatTools.paintSendButton(root, true, null);
+  assert.equal(send.disabled, false);
+  assert.equal(send.title, '停止生成');
+  root.dataset.modelCatalogBlocked = 'false';
+  window.ChatTools.paintSendButton(root, false, null);
+  assert.equal(send.disabled, false);
+  assert.equal(send.title, '发送');
+});
+
+test('keyboard submission preserves the draft while model loading blocks the button', async () => {
+  const source = read('components/panels/chat-session-controller.js');
+  const notices = [], input = { value: 'Preserved draft' };
+  const window = { petSay: message => notices.push(message) };
+  vm.runInNewContext(source, { window });
+  let preflights = 0;
+  const controller = window.ChatSessionController.create({
+    _mount: () => ({ querySelector: () => input }),
+    _composerControls: {
+      modelCatalogState: () => ({ blocked: true, reason: 'Reload the model list' }),
+      waitForAccess: () => { preflights++; throw Error('Must not begin sending'); },
+    },
+  });
+  assert.equal(await controller._sendCore(), false);
+  assert.equal(preflights, 0);
+  assert.deepEqual(notices, ['Reload the model list']);
+  assert.equal(input.value, 'Preserved draft');
+});
+
 test('all work composers share compact circular geometry, including task conversations', () => {
   const css = read('components/panels/work-composer.css');
   assert.match(css, /\.work-composer \.wc-send\{width:30px;height:30px;padding:0;border-radius:50%/);

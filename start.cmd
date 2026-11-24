@@ -1,9 +1,14 @@
 @echo off
 setlocal
+set "SODUWORK_PREVIOUS_CP="
+for /f "tokens=2 delims=:" %%a in ('chcp 2^>nul') do set "SODUWORK_PREVIOUS_CP=%%a"
+if defined SODUWORK_PREVIOUS_CP chcp 65001 >nul 2>nul
+if not defined PYTHONUTF8 set "PYTHONUTF8=1"
+if not defined PYTHONIOENCODING set "PYTHONIOENCODING=utf-8"
 cd /d "%~dp0"
-where py >nul 2>nul
+where py <nul >nul 2>nul
 if errorlevel 1 goto python
-py -3.12 --version >nul 2>nul
+py -3.12 --version <nul >nul 2>nul
 if errorlevel 1 goto py_latest
 py -3.12 start.py %*
 goto finished
@@ -11,7 +16,7 @@ goto finished
 py -3 start.py %*
 goto finished
 :python
-where python >nul 2>nul
+where python <nul >nul 2>nul
 if errorlevel 1 goto missing
 python start.py %*
 goto finished
@@ -31,4 +36,5 @@ goto check_pause
 :pause_on_error
 pause
 :done
+if defined SODUWORK_PREVIOUS_CP chcp %SODUWORK_PREVIOUS_CP% >nul 2>nul
 exit /b %SODUWORK_START_EXIT%

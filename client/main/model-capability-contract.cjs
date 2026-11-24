@@ -20,17 +20,24 @@ function compatibility(raw = {}) {
   };
 }
 function publicEvidence(evidence) {
-  if (!evidence || evidence.reportVersion !== 1) return evidence;
+  if (!evidence || evidence.reportVersion === 3) return evidence;
+  // v2 proved tool emission but never streaming continuation after a receipt.
+  // Preserve its other checks and explicit unsupported results.
   const project = rows => Object.fromEntries(Object.entries(rows || {}).map(([key, check]) => [key,
-    ['toolCalling', 'streaming'].includes(key) && conclusive(check)
+    (evidence.reportVersion === 2 ? key === 'toolCalling' && check?.status === 'passed'
+      : ['toolCalling', 'streaming'].includes(key) && conclusive(check))
       ? { ...check, status: 'inconclusive', code: 'legacy_recheck_required' } : check]));
-  return { ...evidence, checks: project(evidence.checks),
-    ...(evidence.verifiedChecks ? { verifiedChecks: project(evidence.verifiedChecks) } : {}) };
+  const checks = project(evidence.checks), verified = project(evidence.verifiedChecks);
+  for (const [key, check] of Object.entries(verified)) {
+    if (check?.code === 'legacy_recheck_required' && !checks[key]) checks[key] = check;
+  }
+  return { ...evidence, checks,
+    ...(evidence.verifiedChecks ? { verifiedChecks: Object.fromEntries(Object.entries(verified).filter(([, check]) => conclusive(check))) } : {}) };
 }
 function evidenceChecks(evidence) {
   evidence = publicEvidence(evidence);
   if (!evidence || evidence.apiFamily && evidence.apiFamily !== API_FAMILY) return {};
-  return evidence.verifiedChecks || Object.fromEntries(Object.entries(evidence.checks || {}).filter(([, value]) => conclusive(value)));
+  return Object.fromEntries(Object.entries(evidence.verifiedChecks || evidence.checks || {}).filter(([, value]) => conclusive(value)));
 }
 function profile(config = {}, evidence) {
   evidence = publicEvidence(evidence);
@@ -76,7 +83,7 @@ function mergeEvidence(previous, next) {
     }
     verifiedChecks[key] = value;
   }
-  return { ...next, reportVersion: 2, apiFamily: next.apiFamily || API_FAMILY, checks, verifiedChecks, imageInputRejectedSincePass,
+  return { ...next, reportVersion: 3, apiFamily: next.apiFamily || API_FAMILY, checks, verifiedChecks, imageInputRejectedSincePass,
     compatibility: compatibility({ ...(same ? previous.compatibility : {}), ...next.compatibility }),
     reasoningStreamReported: Boolean(next.reasoningStreamReported || same && previous.reasoningStreamReported) };
 }

@@ -93,6 +93,7 @@ async def check_saved(body, session, client=None, *, request=None, admin_binding
     stored = False
     try:
         result = await probe.run(conf, list(dict.fromkeys(checks)))
+        checks_passed = all(result["checks"][key]["status"] == "passed" for key in checks)
         session.info.clear()
         session.expire_all()
         client = await _revalidate_principal(session, client_binding, admin_binding, request)
@@ -113,7 +114,7 @@ async def check_saved(body, session, client=None, *, request=None, admin_binding
     else:
         await client_domain_events.device_changed(client, "models")
     fields = capabilities.runtime_fields(current.get("config") or {}, result)
-    return {"ok": all(item["status"] == "passed" for item in result["checks"].values()),
+    return {"ok": checks_passed,
             **result, **fields, "runtimeRevision": capabilities.runtime_revision(revision, fields)}
 
 

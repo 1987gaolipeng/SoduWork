@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const segments = require('../conversation/runtime-segments');
+const titles = require('../conversation/titles');
 const windowed = require('../pi-session/snapshot-window');
 const clone = value => JSON.parse(JSON.stringify(value));
 const nativeSource = require('../conversation/native-agent-source.cjs');
@@ -60,6 +61,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
   let prefix = restored?.prefix || { messages: [], tools: [] }, persistError = '';
   const listeners = new Set(), overlays = Object.create(null), methods = new Map();
   const publicId = restored?.id || initial.sessionId, publicRef = options.ref || initial.ref;
+  let generatedTitle = options.app?.getPath && titles.read(options.app, publicId)?.generatedTitle;
   // UI/service decorations live on the conversation, not the disposable native segment.
   overlays.ui = initial.ui || {};
   const originAdapter = restored?.originAdapter || initial.adapterId;
@@ -234,13 +236,20 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
     uiSnapshot: value => record ? windowed.limitSnapshot(snapshot(), value) :
       { ...nativeSource.snapshot(raw.uiSnapshot?.(value) || windowed.limitSnapshot(snapshot(), value), raw.adapterId), runtimeSwitching: switching },
     on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    applyGeneratedTitle(title) {
+      generatedTitle = title;
+      emit({ kind: 'renamed' });
+    },
     inFlight: () => switching || Boolean(raw.inFlight?.()),
     historyRow(s) {
       const current = raw.historyRow?.(s);
-      return { ...current, id: publicId, ref: publicRef,
+      if (!current && (!record || (!raw.taskIds?.length && !segments.hasHistory(record)))) return null;
+      const base = current || { ...segments.row(record), count: (prefix.messages || []).length };
+      return { ...base, id: publicId, ref: publicRef,
         usedHarnesses: harnesses.merge(harnesses.fromRecord(record),
           current?.usedHarnesses || harnesses.fromSnapshot(raw.snapshot(), raw.adapterId)),
-        ...(record ? { title: segments.title(record) || current?.title || '' } : {}), adapterId: raw.adapterId };
+        ...(record ? { title: segments.title(record) || current?.title || '' } : {}),
+        ...(generatedTitle ? { title: generatedTitle } : {}), adapterId: raw.adapterId };
     },
     async close() { closed = true; unsub?.(); listeners.clear(); overlays.ui?.memorySubscription?.();
       await switchingCompletion;

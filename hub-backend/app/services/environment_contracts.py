@@ -36,22 +36,27 @@ def _contains_secret(value, path: str = "") -> str:
     return ""
 
 
+class InvalidRunnerSelector(ValueError):
+    """A selector contains an invalid field or an unknown Runner tag."""
+
+
 def _selector(value) -> dict:
-    raw = dict(value or {}) if isinstance(value, dict) else {}
-    tags = []
-    for item in raw.get("tags") or []:
-        tag = _text(item, 40).lower()
-        if tag and tag not in tags:
-            tags.append(tag)
-    runner_ids = []
-    for item in raw.get("runnerIds") or []:
-        runner_id = _text(item, 80)
-        if runner_id and runner_id not in runner_ids:
-            runner_ids.append(runner_id)
-    out = {"tags": tags[:20]}
-    if runner_ids:
-        out["runnerIds"] = runner_ids[:20]
-    return out
+    if value is not None and not isinstance(value, dict):
+        raise InvalidRunnerSelector("runnerSelector 必须是对象")
+    raw = value or {}
+    selector = {"tags": []}
+    for key, limit in (("tags", 40), ("runnerIds", 80)):
+        items = raw.get(key, [])
+        if not isinstance(items, list) or any(
+            not isinstance(item, str) or not 1 <= len(item.strip()) <= limit for item in items
+        ):
+            raise InvalidRunnerSelector(f"runnerSelector.{key} 必须是非空字符串组成的数组")
+        values = list(dict.fromkeys(item.strip().lower() if key == "tags" else item.strip() for item in items))
+        if len(values) > 20:
+            raise InvalidRunnerSelector(f"runnerSelector.{key} 最多允许 20 项")
+        if values:
+            selector[key] = values
+    return selector
 
 
 def promotion_policy(value) -> dict:
@@ -98,6 +103,25 @@ def _headers(value) -> dict:
     return out
 
 
+class InvalidHealthCheck(ValueError):
+    """Invalid input while saving an environment or target health check."""
+
+
+def _check_integer(raw: dict, field: str, index: int, default: int) -> int:
+    value = raw.get(field)
+    # Keep existing defaults for omitted, blank and numeric zero values.
+    if value is None or value == "" or (type(value) in (int, float) and value == 0):
+        return default
+    if type(value) is int or (isinstance(value, float) and value.is_integer()):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            pass
+    raise InvalidHealthCheck(f"第 {index} 条探活检查的 {field} 必须是整数")
+
+
 def _checks(value) -> list[dict]:
     """Resolve deployment assertions shared by Runner-local and adapter-based publication.
     Configure each assertion with its environment and deployment entry point rather than
@@ -105,12 +129,16 @@ def _checks(value) -> list[dict]:
     intended change was deployed; support request methods, headers, bodies, and
     contains/notContains response checks."""
     out = []
-    for raw in (value or [])[:20]:
+    if value is None:
+        return out
+    if not isinstance(value, list):
+        raise InvalidHealthCheck("healthChecks 必须是数组")
+    for index, raw in enumerate(value[:20], start=1):
         if not isinstance(raw, dict):
-            continue
+            raise InvalidHealthCheck(f"第 {index} 条探活检查必须是对象")
         kind = _text(raw.get("type"), 24).lower()
         name = _text(raw.get("name"), 80) or ("HTTP 探活" if kind == "http" else "命令检查")
-        timeout = min(120, max(1, int(raw.get("timeoutSeconds") or 15)))
+        timeout = min(120, max(1, _check_integer(raw, "timeoutSeconds", index, 15)))
         if kind == "http":
             url = _text(raw.get("url"), 800)
             if not url.startswith(("http://", "https://")):
@@ -119,7 +147,7 @@ def _checks(value) -> list[dict]:
             if method not in {"GET", "POST", "PUT", "HEAD", "DELETE"}:
                 raise ValueError(f"{name} 的请求方法不支持：{method}")
             item = {"type": "http", "name": name, "url": url, "method": method,
-                    "expectStatus": int(raw.get("expectStatus") or 200),
+                    "expectStatus": _check_integer(raw, "expectStatus", index, 200),
                     "timeoutSeconds": timeout}
             # Optional fields affect behavior only when configured, preserving older records.
             if raw.get("headers"):
@@ -131,10 +159,10 @@ def _checks(value) -> list[dict]:
             if raw.get("notContains"):
                 item["notContains"] = _text(raw.get("notContains"), 200)
             # Allow configured readiness retries after publication.
-            retries = min(10, max(0, int(raw.get("retries") or 0)))
+            retries = min(10, max(0, _check_integer(raw, "retries", index, 0)))
             if retries:
                 item["retries"] = retries
-                item["intervalSeconds"] = min(60, max(1, int(raw.get("intervalSeconds") or 5)))
+                item["intervalSeconds"] = min(60, max(1, _check_integer(raw, "intervalSeconds", index, 5)))
             out.append(item)
         elif kind == "command":
             out.append({"type": "command", "name": name, "argv": _argv(raw.get("argv"), required=True),

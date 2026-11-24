@@ -14,6 +14,28 @@ function host(exportName, props, api = {}) {
   })
 }
 
+test('code source setup shows three ordered steps and opens the catalog when a source is ready', async (t) => {
+  let sources = [], mayView = true
+  const destinations = []
+  const page = await createComponentHarness(source, { dependencies: {
+    '../api.js': { api: {}, can: () => mayView },
+    '../ui.jsx': { ...ui, useAsync: () => ({ data: sources }), navTo: (screen) => destinations.push(screen) },
+  } })
+  t.after(() => page.unmount())
+  const next = () => page.nodes(node => node.type === 'button' && node.props.children === '下一步：打开仓库目录')[0]
+  assert.deepEqual(page.nodes(node => node.type === 'li').map(node => node.props.children), [
+    '新建 GitHub 或 GitLab 集成源。', '在仓库目录填写拉取账号，保存并测试连接。', '点击「立即同步」，在代码源卡片查看结果。',
+  ])
+  assert.equal(next(), undefined)
+  sources = [{ id: 'lab', type: 'gitlab', enabled: true }]
+  page.render({})
+  next().props.onClick()
+  assert.deepEqual(destinations, ['repositories'])
+  mayView = false
+  page.render({})
+  assert.equal(next(), undefined)
+})
+
 test('new integration form offers GitLab and omits Gerrit', async (t) => {
   const page = await host('IntForm', { onClose() {}, onSaved() {} })
   t.after(() => page.unmount())

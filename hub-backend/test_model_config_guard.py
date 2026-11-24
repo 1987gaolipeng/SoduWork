@@ -80,15 +80,18 @@ class ModelConfigTests(IsolatedDatabase):
     async def test_theme_patch_preserves_new_models_and_does_not_offer_bypass(self):
         async with self.sessions() as left, self.sessions() as right:
             first, stale = await left.get(Client, "device"), await right.get(Client, "device")
+            initial = await config.get_config(stale, withRevision=True)
             await tasks.put_my_models({"expectedRevision": guard.revision(first), "providers": [
                 {"id": "custom-provider", "name": "Personal", "baseUrl": "http://localhost:9999/v1"}]}, first, left)
-            saved = await config.put_config({"theme": "dark"}, stale, right)
+            saved = await config.put_config({"theme": "dark", "_configRevision": initial["_configRevision"]}, stale, right)
             self.assertEqual(saved["theme"], "dark")
             self.assertNotIn("modelProviders", saved)
             self.assertEqual(stale.config["modelProviders"][0]["id"], "custom-provider")
             # Old clients echo this server-owned field: ignore it without
             # rejecting their unrelated preferences or overwriting the catalog.
-            echoed = await config.put_config({"modelProviders": [], "theme": "light"}, stale, right)
+            before = await config.get_config(stale, withRevision=True)
+            echoed = await config.put_config({"modelProviders": [], "theme": "light",
+                                              "_configRevision": before["_configRevision"]}, stale, right)
             self.assertEqual(echoed["theme"], "light")
             self.assertNotIn("modelProviders", echoed)
         async with self.sessions() as session:

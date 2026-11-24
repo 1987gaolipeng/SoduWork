@@ -45,6 +45,7 @@ function fixture(t) {
     sendIdentityOf: async () => identity, identityOf: async () => identity,
     memories: { assertOwner() {} }, updateWorkloads: { guard: () => ({ ok: true }) },
     _cloudHandoff: { guard: () => false }, workDir: () => root, startReceipts: {},
+    firstTurnTitle: { prepare: () => null, accepted() {} },
     taskInput: { request: async () => task, prepare: async (owner, id, chat, submission, text, requested, runtime) => {
       calls.push('prepared');
       return require('../main/pi-session/acceptance-turn').prepare({ identity: owner, taskId: id,

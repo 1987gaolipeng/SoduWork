@@ -17,7 +17,7 @@ function fixture(t) {
     models: [{ providerId: 'fixture', name: 'private-wire-name', config: {} }], keys: { fixture: 'synthetic-private-key' } });
   return { root, deps, ref: saved.usable[0].id };
 }
-const result = (status = 'passed') => ({ reportVersion: 2, apiFamily: 'chat-completions', checkedAt: new Date().toISOString(),
+const result = (status = 'passed') => ({ reportVersion: 3, apiFamily: 'chat-completions', checkedAt: new Date().toISOString(),
   checks: { imageInput: { status, code: status === 'passed' ? 'verified' : 'timeout', checkedAt: new Date().toISOString() } } });
 
 test('local evidence is encrypted, survives restart and reaches the public catalog and trusted resolver', async t => {

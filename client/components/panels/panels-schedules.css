@@ -293,7 +293,7 @@
 .sch-editor-layer.show .sch-editor-drawer{transform:translateX(0);opacity:1}
 .sch-editor-drawer:focus-visible{box-shadow:-22px 0 54px rgba(24,35,52,.16),inset 3px 0 0 var(--accent)}
 .sch-editor-drawer>#schEditorContent{height:100%;min-height:0;display:flex;flex-direction:column}
-.sch-editor-head{display:flex;align-items:flex-start;gap:13px;padding:20px 22px 17px;
+.sch-editor-head{display:flex;align-items:center;gap:13px;padding:20px 22px 17px;
   border-bottom:1px solid var(--line-2);
   background:linear-gradient(135deg,color-mix(in srgb,var(--accent-soft) 46%,var(--bg-0,#fff)),var(--bg-0,#fff) 48%)}
 .sch-editor-mark{width:40px;height:40px;display:grid;place-items:center;flex:0 0 40px;border-radius:12px;
@@ -301,9 +301,7 @@
 .sch-editor-mark svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;
   stroke-linecap:round;stroke-linejoin:round}
 .sch-editor-title{min-width:0;display:flex;flex-direction:column;gap:3px}
-.sch-editor-title small{font-size:max(var(--font-min-readable, 14.5px), 10.5px);font-weight:620;letter-spacing:.15em;color:var(--accent)}
 .sch-editor-title h2{margin:0;color:var(--ink);font-size:19px;font-weight:650;line-height:1.35;letter-spacing:-.02em}
-.sch-editor-title p{max-width:54ch;margin:0;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 11.5px);line-height:1.5}
 .sch-editor-close{width:34px;height:34px;display:grid;place-items:center;flex:0 0 34px;margin-left:auto;
   padding:0;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--ink-3)}
 .sch-editor-close:hover{border-color:var(--line-2);background:var(--bg-0,#fff);color:var(--ink)}
@@ -311,7 +309,6 @@
   stroke-linecap:round;stroke-linejoin:round}
 .sch-editor-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
 .sch-editor-scroll .sch-form{width:auto;min-height:100%;margin:0;padding:18px 22px 0;box-sizing:border-box}
-.sch-editor-drawer .sch-blueprint{margin-bottom:10px}
 .sch-editor-drawer .sch-f-acts{position:sticky;z-index:3;bottom:0;margin:18px -22px 0;padding:14px 22px 18px;
   border-top:1px solid var(--line-2);
   background:linear-gradient(to bottom,color-mix(in srgb,var(--bg-0,#fff) 88%,transparent),var(--bg-0,#fff) 28%)}
@@ -353,9 +350,17 @@
 .sch-f-lbl{font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-3);display:block;margin-bottom:3px}
 .sch-f-lbl em{font-style:normal;color:var(--ink-4);margin-left:8px}
 .sch-executor-hint{display:block;margin:-3px 0 10px;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.55}
-.sch-executor-tools{display:flex;align-items:baseline;gap:8px}.sch-executor-tools small{flex:1;min-width:0}.sch-executor-tools button{flex-shrink:0}
+.sch-executor-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));align-items:start;gap:4px 12px}
+.sch-executor-grid>div{min-width:0;display:grid;grid-template-rows:subgrid;grid-row:span 3;align-content:start}
+.sch-executor-grid .sch-in{width:100%}
+.sch-executor-grid .sch-f-lbl,.sch-executor-label{min-height:28px;display:flex;align-items:center}
+.sch-executor-label{gap:4px}
+.sch-executor-grid .sch-f-lbl{margin:0}
+.sch-executor-hint:empty,.sch-clock small:empty{display:none}
 /* Cadence, weekday, time, and live next-run preview. */
 .sch-when-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sch-cadence-field{display:contents}
+.sch-cadence-field>span{display:none}
 .sch-w-every{max-width:110px}
 .sch-w-wd{max-width:96px}
 .sch-clock{display:inline-flex;align-items:center;gap:4px}
@@ -421,7 +426,7 @@ select.sch-in option{background:var(--bg-0,#fff);color:var(--ink)}
 .sch-clock small{color:var(--ink-3);font-size:var(--font-min-readable,14.5px);font-weight:400;margin-left:4px}
 .sch-retry-row .sch-in{min-height:34px}
 @media(max-width:480px){
-  .sch-when-row>select.sch-in{flex:1 1 100px;max-width:none}
+  .sch-when-row>select.sch-in,.sch-cadence-field>select.sch-in{flex:1 1 100px;max-width:none}
   .sch-clock{flex:1 1 160px}
   .sch-when-pv{margin-left:0;width:100%;box-sizing:border-box}
   .sch-week-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
@@ -588,32 +593,12 @@ select.sch-in option{background:var(--bg-0,#fff);color:var(--ink)}
 .sch-recipes.compact{padding:11px 13px}
 .sch-recipes.compact>header{margin-bottom:8px}
 .sch-recipes.compact button{padding:8px 9px}
-.sch-blueprint{margin:0 0 17px;border:1px solid color-mix(in srgb,var(--accent) 18%,var(--line));
-  border-radius:var(--r-lg,14px);background:linear-gradient(145deg,var(--bg-0,#fff),
-  color-mix(in srgb,var(--accent-soft) 38%,var(--bg-0,#fff)));overflow:hidden}
-.sch-blueprint>header{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 14px;
-  border-bottom:1px solid color-mix(in srgb,var(--accent) 10%,var(--line))}
-.sch-blueprint>header span{display:flex;align-items:baseline;gap:9px;min-width:0}
-.sch-blueprint>header b{font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:620;color:var(--ink)}
-.sch-blueprint>header i,.sch-blueprint>header em{font-size:max(var(--font-min-readable, 14.5px), 12px);font-style:normal;color:var(--ink-4)}
-.sch-blueprint>header em{white-space:nowrap}
-.sch-blueprint ol{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0;padding:0;list-style:none}
-.sch-blueprint li{position:relative;display:grid;grid-template-columns:24px minmax(0,1fr);align-items:center;
-  gap:8px;min-width:0;padding:11px 13px}
-.sch-blueprint li+li{border-left:1px solid color-mix(in srgb,var(--accent) 10%,var(--line))}
-.sch-blueprint li>i{display:flex;align-items:center;justify-content:center;width:22px;height:22px;
-  border-radius:50%;background:var(--accent);color:#fff;font-size:max(var(--font-min-readable, 14.5px), 10px);font-style:normal;font-weight:650}
-.sch-blueprint li>span{display:flex;flex-direction:column;gap:2px;min-width:0}
-.sch-blueprint li small{font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-4)}
-.sch-blueprint li b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:560;color:var(--ink-2)}
 /*
  * Wrap templates according to container width; viewport media queries would measure the
  * full transparent host window.
  */
 @container (max-width:1020px){.sch-recipes>div{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@container (max-width:640px){.sch-recipes>div,.sch-blueprint ol{grid-template-columns:1fr}
-  .sch-blueprint li+li{border-left:0;border-top:1px solid var(--line)}
-  .sch-blueprint>header{align-items:flex-start;flex-direction:column;gap:4px}}
+@container (max-width:640px){.sch-recipes>div{grid-template-columns:1fr}}
 
 
 /* Final automation workbench visual system. */

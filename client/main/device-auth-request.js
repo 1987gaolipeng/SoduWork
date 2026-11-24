@@ -8,6 +8,8 @@
  * that installation may now belong to a different account.
  */
 let identityRefresher = null;
+let requestAdmission = null;
+function setRequestAdmission(admit) { requestAdmission = typeof admit === 'function' ? admit : null; }
 function setIdentityRefresher(refresh) { identityRefresher = typeof refresh === 'function' ? refresh : null; }
 function accountId(identity) {
   // Provenance only: tokens here came from Hub through trusted main-process
@@ -68,10 +70,18 @@ async function fetchWithDeviceAuthRetry(identity, url, options = {}, fetchImpl =
   const context = require('./agent-runtime/process-context').current();
   if (context) return context.authFetch(identity, url, options);
   const original = { ...identity };
-  const send = current => fetchImpl(url, {
-    ...options,
-    headers: mergeHeaders(options, current, false),
-  });
+  const send = async current => {
+    const admitted = requestAdmission?.(current);
+    const signal = admitted ? (options.signal ? AbortSignal.any([options.signal, admitted.signal]) : admitted.signal) : options.signal;
+    signal?.throwIfAborted();
+    const response = await fetchImpl(url, {
+      ...options, signal,
+      headers: mergeHeaders(options, admitted?.identity || current, false),
+    });
+    if (signal?.aborted) await response.body?.cancel?.().catch(() => {});
+    signal?.throwIfAborted();
+    return response;
+  };
   let response = await send(original);
   if (response && Number(response.status) === 401 && original.session) {
     const refreshed = await refreshIdentity(original, options.signal);
@@ -84,5 +94,5 @@ async function fetchWithDeviceAuthRetry(identity, url, options = {}, fetchImpl =
   return response;
 }
 
-module.exports = { authHeaders, fetchWithDeviceAuthRetry, setIdentityRefresher, accountId, accountScopeKey,
+module.exports = { authHeaders, fetchWithDeviceAuthRetry, setIdentityRefresher, setRequestAdmission, accountId, accountScopeKey,
   refreshAccountIdentity: refreshIdentity };

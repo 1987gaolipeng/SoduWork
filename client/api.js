@@ -47,7 +47,7 @@
   'use strict';
   var TASK_STORAGE_BASE = {
     tasks: 'soduwork_work_tasks_v5', ops: 'soduwork_work_task_ops_v1', shadow: 'soduwork_work_task_shadow_v1',
-    notices: 'soduwork_work_notices_v1'
+    notices: 'soduwork_work_notices_v1', 'config-edit-base': 'soduwork_work_cfg_edit_base_v1'
   };
   var LS_CFG = 'soduwork_work_cfg_v5';
   // An unscoped legacy credential has no trustworthy destination. Quarantine it
@@ -402,6 +402,57 @@
   var _deviceAuthState = 'legacy';
   var _clientUser = null;
   var _clientQuota = null;
+  var _requestLifetime = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  function authRequired() {
+    var error = new Error('请先登录');
+    error.code = 'CLIENT_AUTH_REQUIRED'; error.connectivityHandled = true;
+    return error;
+  }
+  function requestsAllowed() {
+    // Older browser clients still use their legacy device credential. Electron
+    // must restore its secure account session before accessing business APIs.
+    return _deviceAuthState === 'active' || (_deviceAuthState === 'legacy' &&
+      !window.soduWorkAPI?.deviceAuthBootstrap);
+  }
+  function publicRequest(path) {
+    return path === '/clients/register' || path === '/client-auth/policy' ||
+      /^\/client-auth\/legal-documents(?:\/|$)/.test(path);
+  }
+  function admitRequest(path, startedAt) {
+    if (publicRequest(path)) return;
+    if (['pending', 'quota'].includes(_deviceAuthState)) throw authRequired();
+    if (!hasValidDeviceSession() && window.soduWorkAPI?.deviceAuthBootstrap) {
+      return refreshDeviceSession('', startedAt).then(function (restored) {
+        if (!restored || !requestsAllowed()) throw authRequired();
+      });
+    }
+    if (!requestsAllowed()) throw authRequired();
+  }
+  async function hubFetch(url, options) {
+    var requestHub = base(), path = String(url).slice((requestHub + '/api/v1').length).split('?')[0];
+    if (publicRequest(path)) return fetch(url, options);
+    var epoch = _registrationEpoch;
+    var admission = admitRequest(path); if (admission) await admission;
+    if (epoch !== _registrationEpoch || requestHub !== base()) throw staleTaskScope();
+    var lifetime = _requestLifetime?.signal;
+    var signal = options?.signal && lifetime?.constructor?.any
+      ? lifetime.constructor.any([options.signal, lifetime]) : options?.signal || lifetime;
+    var headers = Object.assign({}, options?.headers);
+    // Admission can restore/renew a session after the caller built its headers.
+    for (var key of Object.keys(headers)) if (/^(authorization|x-soduwork-secret|x-soduwork-device)$/i.test(key)) delete headers[key];
+    Object.assign(headers, authHeaders(false));
+    try {
+      var response = await fetch(url, Object.assign({}, options, { headers: headers, signal: signal }));
+      if (lifetime?.aborted) {
+        await response.body?.cancel?.().catch(function () {});
+        throw staleTaskScope();
+      }
+      return response;
+    } catch (error) {
+      if (lifetime?.aborted) throw staleTaskScope();
+      throw error;
+    }
+  }
   function hasValidDeviceSession() {
     if (_deviceSession && _deviceSessionHub === base() && Date.now() < _deviceSessionUntil) return true;
     if (_deviceSession) { _deviceSession = ''; _deviceSessionUntil = 0; }
@@ -426,6 +477,8 @@
       _deviceSession = ''; _deviceSessionUntil = 0; _deviceAuthState = 'pending';
     }
     if (previousScope && previousScope !== taskStorageKey('ops')) {
+      _requestLifetime?.abort();
+      _requestLifetime = typeof AbortController !== 'undefined' ? new AbortController() : null;
       try { window.dispatchEvent(new CustomEvent('soduwork-data-scope-changed')); } catch (_) {}
     }
     try { window.dispatchEvent(new CustomEvent('soduwork-device-auth', { detail: {
@@ -527,20 +580,38 @@
     return h;
   }
 
+  function hubInputMessage(key, fallback, params) {
+    const i18n = global.SoduWorkI18n;
+    if (!i18n || !Object.hasOwn(global.SoduWorkLocaleMessages?.[i18n.getLocale()] || {}, key)) return fallback;
+    return i18n.t(key, fallback, params);
+  }
+
+  function validationMessage(item) {
+    const fallback = item?.msg || item?.message || String(item || '');
+    if (item?.type === 'hub.input.due') return hubInputMessage('hub.input.due', fallback);
+    const [source, field] = Array.isArray(item?.loc) ? item.loc : [];
+    if (source !== 'query' || !['limit', 'offset', 'page', 'pageSize', 'days'].includes(field)) return fallback;
+    const lower = item.type === 'greater_than_equal';
+    const bound = lower ? item.ctx?.ge : item.ctx?.le;
+    if ((!lower && item.type !== 'less_than_equal') || !Number.isFinite(bound)) return fallback;
+    return hubInputMessage(lower ? 'hub.input.minimum' : 'hub.input.maximum', fallback, { field, bound });
+  }
+
   function httpError(res, text) {
     var data = null;
     try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
     var detail = data && data.detail;
     var meta = detail && !Array.isArray(detail) && typeof detail === 'object' ? detail : null;
-    if (Array.isArray(detail)) detail = detail.map(function (item) {
-      return item && (item.msg || item.message) || String(item || '');
-    }).filter(Boolean).join('；');
+    if (Array.isArray(detail)) detail = detail.map(validationMessage).filter(Boolean).join('；');
     else if (detail && typeof detail === 'object') detail = detail.message || detail.msg || '';
     detail = String(detail || '').trim().slice(0, 500);
-    var error = new Error(detail || ('HTTP ' + res.status));
+    var inputCode = res.headers?.get?.('X-Error-Code') || '';
+    if (!inputCode.startsWith('hub.input.')) inputCode = '';
+    var message = inputCode ? hubInputMessage(inputCode, detail) : detail;
+    var error = new Error(message || ('HTTP ' + res.status));
     error.status = Number(res.status) || 0;
     error.detail = detail;
-    error.code = String(meta && meta.code || '');
+    error.code = String(meta && meta.code || inputCode);
     error.phase = String(meta && meta.phase || '');
     error.phaseName = String(meta && meta.phaseName || '');
     error.retryable = meta && typeof meta.retryable === 'boolean' ? meta.retryable : null;
@@ -557,6 +628,8 @@
   }
   function invalidateRegistrations() {
     _registrationEpoch += 1;
+    _requestLifetime?.abort();
+    _requestLifetime = typeof AbortController !== 'undefined' ? new AbortController() : null;
     _sessionRefresh = null;
     _registrations.forEach(function (job) { job.cancel(); });
   }
@@ -600,6 +673,7 @@
     return job;
   }
   async function refreshDeviceSession(staleSession, startedAt) {
+    if (['pending', 'quota'].includes(_deviceAuthState)) throw authRequired();
     if (!SoduWorkAPI || typeof SoduWorkAPI.registerClient !== 'function') return false;
     if (startedAt == null) startedAt = Date.now();
     var restoration = restoreSavedHub(); if (restoration) await restoration;
@@ -614,6 +688,12 @@
     }
     var row = await _sessionRefresh;
     checkRefresh();
+    if (!row || row.ok === false) {
+      var failure = new Error(row?.error || '登录状态暂时无法恢复，请重试');
+      failure.code = row?.code || 'DEVICE_AUTH_UNAVAILABLE'; failure.status = row?.status || 0;
+      if (row?.activationRequired) failure.connectivityHandled = true;
+      throw failure;
+    }
     return !!(row && row.ok && row.session);
   }
 
@@ -641,33 +721,22 @@
   async function jfetchCurrent(path, opts, retried, trace) {
     var startedAt = Date.now();
     var restoration = restoreSavedHub(); if (restoration) await restoration;
-    /*
-     * Each Electron window has separate renderer memory. Before its first request, obtain a
-     * short-lived session through main-process secure storage; cached task data does not imply
-     * initData ran here. Share _sessionRefresh across concurrent requests to avoid duplicate
-     * issuance and transient 401 flashes. Pending activation still fails with the actual
-     * authorization error.
-     */
-    if (!retried && path !== '/clients/register' && !hasValidDeviceSession() &&
-        _deviceAuthState !== 'pending' && window.soduWorkAPI && window.soduWorkAPI.deviceAuthBootstrap) {
-      try { await refreshDeviceSession('', startedAt); } catch (e) {
-        if (registrationBoundaryError(e)) throw e;
-        /* Subsequent requests report the actual connectivity or authorization error. */
-      }
-    }
+    var admission = admitRequest(path.split('?')[0], startedAt); if (admission) await admission;
     var requestScope = taskStorageKey('ops');
     if (opts && opts.taskScope && opts.taskScope !== requestScope) throw staleTaskScope();
     var o = Object.assign({ headers: {} }, opts || {});
     delete o.taskScope;
+    delete o.sessionRead;
     o.headers = Object.assign(authHeaders(true), o.headers);
     var auth = requestAuth();
     if (trace?.requestId && !Object.keys(o.headers).some(key => key.toLowerCase() === 'x-request-id')) o.headers['X-Request-ID'] = trace.requestId;
     if (!o.signal) o.signal = _abortSignal(DEFAULT_TIMEOUT);
     var res;
-    try { res = await fetch(apiUrl(path), o); }
+    try { res = await hubFetch(apiUrl(path), o); }
     catch (error) {
+      if (error?.connectivityHandled || error?.code === 'STALE_TASK_SCOPE') throw error;
       global.RequirementDiagnostics?.http(global.RequirementDiagnostics.emit,path,o.body,{},0);
-      if (!opts?.signal?.aborted || error?.name !== 'AbortError') mark(false); throw error;
+      if (!opts?.sessionRead && (!opts?.signal?.aborted || error?.name !== 'AbortError')) mark(false); throw error;
     }
     try { trace?.response?.(res); } catch (_) {}
     /*
@@ -684,7 +753,7 @@
      * Refresh through secure storage and replay once; pending or disabled devices must still
      * report their actual errors.
      */
-    if (res.status === 401 && !retried && path !== '/clients/register') {
+    if (res.status === 401 && !retried && auth.session && requestsAllowed() && path !== '/clients/register') {
       try {
         if (await refreshDeviceSession(auth.session)) return jfetch(path, Object.assign({}, opts, { taskScope: requestScope }), true, trace);
       } catch (e) { if (registrationBoundaryError(e)) throw e; /* Preserve the original 401 error details. */ }
@@ -718,10 +787,7 @@
   async function uploadFile(path, file, retried, metadata, requestScope) {
     var startedAt = Date.now();
     var restoration = restoreSavedHub(); if (restoration) await restoration;
-    if (!retried && !hasValidDeviceSession() && _deviceAuthState !== 'pending' &&
-        window.soduWorkAPI && window.soduWorkAPI.deviceAuthBootstrap) {
-      try { await refreshDeviceSession('', startedAt); } catch (e) { if (registrationBoundaryError(e)) throw e; }
-    }
+    var admission = admitRequest(path, startedAt); if (admission) await admission;
     if (requestScope && requestScope !== taskStorageKey('ops')) throw staleTaskScope();
     var form = new FormData();
     form.append('file', file);
@@ -733,11 +799,11 @@
     }
     var res, auth = requestAuth();
     try {
-      res = await fetch(apiUrl(path), {
+      res = await hubFetch(apiUrl(path), {
         method: 'POST', headers: authHeaders(false), body: form,
         signal: _abortSignal(60000)
       });
-    } catch (error) { mark(false); throw error; }
+    } catch (error) { markFromError(error); throw error; }
     mark(true);
     var txt = await res.text();
     if (requestScope && requestScope !== taskStorageKey('ops')) throw staleTaskScope();
@@ -760,7 +826,7 @@
     var restoration = restoreSavedHub(); if (restoration) await restoration;
     var o = Object.assign({ headers: authHeaders(true) }, opts || {});
     if (!o.signal) o.signal = _abortSignal(timeout || DEFAULT_TIMEOUT);
-    return fetch(apiUrl(path), o);
+    return hubFetch(apiUrl(path), o);
   }
 
   function lsCfg() { try { return JSON.parse(localStorage.getItem(LS_CFG) || '{}'); } catch (e) { return {}; } }
@@ -840,18 +906,44 @@
     return path;
   }
 
+  // Keep the revision tied to the authenticated scope and the snapshot the editor actually saw.
+  var configSnapshot = null, configWriteGeneration = 0;
+  function activeConfigSnapshot(scope) {
+    if (configSnapshot && sameDomainScope(configSnapshot.scope)) return configSnapshot;
+    try {
+      var saved = JSON.parse(localStorage.getItem(taskStorageKey('config-edit-base')) || 'null');
+      return saved && sameDomainScope(saved.scope) ? saved : null;
+    } catch (_) { return null; }
+  }
+  function rememberConfig(scope, value, local, persist = true) {
+    if (!value || !sameDomainScope(scope)) return {};
+    var cfg = Object.assign({}, value), revision = cfg._configRevision;
+    var keys = cfg._configKeys;
+    delete cfg._configRevision;
+    delete cfg._configKeys;
+    if (revision && persist) {
+      var base = local && Array.isArray(keys)
+        ? Object.fromEntries(Object.entries(local).filter(([key]) => keys.includes(key))) : local;
+      configSnapshot = { scope, revision, cfg: base || cfg, remote: cfg, keys };
+      try { localStorage.setItem(taskStorageKey('config-edit-base'), JSON.stringify(configSnapshot)); } catch (_) {}
+    }
+    return cfg;
+  }
   function domainScope() {
     return { hub: base().replace(/\/+$/, ''), clientId: device(), userId: String(_clientUser?.id || '') };
+  }
+  function failedModelScope() {
+    return JSON.stringify([_registrationEpoch, _deviceAuthState, taskStorageKey('ops')]);
   }
   function sameDomainScope(value) {
     var current = domainScope();
     return value && value.hub === current.hub && value.clientId === current.clientId && value.userId === current.userId;
   }
-  async function domainRead(domain, path) {
+  async function domainRead(domain, path, fresh = false) {
     var bridge = global.soduWorkAPI, scope = domainScope();
     if (!bridge?.clientDomainRead || !scope.userId) return jfetch(path);
     var auth = requestAuth();
-    var result = await bridge.clientDomainRead(domain, scope);
+    var result = await bridge.clientDomainRead(domain, scope, fresh);
     if (!sameDomainScope(scope)) throw staleTaskScope();
     if (result?.code === 'DOMAIN_POLL_FALLBACK') return jfetch(path);
     // A local snapshot or replayed backoff error does not prove current reachability.
@@ -1210,6 +1302,12 @@
     connectHub: connectHub,
     normalizeHub: normalizeHub,
     taskStorageKey: taskStorageKey,
+    async reportFirstChatReadiness(scope, runtimeReady, modelReady) {
+      if (!hasValidDeviceSession() || !_clientUser || scope !== taskStorageKey('ops')) return false;
+      await jfetch('/first-chat-readiness', { method: 'PUT', taskScope: scope, sessionRead: true,
+        body: JSON.stringify({ runtimeReady, modelReady }) });
+      return true;
+    },
     adoptVerifiedTaskOperations: adoptVerifiedTaskOperations,
 
     /*
@@ -1275,8 +1373,13 @@
       }
       return task;
     },
-    async getConfig() {
-      try { var c = await domainRead('config', '/config'); return c || {}; }
+    async getConfig(acceptBase) {
+      var scope = domainScope(), generation = configWriteGeneration;
+      try {
+        var result = await domainRead('config', '/config?withRevision=true');
+        return rememberConfig(scope, result, null,
+          generation === configWriteGeneration && (!acceptBase || acceptBase()));
+      }
       catch (e) { markFromError(e); return lsCfg(); }
     },
 
@@ -1314,7 +1417,7 @@
     },
     /* Let a team manager update a member's task status, including acceptance; propagate backend rejection details. */
     async setTeamTaskStatus(tid, status) {
-      var res = await fetch(apiUrl('/team/tasks/' + encodeURIComponent(tid) + '/status'),
+      var res = await hubFetch(apiUrl('/team/tasks/' + encodeURIComponent(tid) + '/status'),
         { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ status: status }) });
       var txt = await res.text();
       var data = parseJSON(txt);
@@ -1323,7 +1426,7 @@
     },
     /* Reassign a task to another team member's SoduWork; propagate backend rejection details. */
     async reassignTeamTask(tid, assigneeUserId) {
-      var res = await fetch(apiUrl('/team/tasks/' + encodeURIComponent(tid) + '/reassign'),
+      var res = await hubFetch(apiUrl('/team/tasks/' + encodeURIComponent(tid) + '/reassign'),
         { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ assigneeUserId: assigneeUserId }), signal: _abortSignal(DEFAULT_TIMEOUT) });
       var txt = await res.text();
       var data = parseJSON(txt);
@@ -1332,7 +1435,7 @@
     },
     /* Send a manager's reminder from the desktop pet; the recipient sees a bubble and attention animation. */
     async nudgeTeamTask(tid, note) {
-      var res = await fetch(apiUrl('/team/tasks/' + encodeURIComponent(tid) + '/nudge'),
+      var res = await hubFetch(apiUrl('/team/tasks/' + encodeURIComponent(tid) + '/nudge'),
         { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ note: note || '' }), signal: _abortSignal(DEFAULT_TIMEOUT) });
       var txt = await res.text(); var data = parseJSON(txt);
       if (!res.ok) { markFromError(new Error('HTTP ' + res.status)); throw new Error((data && data.detail) || ('HTTP ' + res.status)); }
@@ -1340,12 +1443,11 @@
     },
     /* Assign tasks using title, assigneeUserIds/assigneeUserId, priority, due, tags, and note; propagate backend error details. */
     async createTeamTask(body) {
-      var res = await fetch(apiUrl('/team/tasks'),
+      var res = await hubFetch(apiUrl('/team/tasks'),
         { method: 'POST', headers: authHeaders(true), body: JSON.stringify(body || {}), signal: _abortSignal(DEFAULT_TIMEOUT) });
       var txt = await res.text();
-      var data = parseJSON(txt);
-      if (!res.ok) { markFromError(new Error('HTTP ' + res.status)); throw new Error((data && data.detail) || ('HTTP ' + res.status)); }
-      mark(true); return data;
+      if (!res.ok) { markFromError(new Error('HTTP ' + res.status)); throw httpError(res, txt); }
+      mark(true); return parseJSON(txt);
     },
 
     /* Atomic coworker assignment: create on the recipient device, never create locally then hand off. */
@@ -1403,11 +1505,11 @@
       return await jfetch('/tasks/' + encodeURIComponent(tid) + '/comments');
     },
     async addTaskComment(tid, body, mentions) {
-      var res = await fetch(apiUrl('/tasks/' + encodeURIComponent(tid) + '/comments'),
+      var res = await hubFetch(apiUrl('/tasks/' + encodeURIComponent(tid) + '/comments'),
         { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ body: body, mentions: mentions || [] }), signal: _abortSignal(DEFAULT_TIMEOUT) });
-      var txt = await res.text(); var data = parseJSON(txt);
-      if (!res.ok) { markFromError(new Error('HTTP ' + res.status)); throw new Error((data && data.detail) || ('HTTP ' + res.status)); }
-      mark(true); return data;
+      var txt = await res.text();
+      if (!res.ok) { markFromError(new Error('HTTP ' + res.status)); throw httpError(res, txt); }
+      mark(true); return parseJSON(txt);
     },
 
     /* Derive task fields from instructions and materials. Preserve input for manual editing when the API rejects or fails. */
@@ -1417,7 +1519,7 @@
       var timeoutMs = options?.kind === 'automation' ? 90000 : 130000;
       try {
         signal = _abortSignal(timeoutMs);
-        var res = await fetch(apiUrl('/tasks/parse'),
+        var res = await hubFetch(apiUrl('/tasks/parse'),
           { method: 'POST', headers: { ...authHeaders(true), Accept: 'application/json; keepalive=1' },
             /* Use the model selected for this request, or the personal default when empty. */
             body: JSON.stringify({ text: text || '', model: model || '', keepalive: true,
@@ -1461,7 +1563,7 @@
     },
     /* Claim a task for this SoduWork instance; HTTP 409 means another member already claimed it. */
     async claimInboxTask(tid) {
-      var res = await fetch(apiUrl('/team/inbox/' + encodeURIComponent(tid) + '/claim'),
+      var res = await hubFetch(apiUrl('/team/inbox/' + encodeURIComponent(tid) + '/claim'),
         { method: 'POST', headers: authHeaders(true), body: '{}', signal: _abortSignal(DEFAULT_TIMEOUT) });
       var txt = await res.text();
       var data = parseJSON(txt);
@@ -1474,7 +1576,7 @@
     },
     /* Let a manager assign an inbox task directly; 403 means unauthorized and 409 means already claimed. */
     async assignInboxTask(tid, userId) {
-      var res = await fetch(apiUrl('/team/inbox/' + encodeURIComponent(tid) + '/assign'),
+      var res = await hubFetch(apiUrl('/team/inbox/' + encodeURIComponent(tid) + '/assign'),
         { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ userId: userId }), signal: _abortSignal(DEFAULT_TIMEOUT) });
       var txt = await res.text();
       var data = parseJSON(txt);
@@ -1483,7 +1585,7 @@
     },
     /* Return an owned task to the team inbox; the backend rejects workflow tasks and non-owners. */
     async releaseTask(tid, note) {
-      var res = await fetch(apiUrl('/tasks/' + encodeURIComponent(tid) + '/release'),
+      var res = await hubFetch(apiUrl('/tasks/' + encodeURIComponent(tid) + '/release'),
         { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ note: note || '' }), signal: _abortSignal(DEFAULT_TIMEOUT) });
       var txt = await res.text();
       var data = parseJSON(txt);
@@ -1586,7 +1688,8 @@
       localCatalog = localCatalog || { providers: [], usable: [], myModels: [], mediaUsable: {} };
       var r, managedCatalogUnavailable = false;
       try {
-        r = await domainRead('models', '/my-models');
+        if (!sameDomainScope(scope)) throw staleTaskScope();
+        r = await domainRead('models', '/my-models', options?.fresh === true);
         if (r?.ok === false) throw new Error('Hub 模型目录暂时无法读取');
         managedCatalogUnavailable = !Array.isArray(r?.usable);
       }
@@ -1760,6 +1863,49 @@
         body: JSON.stringify({ providerId: providerId }) });
       mark(true); return r;
     },
+    // A chat failure belongs to the configuration that served its request.
+    // Re-resolve on click so neither a new selection nor a replacement catalog
+    // row can inherit the original user's permission to run a probe.
+    failedModelScope,
+    async inspectFailedModel(target, options = {}) {
+      var scope = domainScope(), owner = failedModelScope();
+      if (_deviceAuthState !== 'active' || !scope.userId || !target.scope) return { state: 'account' };
+      var bytes = new TextEncoder().encode(JSON.stringify([scope.hub, scope.clientId, scope.userId]));
+      var hash = Array.from(new Uint8Array(await global.crypto.subtle.digest('SHA-256', bytes)),
+        byte => byte.toString(16).padStart(2, '0')).join('');
+      if (hash !== target.scope || failedModelScope() !== owner) return { state: 'account' };
+      if (!target.model || !target.local && !target.provider) return { state: 'unversioned' };
+      var catalog = target.local ? await this.localModels() : await jfetch('/my-models', { cache: 'no-store', signal: options.signal });
+      if (failedModelScope() !== owner) return { state: 'account' };
+      if (catalog?.ok === false || !Array.isArray(catalog?.providers)) return { state: 'unavailable' };
+      var rows = target.local ? catalog.myModels : catalog.usable;
+      var row = (rows || []).find(item => (item.localOnly === true) === target.local && (target.local
+        ? item.id === target.model : item.providerId === target.provider && item.name === target.model));
+      if (!row) return { state: 'changed' };
+      var provider = catalog.providers.find(item => item.id === row.providerId);
+      if (!provider) return { state: 'changed' };
+      if (target.revision && target.revision !== row.configRevision) return { state: 'changed' };
+      var labels = { service: provider.name || provider.id, model: row.name };
+      if (!target.local && provider.personal !== true) return { ...labels, state: 'managed' };
+      if (!target.revision) return { ...labels, state: 'unversioned' };
+      if (!options.check) return { ...labels, state: 'ready' };
+      options.signal?.throwIfAborted();
+      var requestId = target.local && options.signal ? global.crypto.randomUUID() : '';
+      var cancel = () => global.soduWorkAPI?.localModels?.cancelCapabilities?.({ modelRef: target.model, requestId })?.catch(() => {});
+      if (requestId) options.signal.addEventListener('abort', cancel, { once: true });
+      var report;
+      try {
+        report = await this.checkMyModelCapabilities({ providerId: row.providerId, model: row.name,
+          localOnly: target.local, ...(target.local ? { expectedModelRef: target.model, requestId } : {}),
+          expectedConfigRevision: target.revision, checks: ['connection', 'streaming', 'toolCalling'] },
+          { signal: options.signal, failureOwner: owner });
+      } finally {
+        if (requestId) options.signal.removeEventListener('abort', cancel);
+      }
+      if (failedModelScope() !== owner) return { state: 'account' };
+      if (!report?.checks) return { ...labels, state: 'failed' };
+      return { ...labels, state: 'ready', report };
+    },
     async checkMyModelCapabilities(body, options) {
       body = body || {};
       options?.signal?.throwIfAborted();
@@ -1768,12 +1914,14 @@
       var localCatalog = await localModelCatalog();
       options?.signal?.throwIfAborted();
       if (!sameDomainScope(scope)) throw staleTaskScope();
+      if (options?.failureOwner && options.failureOwner !== failedModelScope()) throw staleTaskScope();
       var nativeId = deviceProviderId(body.providerId);
       var localProvider = (localCatalog?.providers || []).find(row => row?.id === nativeId);
       if (deviceProvider(body.providerId) || body.localOnly === true) {
         if (!localProvider) throw new Error('本地模型服务已不可用，请刷新目录后重试');
         var localModel = (localCatalog?.myModels || []).find(row => row.providerId === nativeId && row.name === String(body.model || '').trim());
-        if (!localModel) throw new Error('本地模型不存在或已不可用，请刷新目录后重试');
+        if (!localModel || body.expectedModelRef && body.expectedModelRef !== localModel.id)
+          throw new Error('本地模型不存在或已不可用，请刷新目录后重试');
         if (body.expectedConfigRevision && body.expectedConfigRevision !== localModel.configRevision)
           throw new Error('模型配置在检测期间已变更，请重新检测');
         if (typeof local?.checkCapabilities !== 'function') throw new Error('当前客户端尚未提供本机能力检测，请更新客户端');
@@ -1788,6 +1936,7 @@
       if (!sameDomainScope(scope)) throw staleTaskScope();
       requirePersonalProvider(body.providerId, await managedModelOwners(scope, options?.signal));
       options?.signal?.throwIfAborted();
+      if (options?.failureOwner && options.failureOwner !== failedModelScope()) throw staleTaskScope();
       var result = await jfetch('/my-models/capabilities/check', { method: 'POST',
         body: JSON.stringify({ providerId: body.providerId, model: body.model,
           ...(body.expectedConfigRevision ? { expectedConfigRevision: body.expectedConfigRevision } : {}),
@@ -1802,7 +1951,9 @@
     async agentSetup(runnerId) {
       var requestScope = taskStorageKey('ops');
       var target = typeof runnerId === 'string' ? '?runnerId=' + encodeURIComponent(runnerId) : '';
-      var r = await jfetch('/agent-setup' + target, { taskScope: requestScope }) || { env: {}, agents: [], modelCount: 0 };
+      // The Hub probe runs local CLI detection per machine (measured 20-38s);
+      // the default 8s timeout aborted the request before the list could load.
+      var r = await jfetch('/agent-setup' + target, { taskScope: requestScope, signal: _abortSignal(90000) }) || { env: {}, agents: [], modelCount: 0 };
       if (!(r.machines || []).length && !(r.agents || []).length) {
         var reason = await localRunnerReason();
         if (reason) r.env = Object.assign({}, r.env, { why: reason });
@@ -1861,7 +2012,8 @@
       var selectedId = runnerId(selected);
       // Keep the captured identity through both requests; an older Hub may ignore runnerId.
       var setupQuery = '?runnerId=' + encodeURIComponent(selectedId) + (hasLocalModel ? '&hasLocalModel=1' : '');
-      var data = await jfetch('/agent-setup' + setupQuery, { taskScope: requestScope }) || {};
+      // Same slow local probe as agentSetup; keep the 90s budget.
+      var data = await jfetch('/agent-setup' + setupQuery, { taskScope: requestScope, signal: _abortSignal(90000) }) || {};
       currentRequest();
       var machine = (Array.isArray(data.machines) ? data.machines : []).find(function (row) {
         if (runnerId(row) !== selectedId || row.execution === 'backend' || row.online === false) return false;
@@ -1884,7 +2036,8 @@
           (savedModel && !models.some(row => row.name === savedModel));
         // Use the first available model only when no valid preference remains.
         // Resolve from the displayed local-first catalog without rewriting it.
-        var automatic = agent.modelPick === true && firstModel && (!savedModel || missing);
+        var pinnedHubModel = !selected?.configured && Boolean(agent.modelProviderId);
+        var automatic = !pinnedHubModel && agent.modelPick === true && firstModel && (!savedModel || missing);
         if (automatic && (firstModel.localOnly !== true ||
             localDefaults && global.soduWorkAPI?.localAgentModels?.probe)) {
           selected = { configured: true, modelName: firstModel.name, unavailable: false,
@@ -1902,7 +2055,7 @@
         var readiness = modelOnly ? { state: state, setupState: state, displayState: state,
           ...(selected.unavailable ? { why: '原本地默认模型已删除或不可用，请重新选择' }
             : modelMissing ? { why: '' } : {}) } : {};
-        return { ...agent, model: savedModel, modelEffective: selected.modelName,
+        return { ...agent, model: savedModel, modelEffective: selected.modelName, modelProviderId: '',
           ...(selected.automatic ? { modelAutomatic: true } : {}),
           modelGone: selected.unavailable, localModelDefault: selected.localOnly !== false,
           ...(selected.localOnly !== false ? { configRevision: 'local:' + String(localCatalog?.revision ?? 'unavailable') } : {}),
@@ -1949,12 +2102,13 @@
         var inheritedModel = !model;
         if (isCurrentRunner && inheritedModel) {
           if (agent?.modelGone || preferred?.unavailable && !agent?.modelAutomatic) {
-            throw new Error('原本地默认模型已删除或不可用，请重新选择');
+            throw new Error(agent?.modelProviderId ? '请主动选择可用模型后再执行，不会自动切换模型'
+              : '原本地默认模型已删除或不可用，请重新选择');
           }
           model = agent?.modelEffective || preferred?.modelName || '';
           if (agent) {
             // Bind test evidence to the freshly resolved model and runtime.
-            probeAgent = Object.fromEntries(['key', 'version', 'bin', 'model', 'modelEffective',
+            probeAgent = Object.fromEntries(['key', 'version', 'bin', 'model', 'modelEffective', 'modelProviderId',
               'modelGone', 'configRevision', 'runtimeRevision'].map(field => [field, agent[field]]));
           }
         }
@@ -1975,7 +2129,7 @@
       mark(true); return r;
     },
 
-    async setAgentModel(key, model) {
+    async setAgentModel(key, model, providerId) {
       var scope = domainScope(), requestScope = taskStorageKey('ops');
       var defaults = await localAgentDefaults(scope);
       if (isLocalModelChoice(model)) {
@@ -1987,7 +2141,8 @@
         return localResult;
       }
       var r = await jfetch('/agent-setup/model', {
-        method: 'PUT', taskScope: requestScope, body: JSON.stringify({ key: key, model: model || '' })
+        method: 'PUT', taskScope: requestScope, body: JSON.stringify({ key: key, model: model || '',
+          ...(providerId ? { providerId } : {}) })
       });
       if (!sameDomainScope(scope)) throw staleTaskScope();
       if (defaults?.selections?.[key]?.configured) {
@@ -2080,7 +2235,7 @@
     async uploadApprovalEvidence(requestId, file) {
       var fd = new FormData();
       fd.append('file', file);
-      var res = await fetch(apiUrl('/approvals/' + encodeURIComponent(requestId) + '/evidence'),
+      var res = await hubFetch(apiUrl('/approvals/' + encodeURIComponent(requestId) + '/evidence'),
         { method: 'POST', headers: authHeaders(false), body: fd, signal: _abortSignal(30000) });
       if (!res.ok) {
         var detail = '';
@@ -2575,9 +2730,10 @@
         if (since) params.set('since', String(since));
         if (ref) params.set('ref', String(ref));
         var q = params.size ? '?' + params.toString() : '';
-        var r = await jfetch('/tasks/' + encodeURIComponent(tid) + '/ai-session' + q);
+        var r = await jfetch('/tasks/' + encodeURIComponent(tid) + '/ai-session' + q, { sessionRead: true });
         mark(true); return r || { ok: false, items: [] };
-      } catch (e) { markFromError(e); return { ok: false, items: [], httpStatus: Number(e.status) || 0, error: '拿不到执行记录，请检查需求权限或后台连接' }; }
+      } catch (e) { return { ok: false, items: [], httpStatus: Number(e.status) || 0,
+        code: e.code || '', retryable: e.retryable, error: e.detail || '会话同步暂时不可用，已有内容已保留，请稍后重试' }; }
     },
     /*
      * Queue a message on the execution record rather than attaching to a TTY. Pending work
@@ -2770,6 +2926,10 @@
         { method: 'POST', body: JSON.stringify({ note: note || '' }) });
       mark(true); return acceptTaskResult(r);
     },
+    async setReviewRecipient(tid, userId) {
+      return jfetch('/tasks/' + encodeURIComponent(tid) + '/review-recipient',
+        {method:'PUT', body:JSON.stringify({userId}), taskScope:taskStorageKey('ops')});
+    },
     /* Evaluate the frozen delivery evidence under server-side reviewer permissions and quality gates. */
     async autoReviewTask(tid, note) {
       var r = await jfetch('/tasks/' + encodeURIComponent(tid) + '/auto-review', {
@@ -2808,7 +2968,7 @@
       for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
       var form = new FormData(); form.append('manifest', JSON.stringify(payload.manifest));
       form.append('file', new Blob([bytes], { type: payload.contentType }), payload.filename);
-      var res = await fetch(apiUrl('/deliveries'), { method: 'POST', headers: authHeaders(false), body: form, signal: _abortSignal(120000) });
+      var res = await hubFetch(apiUrl('/deliveries'), { method: 'POST', headers: authHeaders(false), body: form, signal: _abortSignal(120000) });
       assertLibraryScope(requestScope);
       var text = await res.text(); assertLibraryScope(requestScope);
       if (!res.ok) { var error = httpError(res, text); handleAuthError(error, auth); throw error; }
@@ -2834,7 +2994,7 @@
     },
     async readDeliveryFile(id, path) {
       var requestScope = taskStorageKey('ops');
-      var res = await fetch(apiUrl('/deliveries/' + encodeURIComponent(id) + '/files/' + String(path).split('/').map(encodeURIComponent).join('/')), {
+      var res = await hubFetch(apiUrl('/deliveries/' + encodeURIComponent(id) + '/files/' + String(path).split('/').map(encodeURIComponent).join('/')), {
         headers: authHeaders(false), signal: _abortSignal(120000), redirect: 'error'
       });
       assertLibraryScope(requestScope);
@@ -2932,7 +3092,7 @@
       if (meta.conversationTitle) form.append('conversationTitle', String(meta.conversationTitle));
       if (meta.rejectDuplicateName === true) form.append('rejectDuplicateName', 'true');
       try {
-        var res = await fetch(apiUrl('/library/items/upload'), {
+        var res = await hubFetch(apiUrl('/library/items/upload'), {
           method: 'POST', headers: authHeaders(false), body: form, signal: _abortSignal(120000)
         });
         assertLibraryScope(requestScope);
@@ -2951,7 +3111,7 @@
       const timer = setTimeout(abort, 30000);
       let reader;
       try {
-        const res = await fetch(apiUrl('/library/items/' + encodeURIComponent(id) + '/thumbnail'), {
+        const res = await hubFetch(apiUrl('/library/items/' + encodeURIComponent(id) + '/thumbnail'), {
           headers: authHeaders(false), signal: controller.signal, cache: 'no-store'
         });
         assertLibraryScope(requestScope);
@@ -2978,7 +3138,7 @@
     async readLibraryBinary(id) {
       var requestScope = taskStorageKey('ops'), auth = requestAuth();
       try {
-        var res = await fetch(apiUrl('/library/items/' + encodeURIComponent(id) + '/download'), {
+        var res = await hubFetch(apiUrl('/library/items/' + encodeURIComponent(id) + '/download'), {
           method: 'GET', headers: authHeaders(false), signal: _abortSignal(120000)
         });
         if (requestScope !== taskStorageKey('ops')) {
@@ -3031,7 +3191,7 @@
           });
           mark(true); return preview;
         }
-        var res = await fetch(apiUrl(route), {
+        var res = await hubFetch(apiUrl(route), {
           method: 'GET', headers: authHeaders(false), signal: _abortSignal(120000), redirect: 'error', cache: 'no-store'
         });
         if (requestScope !== taskStorageKey('ops')) {
@@ -3168,7 +3328,7 @@
       var requestScope = taskStorageKey('ops'), auth = requestAuth();
       try {
         var memberBlob = member?.path ? await (member.archive === true ? this.readLibraryArchiveFile(id, member.path) : this.readDeliveryFile(id, member.path)) : null;
-        var res = memberBlob ? new Response(memberBlob) : await fetch(apiUrl('/library/items/' + encodeURIComponent(id) + '/download'), {
+        var res = memberBlob ? new Response(memberBlob) : await hubFetch(apiUrl('/library/items/' + encodeURIComponent(id) + '/download'), {
           method: 'GET', headers: authHeaders(false), signal: _abortSignal(120000)
         });
         if (requestScope !== taskStorageKey('ops')) {
@@ -3193,6 +3353,8 @@
      * user-supplied name, otherwise system username and hostname.
      */
     async registerClient(options) {
+      if (!options?.recheckAuth && ['pending', 'quota'].includes(_deviceAuthState)) return { ok: true, stored: true,
+        authState: _deviceAuthState, activationRequired: true, clientId: device() };
       var startedAt = options && options.startedAt != null ? options.startedAt : Date.now();
       var restoration = restoreSavedHub(); if (restoration) await restoration;
       var registration = registrationContext(startedAt);
@@ -3226,6 +3388,7 @@
           var secure = await registration.step(function () { return window.soduWorkAPI.deviceAuthBootstrap({
             hub: base(), clientId: device(), legacySecret: secret(),
             staleSession: options && options.staleSession || '',
+            recheckAuth: options?.recheckAuth === true,
             name: body.name, platform: body.platform, version: body.version,
             workRoot: body.workRoot || ''
           }); });
@@ -3283,6 +3446,7 @@
         return { ok: false, error: '\u5f53\u524d\u5ba2\u6237\u7aef\u7248\u672c\u4e0d\u652f\u6301\u5b89\u5168\u767b\u5f55' };
       }
       invalidateRegistrations();
+      rememberSession({ activationRequired: true });
       var loginEpoch = _registrationEpoch, loginHub = base();
       function checkLogin() { if (loginEpoch !== _registrationEpoch || loginHub !== base()) throw staleTaskScope(); }
       var version = '1.2.0', sysInfo = null, root = '';
@@ -3321,7 +3485,7 @@
         return { ok: false, error: '请更新客户端后使用邮箱账号功能' };
       var signsIn = ['password', 'emailCode', 'register'].includes(action);
       var changesIdentity = signsIn || action === 'resetPassword';
-      if (changesIdentity) invalidateRegistrations();
+      if (changesIdentity) { invalidateRegistrations(); rememberSession({ activationRequired: true }); }
       var epoch = _registrationEpoch, hub = base();
       var version = '', info = null, root = '';
       if (signsIn) {
@@ -3381,7 +3545,7 @@
       var epoch = _registrationEpoch, hub = base();
       await SoduWorkAPI.clientAuthMe();
       if (epoch !== _registrationEpoch || hub !== base()) throw staleTaskScope();
-      var response = await fetch(apiUrl('/client-auth/me/exports/' + encodeURIComponent(String(id)) + '/download'),
+      var response = await hubFetch(apiUrl('/client-auth/me/exports/' + encodeURIComponent(String(id)) + '/download'),
         { headers: authHeaders(true), signal: _abortSignal(DEFAULT_TIMEOUT) });
       if (!response.ok) throw httpError(response, await response.text());
       var blob = await response.blob();
@@ -3404,6 +3568,7 @@
         return { ok: false, error: '\u5f53\u524d\u5ba2\u6237\u7aef\u7248\u672c\u4e0d\u652f\u6301\u9000\u51fa' };
       }
       invalidateRegistrations();
+      rememberSession({ activationRequired: true });
       var logoutEpoch = _registrationEpoch, logoutHub = base();
       var result = await window.soduWorkAPI.deviceAuthLogout({ hub: logoutHub, clientId: device() });
       if (logoutEpoch !== _registrationEpoch || logoutHub !== base()) throw staleTaskScope();
@@ -3459,7 +3624,7 @@
 
     async clientAuthPolicy() {
       var restoration = restoreSavedHub(); if (restoration) await restoration;
-      var res = await fetch(apiUrl('/client-auth/policy'), { signal: _abortSignal(DEFAULT_TIMEOUT) });
+      var res = await hubFetch(apiUrl('/client-auth/policy'), { signal: _abortSignal(DEFAULT_TIMEOUT) });
       var text = await res.text();
       if (!res.ok) throw httpError(res, text);
       return text ? parseJSON(text) : {};
@@ -3467,7 +3632,7 @@
 
     clientAuthSnapshot() {
       return { state: _deviceAuthState, user: _clientUser, quota: _clientQuota,
-        clientId: device(), online: _online };
+        clientId: device(), online: _online, requestsAllowed: requestsAllowed() };
     },
     rememberedLoginAccount() {
       return loginAccount(readLocal(loginAccountKey()));
@@ -3502,10 +3667,56 @@
     },
     /* Synchronize configuration through saveCfg(). */
     async syncConfig(cfg) {
-      var scope = domainScope();
-      try { await jfetch('/config', { method: 'PUT', body: JSON.stringify(cfg || {}) });
+      var scope = domainScope(), taskScope = taskStorageKey('ops');
+      configWriteGeneration++;
+      try {
+        var patch = Object.assign({}, cfg);
+        var initial = activeConfigSnapshot(scope);
+        if (!initial) {
+          var snapshot = await jfetch('/config?withRevision=true', { taskScope });
+          if (!sameDomainScope(scope)) return false;
+          // Without an editing base, only a new or unchanged field can be written unconditionally.
+          if (Array.isArray(snapshot?._configKeys)) {
+            for (var key of Object.keys(patch)) if (!snapshot._configKeys.includes(key)) delete patch[key];
+          }
+        }
+        if (initial) {
+          for (var key of Object.keys(patch)) {
+            if ((Array.isArray(initial.keys) && !initial.keys.includes(key)) ||
+                JSON.stringify(patch[key]) === JSON.stringify(initial.cfg[key])) delete patch[key];
+          }
+          patch._configRevision = initial.revision;
+        }
+        var saved = await jfetch('/config?withRevision=true', { method: 'PUT', taskScope, body: JSON.stringify(patch) });
+        configWriteGeneration++;
+        rememberConfig(scope, saved, Object.assign({}, cfg));
         await invalidateDomain('config', scope); mark(true); return true; }
-      catch (e) { markFromError(e); return false; }
+      catch (e) {
+        markFromError(e);
+        if (e?.status === 409 || e?.status === 428) {
+          // Return the actual conflict to the store. It can reconcile its live copy and
+          // keep unrelated local edits rather than repeatedly uploading an obsolete snapshot.
+          var latest = await jfetch('/config?withRevision=true', { taskScope });
+          if (!sameDomainScope(scope) || !latest?._configRevision) return false;
+          var remote = rememberConfig(scope, latest, null, false);
+          var previous = initial?.remote || {};
+          var agreed = {};
+          for (var key of Object.keys(remote)) {
+            if (!Object.prototype.hasOwnProperty.call(patch || {}, key) ||
+                JSON.stringify(previous[key]) !== JSON.stringify(remote[key])) agreed[key] = remote[key];
+          }
+          return { conflict: true, current: agreed, accept(local) {
+            if (!sameDomainScope(scope)) return;
+            // Advance only after the store applied this response to the same edit. Local-only
+            // preferences (e.g. an explicit locale) must not replay over the winning Hub value.
+            var base = Object.assign({}, remote);
+            for (var key of Object.keys(agreed)) base[key] = local[key];
+            configWriteGeneration++;
+            rememberConfig(scope, latest, base);
+          } };
+        }
+        return false;
+      }
     },
 
     /*
@@ -3559,12 +3770,12 @@
         return base().replace(/^http/, 'ws') + '/api/v1/ws?device=' + encodeURIComponent(device());
       }
       function open() {
-        if (!currentSource()) return;
+        if (!currentSource() || !requestsAllowed()) return;
         /*
          * Wait locally for registration and a valid session before connecting; an unauthenticated
          * first frame would produce 4401.
          */
-        if (!_deviceSession && !secret()) { timer = setTimeout(open, 800); return; }
+        if (!_deviceSession && !secret()) return;
         try {
           ws = new WebSocket(wsUrl());
           ws.onopen = function () {
@@ -3585,7 +3796,7 @@
         } catch (e) { retry(); }
       }
       /* Reconnect with exponential backoff from three seconds, capped at thirty seconds. */
-      function retry() { if (closed) return; clearTimeout(timer); timer = setTimeout(open, delay); delay = Math.min(delay * 2, 30000); }
+      function retry() { if (closed || !requestsAllowed()) return; clearTimeout(timer); timer = setTimeout(open, delay); delay = Math.min(delay * 2, 30000); }
       open();
       return function () { closed = true; clearTimeout(timer); try { ws && ws.close(); } catch (e) {} };
     }

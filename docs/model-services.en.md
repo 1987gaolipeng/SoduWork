@@ -16,7 +16,9 @@ Update both the Hub and desktop client and apply the database migration for this
 
 ## What a connection test proves
 
-**Save and test connection** first reads the provider’s model list. A successful list request verifies only that endpoint: it does not prove that chat generation is authorized, that a billing balance is available, or that the selected Agent supports the protocol. If discovery is unavailable, the test can send a minimal chat request, which may incur usage. The result states which probe succeeded.
+In the web admin console, open **Model catalog → Connect a service** to set up an organization model service. **Test connection** reads the provider’s model list using the form values before you save. A successful response can contain zero models. After saving, choose **Add first model** on the configured service card to add a model by ID. For daily summaries and legacy execution, open **Expand overview → Catalog configuration → Organization defaults (legacy)**.
+
+On the desktop, **Save and test connection** first reads the provider’s model list. A successful list request verifies only that endpoint: it does not prove that chat generation is authorized, that a billing balance is available, or that the selected Agent supports the protocol. If discovery is unavailable, the test can send a minimal chat request, which may incur usage. The result states which probe succeeded.
 
 The current managed chat gateway uses OpenAI-compatible endpoints. An Anthropic provider can remain configured for an Agent that supports it, but a successful Anthropic connection test does not make it compatible with this gateway. The model editor and managed model picker show this boundary before execution. Changing only the protocol selector does not convert a provider endpoint; use the corresponding address and key supplied by the provider.
 
@@ -37,6 +39,12 @@ Older tool-calling and streaming results need a new check because they did not v
 Changing the endpoint, credential, model ID, protocol or request policy invalidates the matching evidence and cancels obsolete checks. Renaming a label, changing a note or editing a manual capability declaration preserves the evidence. Device-local results are encrypted on that device; local credentials and local capability probes are not forwarded to the Hub. Reopening the application restores matching results. If encrypted evidence cannot be read, the model catalog remains available with unconfirmed capabilities; rechecking rebuilds the evidence store and retains a backup of unreadable encrypted data.
 
 The runtime uses the resulting native-image route, output limit and supported compatibility options. Pi requires streaming, and operations that explicitly require tools reject models declared or verified as lacking that capability. Unknown capabilities retain the existing execution behavior. A change applies to later model selections or turns, without changing an already running request. Provider and runtime acceptance should still be verified with the intended deployment before rollout.
+
+## When a tool finishes and the model rejects the next request
+
+In a Pi conversation using an OpenAI-compatible chat completions service, the model can accept an ordinary message and return HTTP 403 when it receives a tool result. Open the failed request details in the conversation to check which model and request stage were involved. A capability check for the saved model tests ordinary text, streaming and a synthetic tool exchange. For a company model, ask the administrator to run the check if you lack access.
+
+If the conversation offers **Switch model and summarize results**, select another chat model and use that action to summarize the confirmed outputs and remaining work. The summary runs without tools. Files already written and the original task outcome are preserved. For a Hub-routed request, this action requires a Hub version that identifies generic upstream rejections. Explicit permission and policy refusals remain blocked.
 
 ## Zhipu GLM endpoints and error 1113
 

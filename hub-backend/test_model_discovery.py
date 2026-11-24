@@ -67,12 +67,32 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertEqual(result["models"], [])
         self.assertIn("不提供模型列表接口", result["detail"])
 
+    def test_fallback_can_succeed_after_a_denial_but_preserves_auth_errors(self):
+        for alternate, expected_ok in [(FakeResponse(200, ["model-a"]), True), (FakeResponse(404), False)]:
+            responses = {BASE + "/models": FakeResponse(401), BASE + "/v1/models": alternate}
+            with patch.object(model_discovery.httpx, "AsyncClient", _client_factory(responses)):
+                result = self.run_async(model_discovery.discover(BASE, "fixture-key"))
+            self.assertEqual(result["ok"], expected_ok)
+            if not expected_ok:
+                self.assertEqual(result["params"]["status"], "HTTP 401")
+
     def test_auth_failure_is_reported_not_raised(self):
         responses = {BASE + "/models": FakeResponse(401), BASE + "/v1/models": FakeResponse(401)}
         with patch.object(model_discovery.httpx, "AsyncClient", _client_factory(responses)):
             result = self.run_async(model_discovery.discover(BASE, "bad"))
         self.assertFalse(result["ok"])
         self.assertIn("HTTP 401", result["detail"])
+
+    def test_draft_can_distinguish_a_valid_empty_list_from_an_error_body(self):
+        for payload, expected in [({"data": []}, True), ([], True), ({"error": "private"}, False),
+                                  ({"data": [], "error": {}}, False), ({}, False),
+                                  ({"data": [{"message": "private"}]}, False)]:
+            with self.subTest(payload=payload), patch.object(
+                    model_discovery.httpx, "AsyncClient", _client_factory({BASE + "/models": FakeResponse(200, payload)})):
+                result = self.run_async(model_discovery.discover(BASE, "fixture", allow_empty=True))
+                self.assertEqual(result["ok"], expected, result)
+                self.assertEqual(result["models"], [])
+                self.assertNotIn("private", str(result))
 
     def test_network_error_is_classified(self):
         responses = {BASE + "/models": httpx.ConnectError("refused")}
@@ -113,6 +133,12 @@ class ModelDiscoveryTests(unittest.TestCase):
             result = self.run_async(model_discovery.discover(base, key))
             self.assertFalse(result["ok"])
             self.assertEqual(result["models"], [])
+
+    def test_anthropic_accepts_versioned_base_without_repeating_v1(self):
+        responses = {BASE + "/models": FakeResponse(200, [])}
+        with patch.object(model_discovery.httpx, "AsyncClient", _client_factory(responses)):
+            result = self.run_async(model_discovery.discover(BASE + "/", "fixture", "anthropic", allow_empty=True))
+        self.assertTrue(result["ok"])
 
 
 if __name__ == "__main__":

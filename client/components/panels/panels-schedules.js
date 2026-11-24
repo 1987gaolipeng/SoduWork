@@ -467,17 +467,6 @@ function _schConfirmDel(sid, s) {
   });
 }
 
-function _schBlueprintHtml(s) {
-  const work = (s.title || '').trim() || '\u5b8c\u6210\u8bbe\u5b9a\u7684\u5de5\u4f5c';
-  return '<section class="sch-blueprint">' +
-    '<header><span><b>\u5b83\u4f1a\u8fd9\u6837\u8fd0\u884c</b><i>\u4fdd\u5b58\u540e\u53ef\u5148\u8dd1\u4e00\u6b21\uff0c\u786e\u8ba4\u7ed3\u679c\u518d\u653e\u5fc3\u542f\u7528</i></span>' +
-    '<em>\u53ef\u8ffd\u8e2a \u00b7 \u53ef\u91cd\u8bd5 \u00b7 \u7559\u8bc1\u636e</em></header><ol>' +
-    '<li><i>1</i><span><small>\u89e6\u53d1</small><b id="schBpWhen">\u6309\u8bbe\u5b9a\u65f6\u95f4</b></span></li>' +
-    '<li><i>2</i><span><small>\u6267\u884c</small><b id="schBpWork">' + esc(work) + '</b></span></li>' +
-    '<li><i>3</i><span><small>\u4ea4\u4ed8</small><b>\u6253\u5f00\u666e\u901a\u4f1a\u8bdd\u3001\u53d1\u9001\u63d0\u793a\u8bcd\u5e76\u4fdd\u7559\u5b8c\u6574\u8bb0\u5f55</b></span></li>' +
-    '</ol></section>';
-}
-
 function _schTimingNumbers(value, max) {
   const source = Array.isArray(value) ? value : (value == null || value === '' ? [] : [value]);
   return [...new Set(source.map(item => Number(item)).filter(item => Number.isInteger(item) && item >= 1 && item <= max))]
@@ -546,33 +535,33 @@ function _schFormHtml(s) {
     '<span class="sch-cap-dot"></span><b>' + label + '</b><i>' + hint + '</i></label>').join('');
   const retryOn = Number(s.retryLimit == null ? 2 : s.retryLimit) > 0;
 
-  return '<div class="sch-form">' + _schBlueprintHtml(s) +
-    sec('要它干什么') +
-    '<label class="sch-f-lbl">标题</label>' +
+  return '<div class="sch-form">' +
+    sec('任务说明') +
+    '<label class="sch-f-lbl" for="schTitle">标题</label>' +
     '<input class="sch-in" id="schTitle" maxlength="60" placeholder="如：汇总今天干了什么，写一份小结" value="' + esc(s.title) + '">' +
-    '<label class="sch-f-lbl">交代给 AI 的话<em>每次都会原样发过去，写清楚点</em></label>' +
+    '<label class="sch-f-lbl" for="schNote">交代给 AI 的话</label>' +
     '<textarea class="sch-in" id="schNote" rows="4" placeholder="要做什么、产出成什么样、放哪儿。">' + esc(s.note) + '</textarea>' +
 
-    sec('什么时候跑', '<span id="schTimeZoneHint">按' + esc(_schTimeZoneLabel(s.timeZone)) + '执行 · 触发精度约两分钟</span>') +
+    sec('执行时间', '<span id="schTimeZoneHint">按' + esc(_schTimeZoneLabel(s.timeZone)) + '执行 · 触发精度约两分钟</span>') +
     '<div class="sch-when-row">' +
-    '<select class="sch-in sch-w-every" id="schEvery">' + opt(SCH_EVERY, s.every) + '</select>' +
+    '<label class="sch-cadence-field"><span>执行方式</span>' +
+    '<select class="sch-in sch-w-every" id="schEvery">' + opt(SCH_EVERY, s.every) + '</select></label>' +
     '<select class="sch-in sch-w-wd" id="schWd" hidden aria-hidden="true">' + opt(SCH_WD, s.weekday) + '</select>' +
     '<span class="sch-clock" id="schHWrap">' +
     _schTimePickerHtml('schH', s.atHour, 24, '小时') + '<em id="schClockSep" aria-hidden="true">:</em>' +
     _schTimePickerHtml('schM', s.atMinute, 60, '分钟') +
-    '<small id="schClockHint">滚动选择时间</small></span>' +
+    '<small id="schClockHint"></small></span>' +
     _schOnceFieldsHtml(s) + '<span class="sch-when-pv" id="schPv" role="status" aria-live="polite"></span></div>' +
     _schTimingControlsHtml(s) + _schCustomRuleHtml(s) +
 
-    sec('在哪儿运行', '不依赖工程的办公自动化可以留空') +
-    '<label class="sch-f-lbl">工程</label><select class="sch-in" id="schRepo">' +
-    '<option value="">不指定工程（文档、汇总、巡检等）</option>' +
+    sec('执行设置') +
+    '<label class="sch-f-lbl" for="schRepo">关联工程</label><select class="sch-in" id="schRepo">' +
+    '<option value="">不指定工程</option>' +
     (s.repoId && !_schRepos.some(r => r.id === s.repoId) ? '<option value="' + esc(s.repoId) +
       '" selected disabled>原工程已不可用或无权访问，请重新选择</option>' : '') +
     _schRepos.map(r => '<option value="' + esc(r.id) + '"' + (r.id === s.repoId ? ' selected' : '') + '>' + esc(r.name) + '</option>').join('') +
     '</select>' +
 
-    sec('怎么执行', '自动创建普通会话，发送提示词并使用所选底座和模型') +
     '<div class="sch-mode-tabs" role="tablist" hidden style="display:none">' +
     '<button class="sch-mode-btn' + (mode === 'direct' ? ' on' : '') + '" data-mode="direct" role="tab">直接执行' +
     '<i>适合单步、结果明确的工作</i></button>' +
@@ -723,9 +712,7 @@ function _wireSchForm() {
           const preview = ev.value === 'custom' ? _schTx(window.ScheduleTiming.customPreview(result, zone)) :
             wall ? _schTx('下一次：') + wall.replace('T', ' ') : _schTx('计划已超出有效日期范围');
           const nextRun = document.getElementById('schPv');
-          const blueprint = document.getElementById('schBpWhen');
           if (nextRun) nextRun.textContent = preview;
-          if (blueprint) blueprint.textContent = preview;
         }
       } catch (error) {
         if (!isCurrent() || seq !== probeSeq || line !== document.getElementById('schReady')) return;
@@ -815,18 +802,13 @@ function _wireSchForm() {
     const clockSep = document.getElementById('schClockSep');
     if (clockSep) clockSep.hidden = v === 'hourly';
     const clockHint = document.getElementById('schClockHint');
-    if (clockHint) clockHint.textContent = _schTx(v === 'hourly' ? '每小时第几分' : '滚动选择时间');
+    if (clockHint) clockHint.textContent = v === 'hourly' ? _schTx('每小时第几分') : '';
     _schSyncTiming(v);
     document.getElementById('schDirectBlock').style.display = mode === 'direct' ? '' : 'none';
     document.getElementById('schPluginBlock').style.display = mode === 'plugin' ? '' : 'none';
     document.getElementById('schFlowWrap').style.display = 'none';
     const pv = document.getElementById('schPv');
     if (pv) pv.textContent = _schNextPreview();
-    const bpWhen = document.getElementById('schBpWhen');
-    const bpWork = document.getElementById('schBpWork');
-    if (bpWhen) bpWhen.textContent = _schNextPreview().replace(/^\u4e0b\u4e00\u6b21\uff1a/, '');
-    if (bpWork) bpWork.textContent = (document.getElementById('schTitle').value || '').trim() ||
-      '\u5b8c\u6210\u8bbe\u5b9a\u7684\u5de5\u4f5c';
     document.querySelectorAll('#schCaps label').forEach(label =>
       label.classList.toggle('on', label.querySelector('input').checked));
     document.getElementById('schRetryOptions').style.display =

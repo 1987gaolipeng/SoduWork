@@ -53,6 +53,9 @@ def _short(exe: str | None, args: list[str], timeout: int = 12) -> str:
         if (bundled_node and os.path.normcase(os.path.abspath(exe)) ==
                 os.path.normcase(os.path.abspath(bundled_node))):
             env["ELECTRON_RUN_AS_NODE"] = "1"
+        elif os.path.basename(exe).lower() in {"node", "node.exe"}:
+            from .agent_installation import prepend_node_path
+            prepend_node_path(env, exe)
         options = {}
         if _WIN:
             options["creationflags"] = (getattr(subprocess, "CREATE_NO_WINDOW", 0) |

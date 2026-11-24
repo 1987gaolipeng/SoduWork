@@ -15,6 +15,10 @@
       // Keep the keyed row, but update the control, action attributes and body.
       patchContent(current, next); return;
     }
+    if (nextHead?.classList.contains('ntool-summary') && head) {
+      // A command can finish without changing its row or header element type.
+      patchContent(head, nextHead); return;
+    }
     if (head && nextHead) {
       head.title = nextHead.title || '';
       const icon = head.querySelector('.ntool-icon'), nextIcon = nextHead.querySelector('.ntool-icon');

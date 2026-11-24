@@ -6,18 +6,23 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'api.js'), 'utf8');
 
-function load(fetchImpl, seed = {}, internal = false) {
+function load(fetchImpl, seed = {}, internal = false, locale) {
   const values = new Map(Object.entries(seed));
   const localStorage = {
     getItem: (key) => values.has(key) ? values.get(key) : null,
     setItem: (key, value) => values.set(key, String(value)),
   };
   const window = { __SODUWORK_TEST_HUB_CONFIG__: { allowSwitch: internal } };
+  if (locale) {
+    const catalog = require('../core/locales/' + locale + '-runtime-surfaces.js');
+    window.SoduWorkLocaleMessages = { [locale]: catalog };
+    window.SoduWorkI18n = { getLocale: () => locale, t: (key) => catalog[key] };
+  }
   const context = {
     window, localStorage, fetch: fetchImpl, User: { id: 'u-test' },
     navigator: { platform: 'test' }, console: { log() {}, error() {} },
     AbortController: class { constructor() { this.signal = {}; } abort() {} },
-    FormData: class { append() {} }, WebSocket: class {},
+    FormData: class { append() {} }, WebSocket: class {}, URLSearchParams,
     setTimeout: () => 0, clearTimeout() {},
   };
   vm.createContext(context);
@@ -28,6 +33,34 @@ function load(fetchImpl, seed = {}, internal = false) {
 function response(status, body) {
   return { ok: status >= 200 && status < 300, status, text: async () => body || '' };
 }
+
+test('session read failures preserve Hub reachability and expose a retryable timeout', async () => {
+  let mode = 'online';
+  const api = load(async (_url, options) => {
+    assert.equal(options.sessionRead, undefined);
+    if (mode === 'network') throw new TypeError('network down');
+    if (mode === 'timeout') return response(504, JSON.stringify({ detail: {
+      code: 'SESSION_READ_TIMEOUT', retryable: true, message: 'Session read timed out',
+    } }));
+    return response(200, '[]');
+  });
+  await api.getProjects();
+  for (const failure of ['network', 'timeout']) {
+    mode = failure;
+    const page = await api.aiSession('task', 42, 'run');
+    assert.equal(page.ok, false);
+    assert.equal(page.last, undefined);
+    assert.equal(api.online, true);
+    if (failure === 'timeout') {
+      assert.equal(page.httpStatus, 504);
+      assert.equal(page.code, 'SESSION_READ_TIMEOUT');
+      assert.equal(page.retryable, true);
+    }
+  }
+  mode = 'network';
+  await api.getTasks();
+  assert.equal(api.online, false);
+});
 
 test('business project lookup distinguishes a successful empty list from HTTP and malformed responses', async () => {
   assert.equal((await load(async()=>response(200,'[]')).getProjects()).length,0);
@@ -159,4 +192,40 @@ test('定时任务断网向页面交付错误，不伪装成空清单', async ()
   const api = load(async () => { throw new TypeError('schedule network down'); });
   await assert.rejects(() => api.listSchedules(), /schedule network down/);
   assert.equal(api.online, false);
+});
+
+test('localized task errors retain the Hub status, code and original diagnostic', async () => {
+  for (const locale of ['zh-CN', 'en-US', 'ja-JP', 'ko-KR']) {
+    for (const [key, send] of [
+      ['hub.input.inbox', api => api.createTeamTask({ title: 'fixture' })],
+      ['hub.input.comment_length', api => api.addTaskComment('fixture', 'text', [])],
+    ]) {
+      const api = load(async () => ({
+        ...response(400, JSON.stringify({ detail: 'raw diagnostic' })),
+        headers: new Headers({ 'X-Error-Code': key }),
+      }), {}, false, locale);
+      const expected = require('../core/locales/' + locale + '-runtime-surfaces.js')[key];
+      assert.ok(expected);
+      await assert.rejects(send(api), error => error.message === expected &&
+        error.status === 400 && error.code === key && error.detail === 'raw diagnostic');
+    }
+  }
+});
+
+test('approval decisions show the selected language and retain the original diagnostic', async () => {
+  const code = 'hub.input.release_environment';
+  for (const [locale, message] of [
+    ['zh-CN', '当前任务在所选环境中没有可用的部署目标，请检查发布链配置'],
+    ['en-US', 'This task has no available deployment target in the selected environment. Check the release pipeline configuration.'],
+    ['ja-JP', '選択した環境には、このタスクで使用できるデプロイ先がありません。リリースパイプラインの設定を確認してください。'],
+    ['ko-KR', '선택한 환경에서 이 작업에 사용할 수 있는 배포 대상이 없습니다. 릴리스 파이프라인 설정을 확인하세요.'],
+  ]) {
+    const api = load(async () => ({
+      ...response(409, JSON.stringify({ detail: 'original Hub diagnostic' })),
+      headers: new Headers({ 'X-Error-Code': code }),
+    }), {}, false, locale);
+    await assert.rejects(api.decideApproval('fixture', 'approve'), {
+      status: 409, code, message, detail: 'original Hub diagnostic',
+    });
+  }
 });

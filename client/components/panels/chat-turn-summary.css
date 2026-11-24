@@ -6,6 +6,7 @@
 .nturn-summary>button:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
 .nturn-summary-values{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0}
 .nturn-summary-values b,.nturn-summary-values em{font:inherit}
+.nturn-summary [data-turn-empty]{margin:4px 0 0;color:var(--ink-3);font-size:13px;line-height:1.5}
 .nturn-summary svg{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .nturn-summary [aria-expanded=true] svg{transform:rotate(90deg)}
 #nchatList [data-turn-hidden]{display:none!important}

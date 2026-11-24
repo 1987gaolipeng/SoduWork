@@ -113,13 +113,16 @@ test('the real API carries a correlation id and records total time without retai
 
 test('authentication retry stays in one request span and retains the same correlation id', async () => {
   const s = renderer(), ids = [];
+  s.window.soduWorkAPI = { deviceAuthBootstrap: async () => {
+    s.advance(20); return { ok: true, stored: true, clientId: 'fixture-device', session: 'private-session', expiresIn: 600 };
+  } };
   s.context.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
   s.context.fetch = async (_url, options) => {
     ids.push(options.headers['X-Request-ID']); s.advance(30);
     return new Response(ids.length === 1 ? '{}' : '{"assigned":true}', { status: ids.length === 1 ? 401 : 200 });
   };
   for (const file of ['core/api-work-plugins.js', 'api.js']) vm.runInContext(read(file), s.context);
-  s.window.SoduWorkAPI.registerClient = async () => { s.advance(20); return { ok: true, session: 'private-session' }; };
+  await s.window.SoduWorkAPI.registerClient();
   assert.equal((await s.window.SoduWorkAPI.getTeamCapability()).assigned, true);
   const report = await s.api.snapshot();
   assert.equal(report.events.length, 1); assert.equal(report.events[0].attempts, 2);

@@ -116,7 +116,9 @@ async def serve(root: Path) -> None:
                 await task_service.update_task(session, "fixture-device", item.id, {"status": "todo", "triageStage": "clarifying"})
         else:
             raise HTTPException(404, "Unknown isolated fixture action")
-        value = await org_memory.for_client(session, await session.get(models.Client, "fixture-device"))
+        # This fixture action completes the write-side backfill before returning its snapshot.
+        row = await org_memory.refresh(session, "fixture-org")
+        value = org_memory.context_view(row, "fixture-org")
         await session.commit()
         return {"fixtureOnly": True, **value}
 

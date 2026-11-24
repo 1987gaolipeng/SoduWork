@@ -16,11 +16,13 @@ async def tick_loop() -> None:
     from . import schedules
 
     gap = max(60, int(getattr(get_settings(), "delivery_sweep_seconds", 120)))
+    after_run_id = ""
     log.info("自动化定时调度启动，间隔 %ss", gap)
     while True:
         try:
             async with SessionLocal() as session:
-                result = await schedules.tick(session)
+                result = await schedules.tick(session, after_run_id=after_run_id)
+                after_run_id = result["nextRunId"]
             if result.get("fired"):
                 log.info("定时派活：触发 %s 条", result["fired"])
         except asyncio.CancelledError:

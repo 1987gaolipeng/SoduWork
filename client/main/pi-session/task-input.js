@@ -314,12 +314,21 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
       const contract = (receipt.task?.workRouting || task.workRouting || {}).outputContract || {};
       // A kind or prose requirement alone does not require local files. Only
       // explicit file entries authorize treating an empty inventory as failure.
-      const requiresFiles = !['repository-change', 'production-release'].includes(contract.kind) &&
-        !String(receipt.task?.artifactUrl || task.artifactUrl || '').trim() &&
+      const localFileDelivery = !['repository-change', 'production-release'].includes(contract.kind) &&
+        !String(receipt.task?.artifactUrl || task.artifactUrl || '').trim();
+      const requiresFiles = localFileDelivery &&
         [contract.deliverables, contract.expectedArtifacts, contract.outputs].some(rows =>
           Array.isArray(rows) && rows.some(row => row && typeof row === 'object' &&
             (typeof row.path === 'string' && row.path.trim() || typeof row.entry === 'string' && row.entry.trim())));
-      const delivery = await require('./task-delivery.cjs').capture(runtime?.handle, outcome, {taskId,...scope}, {requiresFiles});
+      const feedback = reworkFeedback || task.workRouting?.reworkPending?.feedback;
+      const texts = feedback || followUp ? [feedback, instruction] : [
+        task.acceptanceCriteria, task.outputRequirements, task.deliverables, task.note, task.description, instruction,
+      ];
+      const paths = localFileDelivery && outcome === 'completed'
+        ? require('./task-output-paths.cjs').outputPaths(contract, texts) : undefined;
+      const requestedFormat = feedback && require('../conversation/delivery-selection').requestedExtension(feedback, {explicitOnly:true});
+      const delivery = await require('./task-delivery.cjs').capture(runtime?.handle, outcome, {taskId,...scope},
+        {requiresFiles, paths, requestedFormat});
       require('../requirement-diagnostics.cjs').record('native.capture', {taskId,...scope,outcome,
         fileCount:delivery?.files?.length || 0});
       capturedSettlement = {body: {action, ...(submissionMode ? {submissionMode} : {})}, delivery};

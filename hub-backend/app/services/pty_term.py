@@ -164,6 +164,8 @@ class Term:
     # Process startup.
     def _start(self, env: dict) -> None:
         argv = self.argv
+        from .local_base import bind_command_environment
+        env = bind_command_environment(dict(env or os.environ), argv)
         if _WIN:
             from winpty import PtyProcess
             # ConPTY may inherit a legacy Windows code page.

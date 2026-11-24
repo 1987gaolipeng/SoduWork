@@ -327,6 +327,16 @@ async def admin_capabilities(
         raise HTTPException(409, detail=str(exc)) from exc
 
 
+@admin_router.post("/policy/preview")
+async def preview_admin_capability_policy(
+    cfg: dict = Body(embed=True),
+    user: User = Depends(require_perm("integration.manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    with skill_details.errors():
+        return await capability_catalog.policy_preview(session, cfg)
+
+
 @admin_router.put("")
 async def save_admin_capability_policy(
     body: dict = Body(default_factory=dict),

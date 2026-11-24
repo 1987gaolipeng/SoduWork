@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 from functools import lru_cache
+import math
 import os
 from pathlib import Path
 import shutil
@@ -25,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "outputs", "work"}
 SKIP_SUFFIXES = {".pyc", ".pyo", ".log", ".db", ".db-shm", ".db-wal"}
 BACKEND_FILES = (
-    "requirements.txt", "requirements-runner.txt", "alembic.ini", "runner_main.py", "db_admin.py",
+    "requirements.txt", "requirements-runner.txt", "requirements-image.txt", "alembic.ini", "runner_main.py", "db_admin.py",
     "full_backup.py", "pack_plugin.py", "client-update-trust.json",
 )
 ELECTRON_DOWNLOAD_TIMEOUT = 600
@@ -40,6 +41,31 @@ class StartupError(RuntimeError):
 
 class DiskFullError(StartupError):
     """A storage failure that must not be replaced with download advice."""
+
+
+def electron_download_timeout() -> float:
+    """Electron download deadline in seconds; honor ELECTRON_DOWNLOAD_TIMEOUT.
+
+    docs/getting-started.md documents this variable as a way for slow
+    connections to raise the 600-second deadline, so read it at use time
+    instead of relying on the module constant. Invalid values fail loudly
+    rather than being silently ignored.
+    """
+    raw = os.environ.get('ELECTRON_DOWNLOAD_TIMEOUT', '').strip()
+    if not raw:
+        return float(ELECTRON_DOWNLOAD_TIMEOUT)
+    try:
+        value = float(raw)
+    except ValueError:
+        raise StartupError(
+            'ELECTRON_DOWNLOAD_TIMEOUT must be a positive number of seconds; '
+            'got a non-numeric value'
+        ) from None
+    if not math.isfinite(value) or value <= 0:
+        raise StartupError(
+            'ELECTRON_DOWNLOAD_TIMEOUT must be a positive, finite number of seconds'
+        )
+    return value
 
 
 def command_failure(message: str, log: Path, offset: int) -> StartupError:
@@ -298,7 +324,7 @@ def read_stamp(path: Path) -> str:
 
 def verify_runner_environment(python: Path, backend: Path, log: Path, *, env: dict) -> None:
     """Check imports and the control-channel API without starting a Runner."""
-    probe = ("import inspect, sys, websockets, yaml, pg8000, pymysql, pymongo, dns, redis, cryptography\n"
+    probe = ("import inspect, sys, websockets, yaml, pg8000, pymysql, pymongo, dns, redis, cryptography, truststore\n"
              "assert sys.version_info >= (3, 12), 'Runner requires Python 3.12+'\n"
              "assert {'additional_headers', 'proxy'} <= set(inspect.signature(websockets.connect).parameters), "
              "'Runner requires the websockets 15+ connection API'\n")
@@ -393,18 +419,20 @@ def prepare(state: Path, log: Path) -> tuple[Path, Path]:
 
     venv = state / "venv"
     python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    # Keep the caller's module paths out of pip and its build subprocesses.
+    python_env = {key: value for key, value in cache_env.items() if key not in ("PYTHONHOME", "PYTHONPATH")}
     if not python.is_file():
-        run([sys.executable, "-m", "venv", str(venv)], cwd=state, log=log, env=cache_env,
+        run([sys.executable, "-I", "-m", "venv", str(venv)], cwd=state, log=log, env=python_env,
             label="[1/4] 创建独立环境 / Creating a private Python environment")
         if not python.is_file():
             raise venv_interpreter_error(python, venv, log)
     requirements = [ROOT / "hub-backend" / name for name in ("requirements.txt", "requirements-runner.txt")]
     py_stamp = state / "python-dependencies.sha256"
-    wanted = digest_files(requirements, ROOT)
+    wanted = digest_files([*requirements, ROOT / "hub-backend" / "requirements-image.txt"], ROOT)
     install = read_stamp(py_stamp) != wanted
     if not install:
         try:
-            verify_runner_environment(python, backend, log, env=cache_env)
+            verify_runner_environment(python, backend, log, env=python_env)
         except DiskFullError:
             raise
         except StartupError:
@@ -412,11 +440,11 @@ def prepare(state: Path, log: Path) -> tuple[Path, Path]:
             # launcher's environment, never a checkout or activated shell venv.
             install = True
     if install:
-        run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
+        run([str(python), "-I", "-m", "pip", "install", "--disable-pip-version-check",
              *[argument for file in requirements for argument in ("-r", str(file))]], cwd=state, log=log,
-            env=cache_env,
+            env=python_env,
             label="[2/4] 安装服务依赖 / Installing server dependencies (first run needs internet)")
-        verify_runner_environment(python, backend, log, env=cache_env)
+        verify_runner_environment(python, backend, log, env=python_env)
         py_stamp.write_text(wanted, encoding="utf-8")
 
     source = ROOT / "hub-frontend"
@@ -440,7 +468,7 @@ def prepare(state: Path, log: Path) -> tuple[Path, Path]:
         if (source / name).is_dir():
             files.extend(source_files(source / name))
     files.extend((ROOT / "client" / name) for name in (
-        "core/connector-brand.js", "components/panels/connector-config.js",
+        "core/connector-brand.js", "core/locales/builtin-skills.js", "components/panels/connector-config.js",
         "components/client-auth/legal-html.js", "components/client-auth/legal-html.css"))
     files.extend(source_files(ROOT / "client/assets/connector-brands"))
     wanted = digest_files(files, ROOT)
@@ -490,13 +518,13 @@ def prepare_desktop(state: Path, log: Path) -> Path:
         # npm versions differ in install-script policy. Download the locked Electron
         # runtime explicitly without enabling unrelated dependencies' lifecycle scripts.
         if not electron_binary(client).is_file():
-            print("桌面运行环境下载最多等待 10 分钟 / Electron download allows up to 10 minutes. "
+            print(f"桌面运行环境下载最多等待 {electron_download_timeout():.0f} 秒 / Electron download allows up to {electron_download_timeout():.0f} seconds. "
                   "If GitHub is unreachable, configure ELECTRON_MIRROR or your proxy and retry.", flush=True)
             try:
                 run([node, str(client / 'scripts/install-electron.cjs')], cwd=client, log=log,
                     label='[Desktop] 下载桌面运行环境 / Downloading the Electron runtime',
                     env=electron_install_environment(cache_env),
-                    timeout=ELECTRON_DOWNLOAD_TIMEOUT)
+                    timeout=electron_download_timeout())
             except DiskFullError:
                 raise
             except StartupError as exc:

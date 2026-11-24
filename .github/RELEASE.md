@@ -181,8 +181,19 @@ completion and request charges. The check applies to the main, EU and US
 OpenRouter endpoints; other configured services keep their existing request format.
 
 Generation logs record the model, timing, request settings, HTTP status and a
-bounded failure category. They never include keys, private endpoint addresses,
-commit text, provider response bodies or reasoning content. Failed generation
+bounded failure category. Invalid output also records the failing stage, a specific
+error code and fixed validation-rule message, with a schema path or JSON line/column
+when available. Incomplete responses record an allowlisted finish reason. Logs retain
+original exception messages and chained tracebacks with credentials and endpoint URLs
+redacted, without capturing local variables or full model responses. The structured
+diagnostic appears in the warning and job summary; output-validation failures do not
+suggest changing provider access rules. When returned, `release_notes_usage` records nonnegative
+integer `prompt_tokens`, `completion_tokens`, `total_tokens` and
+`completion_tokens_details.reasoning_tokens` (logged as `reasoning_tokens`). Missing
+or malformed counters are omitted, not estimated; they do not affect generation.
+These counters complement elapsed time without another model call. Logs never include
+keys, private endpoint addresses, complete commit inputs, raw provider responses, arbitrary usage
+metadata or reasoning content. Failed generation
 creates a GitHub Actions warning annotation and a job summary while packaging
 continues. The warning distinguishes access denial, rate limits, missing or paid
 models, catalog verification failures and invalid output. When a replacement is
@@ -190,8 +201,13 @@ needed, it directs maintainers to allow a free model/provider in OpenRouter and
 update the repository variable `RELEASE_NOTES_MODEL` before starting a new run.
 
 The JSON contains Chinese, English, Japanese and Korean prose with matching
-section/item IDs and commit provenance. Each version highlights only 3–5 important
-changes (fewer when appropriate), with one short sentence per item. The model cites
+section/item IDs and commit provenance. A single model call selects up to five
+title-supported changes, prioritizing data loss/overwrite/corruption fixes, broken
+core workflows, everyday usability, then build/deployment options. Each item uses
+one natural sentence about a main user change with at most two closely related
+effects; ambiguous details are omitted rather than guessed. A short terminology
+guide improves Chinese wording, such as “源码安装” for source setup. Input remains
+commit titles only; the timeout and output-token limits are unchanged. The model cites
 only selected commits; the tool marks the rest as `not-highlighted`, without
 claiming they have no user impact. Ambiguous titles must not be expanded with
 invented details. User-facing prose must describe actual

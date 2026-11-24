@@ -3,10 +3,10 @@ function answerHandler(session) {
   return async (event, ref, value) => {
     const handle = session.get(ref);
     if (!handle) return { ok: false, reason: '会话不在了' };
-    if (typeof handle.answerUi !== 'function') return { ok: false, reason: '当前执行底座没有待处理的交互确认' };
-    if (value?.requestId && (!handle.attachedWindow || handle.attachedWindow.webContents?.id !== event.sender.id)) {
+    if (!event?.sender || handle.attachedWindow?.webContents !== event.sender) {
       return { ok: false, reason: '请在当前会话窗口确认权限' };
     }
+    if (typeof handle.answerUi !== 'function') return { ok: false, reason: '当前执行底座没有待处理的交互确认' };
     return (await handle.answerUi(value || {})) || { ok: true };
   };
 }
@@ -20,7 +20,16 @@ function changeHandler({ session, BrowserWindow, confirmFullAccess = require('./
     if (changing.has(ref)) return { ok: false, reason: '正在确认权限，请稍候' };
     changing.add(ref);
     try {
+      const approval = options?.approval;
+      const checkApproval = snapshot => {
+        if (!approval) return;
+        if (!Number.isFinite(approval.expiresAt) || Date.now() >= approval.expiresAt) throw Error('权限确认超时，请重试');
+        const pending = snapshot.pendingPermissions || (snapshot.pendingUi?.method === 'permission' ? [snapshot.pendingUi] : []);
+        if (!pending.some(item => item.requestId === approval.requestId &&
+            item.policyRevision === approval.policyRevision)) throw Error('权限请求已失效');
+      };
       const snapshot = handle.snapshot();
+      checkApproval(snapshot);
       if (!snapshot.accessControl?.supported || !snapshot.accessControl?.canChangeDuringSession || typeof handle.setAccessPolicy !== 'function') {
         return { ok: false, reason: '当前执行底座暂不支持在会话中切换权限，请更新客户端或执行机' };
       }
@@ -29,7 +38,8 @@ function changeHandler({ session, BrowserWindow, confirmFullAccess = require('./
       const policy = rules.next(mode, handle.cwd, current, expectedRevision);
       if (!snapshot.accessControl.modes?.includes(mode)) return { ok: false, reason: '当前执行底座不支持此权限模式' };
       if (mode === 'full' && current?.mode !== 'full') {
-        const confirmed = await confirmFullAccess(BrowserWindow.fromWebContents(event.sender), { anchor: options?.anchor, source: event.sender });
+        const confirmed = await confirmFullAccess(BrowserWindow.fromWebContents(event.sender), { anchor: options?.anchor, source: event.sender, expiresAt: approval?.expiresAt });
+        checkApproval(handle.snapshot());
         if (confirmed !== true) return { ok: false, cancelled: true };
       }
       if (!owner()) return { ok: false, reason: '会话窗口已变化，请重新选择' };

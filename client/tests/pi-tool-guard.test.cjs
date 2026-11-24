@@ -42,6 +42,20 @@ test('derives a per-tool hard fallback from the effective command timeout', () =
   assert.equal(guard.STALL_NOTICE_MS, 90000);
 });
 
+test('Windows Bash gives Python UTF-8 pipes without changing the parent or other platforms', () => {
+  let options;
+  const sdk = { createBashTool(_cwd, value) { options = value; return { name: 'bash' }; } };
+  const resolvedShell = { shellPath: 'bash' };
+  guard.createGuardedBash(sdk, '/work', null, { platform: 'win32', resolvedShell });
+  const spawn = { command: 'python report.py', cwd: '/work', env: { PI_SESSION_ID: 'session' } };
+  assert.deepEqual(options.spawnHook(spawn), {
+    ...spawn, env: { PI_SESSION_ID: 'session', PYTHONIOENCODING: 'utf-8' },
+  });
+  assert.deepEqual(spawn.env, { PI_SESSION_ID: 'session' });
+  guard.createGuardedBash(sdk, '/work', null, { platform: 'linux', resolvedShell });
+  assert.equal(options.spawnHook, undefined);
+});
+
 test('guarded bash injects a timeout and keeps native cancellation path', async () => {
   const calls = [];
   const sdk = {

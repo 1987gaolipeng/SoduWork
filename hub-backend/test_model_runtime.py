@@ -6,6 +6,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from email.utils import formatdate
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -526,6 +527,66 @@ class TransportTests(IsolatedDatabase):
         data = await runtime.snapshot()
         self.assertEqual(data["running"], 0)
         self.assertEqual(data["lastHour"]["rateLimited"], 1)
+
+
+    async def test_refusal_classification_and_http_date_are_safe_and_do_not_retry(self):
+        from app.api.ai_proxy import _proxy_error, _in_stream_error_frame
+        now = 1800000000.25
+        seen = []
+        cases = [
+            ({"code": "rate_limit_exceeded"}, "rate_limit"),
+            ({"type": "rate_limit_error"}, "rate_limit"),
+            ({"code": "1113"}, "billing"),
+            ({"type": "insufficient_quota"}, "billing"),
+            ({"code": "private-fixture-code"}, "unclassified_429"),
+            ({"code": ["rate_limit_exceeded"]}, "unclassified_429"),
+        ]
+        for error_fields, category in cases:
+            def upstream(request):
+                seen.append(request)
+                return httpx.Response(429, json={"error": {
+                    **error_fields, "message": "private-fixture-secret https://private.invalid"}},
+                    headers={"Retry-After": formatdate(now + 420, usegmt=True),
+                             "x-request-id": "fixture-request-429"})
+            async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as http:
+                with patch.object(transport, "_client", return_value=http), \
+                        patch.object(transport.time, "time", return_value=now), \
+                        self.assertLogs("uvicorn.error", level="WARNING") as captured:
+                    with self.assertRaises(runtime.UpstreamError) as failure:
+                        await transport.open_response(CONF, "/responses", b"{}")
+            error = failure.exception
+            self.assertEqual(error.retry_after, 420)
+            logged = "\n".join(captured.output)
+            self.assertIn(f"category={category} retry_after=420", logged)
+            self.assertIn("upstream_request_id=fixture-request-429", logged)
+            for private in ("private-fixture", "private.invalid", CONF["key"]):
+                self.assertNotIn(private, logged)
+            response = _proxy_error(error)
+            payload = json.loads(response.body)
+            if category == "billing":
+                self.assertEqual(payload["error"]["code"], "upstream_billing_error")
+                self.assertNotIn("retry-after", response.headers)
+                self.assertNotIn("retry_after_ms", payload["error"])
+            else:
+                self.assertEqual(response.headers["retry-after"], "420")
+                self.assertEqual(payload["error"]["retry_after_ms"], 420000)
+            for responses in (False, True):
+                frame = _in_stream_error_frame(error, responses=responses)
+                self.assertEqual(json.loads(frame.strip().removeprefix(b"data: ")), payload)
+            self.assertNotIn("private-fixture", response.body.decode())
+        self.assertEqual(len(seen), len(cases))
+        self.assertEqual((await runtime.snapshot())["running"], 0)
+
+    def test_retry_after_invalid_past_and_oversized_values(self):
+        now = 1800000000.25
+        cases = [(" 7 ", 7), ("0", 0), ("4000", 4000), ("9" * 5000, 86400),
+                 (formatdate(now - 60, usegmt=True), 0),
+                 (formatdate(now + 200000, usegmt=True), 86400),
+                 ("-5", None), ("1.5", None), ("", None), ("not-a-date", None)]
+        with patch.object(transport.time, "time", return_value=now):
+            for value, expected in cases:
+                with self.subTest(value=value[:100]):
+                    self.assertEqual(transport._retry_after(value), expected)
 
 
 if __name__ == "__main__":

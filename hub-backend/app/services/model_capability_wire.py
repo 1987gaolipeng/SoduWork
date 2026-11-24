@@ -63,8 +63,10 @@ def failure(error, check) -> tuple[str, str]:
         return "failed", "billing_unavailable"
     if error.status in (408, 429, 500, 502, 503, 504):
         return "inconclusive", "timeout" if error.status in (408, 504) else "temporarily_unavailable"
-    if error.status in (401, 403):
+    if error.status == 401:
         return "failed", "credentials_or_access"
+    if error.status == 403:
+        return "inconclusive", "request_rejected"
     if error.status == 404:
         return "failed", "model_or_endpoint_missing"
     if error.status in (400, 422):
@@ -142,7 +144,10 @@ def _function_fields(value):
                                           for key in ("name", "arguments"))
 
 
-def response_choice(value):
+TRUNCATED_REASONS = ("length", "max_tokens", "max_output_tokens")
+
+
+def response_choice(value, *, allow_truncated=False):
     """Validate the bounded JSON response before treating its message as evidence."""
     if not isinstance(value, dict) or value.get("error") is not None or value.get("type") == "error":
         raise ProbeIssue("invalid_response")
@@ -155,11 +160,12 @@ def response_choice(value):
     if choice.get("logprobs") is not None and not isinstance(choice["logprobs"], dict):
         raise ProbeIssue("invalid_response")
     reason = choice.get("finish_reason")
-    if reason in ("length", "max_tokens", "max_output_tokens"):
-        raise ProbeIssue("response_truncated")
-    if reason == "content_filter":
+    if reason in TRUNCATED_REASONS:
+        if not allow_truncated:
+            raise ProbeIssue("response_truncated")
+    elif reason == "content_filter":
         raise ProbeIssue("content_filtered")
-    if reason not in (None, "stop", "tool_calls", "function_call"):
+    elif reason not in (None, "stop", "tool_calls", "function_call"):
         raise ProbeIssue("invalid_response")
     message = choice.get("message")
     if not isinstance(message, dict) or "role" in message and message["role"] != "assistant":
@@ -287,7 +293,7 @@ class StreamEvidence:
             for key in ("content", "reasoning_content", "reasoning", "thinking", "refusal"):
                 if delta.get(key) is not None and not isinstance(delta[key], str):
                     raise _invalid_stream()
-            if reason in ("length", "max_tokens", "max_output_tokens"):
+            if reason in TRUNCATED_REASONS:
                 raise ProbeIssue("response_truncated")
             if reason is not None:
                 if reason not in ("stop", "tool_calls", "function_call", "content_filter"):

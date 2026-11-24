@@ -4,13 +4,17 @@
 best-effort standalone behavior. Super administrators see all entries and
 other administrators see actors in their department subtree.
 """
+import json
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
+from ..csv_export import csv_chunks
+from ..pagination import Page, select_rows
 from ..schemas import _ms
+from ..timestamps import iso_utc
 from . import rbac
 
 
@@ -42,27 +46,50 @@ def _to_api(a: models.AuditLog) -> dict:
     return {
         "id": a.id, "actorName": a.actor_name, "action": a.action,
         "targetType": a.target_type, "targetId": a.target_id, "targetLabel": a.target_label,
-        "detail": a.detail or {}, "at": _ms(a.at),
+        "detail": a.detail if a.detail is not None else {}, "at": _ms(a.at),
     }
 
 
-async def list_audit(session: AsyncSession, user, action: str | None = None,
-                     limit: int = 50, offset: int = 0) -> dict:
-    q = select(models.AuditLog)
-    cnt = select(models.AuditLog.id)
-    # Limit non-super administrators to actors in their department subtree.
-    if not user.is_super:
-        scope = await rbac.scope_org_ids(session, user)
-        ids = scope or {"__none__"}
-        q = q.where(models.AuditLog.actor_org_id.in_(ids))
-        cnt = cnt.where(models.AuditLog.actor_org_id.in_(ids))
+async def _audit_query(session, user, *, action=None, actor=None, actor_id=None, since=None, until=None):
+    entry = models.AuditLog
+    q = select(entry)
+    scope = await rbac.scope_org_ids(session, user)
+    if scope is not None:
+        q = q.where(entry.actor_org_id.in_(scope))
     if action:
-        q = q.where(models.AuditLog.action == action)
-        cnt = cnt.where(models.AuditLog.action == action)
-    total = len(list((await session.execute(cnt)).all()))
-    q = q.order_by(models.AuditLog.at.desc()).limit(limit).offset(offset)
-    rows = (await session.execute(q)).scalars().all()
+        q = q.where(entry.action == action)
+    if actor_id is not None:
+        q = q.where(entry.actor_id == actor_id)
+    if actor and actor.strip():
+        actor = actor.strip()
+        q = q.where(or_(entry.actor_id == actor, entry.actor_name.icontains(actor, autoescape=True)))
+    if since is not None:
+        q = q.where(entry.at >= since)
+    if until is not None:
+        q = q.where(entry.at < until)
+    return q.order_by(entry.at.desc(), entry.id.desc())
+
+
+async def list_audit(session: AsyncSession, user, action: str | None = None,
+                     limit: int = 50, offset: int = 0, *, actor=None, actor_id=None, since=None, until=None) -> dict:
+    query = await _audit_query(session, user, action=action, actor=actor, actor_id=actor_id, since=since, until=until)
+    rows, total = await select_rows(session, query, Page(limit, offset))
     return {"total": total, "items": [_to_api(a) for a in rows]}
+
+
+async def export_csv(session, user, environment, *, limit=None, offset=0, **filters):
+    query = await _audit_query(session, user, **filters)
+    rows = await session.stream_scalars(query.offset(offset).limit(limit).execution_options(yield_per=400))
+    fields = ("id", "at", "actorId", "actorName", "action", "targetType", "targetId",
+              "targetLabel", "detail", "hubEnvironment")
+
+    def values(row):
+        item = _to_api(row)
+        item.update(at=iso_utc(row.at), actorId=row.actor_id, hubEnvironment=environment,
+                    detail=json.dumps(item["detail"], ensure_ascii=False))
+        return (item[key] for key in fields)
+
+    return csv_chunks(rows, fields, values)
 
 
 async def list_plugin_activity(session: AsyncSession, user, binding_ids,

@@ -4,6 +4,30 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const panels = path.join(__dirname, '../components/panels');
 const now = Date.parse('2026-10-15T01:00:00Z');
 
+test('relative month windows use the message date in the schedule zone and retain their inclusive bounds', () => {
+  const {timing} = runtime();
+  const sent = Date.parse('2026-12-31T16:20:00Z');
+  const original = '这个月25号到30号每天下午给我发一个写日报的提醒';
+  const draft = timing.infer(original, {timeZone:'Asia/Shanghai'}, sent);
+  assert.deepEqual([draft.every,draft.startDate,draft.endDate,draft.atHour,draft.atMinute],
+    ['daily','2027-01-25','2027-01-30',null,null]);
+  assert.match(timing.validate(draft), /请补充下午/);
+  for (const [reply,hour] of [['三点',15],['下午四点',16],['上午九点',9],['09:00',9]]) {
+    const next = timing.infer(reply,draft,sent);
+    assert.deepEqual([next.startDate,next.endDate,next.atHour,next.atMinute],
+      [draft.startDate,draft.endDate,hour,0]);
+    assert.equal(timing.validate(next),'');
+  }
+  const utc = timing.infer('本月二十五日至下月二日，每日下午三点提醒我', {timeZone:'UTC'}, sent);
+  assert.deepEqual([utc.startDate,utc.endDate,utc.atHour], ['2026-12-25','2027-01-02',15]);
+  const invalid = timing.infer('这个月28号到31号每天九点提醒我', {timeZone:'UTC'}, Date.parse('2028-02-01T00:00Z'));
+  assert.match(timing.validate(invalid), /结束日期无效/);
+  const reversed = timing.infer('本月30号到25号每天九点提醒我', {timeZone:'UTC'}, sent);
+  assert.match(timing.validate(reversed), /开始日期不能晚于结束日期/);
+  const content = timing.infer('每天九点汇总这个月25号到30号的销售数据', {timeZone:'UTC'}, sent);
+  assert.equal(content.startDate, undefined);
+});
+
 test('relative delays create one-off instants from the message time, including midnight and Chinese numbers', () => {
   const {timing} = runtime(), sentAt = Date.parse('2026-11-16T08:00:00Z');
   for (const [text, minutes] of [['五分钟后帮我生成日报',5], ['5分钟后生成日报',5], ['半小时后生成日报',30],
@@ -179,6 +203,159 @@ test('recurring inference keeps multi-select weekdays, month days, and date boun
   assert.equal(timing.validate({ ...monthly, startDate: '2026-11-01', endDate: '2026-12-31' }), '');
   assert.match(timing.validate({ ...monthly, startDate: '2026-12-31', endDate: '2026-11-01' }), /开始日期/);
   assert.match(timing.validate({ every: 'weekly', weekdays: [], weekday: null, atHour: 9, atMinute: 0 }), /至少一个星期/);
+});
+
+test('a leading duration and action schedule the same one-off with or without an explicit delay marker', () => {
+  const {proposalOf, bodyOf, validate} = runtime();
+  const prior = {timeZone:'Asia/Shanghai'};
+  for (const [phrase, minutes] of [
+    ['5分钟发一首关于秋天的诗', 5], ['5分钟后发秋天的诗', 5], ['五分钟后发送一句夏天的诗', 5],
+    ['【自动化】：请半小时提醒我喝水', 30], ['一刻钟帮我生成日报', 15],
+  ]) {
+    const draft = proposalOf({}, phrase, prior);
+    assert.equal(validate(draft), '', phrase);
+    assert.equal(draft.every, 'once', phrase);
+    assert.equal(bodyOf(draft).runAt, new Date(now + minutes * 60000).toISOString(), phrase);
+  }
+  for (const phrase of ['每5分钟发一首诗', '5分钟发一次提醒', '5分钟内发一首诗', '用5分钟写一首诗',
+    '分析5分钟发言稿', '如果5分钟发一首诗会怎样']) {
+    const draft = proposalOf({}, phrase, prior);
+    assert.ok(validate(draft), phrase);
+    assert.ok(!draft.runAt, phrase);
+  }
+});
+
+test('implicit one-offs preserve intervals explicitly present in source material and unrelated durations', () => {
+  const {proposalOf} = runtime();
+  const text = '5分钟发送提醒，正文写“每5分钟采样”';
+  const fields = {title:'采样提醒', note:'引用：每5分钟采样', checklist:['检查每10分钟采集的数据']};
+  const draft = proposalOf(fields, text, {timeZone:'Asia/Shanghai'});
+  assert.equal(draft.every, 'once');
+  assert.equal(draft.note, fields.note);
+  assert.deepEqual([...draft.acceptance], fields.checklist);
+  const other = proposalOf(fields, '5分钟发一条提醒', {timeZone:'Asia/Shanghai'});
+  assert.deepEqual([...other.acceptance], fields.checklist);
+});
+
+test('spoken calendar schedules retain the same selections in the draft and create request', () => {
+  const {proposalOf, bodyOf, validate} = runtime();
+  for (const [phrase, fields] of [
+    ['每晚八点发一首诗', {every:'daily', atHour:20, atMinute:0}],
+    ['每早七点半提醒喝水', {every:'daily', atHour:7, atMinute:30}],
+    ['每日下午三点一刻生成日报', {every:'daily', atHour:15, atMinute:15}],
+    ['每个工作日上午九点发送日报', {every:'weekly', weekdays:[1,2,3,4,5], atHour:9}],
+    ['每星期二至星期四下午三点生成报告', {every:'weekly', weekdays:[2,3,4], atHour:15}],
+    ['每周一，三点生成报告', {every:'weekly', weekdays:[1], atHour:3}],
+    ['每个周末中午十二点提醒浇水', {every:'weekly', weekdays:[6,7], atHour:12}],
+    ['每个月十五号下午三点生成报告', {every:'monthly', monthDays:[15], atHour:15}],
+    ['每月一号，十五号上午九点发送报告', {every:'monthly', monthDays:[1,15], atHour:9}],
+    ['每月二十八号到三十号晚间20:15生成报告', {every:'monthly', monthDays:[28,29,30], atHour:20, atMinute:15}],
+    ['每个月底上午九点生成报告', {every:'monthly', monthDays:[31], monthDayPolicy:'last_day'}],
+    ['每个小时第十五分钟检查日志', {every:'hourly', atMinute:15}],
+    ['每小时第0分钟检查日志', {every:'hourly', atMinute:0}],
+    ['每小时整点提醒喝水', {every:'hourly', atMinute:0}],
+    ['今晚八点发诗', {every:'once', runAt:'2026-10-15T12:00:00.000Z'}],
+    ['明晚八点半发诗', {every:'once', runAt:'2026-10-16T12:30:00.000Z'}],
+  ]) {
+    const draft = proposalOf({}, phrase, {timeZone:'Asia/Shanghai'});
+    assert.equal(validate(draft), '', phrase);
+    for (const value of [draft, bodyOf(draft)]) {
+      for (const [key, expected] of Object.entries(fields)) {
+        assert.deepEqual(Array.isArray(value[key]) ? [...value[key]] : value[key], expected, phrase);
+      }
+    }
+  }
+});
+
+test('evening midnight reserves the next day at 00:00 instead of noon', () => {
+  const {proposalOf, bodyOf, validate} = runtime();
+  for (const [phrase, runAt] of [
+    ['今晚12点提醒我交报告', '2026-10-15T16:00:00.000Z'],
+    ['明晚12点生成日报', '2026-10-16T16:00:00.000Z'],
+    ['2026年10月20日晚上12点执行一次', '2026-10-20T16:00:00.000Z'],
+    ['后天午夜12点生成日报', '2026-10-17T16:00:00.000Z'],
+  ]) {
+    const draft = proposalOf({}, phrase, {timeZone:'Asia/Shanghai'});
+    assert.equal(draft.every, 'once', phrase);
+    assert.equal(validate(draft), '', phrase);
+    assert.equal(bodyOf(draft).runAt, runAt, phrase);
+  }
+  for (const phrase of ['每天晚上12点生成日报', '每天半夜12点生成日报', '每周日晚上12点生成日报']) {
+    const draft = proposalOf({}, phrase, {timeZone:'Asia/Shanghai'});
+    assert.equal(draft.atHour, 0, phrase);
+    assert.equal(validate(draft), '', phrase);
+  }
+  for (const [phrase, runAt] of [
+    ['今天中午12点执行一次', '2026-10-15T04:00:00.000Z'],
+    ['今天下午12点执行一次', '2026-10-15T04:00:00.000Z'],
+  ]) assert.equal(bodyOf(proposalOf({}, phrase, {timeZone:'Asia/Shanghai'})).runAt, runAt, phrase);
+});
+
+test('recurring evening midnight uses the following calendar day in the Hub request', () => {
+  const {proposalOf, validate, bodyOf} = runtime();
+  for (const [phrase, field, days] of [
+    ['每周日晚上12点半生成日报', 'weekdays', [1]],
+    ['每个工作日晚上12点半生成日报', 'weekdays', [2,3,4,5,6]],
+    ['每周五到周日晚上12点半生成日报', 'weekdays', [1,6,7]],
+    ['每月1号和15号晚上12点半生成日报', 'monthDays', [2,16]],
+    ['每月最后一天晚上12点半生成日报', 'monthDays', [1]],
+    ['每月27号晚上12点半生成日报', 'monthDays', [28]],
+  ]) {
+    const draft = proposalOf({}, phrase);
+    assert.equal(validate(draft), '', phrase);
+    const body = bodyOf(draft);
+    assert.deepEqual([...body[field]], days, phrase);
+    if (field === 'weekdays') assert.equal(body.weekday, days[0], phrase);
+    assert.deepEqual([body.atHour, body.atMinute], [0,30], phrase);
+    assert.equal(body.monthDayPolicy, 'skip', phrase);
+    assert.equal(Object.hasOwn(body, 'midnightCalendar'), false);
+  }
+  const range = proposalOf({}, '本月30号到31号每天晚上12点生成日报', {timeZone:'UTC'});
+  assert.deepEqual([bodyOf(range).startDate, bodyOf(range).endDate], ['2026-10-31','2026-11-01']);
+  for (const day of [28,29,30,31]) {
+    const draft = proposalOf({}, '每月15号和' + day + '号晚上12点生成日报');
+    assert.deepEqual([...draft.monthDays], []);
+    assert.match(validate(draft), /请选择实际执行日期/);
+    assert.equal(validate(proposalOf({}, '改为每月15号', draft)), '');
+  }
+});
+
+test('midnight refinements preserve the named evening without shifting it twice', () => {
+  const {proposalOf, bodyOf, validate} = runtime();
+  const draft = proposalOf({}, '每周日晚上12点生成日报');
+  for (const phrase of ['增加来源链接', '改为晚上12点半']) {
+    const next = proposalOf({}, phrase, draft);
+    assert.deepEqual([...bodyOf(next).weekdays], [1], phrase);
+    assert.equal(validate(next), '');
+  }
+  const noon = proposalOf({}, '改为中午12点', draft);
+  assert.deepEqual([...bodyOf(noon).weekdays], [7]);
+  assert.equal(bodyOf(noon).atHour, 12);
+  const fri = proposalOf({}, '改为每周五', draft);
+  assert.deepEqual([...bodyOf(fri).weekdays], [6]);
+  const monthly = proposalOf({}, '改为每月15号', draft);
+  assert.deepEqual([...bodyOf(monthly).monthDays], [16]);
+  const once = proposalOf({}, '今晚12点生成日报', {timeZone:'Asia/Shanghai'});
+  assert.equal(bodyOf(proposalOf({}, '改为晚上12点半', once)).runAt, '2026-10-15T16:30:00.000Z');
+  assert.equal(bodyOf(proposalOf({}, '改为明天', once)).runAt, '2026-10-16T16:00:00.000Z');
+  assert.ok(validate(proposalOf({}, '2028年2月30日晚上12点生成日报')));
+});
+
+test('invalid selections require clarification and refinements replace the old calendar settings', () => {
+  const {proposalOf, validate} = runtime();
+  const daily = proposalOf({}, '每天九点半生成报告');
+  for (const phrase of ['改为每周上午九点', '改为每个月九点', '改为每小时第六十分',
+    '改为每月一号和三十二号上午九点', '改为每月第一个周五上午九点']) {
+    assert.ok(validate(proposalOf({}, phrase, daily)), phrase);
+  }
+  const lastDay = proposalOf({}, '每个月最后一天九点生成报告');
+  const regular = proposalOf({}, '改为每月三十号', lastDay);
+  assert.deepEqual([...regular.monthDays], [30]);
+  assert.equal(regular.monthDayPolicy, 'skip');
+  const hourly = proposalOf({}, '改为每小时第十五分钟', daily);
+  assert.equal(proposalOf({}, '改为每小时整点', hourly).atMinute, 0);
+  assert.equal(proposalOf({}, '改为每小时检查日志', daily).atMinute, 0);
+  assert.equal(proposalOf({}, '汇总每个工作日的记录', daily).every, 'daily');
 });
 
 test('custom recurrence rules preserve text and use the shared create contract', () => {

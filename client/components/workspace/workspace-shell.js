@@ -231,7 +231,7 @@
   const { MAX_CHAT_ITEMS, CHAT_STATE, chatState, _chatAt, _chatUiKey, _withChatUiKey, _sameDraft, _settleDraft, _reconcileChats, _upsertChatItems } = global.WorkspaceChatHistory;
   let mode = 'home';              // home | settings
   let collaborationCollapsed = true; // Start collapsed; preserve expansion during navigation and permission refreshes.
-  let lastHomeView = 'create';    // Return to a new chat when leaving settings.
+  let lastHomeView = '';
   let railMoreOpen = false;
   function reportWorkspaceView(key) {
     if (global.WorkspaceNavigation) { global.WorkspaceNavigation.record(key); return; }
@@ -585,12 +585,8 @@
     /* Return to the page that was active before entering settings. */
     root.querySelector('#wsBack').addEventListener('click', () => {
       if (!global.WorkspaceHost) return;
-      const key = lastHomeView || 'create';
-      global.WorkspaceHost.open(key, key === 'create'
-        ? (global.WorkspaceShell && typeof global.WorkspaceShell.newSessionPayload === 'function'
-          ? global.WorkspaceShell.newSessionPayload()
-          : { newSession: true })
-        : {});
+      if (!lastHomeView) return openWorkspaceView('create');
+      global.WorkspaceHost.open(lastHomeView, lastHomeView === 'create' ? { resumeComposer: true } : {});
     });
 
     document.addEventListener('pointerdown', (e) => {
@@ -798,7 +794,7 @@
                             get active() { return active; }, get mode() { return mode; },
                             get activeChatId() { return activeChatId; }, set activeChatId(value) { activeChatId = value; },
                             /* Remember the return destination for the detail page. */
-                            get lastView() { return lastHomeView; } };
+                            get lastView() { return lastHomeView || 'create'; } };
   // The desk has no pet dock; reuse the store/window-sync invalidation hook.
   if (typeof global.updateNoticeBadge !== 'function') global.updateNoticeBadge = () => {
     refreshNoticeBadge();

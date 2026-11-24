@@ -1,7 +1,7 @@
 import './helpers/chinese-locale.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { pluginIssues, pluginKind, pluginPublication, pluginSource, selectCatalog } from '../src/screens/plugin-catalog-model.js'
+import { declaredAccess, pluginIssues, pluginKind, pluginPublication, pluginSource, selectCatalog } from '../src/screens/plugin-catalog-model.js'
 import { setLocale } from '../src/i18n.js'
 
 const make = (id, overrides = {}) => ({ id, name: id, enabled: true, updatedAt: 1,
@@ -98,4 +98,13 @@ test('governance duplicates and malformed queue groups do not inflate card issue
   const row = { id: 'q1', pluginId: 'a', target: 'versions' }
   assert.equal(pluginIssues({ one: [row], two: [row], unknown: 1 }).a.length, 1)
   assert.deepEqual(selectCatalog([], {}, { query: 'anything' }).shown, [])
+})
+
+test('declared access keeps unknown, low-access and mixed permissions distinct', () => {
+  assert.equal(declaredAccess({}), '未提供权限清单')
+  assert.equal(declaredAccess({ capabilities: { permissionSummary: { riskLevel: 'low' } } }), '未声明额外访问')
+  const summary = { runtime: ['files', 'terminal'], network: true, script: true, secretCount: 1 }
+  const access = declaredAccess({ capabilities: { mcpServers: ['one'], permissionSummary: summary } })
+  for (const label of ['本地文件读写', '命令执行', '连接网络', '密钥引用', '外部连接器']) assert.ok(access.includes(label))
+  assert.equal(access.split('命令执行').length, 2)
 })

@@ -7,7 +7,7 @@ import { Loading, ErrorState, Icon, toast } from '../ui.jsx'
  * Retain organization defaults for reports and compatibility execution without maintaining
  * a second model catalog.
  */
-export default function LlmSettings({ embedded = false }) {
+export default function LlmSettings({ embedded = false, onDirtyChange }) {
   const uiLocale = useLocale();
   const [d, setD] = useState(null)
   const [baseUrl, setBaseUrl] = useState('')
@@ -23,6 +23,8 @@ export default function LlmSettings({ embedded = false }) {
     }).catch(setError)
   }
   useEffect(() => { load() }, [])
+  const dirty = Boolean(d && (baseUrl !== (d.baseUrl || '') || model !== (d.model || '') || apiKey))
+  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
 
   async function save() {
     if (baseUrl && !/^https?:\/\//.test(baseUrl.trim())) { toast(tx("接口地址要以 http(s):// 开头")); return }
@@ -46,7 +48,7 @@ export default function LlmSettings({ embedded = false }) {
         <span className="hintline">{tx("组织默认调用供日报总结和仍在迁移的兼容执行入口使用；可用服务与模型统一由“模型目录”治理。")}</span>
       </div>}
       <div className="card" style={embedded ? { border: 0, boxShadow: 'none', padding: 0 } : { maxWidth: 640, padding: '20px 22px' }}>
-        <div className="muted" style={{ marginBottom: 14, lineHeight: 1.7 }}>{tx("这是过渡期的")}<b style={{ color: 'var(--ink-2)' }}>{tx("组织默认调用")}</b>{tx("。日报总结和兼容执行入口暂时使用它；新需求与 Runner 的可用模型以模型目录为准。")}</div>
+        <div className="muted" style={{ marginBottom: 14, lineHeight: 1.7 }}>{tx("此设置用于日报总结和旧版执行。新需求和 Runner 使用的模型请在模型目录中添加。")}</div>
         <div><label className="f-lbl">{tx("接口地址（含 /v1）")}</label>
           <input className="f-in" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://ai-gateway.example.com/v1" /></div>
         <div style={{ marginTop: 12 }}><label className="f-lbl">{tx("模型名")}</label>

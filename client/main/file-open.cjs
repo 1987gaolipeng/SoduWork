@@ -13,7 +13,23 @@ const MAX_BYTES = 256 * 1024 * 1024;
 const RELAUNCH_FILES = '--soduwork-relaunch-files';
 const PREVIEW = /\.(?:html?|pdf|md|markdown|txt|csv|json|ya?ml|xml|js|jsx|ts|tsx|css|scss|py|java|go|rs|sql|sh|ps1|png|jpe?g|gif|webp|svg|mp4|m4v|webm|mov|ogv)$/i;
 
-function commandFiles(argv, cwd, packaged = true) {
+// Match Electron's default-app launcher: a preload switch consumes its own
+// argument, then the first positional argument or --app=... selects the app.
+function firstSourceFileArg(args, mayBeReordered) {
+  for (let index = 1; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === '--require' || arg === '-r') {
+      const preload = args[++index];
+      // Older second instances can move a Chromium switch between -r and its operand.
+      if (mayBeReordered && typeof preload === 'string' && preload.startsWith('-')) return args.length;
+    } else if (typeof arg === 'string' && arg && (arg.startsWith('--app=') || !arg.startsWith('-'))) {
+      return index + 1;
+    }
+  }
+  return args.length;
+}
+
+function commandFiles(argv, cwd, packaged = true, mayBeReordered = false) {
   const args = Array.isArray(argv) ? argv : [];
   const handoff = args.indexOf(RELAUNCH_FILES);
   if (handoff >= 0) {
@@ -21,8 +37,13 @@ function commandFiles(argv, cwd, packaged = true) {
     catch { return []; }
   }
   const explicit = args.indexOf('--soduwork-open-file');
-  const candidates = explicit >= 0 ? args.slice(explicit + 1, explicit + 2)
-    : args.slice(packaged ? 1 : 2).filter(value => path.isAbsolute(String(value)));
+  let candidates;
+  if (explicit >= 0) {
+    candidates = args.slice(explicit + 1, explicit + 2);
+  } else {
+    const firstFile = packaged ? 1 : firstSourceFileArg(args, mayBeReordered);
+    candidates = args.slice(firstFile).filter(value => path.isAbsolute(String(value)));
+  }
   return [...new Set(candidates.map(value => {
     let raw = String(value || '');
     if (!raw || /[\x00-\x1f]/.test(raw) || raw.startsWith('-')) return '';
@@ -63,7 +84,7 @@ function instanceFiles(argv, cwd, packaged = true, additionalData) {
   }
   // Keep the legacy path conservative: never guess which trailing argument is
   // the user's file rather than an Electron entry point or a profile directory.
-  return commandFiles(argv, cwd, packaged);
+  return commandFiles(argv, cwd, packaged, true);
 }
 
 function create(deps) {
@@ -89,6 +110,8 @@ function create(deps) {
     if (win && !win.isDestroyed()) win.webContents.send('file-open-pending');
   };
   function enqueue(files) {
+    // The existing quit policy owns handoff; this broker must not reveal an exiting workspace.
+    if (deps.deferLaunch?.(files)) return 0;
     for (const value of files || []) {
       const file = String(value || '');
       if (!file || !path.isAbsolute(file) || /[\x00-\x1f]/.test(file)) continue;

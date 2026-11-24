@@ -38,6 +38,12 @@ def message(content="OK", **extra):
     return Response({"choices": [{"finish_reason": "stop", "message": {"content": content, **extra}}]})
 
 
+def stream_message(content="OK", *, finish="stop", **extra):
+    raw = ("data: " + json.dumps({"choices": [{"index": 0, "delta": {"content": content, **extra},
+        "finish_reason": finish}]}) + "\n\ndata: [DONE]\n\n").encode()
+    return Response(raw, content_type="text/event-stream")
+
+
 def receipt(body):
     return next(part["content"] for part in body["messages"] if part["role"] == "tool")
 
@@ -88,6 +94,37 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(response.closed for response in self.responses))
         return result
 
+    async def test_streaming_receipt_rejection_and_truncation_do_not_pass(self):
+        for mode in ("rejected", "truncated", "valid"):
+            def handler(body):
+                if has_tool_result(body):
+                    self.assertTrue(body["stream"])
+                    self.assertEqual(body["messages"][-1]["role"], "tool")
+                    self.assertEqual(body["tools"], self.requests[0]["tools"])
+                    self.assertNotIn("tool_choice", body)
+                    if mode == "rejected":
+                        raise UpstreamError(403, '{"error":{"message":"synthetic refusal"}}')
+                    if mode == "truncated":
+                        raw = ("data: " + json.dumps({"choices": [{"index": 0, "delta": {"content": receipt(body)},
+                            "finish_reason": None}]}) + "\n\n").encode()
+                        return Response(raw, content_type="text/event-stream")
+                    return stream_message(receipt(body))
+                return streamed_tool(re.search(r"value ([a-f0-9]{16})", body["messages"][0]["content"])[1])
+            report = await self.run_probe(["toolCalling"], handler, {**CONF, "compatibility": {"toolChoice": "named"}})
+            self.assertEqual(report["checks"]["toolCalling"]["stage"], "tool_result")
+            self.assertEqual(report["checks"]["toolCalling"]["status"] == "passed", mode == "valid")
+
+    async def test_v2_success_is_retired_on_projection_and_partial_merge(self):
+        old = {"reportVersion": 2, "configRevision": "same", "checks": {
+            key: {"status": "passed"} for key in caps.CHECKS}}
+        old["verifiedChecks"] = dict(old["checks"])
+        for result in (old, caps.merge_evidence(old, {"reportVersion": 3, "configRevision": "same",
+                "checks": {"connection": {"status": "passed"}}})):
+            profile = caps.runtime_fields({}, result)["capabilityProfile"]
+            self.assertEqual(profile["toolCalling"]["state"], "unknown")
+            self.assertEqual(profile["streaming"]["state"], "supported")
+            self.assertEqual(profile["imageInput"]["state"], "supported")
+
     async def test_shared_probe_protocol_vectors_and_exact_safe_tool_policy(self):
         fixture = Path(__file__).resolve().parents[1] / "tools/contracts/model-capability-probe-v1.json"
         contract = json.loads(fixture.read_text(encoding="utf-8"))
@@ -97,15 +134,15 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
                 def handler(body):
                     if has_tool_result(body):
                         self.assertIs(body["stream"], policy["followupStream"])
-                        self.assertNotIn("tools", body)
+                        self.assertEqual(body["tools"], [policy["tool"]])
                         self.assertNotIn("tool_choice", body)
-                        self.assertNotIn("stream_options", body)
-                        self.assertEqual(body["messages"][-1], {"role": "user", "content": policy["receiptPrompt"]})
+                        self.assertEqual(body["messages"][-1]["role"], "tool")
                         self.assertRegex(receipt(body), r"^[a-f0-9]{16}$")
                         if "replayedReasoning" in case:
-                            self.assertEqual(body["messages"][-3]["reasoning_content"], case["replayedReasoning"])
+                            self.assertEqual(body["messages"][-2]["reasoning_content"], case["replayedReasoning"])
                         final = json.dumps(case["followup"]).replace("{{receipt}}", receipt(body))
-                        return Response(json.loads(final))
+                        choice = json.loads(final)["choices"][0]
+                        return stream_message(finish=choice["finish_reason"], **choice["message"])
                     if case["check"] == "toolCalling":
                         self.assertEqual(body["tools"], [policy["tool"]])
                         self.assertEqual(body["tool_choice"], policy["toolChoice"])
@@ -217,7 +254,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
     async def test_integer_valued_json_numbers_match_the_shared_wire_policy(self):
         def handler(body):
             if has_tool_result(body):
-                return Response({"choices": [{"index": 0.0, "message": {"content": receipt(body)}, "finish_reason": "stop"}]})
+                return Response(stream_message(receipt(body)).data.replace(b'"index": 0', b'"index": 0.0'), content_type="text/event-stream")
             nonce = re.search(r"value ([a-f0-9]+)", body["messages"][0]["content"])[1]
             raw = streamed_tool(nonce).data.replace(b'"index": 0', b'"index": 0.0')
             return Response(raw, content_type="text/event-stream")
@@ -238,7 +275,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["checks"]["streaming"]["status"], "passed")
         def handler(body):
             if has_tool_result(body):
-                return message(receipt(body))
+                return stream_message(receipt(body))
             value = re.search(r"value ([a-f0-9]+)", body["messages"][0]["content"])[1]
             raw = streamed_tool(value).data.replace(b'"id": "call-"', b'"vendor_call": 1, "id": "call-"')
             raw = raw.replace(b'"name": "soduwork"', b'"vendor_function": 1, "name": "soduwork"')
@@ -298,6 +335,59 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
                     if value.strip() != "123456":
                         self.assertEqual(actual.get("detailCode"), "expected_output_mismatch")
 
+    async def test_reasoning_model_truncated_probe_retries_with_larger_budget(self):
+        # A reasoning model can spend the small fixed probe budget on its thinking
+        # trail and get cut off before the short deterministic answer. The image
+        # challenge must still be verifiable with one bounded higher-budget retry.
+        with patch.object(probe, "image_challenge", return_value=("582941", "data:image/png;base64,fixture")):
+            calls = []
+            def handler(body):
+                calls.append(body)
+                if len(calls) == 1:
+                    # First probe exhausts the small budget on reasoning; no final answer.
+                    return Response({"choices": [{"finish_reason": "length", "message": {
+                        "content": "", "reasoning_content": "thinking " * 200}}]})
+                # Retry with a larger budget returns the expected six digits.
+                return message("582941")
+            result = await self.run_probe(["imageInput"], handler)
+        actual = result["checks"]["imageInput"]
+        self.assertEqual(actual["status"], "passed", result)
+        self.assertEqual(len(self.requests), 2)
+        first = self.requests[0].get("max_tokens", self.requests[0].get("max_completion_tokens"))
+        second = self.requests[1].get("max_tokens", self.requests[1].get("max_completion_tokens"))
+        self.assertGreater(second, first)
+
+    async def test_reasoning_retry_respects_both_saved_limits_and_retries_only_once(self):
+        for finish, output, context, budgets in (
+            ("length", 1024, 4096, [512, 1024]),
+            ("max_tokens", 4096, 768, [512, 768]),
+            ("max_output_tokens", 4096, 8192, [512, 4096]),
+            ("length", 512, 4096, [512]),
+        ):
+            with self.subTest(finish=finish, output=output, context=context):
+                conf = {**CONF, "config": {"maxOutputTokens": output, "contextWindow": context},
+                        "compatibility": {"maxTokensField": "max_completion_tokens"}}
+                choice = {"finish_reason": finish, "message": {"reasoning": "still working"}}
+                result = await self.run_probe(["connection"], lambda _: Response({"choices": [choice]}), conf)
+                self.assertEqual(result["checks"]["connection"]["code"], "response_truncated")
+                self.assertEqual([body["max_completion_tokens"] for body in self.requests], budgets)
+
+    async def test_only_complete_valid_reasoning_responses_trigger_a_retry(self):
+        choice = {"finish_reason": "length", "message": {"reasoning_content": "still working"}}
+        for data, outcome, expected in (
+            ({"choices": [choice]}, "timeout", "timeout"),
+            ({"choices": [choice]}, "interrupted", "transport_interrupted"),
+            ({"choices": [choice, choice]}, "completed", "invalid_response"),
+            ({"choices": [{**choice, "message": {"role": "user", "thinking": "text"}}]}, "completed", "invalid_response"),
+            ({"choices": [{**choice, "message": {"content": "partial"}}]}, "completed", "response_truncated"),
+        ):
+            with self.subTest(outcome=outcome, expected=expected):
+                response = Response(data)
+                response.outcome = outcome
+                result = await self.run_probe(["connection"], lambda _: response)
+                self.assertEqual(result["checks"]["connection"]["code"], expected)
+                self.assertEqual(len(self.requests), 1)
+
     async def test_nonstream_malformed_bodies_cannot_verify_connection(self):
         malformed = [{"choices": [{"message": {"content": "OK"}}, {"message": {"content": "ignored"}}]},
                      {"choices": [{"index": False, "message": {"content": "OK"}}]},
@@ -350,7 +440,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             if "stream_options" in body:
                 raise UpstreamError(400, '{"error":{"code":"unsupported_parameter","param":"stream_options"}}')
             if has_tool_result(body):
-                return message(receipt(body))
+                return stream_message(receipt(body))
             if body.get("tools"):
                 value = re.search(r"value ([a-f0-9]+)", body["messages"][0]["content"])[1]
                 return streamed_tool(value)
@@ -387,21 +477,21 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
                 raise UpstreamError(400, json.dumps({"error": {"code": "unsupported_parameter",
                     "param": "tool_choice", "message": "named tool_choice is not supported"}}))
             if has_tool_result(body):
-                return message(receipt(body))
+                return stream_message(receipt(body))
             value = re.search(r"value ([a-f0-9]+)", body["messages"][0]["content"])[1]
             return streamed_tool(value)
         result = await self.run_probe(["toolCalling"], handler, {**CONF, "compatibility": {"toolChoice": "named"}})
         self.assertEqual(result["checks"]["toolCalling"]["status"], "passed")
         self.assertEqual(result["compatibility"]["toolChoice"], "auto")
         self.assertEqual(len(self.requests), 3)
-        self.assertEqual(self.requests[-1]["messages"][-1], {"role": "user", "content": "Reply only with the tool result value."})
-        self.assertEqual(result["reportVersion"], 2)
+        self.assertEqual(self.requests[-1]["messages"][-1]["role"], "tool")
+        self.assertEqual(result["reportVersion"], 3)
         self.assertEqual(result["apiFamily"], "chat-completions")
 
     async def test_cached_named_plain_stop_text_retries_auto_and_confirms_only_the_safe_receipt(self):
         def handler(body):
             if has_tool_result(body):
-                return message(receipt(body))
+                return stream_message(receipt(body))
             if isinstance(body.get("tool_choice"), dict):
                 return Response(b'data: {"choices":[{"delta":{"content":"Use automatic tool selection."},"finish_reason":"stop"}]}\n\n',
                                 content_type="text/event-stream")
@@ -415,7 +505,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(self.requests[0]["tool_choice"], dict)
         self.assertEqual(self.requests[1]["tool_choice"], "auto")
         self.assertEqual(self.requests[0]["messages"], self.requests[1]["messages"])
-        self.assertNotIn("tools", self.requests[2])
+        self.assertEqual(self.requests[2]["tools"], self.requests[1]["tools"])
 
     async def test_ambiguous_text_never_confirms_a_tool_choice_or_retries_auto_again(self):
         plain = b'data: {"choices":[{"delta":{"content":"ordinary text"},"finish_reason":"stop"}]}\n\n'
@@ -435,7 +525,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(rejection=rejection):
                 def handler(body):
                     if has_tool_result(body):
-                        return message("unrelated receipt")
+                        return stream_message("unrelated receipt")
                     if isinstance(body.get("tool_choice"), dict):
                         if rejection == "http":
                             raise UpstreamError(400, '{"error":{"code":"unsupported_parameter","param":"tool_choice"}}')
@@ -470,7 +560,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             if "max_tokens" in body:
                 raise UpstreamError(400, '{"error":{"code":"unsupported_parameter","param":"max_tokens"}}')
             if has_tool_result(body):
-                return message(receipt(body))
+                return stream_message(receipt(body))
             if body.get("tools"):
                 if isinstance(body["tool_choice"], dict):
                     return Response(b'data: {"choices":[{"delta":{"content":"ordinary text"},"finish_reason":"stop"}]}\n\n',
@@ -508,7 +598,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             if body.get("stream") and body.get("tools"):
                 raise UpstreamError(400, '{"error":{"message":"streamed tools request not accepted"}}')
             if has_tool_result(body):
-                return message(receipt(body))
+                return stream_message(receipt(body))
             value = re.search(r"value ([a-f0-9]+)", body["messages"][0]["content"])[1]
             return message(None, tool_calls=[{"id": "json-only", "type": "function", "function": {
                 "name": "soduwork_capability_echo", "arguments": json.dumps({"value": value})}}])
@@ -520,15 +610,15 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
     async def test_streamed_tool_fragments_assemble_id_name_arguments_and_safe_receipt(self):
         def handler(body):
             if has_tool_result(body):
-                return message(receipt(body))
+                return stream_message(receipt(body))
             value = re.search(r"value ([a-f0-9]+)", body["messages"][0]["content"])[1]
             return streamed_tool(value, reasoning=True)
         result = await self.run_probe(["toolCalling"], handler)
         self.assertEqual(result["checks"]["toolCalling"]["status"], "passed")
         self.assertTrue(result["reasoningStreamReported"])
         self.assertTrue(self.requests[0]["stream"])
-        self.assertFalse(self.requests[-1]["stream"])
-        replay = self.requests[-1]["messages"][-3]
+        self.assertTrue(self.requests[-1]["stream"])
+        replay = self.requests[-1]["messages"][-2]
         self.assertEqual(replay["tool_calls"][0]["id"], "call-fixture")
         self.assertEqual(replay["tool_calls"][0]["function"]["name"], "soduwork_capability_echo")
         self.assertEqual(replay["reasoning_content"], "synthetic thought")
@@ -563,7 +653,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         for index in (1, -1, True, 16):
             def handler(body):
                 if has_tool_result(body):
-                    return message(receipt(body))
+                    return stream_message(receipt(body))
                 value = re.search(r"value ([a-f0-9]+)", body["messages"][0]["content"])[1]
                 data = streamed_tool(value).data.replace(b'"index": 0, "id"',
                     ('"index": ' + json.dumps(index) + ', "id"').encode())
@@ -574,7 +664,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         for finish in (None, "tool_calls"):
             def handler(body):
                 if has_tool_result(body):
-                    return Response({"choices": [{"message": {"content": receipt(body)}, "finish_reason": finish}]})
+                    return stream_message(receipt(body), finish=finish)
                 value = re.search(r"value ([a-f0-9]+)", body["messages"][0]["content"])[1]
                 return streamed_tool(value)
             result = await self.run_probe(["toolCalling"], handler)
@@ -605,7 +695,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             if body.get("stream_options"):
                 raise UpstreamError(400, '{"error":{"code":"unsupported_parameter","param":"stream_options"}}')
             if has_tool_result(body):
-                return message(receipt(body))
+                return stream_message(receipt(body))
             if body.get("tools"):
                 value = re.search(r"value ([a-f0-9]+)", body["messages"][0]["content"])[1]
                 return streamed_tool(value)

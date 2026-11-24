@@ -159,7 +159,7 @@ function _schCardNext(s) {
   if (s.endDate && !s.nextRunAt) return _schTx(s.retrying ? '等待重试' : '计划已超出有效日期范围');
   if (s.every === 'once') {
     if (Date.parse(s.runAt) <= Date.now()) return '等待补跑一次';
-    const local = window.ScheduleTiming?.localInput(s.runAt, s.timeZone || _schBrowserTimeZone()) || '';
+    const local = window.ScheduleTiming?.localMinute(s.runAt, s.timeZone || _schBrowserTimeZone()) || '';
     return '下次 ' + (s.nextRunLocal || local.replace('T', ' ')) + ' · ' + _schTimeZoneLabel(s.timeZone);
   }
   return '下次 ' + (s.nextRunLocal || _schLocal(s.nextRunAt));

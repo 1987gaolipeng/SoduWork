@@ -1,7 +1,7 @@
 'use strict';
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
-const media = require('./media-artifacts');
-const MAX_BYTES = 32 * 1024 * 1024, JSON_LIMIT = Math.ceil(MAX_BYTES / 3) * 4 + 1024 * 1024;
+const { MAX_BYTES, ImageResultError, prepare, validate } = require('./generated-image.cjs');
+const JSON_LIMIT = Math.ceil(MAX_BYTES / 3) * 4 + 1024 * 1024;
 const INDEX = '.soduwork-media-index.json';
 
 async function bounded(response, limit, signal) {
@@ -37,10 +37,7 @@ function outputDirectory(cwd) {
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
   return output;
 }
-function save(cwd, bytes, id) {
-  if (!bytes.length || bytes.length > MAX_BYTES) throw Error('Invalid image size');
-  const type = ['image/png', 'image/jpeg', 'image/webp'].find(value => media._videoSignature(bytes.subarray(0, 16), value));
-  if (!type) throw Error('Image type is unsupported');
+function save(cwd, bytes, type, id) {
   const output = outputDirectory(cwd), name = 'image-' + id + ({ 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' })[type];
   const target = path.join(output, name), temporaryImage = target + '.part-' + crypto.randomUUID();
   const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0);
@@ -90,10 +87,20 @@ async function generate({ handle, selected, text, submissionId, signal, push, em
     const base = new URL(local.baseUrl);
     if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) throw Error('Invalid image provider');
     const combined = AbortSignal.any([signal, AbortSignal.timeout(250000)]);
+    const runtime = await prepare(combined);
     const response = await fetchImpl(local.baseUrl.replace(/\/+$/, '') + '/images/generations', {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...(local.key ? { Authorization: 'Bearer ' + local.key } : {}) },
       body: JSON.stringify({ model: local.name, prompt: text, n: 1 }), redirect: 'error', signal: combined,
     });
+    const hints = {
+      400: '请核对图片模型 ID、请求格式和生成参数。', 422: '请核对图片模型 ID、请求格式和生成参数。',
+      401: '请核对 API Key 和所选图片模型的访问权限。', 403: '请核对 API Key 和所选图片模型的访问权限。',
+      404: '请核对基础地址、图片模型名称和 /images/generations 接口。',
+    };
+    if (Object.hasOwn(hints, response.status)) {
+      await response.body?.cancel().catch(() => {});
+      throw new ImageResultError('图片生成服务返回 HTTP ' + response.status + '，' + hints[response.status]);
+    }
     const payload = JSON.parse((await bounded(response, JSON_LIMIT, combined)).toString('utf8'));
     const result = payload?.data?.[0]; let bytes;
     if (typeof result?.b64_json === 'string') {
@@ -109,16 +116,17 @@ async function generate({ handle, selected, text, submissionId, signal, push, em
       bytes = await bounded(download, MAX_BYTES, combined);
     } else throw Error('Image data is missing');
     combined.throwIfAborted();
-    const file = save(handle.cwd, bytes, id);
+    const type = await validate({ bytes, signal: combined }, runtime);
+    const file = save(handle.cwd, bytes, type, id);
     handle.appendTaskTool({ ...event, type: 'tool_execution_end', isError: false,
       result: { content: [{ type: 'text', text: JSON.stringify({ file: file.relative }) }] } }, '');
     handle.appendTaskMessage('assistant', '图片已生成。\n\n[查看图片](' + file.relative + ')', [], '', 'image-result:' + generationId);
     emit({ kind: 'settled', mediaArtifact: file });
     return { ok: true, artifact: file };
-  } catch (_) {
+  } catch (error) {
     const cancelled = signal.aborted;
     const reason = cancelled ? '已停止等待本地图片生成，请先检查本机成果后再决定是否重新生成。'
-      : '本地图片生成未完成，请检查本机模型设置和输出目录后重试；服务端可能已处理请求。';
+      : error instanceof ImageResultError ? error.message : '本地图片生成未完成，请检查本机模型设置和输出目录后重试；服务端可能已处理请求。';
     handle.appendTaskTool({ ...event, type: 'tool_execution_end', isError: true, result: { content: [{ type: 'text', text: reason }] } }, '');
     handle.appendTaskMessage('assistant', reason, [], '', 'image-error:' + generationId);
     return cancelled ? { ok: true, cancelled: true } : { ok: false, reason, retrySafe: false };

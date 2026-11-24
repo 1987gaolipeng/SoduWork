@@ -27,6 +27,23 @@ export function pluginSource(plugin) {
   return { key: 'external', label: SOURCE_LABELS[plugin.sourceKind] || tx("外部导入") }
 }
 
+export function declaredAccess(version) {
+  const capabilities = version?.capabilities
+  const summary = capabilities?.permissionSummary
+  if (!summary) return tx('未提供权限清单')
+  const runtime = {
+    files: tx('本地文件读写'), repository: tx('仓库读写'), terminal: tx('命令执行'),
+    browser: tx('浏览与检索'), office: tx('办公文档'), computer: tx('操作电脑'),
+  }
+  const labels = (summary.runtime || []).map(key => runtime[key] || key)
+  if (summary.network) labels.push(tx('连接网络'))
+  if (summary.script) labels.push(tx('命令执行'))
+  if (summary.secretCount) labels.push(tx('密钥引用'))
+  if (summary.externalUiCount) labels.push(tx('外部页面'))
+  if (capabilities.mcpServers?.length) labels.push(tx('外部连接器'))
+  return labels.length ? tx('访问范围：{0}', [[...new Set(labels)].join(' · ')]) : tx('未声明额外访问')
+}
+
 export function pluginPublication(plugin) {
   const version = plugin.latestVersion
   if (!version) return { key: 'disabled', label: tx("暂无版本") }

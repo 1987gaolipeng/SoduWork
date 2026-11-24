@@ -106,12 +106,44 @@ function createEntriesSync(entries) {
   return encode(entries.map(item => ({ ...item, compressed: zlib.deflateRawSync(item.bytes, { level: 6 }) })));
 }
 function createZip(root) {
+  const { fs, collect } = createBoundedSource();
   const base = fs.realpathSync(root); const { result, total } = collect(base);
   const entries = result.map(item => ({ name: item.name, filename: item.full, st: item.st, bytes: fs.readFileSync(item.full) }));
   const archive = createEntriesSync(captureFileEntries(entries));
   if (archive.length > MAX_BYTES) throw new Error("ZIP archive is larger than 24 MB; remove large files");
   return { data: archive, name: path.basename(base) + ".zip", size: archive.length, files: result.length, total,
     website: result.some(file => /(?:^|\/)index\.(?:html?|xhtml)$/i.test(file.name)) };
+}
+function readBounded(filename, remaining) {
+  const fd = fs.openSync(filename, 'r');
+  try {
+    const limitError = () => new Error('Folder is larger than 24 MB; remove dependencies or media files');
+    if (fs.fstatSync(fd).size > remaining) throw limitError();
+    const chunks = []; let size = 0;
+    // The file may grow even after fstat. Read at most the remaining input
+    // budget plus one overflow byte, before compression or ZIP allocation.
+    while (true) {
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, remaining - size + 1));
+      const read = fs.readSync(fd, chunk, 0, chunk.length, null);
+      if (!read) return Buffer.concat(chunks, size);
+      size += read;
+      if (size > remaining) throw limitError();
+      chunks.push(chunk.subarray(0, read));
+    }
+  } finally { fs.closeSync(fd); }
+}
+function createBoundedSource() {
+  const contents = new Map(), sourceFs = Object.create(fs);
+  sourceFs.readFileSync = filename => contents.get(filename);
+  return { fs: sourceFs, collect: root => {
+    const collected = collect(root); let total = 0;
+    // Capture bytes under the input budget before the encoders consume them.
+    for (const item of collected.result) {
+      const bytes = readBounded(item.full, MAX_BYTES - total);
+      total += bytes.length; contents.set(item.full, bytes);
+    }
+    return { ...collected, total };
+  } };
 }
 // Keep the synchronous primitive for worker/test callers. Native UI handlers
 // must use the bounded worker so scanning, reads, zlib and CRC stay off-thread.

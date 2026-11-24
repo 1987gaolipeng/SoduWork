@@ -66,19 +66,20 @@ def _mapping(value) -> dict:
 
 def project_evidence(raw) -> dict:
     evidence = _mapping(raw)
-    if evidence.get("reportVersion", 1) != 1:
+    if evidence.get("reportVersion") == 3:
         return evidence
     checks = dict(_mapping(evidence.get("checks")))
     verified = dict(_mapping(evidence.get("verifiedChecks")))
     changed = False
-    # v1 accepted JSON tools/incomplete streams and confused optional-control
-    # refusals with absent features. Keep raw attempts, but require v2 proof.
-    for key in ("toolCalling", "streaming"):
+    # v2 never tested streaming tool-result continuation. Retire its tool
+    # success only; retain independent checks and explicit feature refusals.
+    version_two = evidence.get("reportVersion") == 2
+    for key in (("toolCalling",) if version_two else ("toolCalling", "streaming")):
         latest, prior = _mapping(checks.get(key)), _mapping(verified.get(key))
-        if _conclusive(latest):
+        if _conclusive(latest) and (not version_two or latest["status"] == "passed"):
             checks[key] = {**latest, "status": "inconclusive", "code": "legacy_recheck_required"}
             changed = True
-        if _conclusive(prior):
+        if _conclusive(prior) and (not version_two or prior["status"] == "passed"):
             verified.pop(key, None)
             if not latest:
                 checks[key] = {**prior, "status": "inconclusive", "code": "legacy_recheck_required"}
@@ -126,7 +127,7 @@ def merge_evidence(previous, result: dict) -> dict:
             if image_rejected_since_pass:
                 continue
         verified[key] = dict(check)
-    return {**public_evidence(result), "reportVersion": 2,
+    return {**public_evidence(result), "reportVersion": 3,
             "apiFamily": result.get("apiFamily", API_FAMILY), "checks": checks, "verifiedChecks": verified,
             "imageInputRejectedSincePass": image_rejected_since_pass,
             "compatibility": {**(compatibility(previous.get("compatibility")) if same else {}),

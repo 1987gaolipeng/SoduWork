@@ -6,6 +6,10 @@ Command examples use `sh start.sh` on macOS/Linux. On Windows, use `.\start.cmd`
 
 The desktop uses Electron and native HTML/CSS/JavaScript. The React management UI is a separate application.
 
+Before your first message, the composer checks the selected runtime and chat model. Use the action beside a missing setting, then return to your draft. The Hub overview can open runtime and model settings in the installed desktop app. While the composer is open, it reports whether those selections are ready for the signed-in account.
+
+The chat model picker retries a timed-out catalog read once and shows a reload action if loading fails or no models are available. A send timeout preserves your input; a later catalog response can update the picker but never sends the message automatically. Reload the list, select an available model, and send again.
+
 ## Build a different default Hub
 
 Normal builds still default to `https://service.soduwork.ai`. To build for another
@@ -105,6 +109,14 @@ Closing a conversation automation form preserves a draft card at its original po
 
 ## Run and verify
 
+Model capability report v3 verifies the complete streaming tool round trip: the synthetic tool result is the last message, tool definitions remain present, and the model must return that result without another forced tool call. Older v2 tool successes require a new check; independent image and streaming evidence remains available. A passed check verifies this small request, not every production prompt or provider policy. Update both desktop and Hub, then rerun the tool capability check for existing models.
+
+The receipt continuation omits `tool_choice`, matching the native Pi request. A generic 403 leaves that capability inconclusive and does not skip independent checks or diagnose missing credential permissions. Explicit authentication and billing failures retain their separate handling.
+
+Hub model refusals carry an opaque `soduwork-trace` marker through JSON, SSE and native conversation summaries. Use it to correlate the Hub transport log with a validated upstream request identifier. Generic HTTP 403 means the request was rejected; it does not prove a credential-permission defect. Completed tools and files remain available, and a 403 does not trigger an automatic retry.
+
+Transient model failures share the existing per-turn retry budget. A provider's `Retry-After` is a minimum wait: if it exceeds the remaining time budget, automatic retries stop instead of shortening that wait. Recognized billing or quota exhaustion does not retry. Completed output and tool results remain available through the existing explicit recovery flow.
+
 Native file delivery preserves Unicode filename spelling and file bytes, including relative links inside bundles. Update the Hub together with the desktop to accept decomposed Unicode names; canonically equivalent or case-conflicting paths are rejected rather than merged. Completed Pi turn journals can recover files with preserved old modification times within the existing scan limits; unrelated historical files remain excluded. Capture checks recorded content hashes before freezing bytes. An explicit file-path contract with no captured output or an incomplete inferred scan reports incomplete delivery; text-only and kind-only contracts retain their existing behavior. Completed manual submissions show that acceptance still requires submission. Transport continues to use the existing account-scoped durable receipt queue.
 
 New native requirement executions distinguish the selected submission policy from its effective mode. The default can submit validated current-turn primary outputs for review even without a predeclared output contract; explicit and unclassified historical manual policies stay manual. Explicit default selections require an updated Hub acknowledgment. Standalone chat JSON results can be collected alongside Markdown; configuration, credentials, hidden directories and process files remain excluded from inference. Project workspaces retain their bounded result rules and explicit manifests remain authoritative.
@@ -155,7 +167,7 @@ npm start
 
 Use Node.js 22.19+. A separately started client retains its own profile and Hub connection settings. See the [developer guide](../docs/development.en.md) for service addresses and profile isolation.
 
-The root source launcher prepares both Hub and Runner dependencies in its private `venv/` and explicitly binds the generated desktop to that Python interpreter. Independent `npm start` development uses `../hub-backend/.venv` with `requirements-runner.txt` installed. Both paths execute the current backend source; do not substitute a Runner copied from an old release.
+The root source launcher prepares both Hub and Runner dependencies in its private `venv/` and explicitly binds the generated desktop to that Python interpreter. For independent `npm start` development, activate `../hub-backend/.venv` and run `python -m pip install -r ../hub-backend/requirements-runner.txt -r ../hub-backend/requirements-image.txt` from `client/`. Pillow validates generated images before the desktop publishes them. Both paths execute the current backend source; do not substitute a Runner copied from an old release.
 
 Run `npm test` for unit/contract tests and `npm run check:layout` for source boundaries. Inspect the requirements of each `e2e/` script before using it. Fixture success does not establish real-model or production acceptance.
 

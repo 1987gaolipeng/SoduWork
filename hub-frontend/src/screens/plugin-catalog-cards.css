@@ -76,3 +76,9 @@
 .plugin-page .plugin-catalog .plugin-card-shelf-actions .plugin-card-quick-action:hover { color: var(--accent); background: transparent; box-shadow: none; }
 .plugin-page .plugin-catalog .plugin-card-shelf-actions .is-danger { color: var(--crit); }
 .plugin-page .plugin-catalog .plugin-card-state { font-size: 14.5px; font-weight: 400; }
+
+.plugin-page .plugin-catalog .plugin-card-evidence {
+  display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 10px;
+  color: var(--ink-2); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere;
+}
+.plugin-page .plugin-catalog .plugin-card-evidence > :first-child { flex-basis: 100%; }

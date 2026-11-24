@@ -23,6 +23,7 @@ function fixture(workflow = false) {
     updateWorkloads: { guard: () => ({ ok: true }) }, session: { get: () => handle },
     sendIdentityOf: async () => ({}), identityOf: async () => ({}), app: {}, memories: { assertOwner() {} },
     _cloudHandoff: { guard: () => false }, path, workDir: () => '/fixture',
+    firstTurnTitle: { prepare: () => null, accepted() {} },
     attachments: { stage: async () => ({ files: [], warnings: [] }) },
     pluginDebug: { guard: () => '', submitConversation: async () => { plugins++; return workflow ? submitted() : null; } },
     BrowserWindow: {}, _publish() {}, _uiWindow: { snapshot: () => ({}) }, _contextSnapshot: () => ({}),

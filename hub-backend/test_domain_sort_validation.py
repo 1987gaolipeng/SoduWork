@@ -1,5 +1,8 @@
 """Authenticated domain writes reject invalid sort values before any mutation."""
+import asyncio
 import os
+import tempfile
+from pathlib import Path
 import unittest
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
@@ -17,12 +20,14 @@ from app.db import Base, get_session
 
 class DomainSortValidationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.engine = create_async_engine(f"sqlite+aiosqlite:///{Path(directory.name) / 'test.db'}")
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         # Only the real tables used by these endpoints and their associations.
         tables = [model.__table__ for model in (
             models.User, models.Role, models.Domain, models.AuditLog,
-            models.Client, models.Task,
+            models.Client, models.Task, models.OrgUnit, models.Position, models.AppSetting,
         )]
         async with self.engine.begin() as conn:
             await conn.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
@@ -57,6 +62,94 @@ class DomainSortValidationTests(unittest.IsolatedAsyncioTestCase):
         headers = {"Authorization": "Bearer " + sign_token(who, 1)} if who else {}
         headers.update(kwargs.pop("headers", {}))
         return await self.http.request(method, "/api/v1/admin" + path, headers=headers, **kwargs)
+
+    async def test_overlapping_updates_return_and_audit_each_actors_own_write(self):
+        async with self.sessions() as session:
+            session.add(models.User(id="second-manager", username="second-manager", role_id="manager-role"))
+            await session.commit()
+        changes = [(f"Domain {i}", "manager" if i % 2 else "second-manager") for i in range(20)]
+        replies = await asyncio.gather(*(self.request(
+            "PATCH", "/domains/existing", who=actor, json={"name": name, "sort": i})
+            for i, (name, actor) in enumerate(changes)))
+        for i, ((name, _), response) in enumerate(zip(changes, replies)):
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual((response.json()["name"], response.json()["sort"]), (name, i))
+
+        async with self.sessions() as session:
+            logs = list(await session.scalars(select(models.AuditLog).where(
+                models.AuditLog.action == "domain.update", models.AuditLog.target_id == "existing")))
+            domain = await session.get(models.Domain, "existing")
+            self.assertCountEqual([(row.target_label, row.actor_id) for row in logs], changes)
+            next_edit = {row.detail["before"]["name"]: row for row in logs}
+            previous = {"name": "Existing", "sort": 2, "id": "existing", "isSystem": False}
+            for _ in changes:
+                row = next_edit.pop(previous["name"])
+                current = row.detail["after"]
+                self.assertEqual(row.target_label, current["name"])
+                self.assertEqual(row.detail["before"], previous)
+                self.assertEqual(current["sort"], int(current["name"].split()[1]))
+                previous = current
+            self.assertFalse(next_edit)
+            self.assertEqual((domain.name, domain.sort), (previous["name"], previous["sort"]))
+
+    async def test_audit_insert_failure_rolls_back_domain_edit(self):
+        async with self.engine.begin() as conn:
+            await conn.execute(text("""
+                CREATE TRIGGER reject_domain_audit BEFORE INSERT ON audit_log
+                WHEN NEW.action = 'domain.update'
+                BEGIN SELECT RAISE(ABORT, 'audit write unavailable'); END
+            """))
+        reply = await self.request("PATCH", "/domains/existing", json={"name": "Rejected", "sort": 9})
+        self.assertEqual(reply.status_code, 500)
+        async with self.sessions() as session:
+            domain = await session.get(models.Domain, "existing")
+            self.assertEqual((domain.name, domain.sort), ("Existing", 2))
+            self.assertEqual(await session.scalar(select(func.count()).select_from(models.AuditLog)), 0)
+
+    async def test_user_assignments_protect_domains_and_reject_stale_ids(self):
+        async with self.sessions() as session:
+            session.add(models.OrgUnit(id="team", name="Team"))
+            actor = await session.get(models.User, "manager")
+            actor.org_id = "team"
+            await session.commit()
+
+        body = {"username": "new-user", "password": "isolated-fixture", "orgId": "team"}
+        bad_role = await self.request("POST", "/users", json={**body, "roleId": "missing-role"})
+        self.assertEqual(bad_role.status_code, 400, bad_role.text)
+        invalid = await self.request("POST", "/users", json={**body, "domains": ["missing"]})
+        self.assertEqual(invalid.status_code, 400, invalid.text)
+        created = await self.request("POST", "/users", json={**body, "domains": ["existing"]})
+        self.assertEqual(created.status_code, 200, created.text)
+        user_path = "/users/" + created.json()["id"]
+        bad_role = await self.request("PATCH", user_path, json={"roleId": "missing-role"})
+        self.assertEqual(bad_role.status_code, 400, bad_role.text)
+        bad_patch = await self.request("PATCH", user_path, json={"domains": ["existing", "missing"]})
+        self.assertEqual(bad_patch.status_code, 400, bad_patch.text)
+        renamed = await self.request("PATCH", user_path, json={"displayName": "Renamed"})
+        self.assertEqual(renamed.json()["domains"], ["existing"])
+
+        for path in ("/users/manager", user_path):
+            blocked = await self.request("DELETE", "/domains/existing")
+            self.assertEqual(blocked.status_code, 400, blocked.text)
+            self.assertIn("仍有用户", blocked.json()["detail"])
+            cleared = await self.request("PATCH", path, json={"domains": []})
+            self.assertEqual(cleared.json()["domains"], [])
+        deleted = await self.request("DELETE", "/domains/existing")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        stale = await self.request("PATCH", user_path, json={"domains": ["existing"]})
+        self.assertEqual(stale.status_code, 400, stale.text)
+
+    async def test_domain_names_are_required_bounded_and_unique_on_both_write_paths(self):
+        for value in (None, "", "   ", "x" * 65, {"name": "bad"}):
+            response = await self.request("POST", json={} if value is None else {"name": value})
+            self.assertEqual(response.status_code, 422, response.text)
+            response = await self.request("PATCH", "/domains/existing", json={"name": value})
+            self.assertEqual(response.status_code, 422, response.text)
+        new = await self.request("POST", json={"name": "  Another  "})
+        self.assertEqual(new.json()["name"], "Another")
+        for method, path in (("POST", "/domains"), ("PATCH", "/domains/existing")):
+            response = await self.request(method, path, json={"name": " another "})
+            self.assertEqual(response.status_code, 409, response.text)
 
     async def assert_unchanged(self):
         async with self.sessions() as session:
@@ -95,9 +188,9 @@ class DomainSortValidationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(actions.count("domain.update"), len(cases))
 
     async def test_omitted_null_and_create_empty_string_keep_existing_defaults(self):
-        for extra in ({}, {"sort": None}, {"sort": ""}):
+        for index, extra in enumerate(({}, {"sort": None}, {"sort": ""})):
             with self.subTest(extra=extra):
-                response = await self.request("POST", json={"name": "Synthetic default", **extra})
+                response = await self.request("POST", json={"name": f"Synthetic default {index}", **extra})
                 self.assertEqual(response.status_code, 200, response.text)
                 self.assertEqual(response.json()["sort"], 0)
         for extra in ({}, {"sort": None}):

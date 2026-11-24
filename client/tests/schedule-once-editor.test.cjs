@@ -3,7 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const folder = path.join(__dirname, '../components/panels');
 const future = '2099-10-15T04:30:15.123456+00:00';
-const display = '2099-10-15T12:30:15.123';
+const display = '2099-10-15T12:30';
 const copy = value => JSON.parse(JSON.stringify(value));
 
 function fixture(existing = null, every = 'once') {
@@ -17,7 +17,7 @@ function fixture(existing = null, every = 'once') {
     focus() { this.focused = true; },
   });
   for (const id of ['schEvery', 'schRepo', 'schWd', 'schHWrap', 'schDirectBlock',
-    'schPluginBlock', 'schFlowWrap', 'schPv', 'schBpWhen', 'schBpWork', 'schRetryOptions',
+    'schPluginBlock', 'schFlowWrap', 'schPv', 'schRetryOptions',
     'schRetry', 'schTitle', 'schNote', 'schWho', 'schRetryLimit', 'schRetryDelay',
     'schCancel', 'schSave', 'schH', 'schM', 'schEnabled', 'schRunAt', 'schOnceWrap',
     'schPluginConfig', 'schMethodWrap', 'schMethod', 'schOnceHint', 'schFlow']) controls[id] = element();
@@ -49,16 +49,16 @@ function fixture(existing = null, every = 'once') {
   };
   c.window = c;
   vm.createContext(c);
-  for (const file of ['schedule-timing.js', 'panels-schedules-methods.js', 'panels-schedules-cards.js',
+  for (const file of ['schedule-timing.js', 'work-automation-view.js', 'panels-schedules-methods.js', 'panels-schedules-cards.js',
     'panels-schedules.js', 'panels-schedules-editor.js'])
     vm.runInContext(fs.readFileSync(path.join(folder, file), 'utf8'), c, { filename: file });
   c.initial = existing || 'new';
   vm.runInContext('_schEditing = initial', c);
   c._schBrowserTimeZone = () => 'Asia/Shanghai';
-  if (existing?.every === 'once') controls.schRunAt.value = c.ScheduleTiming.localInput(
+  if (existing?.every === 'once') controls.schRunAt.value = c.ScheduleTiming.localMinute(
     existing.runAt, existing.timeZone || 'Asia/Shanghai');
   const timing = { ...c.ScheduleTiming };
-  c.ScheduleTiming.localInput = (value, zone) => { timingCalls.push(['local', value, zone]); return timing.localInput(value, zone); };
+  c.ScheduleTiming.localMinute = (value, zone) => { timingCalls.push(['local', value, zone]); return timing.localMinute(value, zone); };
   c.ScheduleTiming.fromLocalInput = (value, zone) => { timingCalls.push(['parse', value, zone]); return timing.fromLocalInput(value, zone); };
   c._schmSnapshotState = () => ({ versionPolicy: 'latest', personalVersion: '', personalChecksum: '', preserveSnapshot: false });
   c._schmSnapshotLocked = () => false;
@@ -177,14 +177,13 @@ test('one-time save converts the chosen schedule-zone wall time and excludes rea
   const f = fixture(); f.wire(); await f.save();
   assert.equal(f.saves.length, 1);
   assert.equal(f.saves[0].body.every, 'once');
-  assert.equal(f.saves[0].body.runAt, '2099-10-15T04:30:15.123Z');
+  assert.equal(f.saves[0].body.runAt, '2099-10-15T04:30:00.000Z');
   assert.equal(f.saves[0].body.onceFired, undefined);
   assert.equal(f.saves[0].body.scheduleId, undefined);
 });
 
 test('editing an unchanged instant preserves the original microseconds and adds preflight identity', async () => {
   const f = fixture({ id: 'plan', every: 'once', runAt: future, timeZone: 'Asia/Shanghai' });
-  f.controls.schRunAt.value = display.replace('.123', '.123');
   f.wire(); await f.save();
   assert.equal(f.saves[0].id, 'plan');
   assert.equal(f.saves[0].body.runAt, future);
@@ -238,12 +237,12 @@ test('unchanged overdue existing appointment remains editable for catch-up once'
   assert.equal(f.saves[0].body.runAt, past);
 });
 
-test('browser-normalized fractional seconds still preserve original microseconds', async () => {
+test('changing the minute on a precise reservation drops its original seconds', async () => {
   const precise = future.replace('.123456', '.120456');
   const f = fixture({ id: 'precise', every: 'once', runAt: precise, timeZone: 'Asia/Shanghai' });
-  f.controls.schRunAt.value = f.controls.schRunAt.value.replace('.120', '.12');
+  f.controls.schRunAt.value = '2099-10-15T12:31';
   f.wire(); await f.save();
-  assert.equal(f.saves[0].body.runAt, precise);
+  assert.equal(f.saves[0].body.runAt, '2099-10-15T04:31:00.000Z');
 });
 
 test('an invalid wall date cannot normalize into the old instant and masquerade as unchanged', async () => {

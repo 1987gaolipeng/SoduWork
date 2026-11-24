@@ -4,10 +4,25 @@
   const esc = value => String(value == null ? '' : value).replace(/&/g, '&amp;')
     .replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const cut = (value, max) => String(value || '').trim().slice(0, max);
+  function agentOptionHtml(agent, selected) {
+    const tx = value => global.SoduWorkI18n?.translateText?.(value) ?? value;
+    const location = String(agent.locationLabel || '');
+    const name = String(agent.name || agent.id);
+    // Multi-device catalog entries already include the location in their display name.
+    const suffix = ' · ' + location;
+    const title = location && name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+    const status = [agent.available === false ? tx('当前未就绪') : '',
+      agent.onlineSeats ? tx(agent.onlineSeats + ' 个在线席位') : ''].filter(Boolean).join(' · ');
+    const label = [title, location, status].filter(Boolean).join(' · ');
+    const separator = '<span class="automation-runtime-separator"> · </span>';
+    return '<option value="' + esc(agent.id) + '"' + (String(agent.id) === selected ? ' selected' : '') +
+      ' aria-label="' + esc(label) + '" title="' + esc(label) + '">' +
+      '<span class="automation-runtime-name">' + esc(title) + '</span>' +
+      (location ? separator + '<span class="automation-runtime-location">' + esc(location) + '</span>' : '') +
+      (status ? separator + '<span class="automation-runtime-status">' + esc(status) + '</span>' : '') + '</option>';
+  }
   function methodFieldsHtml(method, values) {
-    if (!method) {
-      return '<p class="waz-method-hint">不选工作方法时，Agent 会按上面的执行说明直接完成。</p>';
-    }
+    if (!method) return '';
     const fields = (method.inputs || []).map(field => {
       const key = cut(field.key, 80);
       const hasValue = Object.prototype.hasOwnProperty.call(values || {}, key);
@@ -104,5 +119,5 @@
     };
   }
 
-  global.WorkAutomationView = {methodFieldsHtml, optionRows, mountDialog, rememberView};
+  global.WorkAutomationView = {agentOptionHtml, methodFieldsHtml, optionRows, mountDialog, rememberView};
 })(window);

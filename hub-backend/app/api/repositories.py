@@ -2,11 +2,14 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import automation_models as am, models
+from .. import automation_models as am
+from .. import models
 from ..db import get_session
 from ..deps import require_perm
 from ..models import User
-from ..services import audit, rbac, repository_catalog as catalog
+from ..services import audit, rbac
+from ..services import repository_catalog as catalog
+from ..services.business_records import record_fields
 from ..services.resource_leases import LeaseBusy as resource_busy
 from ..services.workdirs import InvalidRepositoryDirectory
 
@@ -14,12 +17,23 @@ router = APIRouter(prefix="/api/v1/admin", tags=["repository-catalog"])
 
 
 def _conflict(exc: Exception) -> HTTPException:
-    return HTTPException(status_code=400 if isinstance(exc, InvalidRepositoryDirectory) else 409,
+    return HTTPException(status_code=400 if isinstance(
+        exc, (InvalidRepositoryDirectory, catalog.InvalidRepositoryInput)) else 409,
                          detail=str(exc))
 
 
 async def _scope(session: AsyncSession, user: User) -> set[str] | None:
     return await rbac.scope_org_ids(session, user)
+
+
+async def _assert_integration_scope(session: AsyncSession, user: User, integration_id: str) -> None:
+    integration = await session.get(models.Integration, integration_id)
+    if integration is None:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    scope = await _scope(session, user)
+    org_id = (integration.config or {}).get("orgId")
+    if scope is not None and (not isinstance(org_id, str) or org_id.strip() not in scope):
+        raise HTTPException(status_code=403, detail="Integration is outside your organization scope")
 
 
 async def _project(session: AsyncSession, user: User, project_id: str) -> models.Project:
@@ -77,6 +91,16 @@ async def list_repository_catalog(
         include_inactive=includeInactive)}
 
 
+@router.get("/integrations/{integration_id}/repositories/sync")
+async def repository_sync_status(
+    integration_id: str,
+    user: User = Depends(require_perm("integration.manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    await _assert_integration_scope(session, user, integration_id)
+    return {"stage": await catalog.sync_stage(session, integration_id)}
+
+
 @router.post("/integrations/{integration_id}/repositories/sync")
 async def sync_repositories(
     integration_id: str, body: dict = Body(default_factory=dict),
@@ -125,6 +149,7 @@ async def test_pull_account(
     session: AsyncSession = Depends(get_session),
 ):
     """Test the pending account edits, retaining stored fields omitted by the form."""
+    await _assert_integration_scope(session, user, integration_id)
     override = {key: body[key] for key in ("user", "secret", "kind") if key in body} or None
     try:
         return await catalog.verify_pull_account(session, integration_id, override=override)
@@ -156,7 +181,7 @@ async def create_repo_mapping(
     project = await _project(session, user, project_id)
     row = await _catalog(session, user, str(body.get("catalogId") or ""))
     try:
-        repo = await catalog.create_mapping(session, project, row, body)
+        repo = await catalog.create_mapping(session, project, row, body, actor=user)
     except resource_busy as exc:
         raise HTTPException(status_code=423, detail="This repository mapping is being updated") from exc
     except ValueError as exc:
@@ -164,7 +189,7 @@ async def create_repo_mapping(
     await audit.log(session, user, "repository.mapping.create", "repo",
                     repo.id, repo.name, {"projectId": project.id,
                                         "branch": repo.default_branch})
-    return {"id": repo.id, "projectId": repo.project_id,
+    return {"id": repo.id, "projectId": repo.project_id, **record_fields(repo),
             "sourceRepositoryId": repo.source_repository_id,
             "name": repo.name, "gitUrl": repo.git_url,
             "branch": repo.default_branch, "mergeBranch": repo.merge_branch,
@@ -180,7 +205,7 @@ async def copy_repo_mapping(
     source = await _repo(session, user, repo_id)
     target = await _project(session, user, str(body.get("projectId") or ""))
     try:
-        repo = await catalog.copy_mapping(session, source, target, body)
+        repo = await catalog.copy_mapping(session, source, target, body, actor=user)
     except resource_busy as exc:
         raise HTTPException(status_code=423, detail="This repository mapping is being updated") from exc
     except ValueError as exc:
@@ -189,7 +214,7 @@ async def copy_repo_mapping(
                     repo.id, repo.name, {"sourceRepoId": source.id,
                                         "projectId": target.id,
                                         "branch": repo.default_branch})
-    return {"id": repo.id, "projectId": repo.project_id,
+    return {"id": repo.id, "projectId": repo.project_id, **record_fields(repo),
             "sourceRepositoryId": repo.source_repository_id,
             "name": repo.name, "gitUrl": repo.git_url,
             "branch": repo.default_branch, "mergeBranch": repo.merge_branch,

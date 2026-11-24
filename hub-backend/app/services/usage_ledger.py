@@ -18,7 +18,7 @@ _COUNTERS = (
     "reasoning_tokens", "total_tokens", "requests", "turns", "steps",
     "duration_ms", "cost_microusd",
 )
-from .usage_values import _QUALITY_RANK, _number, normalize_usage
+from .usage_values import _QUALITY_RANK, _number, normalize_usage, validate_reported_usage
 from ..timestamps import iso_utc
 
 def _dt(value: Any) -> datetime:
@@ -36,6 +36,13 @@ def _dt(value: Any) -> datetime:
 async def upsert_cumulative(
     session: AsyncSession, idempotency_key: str, values: dict,
 ) -> models.AIUsageEvent:
+    row, _ = await record_cumulative(session, idempotency_key, values)
+    return row
+
+
+async def record_cumulative(
+    session: AsyncSession, idempotency_key: str, values: dict,
+) -> tuple[models.AIUsageEvent, str]:
     """Create once, then accept only monotonic cumulative counters.
 
     A client reports the running total for one session more than once.  The
@@ -53,18 +60,22 @@ async def upsert_cumulative(
         models.AIUsageEvent.idempotency_key == key).limit(1).with_for_update()
         .execution_options(populate_existing=True))).scalar_one_or_none()
     reported_at = _dt(values.get("occurred_at"))
+    created = False
     if row is None:
         # Set the anchor before flush so the model's ``default=now`` cannot
         # win over a client timestamp that arrived a little later.
         candidate = models.AIUsageEvent(
             idempotency_key=key,
             occurred_at=reported_at,
+            # The first receipt supplies its own quality before later upgrades.
+            quality="unknown",
         )
         try:
             async with session.begin_nested():
                 session.add(candidate)
                 await session.flush()
             row = candidate
+            created = True
         except IntegrityError:
             row = (await session.execute(select(models.AIUsageEvent).where(
                 models.AIUsageEvent.idempotency_key == key).limit(1).with_for_update()
@@ -139,7 +150,9 @@ async def upsert_cumulative(
             for field, delta in deltas.items():
                 setattr(daily, field, int(getattr(daily, field) or 0) + delta)
         await session.flush()
-    return row
+    if created:
+        return row, "created"
+    return row, "updated" if any(deltas.values()) else "duplicate"
 
 
 def to_api(row: models.AIUsageEvent) -> dict:
@@ -223,9 +236,21 @@ async def from_execution(
 async def from_client(
     session: AsyncSession, client: models.Client, payload: dict,
 ) -> models.AIUsageEvent:
-    source_type = str(payload.get("sourceType") or "chat").lower()
-    if source_type not in {"chat", "task", "workflow", "automation", "system"}:
-        source_type = "chat"
+    key, values = await prepare_client_event(session, client, payload)
+    return await upsert_cumulative(session, key, values)
+
+
+class InvalidUsageSource(ValueError):
+    """The supplied event category cannot be recorded as reported."""
+
+
+async def prepare_client_event(
+    session: AsyncSession, client: models.Client, payload: dict,
+) -> tuple[str, dict]:
+    allowed_sources = ("chat", "task", "workflow", "automation", "system")
+    source_type = payload.get("sourceType", "chat")
+    if source_type not in allowed_sources:
+        raise InvalidUsageSource("sourceType must be one of: " + ", ".join(allowed_sources))
     source_id = str(payload.get("sourceId") or payload.get("conversationId") or "")[:180]
     reported_key = str(payload.get("idempotencyKey") or source_id)[:180]
     if not reported_key:
@@ -245,20 +270,20 @@ async def from_client(
     workflow_run_id = str(payload.get("workflowRunId") or "")[:36]
     node_run_id = str(payload.get("nodeRunId") or "")[:36]
     if source_type in {"task", "workflow"} and not task_id:
-        source_type = "chat"
-        workflow_run_id = ""
-        node_run_id = ""
+        raise InvalidUsageSource(f"sourceType {source_type} requires a visible taskId")
     from .model_quota import reported_scope
+    raw_usage = dict(payload.get("usage") or {})
+    validate_reported_usage(raw_usage)
     values = {
         "quota_scope": reported_scope(client, payload),
-        **normalize_usage(dict(payload.get("usage") or {})),
+        **normalize_usage(raw_usage),
         "org_id": str((user.org_id if user else "") or ""),
         "billing_user_id": user_id,
         "actor_user_id": user_id,
         "client_id": client.id,
         "runner_id": str(payload.get("runnerId") or ""),
         "source_type": source_type,
-        "source_id": source_id,
+        "source_id": source_id or reported_key,
         "source_title": str(payload.get("sourceTitle") or "").strip()[:200],
         "conversation_id": str(payload.get("conversationId") or source_id),
         "task_id": task_id,
@@ -284,4 +309,4 @@ async def from_client(
     else:
         identity = json.dumps([client.id, user_id, reported_key], separators=(",", ":"))
         key = "client-account:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
-    return await upsert_cumulative(session, key, values)
+    return key, values

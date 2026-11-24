@@ -199,7 +199,7 @@ function create({ request, task, spec, scope, interval = 1500, wait = ms => new 
         // Transcript completion does not ingest Runner outputs. Reconcile the
         // exact execution before acknowledging this controlled conversation turn.
         if (continuation && status === 'completed')
-          await request(route + '/ai-status?ref=' + encodeURIComponent(runId));
+          await require('../conversation/runner-output-sync.cjs').collect(request, route, runId);
         // Preserve the authoritative failure without copying raw provider envelopes into chat.
         const error = status === 'failed' ? modelErrors.describe(latest.error) : null;
         let reason = error ? modelErrors.forDisplay(latest.error) || '需求执行失败，请检查当前步骤' : '';

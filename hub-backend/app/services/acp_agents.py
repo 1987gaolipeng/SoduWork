@@ -31,10 +31,27 @@ def find_bin(key: str) -> str | None:
         return private
     if spec.get("launch") == "node":
         return None
+    from .agent_installation import path_directories
+    directories = path_directories(windows=sys.platform == 'win32')
     for name in spec.get("bins") or ():
-        found = shutil.which(name)
+        found = (shutil.which(name, path=os.pathsep.join(directories))
+                 if sys.platform == 'win32' else shutil.which(name))
+        if not found:
+            found = next((hit for directory in directories
+                          if (hit := shutil.which(name, path=directory))), None)
         if found:
             return found
+    from .local_base import _npm_roots
+    from .agent_installation import selected_manifest
+    for root in _npm_roots():
+        directory = Path(root).parent if sys.platform == 'win32' else Path(root).parent.parent / 'bin'
+        for name in spec.get('bins') or ():
+            if sys.platform == 'win32' and not name.lower().endswith(('.cmd', '.exe')):
+                continue
+            candidate = directory / name
+            if (candidate.is_file() and (sys.platform == 'win32' or os.access(candidate, os.X_OK))
+                    and selected_manifest(spec.get('pkg', ''), str(candidate))):
+                return str(candidate)
     return None
 
 
@@ -77,6 +94,19 @@ def _agent_args(key: str, cfg: dict) -> list[str]:
     return args
 
 
+def executable_command(key: str, executable: str) -> list[str]:
+    """Use one validated Node/entry pair for npm probes and actual ACP launches."""
+    from .agent_installation import selected_node_entry
+    spec = CATALOG.get(key) or {}
+    entry, engine = selected_node_entry(spec.get('pkg', ''), executable)
+    if not entry:
+        return [executable]
+    node = agent_npm_runtime.node_env(key, engine=engine)
+    if not node.get('ok'):
+        raise RuntimeError(node.get('why') or 'Agent Node runtime is unavailable')
+    return [node['nodePath'], entry]
+
+
 def command_argv(key: str, exe: str, args: list[str], ws: str,
                  cfg: dict | None = None) -> list[str]:
     """Wrap one installed ACP agent in SoduWork's normalized JSON event bridge."""
@@ -94,15 +124,7 @@ def command_argv(key: str, exe: str, args: list[str], ws: str,
         bridge.append("--terminal")
     if session:
         bridge += ["--session", session]
-    command = [exe]
-    spec = CATALOG.get(key) or {}
-    if spec.get("launch") == "node":
-        command_name = str((spec.get("bins") or [""])[0]).removesuffix(".cmd")
-        entry = agent_npm_runtime.package_entry(spec.get("pkg", ""), command_name)
-        node = agent_npm_runtime.node_env(key)
-        if not entry or not node.get("ok"):
-            raise RuntimeError(node.get("why") or "Agent adapter entry is unavailable; reinstall this Agent")
-        command = [node["nodePath"], entry]
+    command = executable_command(key, exe)
     return [*bridge, "--", *command, *_agent_args(key, cfg or {})]
 
 
@@ -116,7 +138,7 @@ def runtime_issue(key: str, *, probe: bool = False) -> str:
     expected = dsh_runtime.adapter_expected_version(exe)
     if probe:
         return dsh_runtime.boot_issue(exe, expected_version=expected)
-    return dsh_runtime.runtime_issue(expected_version=expected)
+    return dsh_runtime.runtime_issue(expected_version=expected, executable=exe)
 
 
 def home_env(key: str, env: dict, work_root: str, *, installation_root: str | None = None) -> None:

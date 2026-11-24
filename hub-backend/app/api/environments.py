@@ -3,19 +3,56 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import automation_models as am, models
+from .. import automation_models as am
+from .. import models
 from ..db import get_session
 from ..deps import require_perm
 from ..models import User
-from ..services import (approval_policies as policy_svc, audit, deployments,
-                        environment_service as svc, project_setup, rbac,
-                        release_control, runner_hub)
+from ..services import approval_policies as policy_svc
+from ..services import (
+    audit,
+    catalog_names,
+    deployments,
+    project_setup,
+    rbac,
+    release_control,
+    runner_hub,
+)
+from ..services import environment_service as svc
+from ..services.environment_contracts import InvalidHealthCheck
+from .input_validation import parse_integer
 
 router = APIRouter(prefix="/api/v1/admin", tags=["environments"])
 
 
 def _bad(error: ValueError) -> HTTPException:
-    return HTTPException(status_code=409, detail=str(error))
+    if isinstance(error, InvalidHealthCheck):
+        return HTTPException(status_code=400, detail=str(error))
+    if isinstance(error, svc.InvalidRunnerSelector):
+        return HTTPException(status_code=422, detail=str(error))
+    if isinstance(error, svc.InvalidEnvironmentTier):
+        return HTTPException(status_code=400, detail=str(error), headers={"X-Error-Code": "hub.input.tier"})
+    if isinstance(error, (catalog_names.DuplicateName, svc.BusinessConflict)):
+        return HTTPException(status_code=409, detail=str(error))
+    if isinstance(error, policy_svc.InvalidPolicyInput):
+        return HTTPException(status_code=400, detail=str(error), headers={"X-Error-Code": "hub.input.tier"})
+    # Approval policy business errors (unsupported/empty actions, missing approvers) are 409.
+    msg = str(error)
+    if msg in (
+        "至少选择一个适用场景", "审批职责必须是数组", "至少选择一种审批职责",
+    ) or msg.startswith(("不支持的审批场景", "不支持的审批职责")):
+        return HTTPException(status_code=409, detail=msg)
+    # Generic value errors (e.g., invalid key format, bad selector) are 422.
+    return HTTPException(status_code=422, detail=str(error))
+
+
+def _approval_policy_input(body: dict) -> dict:
+    safe = dict(body)
+    rules = safe.get("rules")
+    if isinstance(rules, dict) and "required" in rules:
+        safe["rules"] = {**rules, "required": parse_integer(
+            rules["required"], field="rules.required", default=1)}
+    return safe
 
 
 async def _scope(session: AsyncSession, user: User) -> set[str] | None:
@@ -69,7 +106,8 @@ async def automation_overview(
     probes.
     """
     scope = await _scope(session, user)
-    project_q = select(models.Project)
+    from ..services.business_records import business_visible
+    project_q = select(models.Project).where(business_visible(models.Project))
     if scope is not None:
         project_q = project_q.where(
             models.Project.org_id.in_(scope or {"__none__"}) |
@@ -78,7 +116,7 @@ async def automation_overview(
         project_q.order_by(models.Project.created_at.desc()))).scalars().all())
     project_ids = {x.id for x in projects}
     repos = list((await session.execute(select(models.Repo).where(
-        models.Repo.project_id.in_(project_ids or {"__none__"})
+        business_visible(models.Repo), models.Repo.project_id.in_(project_ids or {"__none__"})
     ))).scalars().all())
     repo_ids = {x.id for x in repos}
     targets = list((await session.execute(select(am.DeploymentTarget).where(
@@ -255,7 +293,7 @@ async def create_approval_policy(
     user: User = Depends(require_perm("flow.manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    safe = dict(body)
+    safe = _approval_policy_input(body)
     safe["orgId"] = body.get("orgId") if user.is_super else user.org_id
     try:
         row = await policy_svc.save(session, safe)
@@ -282,7 +320,7 @@ async def update_approval_policy(
     if scope is not None and row.org_id is not None and row.org_id not in scope:
         raise HTTPException(status_code=403, detail="这项审批职责不在你的组织范围内")
     try:
-        row = await policy_svc.save(session, body, row)
+        row = await policy_svc.save(session, _approval_policy_input(body), row)
     except ValueError as e:
         raise _bad(e) from e
     await audit.log(session, user, "approval_policy.update", "approval_policy",
@@ -329,6 +367,14 @@ async def create_environment(
     try:
         safe = dict(body)
         safe["orgId"] = body.get("orgId") if user.is_super else user.org_id
+        if not user.is_super and not safe["orgId"]:
+            raise ValueError("请先加入组织后再创建环境")
+        org_id = safe["orgId"]
+        if org_id is not None and org_id != "" and (
+                not isinstance(org_id, str) or await session.get(models.OrgUnit, org_id) is None):
+            raise HTTPException(status_code=400, detail="部门不存在")
+        if "sort" in safe:
+            safe["sort"] = parse_integer(safe["sort"], field="sort", default=0)
         row = await svc.save_environment(session, safe)
     except ValueError as e:
         raise _bad(e) from e
@@ -353,7 +399,10 @@ async def update_environment(
     if scope is not None and row.org_id is not None and row.org_id not in scope:
         raise HTTPException(status_code=403, detail="这个环境不在你的组织范围内")
     try:
-        row = await svc.save_environment(session, body, row)
+        safe = dict(body)
+        if "sort" in safe:
+            safe["sort"] = parse_integer(safe["sort"], field="sort", default=0)
+        row = await svc.save_environment(session, safe, row)
     except ValueError as e:
         raise _bad(e) from e
     await audit.log(session, user, "environment.update", "environment", row.id, row.name, {})
@@ -443,7 +492,10 @@ async def create_target(
     user: User = Depends(require_perm("environment.manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    await _repo(session, user, str(body.get("repoId") or ""))
+    for key in ("repoId", "environmentId"):
+        if not isinstance(body.get(key), str) or not body[key].strip():
+            raise HTTPException(status_code=400, detail=f"{key} is required")
+    await _repo(session, user, body["repoId"].strip())
     try:
         row = await svc.save_target(session, body)
     except ValueError as e:
@@ -589,6 +641,8 @@ async def probe_secret_reference(
     row = await session.get(am.SecretReference, ref_id)
     if row is None:
         raise HTTPException(status_code=404, detail="密钥引用不存在")
+    if row.org_id is None and not user.is_super:
+        raise HTTPException(status_code=403, detail="系统级密钥引用只能由超级管理员操作")
     scope = await _scope(session, user)
     if scope is not None and row.org_id is not None and row.org_id not in scope:
         raise HTTPException(status_code=403, detail="这个密钥引用不在你的组织范围内")

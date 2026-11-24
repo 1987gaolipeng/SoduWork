@@ -10,11 +10,13 @@ const RELEASE = Object.freeze({
   x64: Object.freeze({
     version: '2.55.0.4',
     url: 'https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.4/PortableGit-2.55.0.4-64-bit.7z.exe',
+    size: 58915456,
     sha256: '016e84230a3767f0c6b3788e79ba0c58a17377086801719d46700fca4f7b36b5',
   }),
   arm64: Object.freeze({
     version: '2.55.0.4',
     url: 'https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.4/PortableGit-2.55.0.4-arm64.7z.exe',
+    size: 59191568,
     sha256: 'd69d0c6a3c5445553565ef74f1d9e22a9869f57c246111db347dd96c252b4da5',
   }),
 });
@@ -171,7 +173,7 @@ async function prepareArchive(release, { cache = cacheRoot, environment = proces
     fs.writeFileSync(marker, source);
     log('[SoduWork shell runtime] downloading ' + downloadLabel(url));
     try {
-      await download(url, archive, { environment, resume: true, log });
+      await download(url, archive, { environment, expectedBytes: release.size, resume: true, log });
       if (hash(archive) !== release.sha256) {
         fs.rmSync(archive, { force: true });
         fs.rmSync(partial, { force: true });

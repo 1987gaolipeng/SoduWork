@@ -205,6 +205,14 @@
     return pending ? tx('收到，正在接上工作区…') : tx('正在理解你的要求…');
   }
 
+  function serviceHostname(raw) {
+    const value = String(raw || '').trim();
+    const host = value.includes(':') && !value.startsWith('[') ? '[' + value + ']' : value;
+    if (!/^(?:[a-z0-9][a-z0-9._-]{0,252}|\[[a-f0-9:.]+\])$/i.test(host)) return '';
+    // URL validates IPv6 and retains the brackets needed by later URLs.
+    try { return new URL('http://' + host + '/').hostname; }
+    catch (_) { return ''; }
+  }
   function normalizeUrl(raw, options) {
     const opts = options || {};
     let value = String(raw || '').trim().replace(/[),.;]+$/, '');
@@ -229,9 +237,9 @@
       // A cloud runner's localhost is the runner, not the user's desktop. The
       // Hub exposes the runner host in the target snapshot, so rewrite only
       // loopback addresses and keep the reported port/path/query intact.
-      const cloudHost = String(opts.cloudHost || '').trim();
-      if (opts.cloud && loopback && !cloudHost) return '';
-      if (opts.cloud && loopback && cloudHost && /^[a-z0-9][a-z0-9._-]{0,252}$/i.test(cloudHost)) {
+      if (opts.cloud && loopback) {
+        const cloudHost = serviceHostname(opts.cloudHost);
+        if (!cloudHost) return '';
         parsed.hostname = cloudHost;
       } else if (loopback) {
         parsed.hostname = '127.0.0.1';
@@ -294,8 +302,9 @@
       const meta = toolMeta(tool);
       if (meta.kind !== 'command') return;
       const port = Number(tool.port);
-      const structuredPort = Number.isInteger(port) && port > 0 && port < 65536
-        ? String(tool.host || 'localhost') + ':' + String(port) : '';
+      const host = serviceHostname(tool.host || 'localhost');
+      const structuredPort = host && Number.isInteger(port) && port > 0 && port < 65536
+        ? 'http://' + host + ':' + String(port) : '';
       const explicitServiceUrls = [
         tool.serviceUrl, tool.previewUrl, tool.service?.url,
         ...(Array.isArray(tool.services) ? tool.services.map(item => item?.url || item?.previewUrl) : []),
@@ -341,14 +350,27 @@
     return [...unique.values()];
   }
 
+  const CHANGE_STATES = { running: '进行中', error: '失败', failed: '失败', cancelled: '已取消',
+    done: '已完成', completed: '已完成', success: '已完成', pending: '待开始', preparing: '准备中' };
   function changes(input) {
     return (input || []).map((tool) => ({ tool, meta: toolMeta(tool) }))
       .filter((item) => item.meta.kind === 'write' || item.meta.kind === 'edit')
       .map(({ tool, meta }) => ({
         id: tool.id, action: meta.kind === 'write' ? '新建' : '修改',
         name: baseName(meta.target) || '文件', path: meta.target || '',
-        state: tool.state === 'running' ? '进行中' : tool.state === 'error' ? '失败' : '已完成',
+        state: tool.isError && tool.state !== 'cancelled' ? '失败' : CHANGE_STATES[tool.state] || '未知',
       }));
+  }
+
+  function changeRows(items) {
+    return items.map(item => {
+      const path = item.path || item.name || '', name = baseName(path);
+      const directory = path.slice(0, path.length - name.length);
+      return '<button type="button" class="ncw-change-row" ' +
+        (item.id ? 'data-wb-tool="' + esc(item.id) + '"' : 'disabled') + '><span>' + esc(item.action) + '</span>' +
+        '<b data-user-content title="' + esc(path) + '"><span>' + esc(directory) + '</span><strong>' + esc(name) +
+        '</strong></b><small>' + esc(item.state) + '</small></button>';
+    }).join('');
   }
 
   // Self-contained SVGs also render in document headers without inherited SVG CSS.
@@ -446,7 +468,7 @@
       '<button type="button" data-wb-copy-location title="复制页面地址" aria-label="复制页面地址">' + ICONS.copy + '</button></div>';
   }
 
-  const api = { toolMeta, status, services, serviceCandidates, changes, currentTurnTools, currentWorkFiles, currentWorkSelection, currentDeliveryFiles, currentWorkJournal, baseName, normalizeUrl, stripAnsi, isServerCommand, ICONS, documentToolbar, browserToolbar, mediaToolbar, displayAddress, buttonStatus, copied };
+  const api = { toolMeta, status, services, serviceCandidates, changes, changeRows, currentTurnTools, currentWorkFiles, currentWorkSelection, currentDeliveryFiles, currentWorkJournal, baseName, normalizeUrl, stripAnsi, isServerCommand, ICONS, documentToolbar, browserToolbar, mediaToolbar, displayAddress, buttonStatus, copied };
   Object.assign(tools, { status, _toolMeta: toolMeta, _services: services, _serviceCandidates: serviceCandidates, _changes: changes, _currentTurnTools: currentTurnTools });
   global.ChatWorkspaceInfo = api;
   global.ChatWorkbenchIcons = ICONS;

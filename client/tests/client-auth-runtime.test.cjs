@@ -266,7 +266,7 @@ test('remembered account is saved before interactive login is announced and surv
   assert.equal(saved.length, 1);
   assert.equal(saved[0][1], 'Employee.Example');
   assert.equal(JSON.stringify(saved).includes('never-persist-password'), false);
-  assert.equal(f.events.find(event => event.type === 'soduwork-device-auth').detail.interactiveLogin, true);
+  assert.equal(f.events.find(event => event.type === 'soduwork-device-auth' && event.detail.state === 'active').detail.interactiveLogin, true);
 });
 
 for (const action of ['password', 'emailCode', 'register']) test(action + ' remembers only the successful explicit account identifier', async () => {
@@ -277,7 +277,7 @@ for (const action of ['password', 'emailCode', 'register']) test(action + ' reme
   const values = [...f.values].filter(([key]) => key.startsWith('soduwork_work_last_login_account_v1@'));
   assert.equal(values.length, 1);
   assert.equal(values[0][1], 'User@Example.test');
-  assert.equal(f.events.find(event => event.type === 'soduwork-device-auth').detail.interactiveLogin, true);
+  assert.equal(f.events.find(event => event.type === 'soduwork-device-auth' && event.detail.state === 'active').detail.interactiveLogin, true);
   f.login({ ok: false, status: 401, code: 'ACCOUNT_OR_PASSWORD_INVALID' });
   await f.api.clientAccountAction(action, { email: 'failed@example.test', password: 'private-fixture-password' });
   assert.equal(f.api.rememberedLoginAccount(), 'User@Example.test');
@@ -314,7 +314,7 @@ for (const [label, user, expected] of [
   assert.equal(result.ok, true);
   assert.equal(observed, expected);
   assert.equal(f.api.rememberedLoginAccount(), expected);
-  assert.equal(f.events.find(event => event.type === 'soduwork-device-auth').detail.interactiveLogin, undefined);
+  assert.equal(f.events.find(event => event.type === 'soduwork-device-auth' && event.detail.state === 'active').detail.interactiveLogin, undefined);
   const reopened = runtime(signedIn('unused-login-session'), {values: f.values});
   assert.equal(reopened.api.rememberedLoginAccount(), expected);
 });

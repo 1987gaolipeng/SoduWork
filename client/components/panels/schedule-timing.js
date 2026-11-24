@@ -19,6 +19,9 @@
         (fraction ? '.' + String(fraction).padStart(3,'0') : '');
     } catch (_) { return ''; }
   }
+  function localMinute(value, zone) {
+    return localInput(value, zone).slice(0, 16);
+  }
   function fromLocalInput(value, zone) {
     const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/);
     if (!match || Number(match[1]) < 100) return '';
@@ -63,6 +66,35 @@
     if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
     const date = new Date(text + 'T00:00:00Z');
     return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== text ? '' : text;
+  }
+  function followingDate(value) {
+    if (!cleanDate(value)) return value;
+    const day = new Date(value + 'T12:00:00Z');
+    day.setUTCDate(day.getUTCDate() + 1);
+    return day.toISOString().split('T')[0];
+  }
+  function rollRecurringMidnight(next) {
+    // Keep the named evening in the editable draft for subsequent chat edits.
+    // Hub receives only the actual execution calendar.
+    const {weekday, weekdays, monthDays, monthDayPolicy, startDate, endDate} = next;
+    next.midnightCalendar = {weekday, weekdays, monthDays, monthDayPolicy, startDate, endDate};
+    if (next.every === 'weekly') {
+      const days = cleanList(weekdays?.length ? weekdays : weekday, 1, 7);
+      next.weekdays = days.map(day => day % 7 + 1).sort((a, b) => a - b);
+      next.weekday = next.weekdays[0];
+    } else if (next.every === 'monthly') {
+      const days = cleanList(monthDays, 1, 31);
+      if (monthDayPolicy === 'last_day' && days.length === 1 && days[0] === 31) {
+        next.monthDays = [1];
+        next.monthDayPolicy = 'skip';
+      } else {
+        // A numbered evening on or after the 28th can end in another month.
+        // A fixed list cannot express that for all month lengths.
+        next.monthDays = days.some(day => day >= 28) ? [] : days.map(day => day + 1);
+      }
+    }
+    if (startDate) next.startDate = followingDate(startDate);
+    if (endDate) next.endDate = followingDate(endDate);
   }
   function customDateTime(raw) {
     const match = String(raw || '').match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?$/i);
@@ -162,7 +194,8 @@
       if (value.every === 'weekly' && !cleanList(value.weekdays, 1, 7).length && !cleanList(value.weekday, 1, 7).length)
         return '请选择至少一个星期';
       if (value.every === 'monthly' && !cleanList(value.monthDays, 1, 31).length)
-        return '请选择至少一个月度日期';
+        return value.midnightCalendar?.monthDays?.some(day => day >= 28)
+          ? '月底跨日后的执行日期因月份而异，请选择实际执行日期' : '请选择至少一个月度日期';
       if (value.every === 'monthly' && !['skip', 'last_day'].includes(value.monthDayPolicy || 'skip'))
         return '月度无效日期处理方式无效';
       return '';
@@ -174,7 +207,7 @@
   }
   function summary(value) {
     if (value.every === 'custom') return value.customRule ? '自定义规则' : '自定义规则 · 待设置';
-    const formatted = localInput(value.runAt,value.timeZone);
+    const formatted = localMinute(value.runAt,value.timeZone);
     return formatted ? formatted.replace('T',' ') + ' · 仅一次' : '指定日期时间 · 待设置';
   }
   function cnNumber(raw) {
@@ -184,14 +217,18 @@
     return parts.length === 2 ? (parts[0] ? digits[parts[0]] : 1)*10 + (parts[1] ? digits[parts[1]] : 0) : digits[raw];
   }
   function clock(text) {
-    const found = text.match(/(凌晨|早上|上午|中午|下午|傍晚|晚上)?\s*([\d零一二两三四五六七八九十]{1,3})\s*([:：点时])\s*(半|一刻|三刻|整|[\d零一二两三四五六七八九十]{1,3})?\s*分?/);
+    const found = text.match(/(凌晨|早上|上午|中午|下午|傍晚|午夜|半夜|晚上)?\s*([\d零一二两三四五六七八九十]{1,3})\s*([:：点时])\s*(半|一刻|三刻|整|[\d零一二两三四五六七八九十]{1,3})?\s*分?/);
     if (!found) return null;
     let hour = cnNumber(found[2]);
     const token = found[4] || '0', minute = ({半:30,一刻:15,三刻:45,整:0})[token] ?? cnNumber(token);
     if (/下午|傍晚|晚上/.test(found[1]) && hour < 12) hour += 12;
     if (/凌晨|早上|上午/.test(found[1]) && hour === 12) hour = 0;
     if (found[1] === '中午' && hour < 11) hour += 12;
-    return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 ? {atHour:hour,atMinute:minute} : {invalid:true};
+    // “晚上12点/午夜12点”是当天结束处的那个零点，不是次日中午。
+    const endOfDay = /傍晚|午夜|半夜|晚上/.test(found[1]) && hour === 12;
+    if (endOfDay) hour = 0;
+    if (!(hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59)) return {invalid:true};
+    return endOfDay ? {atHour:hour,atMinute:minute,endOfDay:true} : {atHour:hour,atMinute:minute};
   }
   // Resolve durations against the originating message, never the time an async
   // parser completes. Keep this instant when a later turn only changes the work.
@@ -201,6 +238,71 @@
     const count = match[1] ? (/^\d+$/.test(match[1]) ? Number(match[1]) : cnNumber(match[1])) : 1;
     const minutes = match[3] ? 30 : /一刻钟/.test(match[0]) ? 15 : count * ({分钟:1,小时:60,天:1440}[match[2]] || 1);
     return {index:match.index, text:match[0], minutes};
+  }
+  const numberToken = '[\\d零一二两三四五六七八九十]';
+  const relativeMonth = '(本月|这个月|这月|下个月|下月)';
+  const afternoonPrompt = '请补充下午的具体执行时间，例如下午三点';
+  const rangeDay = '(' + numberToken + '+)\\s*[日号]';
+  const monthWindow = new RegExp('(?:^|[，,]|日期范围(?:改为|为)?|安排在|改为)\\s*(?:【自动化】[：:]?\\s*)?(?:(?:请|帮我)\\s*)*(?:从|在)?' +
+    relativeMonth + '\\s*' + rangeDay + '\\s*(?:到|至|[-~～])\\s*' + relativeMonth + '?\\s*' + rangeDay +
+    '(?=\\s*(?:期间|之间|内|每|[，,]|$))');
+  function monthWindowDates(match, now, zone) {
+    const today = localInput(new Date(now).toISOString(), zone).slice(0, 10);
+    if (!today) return {timingIssue:'请选择有效的时区'};
+    function date(month, day) {
+      const first = new Date(today.slice(0, 7) + '-01T00:00:00Z');
+      if (month.startsWith('下')) first.setUTCMonth(first.getUTCMonth() + 1);
+      return first.toISOString().slice(0, 7) + '-' + pad(cnNumber(day));
+    }
+    return {startDate:date(match[1], match[2]), endDate:date(match[3] || match[1], match[4])};
+  }
+  const weekdayToken = '[一二三四五六日天](?!\\s*[:：点时])';
+  const monthDayToken = numberToken + '+(?!' + numberToken + '|\\s*[:：点时])(?:\\s*[日号])?';
+  const daySeparator = '\\s*([、,，和及至到])\\s*';
+  const weeklyDays = new RegExp('每周\\s*(' + weekdayToken + '(?:' + daySeparator + '(?:周|星期|礼拜)?' + weekdayToken + ')*)', 'g');
+  const monthlyDays = new RegExp('每月\\s*(' + monthDayToken + '(?:' + daySeparator + monthDayToken + ')*)', 'g');
+
+  function calendarDays(group, weekly) {
+    const days = [], limit = weekly ? 7 : 31;
+    const parts = group.split(new RegExp(daySeparator));
+    let previous;
+    for (let i = 0; i < parts.length; i += 2) {
+      const day = weekly ? '一二三四五六日'.indexOf(parts[i].slice(-1).replace('天', '日')) + 1 :
+        cnNumber(parts[i].replace(/\s*[日号]$/, ''));
+      if (!Number.isInteger(day) || day < 1 || day > limit) return [];
+      if (['至', '到'].includes(parts[i - 1])) {
+        if (!weekly && previous > day) return [];
+        for (let d = previous; d !== day; d = d % limit + 1) days.push(d);
+      }
+      days.push(day);
+      previous = day;
+    }
+    return cleanList(days, 1, limit);
+  }
+
+  // Only infer an omitted "after" for a leading duration followed by a task.
+  const leadingDelay = new RegExp('^((?:【自动化】\\s*[:：]?|/自动化)?\\s*(?:(?:请|帮我|麻烦)\\s*)*' +
+    '(?:' + numberToken + '+\\s*(?:分钟|小时|天)|半小时|一刻钟))' +
+    '(\\s*(?:帮我|给我)?(?:发送|发(?!言|票)|提醒|通知|执行|生成|检查|写|运行))');
+  function clarifyLeadingDelay(raw) {
+    return String(raw || '').replace(leadingDelay, (match, delay, action, offset, input) =>
+      /^\s*(?:一次|1次)/.test(input.slice(offset + match.length)) ? match : delay + '后' + action);
+  }
+  function correctDelayInterval(text, minutes) {
+    return String(text || '').replace(/((?:触发|执行|运行)间隔(?:为|是|[:：])\s*)?每(?:隔)?\s*([\d零一二两三四五六七八九十百]+\s*(?:分钟|小时|天)|半小时|一刻钟)(\s*一次)?/g,
+      (match, prefix, duration, once) => delayMinutes(duration + '后')?.minutes === minutes
+        ? (prefix || '').replace('间隔', '时间') + minutes + '分钟后' + (once ? '执行一次' : '')
+        : match);
+  }
+  function timingText(raw) {
+    return clarifyLeadingDelay(String(raw || '').trim())
+      .replace(/每个?工作日/g, '每周一到周五')
+      .replace(/每个?(?:星期|礼拜|周)/g, '每周')
+      .replace(/每周末/g, '每周六和周日').replace(/每个(月|小时)/g, '每$1')
+      .replace(/每晚上?/g, '每天晚上').replace(/每早上?/g, '每天早上')
+      .replace(/(今|明)晚(?=\s*[\d零一二两三四五六七八九十])/g, '$1天晚上')
+      .replace(weeklyDays, group => group.replace(/[,，]/g, '、'))
+      .replace(monthlyDays, group => group.replace(/[,，]/g, '、'));
   }
   // Only a complete scheduling instruction may bypass task extraction. Quoted
   // content, questions, negations and extra work still use the regular parser.
@@ -221,13 +323,10 @@
         continuation = property || (continuation && Boolean(line) && /^[ \t]/.test(rawLines[index]));
         return continuation;
       });
-      return { ...previous, timingIssue: '', every: 'custom', customRule: ruleLines.join('\n'),
+      return { ...previous, midnightCalendar:null, timingIssue: '', every: 'custom', customRule: ruleLines.join('\n'),
         runAt: null, relativeTiming:null, timeZone: previous?.timeZone || 'Asia/Shanghai' };
     }
-    // Keep recurrence lists together before separating timing from task content.
-    text = String(text || '').replace(/每周\s*[一二三四五六日天](?:\s*[、,，和及]\s*(?:周)?[一二三四五六日天])+|每月\s*\d{1,2}(?:\s*[日号])?(?:\s*[、,，和及]\s*\d{1,2}(?:\s*[日号])?)+/g,
-      group => group.replace(/[,，]/g, '、'));
-    text = String(text || '').split(/[，,。；;\n]/).map(clause => {
+    text = timingText(text).split(/[，,。；;\n]/).map(clause => {
       const first = clause.search(/\d{4}[-/年]|\d{1,2}月|今天|明天|后天|今晚|明晚|[本这下]周|每[天日周月小]|(?:仅|只|执行|运行)一次|一次性|单次|(?:半|[零一二两三四五六七八九十百\d]+)\s*(?:分钟|小时|天)\s*(?:之|以|过)?后|一刻钟\s*(?:之|以|过)?后|[零一二两三四五六七八九十\d]+[:：点时]|\btoday\b|\btomorrow\b|\bonce\b/i);
       const before = first < 0 ? clause : clause.slice(0,first);
       if (/(?:不要|不用|不在|不需要|不是|取消|如果|假如|比如|例如|是否|能否|\bif\b|\bdo not\b|\bdon't\b)/i.test(before)) return '';
@@ -242,6 +341,9 @@
       return work < 0 ? clause : clause.slice(0,first+work) + (trailing && trailing.index > first+work ? ' ' + trailing[1] : '');
     }).join('，');
     const prior = previous || {}, next = {every:'',atHour:null,atMinute:null,weekday:1,...prior};
+    const calendar = prior.midnightCalendar;
+    if (calendar && prior.every !== 'once') Object.assign(next, calendar);
+    if (calendar) next.midnightCalendar = null;
     const zone = /北京时间/.test(text) ? 'Asia/Shanghai' : /\bUTC\b/.test(text) ? 'UTC' :
       prior.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
     next.timeZone = zone;
@@ -249,7 +351,7 @@
     if (delay) {
       const ambiguous = delayMinutes(text.slice(delay.index + delay.text.length)) || clock(text) || /每/.test(text);
       const valid = !ambiguous && Number.isFinite(delay.minutes) && delay.minutes > 0 && delay.minutes <= 525600;
-      const instant = valid ? new Date(now + delay.minutes * 60000).toISOString() : '';
+      const instant = valid ? new Date((Math.floor(now / 60000) + delay.minutes) * 60000).toISOString() : '';
       const local = localInput(instant, zone);
       return {...next, every:'once', runAt:instant, atHour:local ? Number(local.slice(11,13)) : null,
         atMinute:local ? Number(local.slice(14,16)) : null,
@@ -263,46 +365,59 @@
     const relative = text.match(/大后天|后天|明天|明晚|今天|今晚|\btoday\b|\btomorrow\b/i);
     const week = text.match(/(本周|这周|下周)([一二三四五六日天])/);
     const oneTime = !recurring && Boolean(explicit || relative || week || /(?:仅|只)(?:执行|运行)?一次|执行一次|运行一次|一次性|单次|\bonce\b/i.test(text));
-    if (/每(?:隔)?(?:一|1)?小时|每小时/.test(text)) { next.every = 'hourly'; next.atHour = 0; next.atMinute ??= 0; }
-    else if (/每周/.test(text)) next.every = 'weekly';
+    if (/每(?:隔)?(?:一|1)?小时|每小时/.test(text)) {
+      next.every = 'hourly'; next.atHour = 0;
+      if (prior.every !== 'hourly') next.atMinute = 0;
+    } else if (/每周/.test(text)) {
+      next.every = 'weekly';
+      if (prior.every !== 'weekly') { next.weekday = null; next.weekdays = []; }
+    }
     else if (/每月/.test(text)) next.every = 'monthly';
     else if (/每天|每日|天天/.test(text)) next.every = 'daily';
     if (oneTime) next.every = 'once';
     const weekday = text.match(/(?:每周|周)([一二三四五六日天])/);
-    if (weekday && !oneTime && prior.every !== 'once') next.every = 'weekly';
-    const weekdayGroup = text.match(/每周\s*([一二三四五六日天](?:\s*[、,，和及]\s*(?:周)?[一二三四五六日天])*)/);
+    if (weekday && !recurring && !oneTime && prior.every !== 'once') next.every = 'weekly';
+    const weekdayGroup = text.matchAll(weeklyDays).next().value;
     if (weekdayGroup && !oneTime) {
-      next.weekdays = [...new Set([...weekdayGroup[1].matchAll(/[一二三四五六日天]/g)].map(item => Math.min(7, '一二三四五六日天'.indexOf(item[0]) + 1)))].sort((a, b) => a - b);
+      next.weekdays = calendarDays(weekdayGroup[1], true);
       next.weekday = next.weekdays[0];
-    } else if (weekday) {
+    } else if (weekday && !recurring && next.every === 'weekly') {
       next.weekdays = [Math.min(7, '一二三四五六日天'.indexOf(weekday[1]) + 1)];
       next.weekday = next.weekdays[0];
     }
-    const monthGroup = text.match(/每月\s*(\d{1,2}(?!\d)(?:\s*[日号])?(?:\s*[、,，和及]\s*\d{1,2}(?!\d)(?:\s*[日号])?)*(?![:：点时])|月底|月末|最后一天|末日)/);
     if (/每月/.test(text) && !oneTime) {
-      const segment = monthGroup?.[1] || '';
-      const monthTokens = [
-        ...segment.matchAll(/(?:^|[、,，和及至到\s])(\d{1,2})(?=\s*(?:日|号))/g),
-        ...segment.matchAll(/(?:^|[、,，和及至到\s])(\d{1,2})(?=\s*(?:[、,，和及至到\s]|$))/g),
-      ].map(item => item[1]);
-      next.monthDays = cleanList(monthTokens, 1, 31);
-      if (/月底|月末|最后一天|末日/.test(segment)) {
-        next.monthDayPolicy = 'last_day';
-        if (!next.monthDays.length) next.monthDays = [31];
-      }
+      const monthGroup = text.matchAll(monthlyDays).next().value;
+      const lastDay = /每月\s*(?:底|末|月底|月末|最后一天|末日)/.test(text);
+      next.monthDays = lastDay ? [31] : monthGroup ? calendarDays(monthGroup[1], false) : [];
+      next.monthDayPolicy = lastDay ? 'last_day' : 'skip';
     }
     const time = clock(text);
-    if (time && !time.invalid) Object.assign(next,time, {timingIssue:''});
+    // A bare clock in a reply inherits the requested afternoon; an explicit period wins.
+    if (!recurring && !oneTime && time && !time.invalid && prior.timingIssue === afternoonPrompt && time.atHour > 0 && time.atHour < 12 &&
+        !/(?:凌晨|早上|上午|中午|下午|傍晚|午夜|半夜|晚上)|\d\s*[:：]/.test(text)) time.atHour += 12;
+    if (time && !time.invalid) Object.assign(next,{atHour:time.atHour,atMinute:time.atMinute}, {timingIssue:''});
     else if (time?.invalid) Object.assign(next, {atHour:null, atMinute:null, timingIssue:'执行时间无效，请填写0至23点、0至59分'});
+    else if (next.every === 'daily' && /(?:每天|每日|天天)\s*下午/.test(text))
+      Object.assign(next, {atHour:null, atMinute:null, timingIssue:afternoonPrompt});
     else if (next.every === 'hourly') {
-      const minute = text.match(/(?:第|每小时)?\s*([0-5]?\d)\s*分/);
-      if (minute) { next.atMinute = Number(minute[1]); next.timingIssue = ''; }
+      const minute = text.match(/(?:第\s*)?([\d零一二两三四五六七八九十]+)\s*分|整点/);
+      if (minute) { next.atMinute = minute[1] ? cnNumber(minute[1]) : 0; next.timingIssue = ''; }
     }
-    if (next.every !== 'once') { next.runAt = null; next.relativeTiming = null; return next; }
-    if (!explicit && !relative && !week && !time && prior.every === 'once') return next;
+    if (next.every !== 'once') {
+      const range = text.match(monthWindow);
+      if (range && ['daily','weekly','monthly','hourly'].includes(next.every)) {
+        Object.assign(next, monthWindowDates(range, now, zone));
+      }
+      if (['daily','weekly','monthly'].includes(next.every) &&
+          (time ? time.endOfDay : calendar && !next.timingIssue)) {
+        rollRecurringMidnight(next);
+      }
+      next.runAt = null; next.relativeTiming = null; return next;
+    }
+    if (!explicit && !relative && !week && !time && prior.every === 'once') return {...next, midnightCalendar:calendar};
     next.relativeTiming = null;
-    const old = localInput(prior.runAt,zone);
-    let date = prior.every === 'once' && old ? old.slice(0,10) : '';
+    const old = localMinute(prior.runAt,zone);
+    let date = prior.every === 'once' ? calendar?.date || old.slice(0,10) : '';
     const today = localInput(new Date(now).toISOString(),zone).slice(0,10);
     const firstDate = [explicit,relative,week].filter(Boolean).sort((a,b) => a.index-b.index)[0];
     if (firstDate && firstDate === explicit) date = `${explicit[1] || explicit[4] || today.slice(0,4)}-${pad(explicit[2] || explicit[5])}-${pad(explicit[3] || explicit[6])}`;
@@ -312,11 +427,18 @@
         (week[1] === '下周' ? 7 : 0) + Math.min(6,'一二三四五六日天'.indexOf(week[2])) - ((day.getUTCDay()+6)%7);
       day.setUTCDate(day.getUTCDate()+offset); date = day.toISOString().slice(0,10);
     }
+    // A clock reading of "晚上12点/午夜12点" is the midnight that ends the
+    // referenced day, so the one-off instant belongs to the next date. Skip
+    // impossible dates; those must stay invalid instead of rolling into March.
+    if ((time ? time.endOfDay : calendar?.date) && date) {
+      next.midnightCalendar = {date};
+      date = followingDate(date);
+    }
     // A newly requested one-off without an explicit clock stays incomplete.
     const when = time && !time.invalid ? pad(time.atHour)+':'+pad(time.atMinute) : old ? old.slice(11) : '';
     next.runAt = date && when && !time?.invalid ? fromLocalInput(date+'T'+when,zone) : '';
     return next;
   }
-  global.ScheduleTiming = {every,weekdays,localInput,fromLocalInput,validate,summary,infer,clock,clockNumber,clockOptions,cleanList,cleanDate,
-    validateCustomRule,customExample,customPreview,customTimeZone,relativeEdit};
+  global.ScheduleTiming = {every,weekdays,localInput,localMinute,fromLocalInput,validate,summary,infer,clock,clockNumber,clockOptions,cleanList,cleanDate,
+    validateCustomRule,customExample,customPreview,customTimeZone,relativeEdit,clarifyLeadingDelay,correctDelayInterval};
 })(window);

@@ -67,6 +67,7 @@ async def get_agent_setup(
 
 
     data["models"] = [{"name": m["name"], "label": m.get("label") or m["name"],
+                       "providerId": m.get("providerId", ""),
                        "provider": m.get("providerName") or m.get("providerId", ""),
                        "providerKind": m.get("providerKind", ""),
                        "keyFrom": m.get("keyFrom", "")} for m in usable]
@@ -81,11 +82,12 @@ async def get_agent_setup(
                 # Account runtimes never inherit the Hub model directory or its defaults.
                 a.update(model="", modelEffective="", modelGone=False)
                 continue
-            picked = model_catalog.agent_model(client, a.get("key", ""))
+            picked, provider = model_catalog.agent_choice(client, a.get("key", ""))
+            a["modelProviderId"] = provider
             a["model"] = picked
             # Report unavailable selections immediately, before dispatch.
-            a["modelGone"] = bool(picked and not any(x["name"] == picked for x in usable))
-            a["modelEffective"] = picked if (picked and not a["modelGone"]) else default_model
+            a["modelGone"] = bool(picked and not model_catalog.agent_choice_row(usable, picked, provider))
+            a["modelEffective"] = picked if (picked and not a["modelGone"]) else ("" if provider else default_model)
     return data
 
 
@@ -185,16 +187,17 @@ async def put_agent_model(
     key = str(body.get("key") or "").strip().lower()
     if key not in agent_setup._SPECS:
         raise HTTPException(status_code=404, detail="该执行底座已不可用，请选择其他底座")
-    name = str(body.get("model") or "").strip()[:160]
+    name = str(body.get("model") or "").strip()
+    provider = str(body.get("providerId") or "").strip()
     if name and (AGENTS.get(key) or {}).get("modelMode") != "managed":
         raise HTTPException(status_code=422, detail="该底座使用独立账号模型，不能选择 Hub 模型")
     if name:
         lst = await model_catalog.usable(session, client)
-        if not any(m["name"] == name for m in lst):
+        if not model_catalog.agent_choice_row(lst, name, provider):
             raise HTTPException(status_code=422, detail="这个模型你现在用不了，换一个或先去「我的模型」配 key")
     table = dict(getattr(client, "agent_models", None) or {})
     if name:
-        table[key] = name
+        table[key] = {"name": name, "providerId": provider} if provider else name
     else:
         table.pop(key, None)
     client.agent_models = table
@@ -250,6 +253,13 @@ async def post_agent_install(
             if action.startswith("login") else agent_setup.start_install(key, action)}
 
 
+async def _setup_model(session, client, key, name):
+    llm = await model_catalog.resolve_for_agent(session, client, key, name)
+    if not llm and model_catalog.agent_choice(client, key, name)[1]:
+        raise HTTPException(422, "所选服务商的模型已不可用，请重新选择")
+    return llm
+
+
 @router.post("/agent-setup/probe")
 async def post_agent_probe(
     body: dict = Body(default_factory=dict),
@@ -263,7 +273,7 @@ async def post_agent_probe(
         raise HTTPException(status_code=404, detail="该执行底座已不可用，请选择其他底座")
     # Native account runtimes choose their own model. Do not send managed keys
     # or claim that an unused company model was exercised by their probe.
-    llm = (await model_catalog.resolve_for_agent(session, client, key, str(body.get("model") or ""))
+    llm = (await _setup_model(session, client, key, str(body.get("model") or ""))
            if (agent_setup._PROFILES.get(key) or {}).get("needs_llm") else {})
     runner = _pick_runner(client, body.get("runnerId"))
     jid = (str((await _runner_call(runner, "agent.probe", {"key": key, "llm": llm}, timeout=60)).get("jobId") or "")
@@ -286,7 +296,7 @@ async def post_agent_configure(
     key = str(body.get("key") or "").strip()
     if key not in agent_setup._SPECS:
         raise HTTPException(status_code=404, detail="该执行底座已不可用，请选择其他底座")
-    llm = (await model_catalog.resolve_for_agent(session, client, key, str(body.get("model") or ""))
+    llm = (await _setup_model(session, client, key, str(body.get("model") or ""))
            if (AGENTS.get(key) or {}).get("modelMode") == "managed" else {})
     runner = _pick_runner(client, body.get("runnerId"))
     if runner is not None:
@@ -303,16 +313,30 @@ async def get_my_git(
     """Return the client's Git identity, masked credential metadata, and configured repository URLs
     suitable for a connection probe.
     """
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
 
-    from ..models import Repo
-    from ..services import code_creds
-    repos = (await session.execute(select(Repo))).scalars().all()
-    return {
-        "git": code_creds.api_view(client),
-        "repos": [{"id": r.id, "name": r.name, "url": r.git_url}
-                  for r in repos if (r.git_url or "").strip()],
-    }
+    from ..models import Project, Repo, User
+    from ..services import code_creds, rbac
+    from ..services.repo_urls import git_probe_url
+
+    result = {"git": code_creds.api_view(client), "repos": []}
+    user = await session.get(User, client.user_ref) if client.user_ref else None
+    if not user or not user.is_active or user.account_deleted_at:
+        return result
+
+    scope = await rbac.scope_org_ids(session, user)
+    query = select(Repo.id, Repo.name, Repo.git_url).join(Project, Repo.project_id == Project.id)
+    if scope is not None:
+        # A legacy NULL repository org does not make its private parent project public.
+        query = query.where(
+            or_(Repo.org_id.is_(None), Repo.org_id.in_(scope)),
+            or_(Project.org_id.is_(None), Project.org_id.in_(scope)),
+        )
+    for repo in await session.execute(query):
+        url = git_probe_url(repo.git_url)
+        if url:
+            result["repos"].append({"id": repo.id, "name": repo.name, "url": url})
+    return result
 
 
 @router.put("/my-git")

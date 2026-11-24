@@ -119,8 +119,9 @@ test('a password change awaiting Hub restoration cannot send the old proof after
   const replacing = api.clientLogin({ account: 'bob', password: 'same-fixture-password' });
   for (let n = 0; n < 30; n++) await Promise.resolve();
   assert.equal(loginStarted, true);
-  // The original account remains visible until the other login completes.
-  assert.equal(api.clientAuthSnapshot().user.id, 'alice');
+  // Account switching closes admission immediately, before the remote login completes.
+  assert.equal(api.clientAuthSnapshot().user, null);
+  assert.equal(api.clientAuthSnapshot().requestsAllowed, false);
   bridge.getHubConnection = () => { restorationStarted = true; return restoration.promise; };
   const pending = api.clientChangePassword({ currentPassword: 'same-fixture-password', newPassword: 'New-password-2026' });
   const rejected = assert.rejects(pending, { code: 'STALE_TASK_SCOPE' });

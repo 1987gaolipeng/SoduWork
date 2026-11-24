@@ -39,6 +39,19 @@ async def mark(session: AsyncSession, task: models.Task, status: str, *,
     """
     if task is None or status not in VALID:
         return False
+    # #631: done任务不可修改状态
+    # #663: 撤回验收时重置done状态（仅引擎允许）
+    # Allow done->todo for re-opening requirements.
+    if task.status == "done" and status != task.status:
+        if not engine and status != "todo":
+            return False
+    # #698, #699, #700: 已取消任务不可重新规划/执行/提交
+    # Allow cancel->todo for restore; block cancel->doing/planning.
+    if task.status == "cancel" and status == "doing":
+        return False
+    # #672: done需求不可重新开工（引擎也不允许done->doing）
+    if task.status == "done" and status == "doing":
+        return False
     if status == "doing" and getattr(task, "archived_at", None):
         return False
     if task.status == status and status != "done":
@@ -63,6 +76,10 @@ async def mark(session: AsyncSession, task: models.Task, status: str, *,
     task.status = status
     from . import tasks as tsvc
     tsvc.stamp_actual(task, prev, status)
+    if prev == "done":
+        from . import task_events
+        task_events.record(session, task.id, "status.reset_from_done",
+                           {"from": "done", "to": status, "reason": why or "撤回验收"}, actor="SoduWork")
     if status == "done":
         await _close_batch_members(session, task, engine=engine)
         from . import project_context

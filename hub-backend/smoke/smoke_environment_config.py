@@ -91,6 +91,25 @@ async def main():
         chk("client release upload config survives target normalization",
             targets[0].config.get("clientReleaseUpload") == {
                 "enabled": True, "baseUrl": "http://192.0.2.10:8989"})
+        from app.services import deployments
+        from types import SimpleNamespace
+        shared = await environment_service.save_secret_ref(s, {"name": "shared", "provider": "runner-env", "locator": "SHARED_FIXTURE"})
+        scoped = await environment_service.save_secret_ref(s, {"name": "scoped", "provider": "runner-env", "locator": "SCOPED_FIXTURE",
+                                                               "orgId": org.id})
+        ref_map = {"SHARED": shared.id, "SCOPED": scoped.id}
+        accepted = await environment_service.save_target(s, {"secretRefs": ref_map}, targets[1])
+        spec = await deployments._spec(s, SimpleNamespace(id="fixture", commit_sha="abc"),
+                                       created[1], accepted, repo, task)
+        chk("Saved deployment grants resolve for the owning organization and shared references",
+            {item["env"] for item in spec["secrets"]} == set(ref_map))
+        await environment_service.save_target(s, {"secretRefs": {}}, accepted)
+        for organizations in ((org.id, None), ("different", org.id), (None, None)):
+            try:
+                environment_service.require_target_secret(scoped, scoped.id, *organizations)
+            except ValueError:
+                chk("A scoped grant requires matching organization identities", True)
+            else:
+                chk("A scoped grant requires matching organization identities", False)
         unsafe_upload_blocked = False
         try:
             environment_service._target_config({

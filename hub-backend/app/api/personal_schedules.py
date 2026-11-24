@@ -3,6 +3,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..pagination import PageQuery, list_result, select_rows
 from ..db import get_session
 from ..deps import current_client, identity_only
 from ..models import Client
@@ -31,16 +32,15 @@ async def _my_sch(session: AsyncSession, sid: str, client: Client, *, lock: bool
 
 @router.get("/schedules")
 async def my_schedules(client: Client = Depends(current_client),
-                       session: AsyncSession = Depends(get_session)):
+                       session: AsyncSession = Depends(get_session), window: PageQuery = None):
     from .tasks import _my_sch_api
 
     from sqlalchemy import select as _sel
 
     from ..models import AiSchedule
-    rows = (await session.execute(
-        _sel(AiSchedule).where(schedule_access.owner_clause(client))
-        .order_by(AiSchedule.created_at))).scalars().all()
-    return [_my_sch_api(s) for s in rows]
+    query = _sel(AiSchedule).where(schedule_access.owner_clause(client)).order_by(AiSchedule.created_at, AiSchedule.id)
+    rows, total = await select_rows(session, query, window)
+    return list_result([_my_sch_api(s) for s in rows], total)
 
 
 @router.get("/schedules/templates")
@@ -223,17 +223,13 @@ async def delete_my_schedule(sid: str, client: Client = Depends(current_client),
 async def my_schedule_runs(sid: str, limit: int = 20,
                            client: Client = Depends(current_client),
                            session: AsyncSession = Depends(get_session)):
-    """List recent executions with status reconciled against authoritative task and workflow state.
-
-    """
+    """List the account's stored receipts for this schedule."""
+    from ..services import schedules as sch
     from .tasks import _my_sch
 
-    from ..services import schedules as sch
-    from ..services import schedule_conversations as conversations
     await _my_sch(session, sid, client)
     items = await sch.list_runs(session, sid,
                                owner_user_id=str(client.user_ref or ""), limit=limit)
-    await session.commit()
     return {"items": items}
 
 

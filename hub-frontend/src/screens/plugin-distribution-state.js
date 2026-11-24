@@ -5,7 +5,7 @@ export const INSTALLATION_LABEL = localeMap(() => ({
   not_available: '不开放个人安装',
 }))
 
-function sourceState(version) {
+export function sourceState(version) {
   const signature = ((version || {}).provenance || {}).signatureState
   if (['platform', 'verified'].includes(signature)) {
     return {

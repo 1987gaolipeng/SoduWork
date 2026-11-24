@@ -70,12 +70,13 @@ test('a late logout result cannot clear or reload the next signed-in account', a
   assert.equal(f.reloads.length, 1); assert.equal(f.alerts.length, 0);
 });
 
-test('an unchanged logout failure remains visible and restores the button', async () => {
+test('an offline logout reports the failure while keeping local requests signed out', async () => {
   const f = fixture(); await f.login('alice');
   const pending = f.auth.logout(); f.finish({ ok: false, error: '服务暂不可用' }); await pending;
   assert.deepEqual(f.alerts, ['服务暂不可用']);
   assert.equal(f.button.disabled, false); assert.equal(f.reloads.length, 0);
-  assert.equal(f.api.clientAuthSnapshot().user.id, 'alice');
+  assert.equal(f.api.clientAuthSnapshot().user, null);
+  assert.equal(f.api.clientAuthSnapshot().requestsAllowed, false);
 });
 
 test('a normal logout still clears its own identity and reloads', async () => {

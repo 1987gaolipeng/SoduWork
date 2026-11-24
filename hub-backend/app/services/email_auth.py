@@ -103,6 +103,13 @@ async def take_limits(session, limits):
         raise
 
 
+async def reserve_admin_login(session, account, remote_ip):
+    """Reserve failure slots atomically in the caller's transaction."""
+    current = now()
+    await _take_limit(session, "admin-login-ip:" + remote_ip, 30, 300, current)
+    await _take_limit(session, "admin-login-account:" + account, 10, 300, current)
+
+
 async def password_budget(session, account, device_id):
     await take_limits(session, [("password-account:" + account.lower(), 10, 300),
                                ("password-device:" + device_id, 30, 300)])

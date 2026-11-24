@@ -72,7 +72,8 @@ async function main() {
   assert.equal(details.contentCheckSkips.length, 1);
   assert.equal(details.contentCheckSkips[0].path, 'resources/runner/_internal/base_library.zip');
   assert.equal(details.contentCheckSkips[0].filesystemSize, original.length + 4096);
-  assert.match(await fs.readFile(path.join(installed, '.soduwork-update.log'), 'utf8'), /verification-policy=bootstrap-existence-only/);
+  assert.ok((await fs.readFile(path.join(installed, '.soduwork-update.log'), 'utf8'))
+    .includes('payload-verification-summary files=' + details.fileCount + ' content-skips=1 skipped=' + details.contentCheckSkips[0].path));
   const launchOutput = path.join(root, 'launched-after-bootstrap-skip-' + Date.now() + '.json');
   const launchCode = await run(path.join(installed, executableName + '.exe'), [], {
     SODUWORK_UPDATE_E2E_PROFILE: path.join(root, 'profile'), SODUWORK_UPDATE_E2E_OUTPUT: launchOutput,

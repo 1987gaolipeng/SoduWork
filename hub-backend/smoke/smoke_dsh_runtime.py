@@ -183,7 +183,11 @@ def _native_platform_matrix() -> int:
             with tempfile.TemporaryDirectory(prefix="dsh-native-matrix-") as data_root, \
                     patch.object(dsh_runtime.sys, "platform", system), \
                     patch.object(dsh_runtime, "_arch", return_value=arch), \
-                    patch.object(dsh_runtime, "_linux_libc", return_value=libc):
+                    patch.object(dsh_runtime, "_linux_libc", return_value=libc), \
+                    patch.object(acp_agents, "find_bin", return_value=None):
+                # This is the native/custom wrapper matrix; do not discover a
+                # real installed Node from the machine running the fixture.
+                # Selected npm Node identities have their own regression matrix.
                 sharp_target = "linuxmusl" if libc == "musl" else system
                 names = dsh_runtime._required_native_packages()
                 assert names[:3] == (f"@img/sharp-{sharp_target}-{arch}",

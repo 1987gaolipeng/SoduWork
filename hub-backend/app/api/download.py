@@ -182,7 +182,7 @@ async def client_linux_info(session=Depends(get_session)):
             "size": size,
             "sizeText": f"{size / 1024 / 1024:.1f} MB",
             "sha256": row.sha256,
-            "updatedAt": (row.created_at.astimezone(timezone.utc).isoformat()
+            "updatedAt": ((row.created_at.replace(tzinfo=timezone.utc) if row.created_at.tzinfo is None else row.created_at).astimezone(timezone.utc).isoformat()
                           if row.created_at else ""),
         }
     return {"available": bool(formats), "version": version, "formats": formats}

@@ -18,9 +18,30 @@
 }
 .app .content .admin-access-summary .sv { font-variant-numeric: tabular-nums; }
 .app .content .admin-access-summary .sl { line-height: 1.5; }
+.app .content .admin-access-page .user-status-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.user-batch-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.user-batch-actions .admin-access-note { flex-basis: 100%; }
+.user-batch-preview { max-height: 12em; overflow-y: auto; overflow-wrap: anywhere; }
 .app .content .admin-access-page > .admin-filterbar { margin: 0; }
 .app .content .admin-access-page .admin-filterbar .btn {
   min-height: var(--filter-height);
+}
+.app .content .admin-filter-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--filter-height);
+  color: var(--ink-2);
+  font-size: 14.5px;
+  cursor: pointer;
+  user-select: none;
+}
+.app .content .admin-filter-check > input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 .admin-access-note {
   min-width: 0;
@@ -34,7 +55,7 @@
 .admin-audit-filter { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .admin-audit-filter-label { flex: 0 0 auto; color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); }
 .app .content .admin-audit-table { min-width: 840px; table-layout: fixed; }
-.admin-audit-table .audit-col-time { width: 160px; }
+.admin-audit-table .audit-col-time { width: 22ch; }
 .admin-audit-table .audit-col-actor { width: 14%; }
 .admin-audit-table .audit-col-action { width: 20%; }
 .admin-audit-table .audit-col-target { width: 20%; }
@@ -44,8 +65,12 @@
 .admin-audit-action { display: inline-flex; align-items: baseline; gap: 7px; color: var(--ink); }
 .admin-audit-action > i { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; }
 .admin-audit-detail { color: var(--ink-3); line-height: 1.6; white-space: pre-wrap; }
+.admin-audit-environment { align-self: flex-start; padding: 4px 10px; border: 1px solid var(--warn); border-radius: 6px; color: var(--ink); }
+.admin-audit-page .admin-filter-field input[type="date"] { width: 0; flex: 1; min-width: 0; height: 100%; padding: 0 6px; border: 0; background: transparent; color: var(--ink); font: inherit; }
+.admin-audit-page .admin-audit-filter .admin-search { width: 16em; }
 .app .content .admin-audit-page > .list-pager { margin: 0; }
 @media (max-width: 600px) {
+  .app .content .admin-access-page .user-status-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .app .content .admin-access-page .admin-access-summary { gap: 8px; }
   .app .content .admin-access-summary > .stat { padding: 12px 10px; }
   .app .content .admin-access-summary .sv { font-size: 21px; }
@@ -54,3 +79,12 @@
 /* Use a neutral avatar placeholder in the new-user dialog. */
 .ava-placeholder{width:46px;height:46px;border-radius:50%;flex:0 0 46px;background:var(--surface-2,#f2f5f9);color:var(--ink-3,#98a2b3);display:flex;align-items:center;justify-content:center;border:1px solid var(--line,#e3e8ef)}
 .ava-placeholder svg{width:22px;height:22px}
+
+.managed-password-hint {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--font-min-readable, 14.5px);
+  line-height: 1.5;
+}
+.managed-password input[aria-invalid="true"] { border-color: var(--crit); }
+.managed-password input[aria-invalid="true"] + .managed-password-hint { color: var(--crit); }

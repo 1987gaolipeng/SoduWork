@@ -17,7 +17,7 @@ function directory(t) {
 }
 function fixtureRelease(overrides = {}) {
   return { version: 'fixture', url: 'https://official.invalid/PortableGit-fixture.7z.exe',
-    file: 'PortableGit-fixture.7z.exe', sha256: digest('verified executable fixture'),
+    file: 'PortableGit-fixture.7z.exe', size: Buffer.byteLength('verified executable fixture'), sha256: digest('verified executable fixture'),
     urls: ['https://mirror.invalid/PortableGit-fixture.7z.exe', 'https://official.invalid/PortableGit-fixture.7z.exe'],
     ...overrides };
 }
@@ -28,6 +28,8 @@ test('PortableGit architectures keep the reviewed version and official SHA-256',
   assert.deepEqual(Object.keys(RELEASE).sort(), ['arm64', 'x64']);
   assert.equal(RELEASE.x64.version, '2.55.0.4');
   assert.equal(RELEASE.arm64.version, '2.55.0.4');
+  assert.equal(RELEASE.x64.size, 58915456);
+  assert.equal(RELEASE.arm64.size, 59191568);
   assert.equal(RELEASE.x64.sha256, '016e84230a3767f0c6b3788e79ba0c58a17377086801719d46700fca4f7b36b5');
   assert.equal(RELEASE.arm64.sha256, 'd69d0c6a3c5445553565ef74f1d9e22a9869f57c246111db347dd96c252b4da5');
   for (const arch of Object.keys(RELEASE)) {
@@ -102,6 +104,7 @@ test('a corrupt basename cache is replaced only with bytes matching the pinned d
     download: async (url, target, options) => {
       attempts.push(url); assert.equal(target, archive); assert.match(target, /\.exe$/);
       assert.equal(options.environment, environment); assert.equal(options.resume, true);
+      assert.equal(options.expectedBytes, release.size);
       assert.equal(fs.existsSync(target), false);
       fs.writeFileSync(target, 'verified executable fixture');
     } });

@@ -312,6 +312,23 @@ check('★第二轮开始时状态要回到 streaming（settled 不清会让「�
   assert.equal(acc.status(), 'no-output', '上一轮的正文不能冒充本轮实际产出');
 });
 
+check('a repeated submission without agent_start cannot reuse an earlier answer', () => {
+  const acc = feed(INTERLEAVED);
+  acc.abort();
+  acc.push({ type: 'message_end', message: { role: 'user', content: 'run again' } });
+  assert.equal(acc.status(), 'streaming');
+  acc.push({ type: 'agent_settled' });
+  assert.equal(acc.status(), 'no-output');
+  assert.ok(acc.snapshot().statusText);
+});
+
+check('an archived user prompt alone is not a failed execution receipt', () => {
+  const acc = feed(INTERLEAVED);
+  acc.push({ type: 'message_end', replay: true, message: { role: 'user', content: 'saved prompt' } });
+  acc.push({ type: 'agent_settled' });
+  assert.equal(acc.status(), 'idle');
+});
+
 check('叫停之后再发一轮，不该还挂着 aborted', () => {
   const acc = feed(INTERLEAVED);
   acc.abort();

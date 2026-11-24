@@ -74,3 +74,85 @@ test('unsent composer titles and saved renames remain visible without publishing
     assert.equal(openReply(app, f.handle).title, 'My chosen name');
   }
 });
+
+test('switchable-conversation preserves null historyRow for unused and ephemeral Pi handles', async t => {
+  const switchable = require('../main/agent-runtime/switchable-conversation');
+  const { create: createStore } = require('../main/conversation/replica-store.cjs');
+  const { create: createSharedHistory } = require('../main/conversation/shared-history.cjs');
+  const { identity } = require('./helpers/platform-session-fixture.cjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-switchable-empty-'));
+  const app = { getPath: () => root }, actor = identity();
+  const store = createStore(path.join(root, 'history.sqlite'));
+  const shared = createSharedHistory({
+    app, store, identityOf: () => actor,
+    session: { archivedConversation: async () => null, findBySessionId: () => null },
+  });
+  t.after(async () => { await shared.close(); fs.rmSync(root, { recursive: true, force: true }); });
+
+  for (const [id, ephemeral, messages] of [
+    ['unused-draft', false, []],
+    ['ephemeral-child', true, [{ role: 'user', text: 'Hidden child turn' }]],
+  ]) {
+    const f = handle(id, ephemeral);
+    f.ctx.listeners = new Set();
+    f.ctx.piSession.sessionManager = { getSessionFile: () => '' };
+    f.ctx._snapshot = () => ({ status: 'idle', messages });
+    const wrapped = switchable.create({ raw: f.handle, options: { app, identity: actor, ref: 'chat-' + id } });
+    assert.equal(wrapped.historyRow(), null);
+    assert.equal(wrapped.historyRow(wrapped.snapshot()), null);
+    shared.observe(wrapped, actor);
+    await shared.capture(wrapped, actor);
+    assert.equal(store.get(id), null);
+    await wrapped.close();
+    assert.equal(store.get(id), null);
+  }
+
+  const active = handle('real-turn', false);
+  active.ctx.listeners = new Set();
+  active.ctx.piSession.sessionManager = { getSessionFile: () => '' };
+  let liveMessages = [];
+  active.ctx._snapshot = () => ({ status: 'idle', messages: liveMessages });
+  const wrappedActive = switchable.create({ raw: active.handle, options: { app, identity: actor, ref: 'chat-real-turn' } });
+  assert.equal(wrappedActive.historyRow(), null);
+  await shared.capture(wrappedActive, actor);
+  assert.equal(store.get('real-turn'), null);
+  liveMessages = [{ role: 'user', text: 'First real message' }];
+  await shared.capture(wrappedActive, actor);
+  const persisted = store.get('real-turn');
+  assert.equal(persisted?.id, 'real-turn');
+  assert.equal(persisted?.title, 'First real message');
+  assert.equal(persisted?.cwd, 'node-workspace');
+  await wrappedActive.close();
+});
+
+test('switchable-conversation retains segment metadata when a switched conversation has an empty active Pi segment', async t => {
+  const switchable = require('../main/agent-runtime/switchable-conversation');
+  const segments = require('../main/conversation/runtime-segments');
+  const { identity } = require('./helpers/platform-session-fixture.cjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-switchable-segment-'));
+  const app = { getPath: () => root }, actor = identity();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const f = handle('pi-next-seg', false);
+  f.ctx.listeners = new Set();
+  f.ctx.piSession.sessionManager = { getSessionFile: () => '' };
+  f.ctx._snapshot = () => ({ status: 'idle', messages: [] });
+  assert.equal(f.handle.historyRow(), null);
+
+  const restored = {
+    version: 1, id: 'public-switched', owner: segments.scope(actor),
+    title: 'Preserved topic', cwd: root, originAdapter: 'qwen', at: 123456,
+    prefix: { messages: [{ role: 'user', text: 'Preserved topic' }, { role: 'assistant', text: 'Qwen answer' }], tools: [] },
+    segments: [{ sessionId: 'qwen-seg', adapterId: 'qwen', path: 'qwen-seg', usedHarnesses: ['qwen'] }],
+    active: { sessionId: 'pi-next-seg', adapterId: 'pi', path: '', usedHarnesses: [] },
+  };
+  const wrapped = switchable.create({ raw: f.handle, restored, options: { app, identity: actor, ref: 'chat-switched' } });
+  const row = wrapped.historyRow();
+  assert.equal(row?.id, 'public-switched');
+  assert.equal(row?.title, 'Preserved topic');
+  assert.equal(row?.cwd, root);
+  assert.equal(row?.at, 123456);
+  assert.equal(row?.count, 2);
+  assert.deepEqual(row?.usedHarnesses, ['qwen']);
+  await wrapped.close();
+});

@@ -24,6 +24,7 @@ function fixture(options = {}) {
     _accountSync: options.accountSync,
     _sharedHistory: options.sharedHistory || null,
     _cloudHandoff: options.cloudHandoff || { observe() {} },
+    firstTurnTitle: { enroll() {} },
     skillTurn: require('../main/pi-session/skill-turn'), sendIdentityOf: null,
     taskInput: { request: async (_identity, route) => options.request(route) },
     app: options.app || { getPath: () => emptyStorage }, path,

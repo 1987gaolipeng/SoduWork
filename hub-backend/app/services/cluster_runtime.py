@@ -5,9 +5,10 @@ import asyncio
 import logging
 import time
 import uuid
+from functools import partial
 
-from .cluster_bus import bus, ClusterUnavailable, RunnerOwnerChanged
 from . import runner_hub
+from .cluster_bus import ClusterUnavailable, RunnerOwnerChanged, bus
 
 _REMOTE = {}
 _LOCAL_INVENTORY = {}
@@ -80,13 +81,23 @@ class RemoteRunner(runner_hub._Runner):
         return bus.healthy and self.node in bus.peers and super().alive()
 
     async def call(self, op, data, timeout=60, *, _rerouted=False):
+        from .session_read_budget import deadline_active, remaining
         try:
-            result = await bus.request(self.node, "runner.call", {
+            packet_timeout = remaining(timeout + 5)
+            wait_timeout = packet_timeout
+            if deadline_active() and op == "content.read":
+                wait_timeout = max(wait_timeout, 0.2)
+            request_data = {
                 "runner": self.id, "token": self.cluster_token,
                 "op": op, "data": data, "timeout": timeout,
                 "client": self.client_id, "org": self.org_id,
                 "owner": self.owner_user_id,
-            }, timeout + 5)
+            }
+            if op == "content.read":
+                result = await bus.request(self.node, "runner.call", request_data,
+                                           packet_timeout, wait_timeout=wait_timeout)
+            else:
+                result = await bus.request(self.node, "runner.call", request_data, packet_timeout)
             # A rejected old owner has NOT forwarded bytes. Refresh once so a
             # just-reconnected Runner does not require a second user click.
             if (not _rerouted and result.get("code") == "RUNNER_OWNER_CHANGED"
@@ -107,6 +118,14 @@ class RemoteRunner(runner_hub._Runner):
                         current.term_subs.pop(task, None)
                     return retried
             return result
+        except TimeoutError:
+            # A bounded session read must preserve timeout semantics so its
+            # middleware can return a retryable 504 instead of a 503.
+            if deadline_active():
+                raise
+            return {"ok": False, "code": "CLUSTER_RUNNER_UNAVAILABLE",
+                    "error": "执行机连接正在恢复，请稍后重试",
+                    "uncertain": op in {"job.dispatch", "job.comment"}}
         except Exception:
             return {"ok": False, "code": "CLUSTER_RUNNER_UNAVAILABLE",
                     "error": "执行机连接正在恢复，请稍后重试",
@@ -198,6 +217,8 @@ async def before_refresh():
     seen = set()
     for runner, owns in zip(runners, renewed):
         if not runner.alive() or not owns:
+            runner.close_reason = "heartbeat_expired" if not runner.alive() else "owner_changed"
+            runner_hub.log_connection(runner, "close_requested", close_code=1012)
             runner_hub.drop(runner.id, runner.ws)
             await runner_hub._close_quietly(runner.ws, 1012)
             continue
@@ -226,7 +247,7 @@ async def before_refresh():
         _LOCAL_INVENTORY.pop(rid, None)
 
 
-async def on_snapshot(peers):
+async def on_snapshot(peers, *, on_runner_connected=None):
     entries = [(node, info) for node, state in peers.items() if node != bus.node
                for info in state.get("runners", [])]
     owners = await bus.redis.mget([bus.key("runner", info["runnerId"])
@@ -250,6 +271,8 @@ async def on_snapshot(peers):
             if current:
                 _end_terms(current)
             current = _REMOTE[rid] = RemoteRunner(node, info)
+            if on_runner_connected is not None:
+                on_runner_connected(current)
         else:
             current.update(info)
         current.inventory_revision = reference["revision"]
@@ -403,7 +426,7 @@ async def on_failure():
         await hub.close_device(device, 1012, _local=True)
 
 
-async def start():
+async def start(*, on_runner_connected=None):
     global _RELAY_JOB, _STOPPING
     _STOPPING = False
     runner_hub.bind_loop()
@@ -411,7 +434,7 @@ async def start():
     ai_local._HUB_CLUSTER_MODE = bus.enabled
     bus.snapshot = snapshot
     bus.before_refresh = before_refresh
-    bus.on_snapshot = on_snapshot
+    bus.on_snapshot = partial(on_snapshot, on_runner_connected=on_runner_connected)
     bus.on_event = on_event
     bus.on_request = on_request
     bus.on_failure = on_failure

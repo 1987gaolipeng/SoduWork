@@ -6,6 +6,11 @@
   const handles = new Map();
   const preview = () => global.soduWorkAPI?.workPreview;
   const scope = () => global.SoduWorkAPI?.taskStorageKey?.('ops');
+  const authenticated = () => {
+    const state = global.SoduWorkAPI?.clientAuthSnapshot?.();
+    return !state || state.requestsAllowed === true || state.state === 'active';
+  };
+  let flight = null, pollTimer = null, authScope = '';
   const tr = value => global.SoduWorkI18n?.translateText?.(value) || value;
   function renderRail() {
     const slot = document.getElementById('wsSidebarApps');
@@ -29,13 +34,19 @@
       slot.append(button);
     }
   }
-  async function refresh() {
+  function refresh() {
+    if (!authenticated()) return Promise.resolve();
+    if (flight) return flight;
+    const work = refreshCurrent().finally(() => { if (flight === work) flight = null; });
+    flight = work; return work;
+  }
+  async function refreshCurrent() {
     const api = global.SoduWorkAPI;
     if (!api?.sidebarRecommendations || !api.pluginCatalog) return;
     const ticket = ++request, owner = scope();
     try {
       const [placements, catalog] = await Promise.all([api.sidebarRecommendations(), api.pluginCatalog()]);
-      if (ticket !== request || owner !== scope()) return;
+      if (ticket !== request || owner !== scope() || !authenticated()) return;
       const byId = new Map((catalog?.items || []).filter(item => !item.personal && item.enabled !== false &&
         item.listed !== false && item.permissions?.canUse !== false &&
         item.ui?.contributions?.some(row => row.slot === 'workspace.navigation' &&
@@ -63,7 +74,8 @@
   }
   function mount() {
     renderRail();
-    if (!loaded) { loaded = true; void refresh(); }
+    syncPolling();
+    if (!loaded && authenticated()) { loaded = true; void refresh(); }
   }
   function bounds() {
     const b = panel.getBoundingClientRect();
@@ -119,14 +131,27 @@
     }
   }
   function invalidate(event) {
-    ++request; picks = []; loaded = false; renderRail();
+    ++request; flight = null; picks = []; loaded = false; renderRail();
     if (event.type === 'soduwork-data-scope-changed') { handles.clear(); close(); }
     else void refresh();
   }
   global.WorkspaceSidebarApps = { mount, refresh, renderRail, open, close };
-  for (const event of ['soduwork-data-scope-changed', 'soduwork:plugins-changed', 'soduwork-plugin-policy', 'soduwork-device-auth']) global.addEventListener(event, invalidate);
+  for (const event of ['soduwork-data-scope-changed', 'soduwork:plugins-changed', 'soduwork-plugin-policy']) global.addEventListener(event, invalidate);
+  function syncPolling() {
+    if (authenticated() && !pollTimer) pollTimer = setInterval(() => { if (loaded && !document.hidden) void refresh(); }, 60000);
+    if (!authenticated()) { clearInterval(pollTimer); pollTimer = null; }
+  }
+  function authChanged(event) {
+    const next = authenticated() ? scope() : '';
+    syncPolling();
+    // A token renewal or quota refresh does not change sidebar ownership.
+    if (next === authScope) return;
+    authScope = next; invalidate(event);
+    if (!next) { handles.clear(); close(); }
+  }
+  global.addEventListener('soduwork-device-auth', authChanged);
+  global.addEventListener('soduwork-client-auth-required', authChanged);
   global.addEventListener('focus', () => { if (loaded) void refresh(); });
   global.addEventListener('soduwork-locale-change', renderRail);
-  const timer = setInterval(() => { if (loaded && !document.hidden) void refresh(); }, 60000);
-  global.addEventListener('beforeunload', () => clearInterval(timer));
+  global.addEventListener('beforeunload', () => clearInterval(pollTimer));
 })(window);

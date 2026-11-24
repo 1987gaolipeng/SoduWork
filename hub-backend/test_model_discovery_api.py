@@ -1,9 +1,9 @@
-"""Admin discovery endpoint: saved-provider-only, read-only, name-filtered."""
+"""Admin model-list routes for draft connections and saved-provider discovery."""
 import importlib
 import os
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
@@ -91,8 +91,6 @@ class ModelDiscoveryEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, [("https://gw.example/v1", "k", "openai-compat")])
 
     async def test_discovery_never_writes_model_rows(self):
-        from unittest.mock import AsyncMock, patch
-
         from app.services import model_discovery
         with patch.object(model_discovery, "discover",
                           AsyncMock(return_value={"ok": True, "models": ["ghost"],
@@ -102,6 +100,37 @@ class ModelDiscoveryEndpointTests(unittest.IsolatedAsyncioTestCase):
         catalog = await self.request("GET", "/model-catalog")
         ids = [m["id"] for m in catalog.json()["models"]]
         self.assertNotIn("good:ghost", ids)
+
+    async def test_unsaved_connection_uses_draft_values_without_writing(self):
+        from app.services import model_discovery
+        result = {"ok": True, "models": ["fixture-model"], "path": "/v1/models", "detail": ""}
+        draft = {"kind": "anthropic", "baseUrl": "https://draft.example", "apiKey": "draft-key"}
+        with patch.object(model_discovery, "discover", AsyncMock(return_value=result)) as discover:
+            response = await self.request("POST", "/model-providers/test-connection", json=draft)
+        self.assertEqual(response.json(), result)
+        discover.assert_awaited_once_with("https://draft.example", "draft-key", "anthropic", allow_empty=True)
+        catalog = (await self.request("GET", "/model-catalog")).json()
+        self.assertEqual({p["id"] for p in catalog["providers"]}, {"dark", "good"})
+        self.assertEqual([m["name"] for m in catalog["models"]], ["known-model"])
+
+    async def test_saved_connection_key_stays_bound_to_its_address_and_protocol(self):
+        from app.services import model_discovery
+        path = "/model-providers/test-connection"
+        draft = {"providerId": "good", "baseUrl": "https://gw.example/v1", "kind": "openai-compat"}
+        with patch.object(model_discovery, "discover", AsyncMock(return_value={"ok": True, "models": []})) as discover:
+            response = await self.request("POST", path, json=draft)
+            self.assertTrue(response.json()["ok"])
+            discover.assert_awaited_once_with(draft["baseUrl"], "k", draft["kind"], allow_empty=True)
+            discover.reset_mock()
+            for change in ({"baseUrl": "https://other.example"}, {"kind": "anthropic"}):
+                response = await self.request("POST", path, json={**draft, **change})
+                self.assertEqual(response.json()["code"], "model.discovery.reenter-key")
+            discover.assert_not_awaited()
+            response = await self.request("POST", path, json={**draft, "baseUrl": "https://other.example", "apiKey": "replacement"})
+            self.assertTrue(response.json()["ok"])
+            discover.assert_awaited_once_with("https://other.example", "replacement", draft["kind"], allow_empty=True)
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(models.ModelProvider, "good")).api_key, "k")
 
 
 if __name__ == "__main__":

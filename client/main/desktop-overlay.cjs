@@ -49,7 +49,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     for (const timer of _pendingTimeouts) clearTimeout(timer);
     _pendingTimeouts.clear();
     if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; }
-    if (_readyTimer) { clearTimeout(_readyTimer); _readyTimer = null; }
+    clearReadyWatchdog();
     if (_unresponsiveTimer) { clearTimeout(_unresponsiveTimer); _unresponsiveTimer = null; }
     if (_overlayInputGuardTimer) { clearInterval(_overlayInputGuardTimer); _overlayInputGuardTimer = null; }
   }
@@ -364,6 +364,8 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
   /* Watchdog state. */
   const HEARTBEAT_TIMEOUT_MS = 20000;   // Require a 20-second heartbeat lapse before secondary checks.
   const READY_TIMEOUT_MS = 15000;      // Allow 15 seconds for startup readiness.
+  const DOCUMENT_LOAD_TIMEOUT_MS = 60000; // A live renderer may still be loading local scripts.
+  const STARTUP_TIMEOUT_REASON = '启动就绪超时（渲染进程可能启动失败）';
   const HEARTBEAT_CHECK_INTERVAL = 2000; // Heartbeat check interval.
   const HEARTBEAT_MISSES_REQUIRED = 2; // Require consecutive unresponsive samples to tolerate temporary stalls.
   const UNRESPONSIVE_GRACE_MS = 15000; // Delay emergency protection until unresponsive state persists for 15 seconds.
@@ -373,6 +375,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
   let _rendererUnresponsive = false;    // Health state from Electron responsive and unresponsive events.
   let _heartbeatTimer = null;          // Heartbeat timer.
   let _readyTimer = null;              // Startup readiness timer.
+  let _documentLoadDeadline = null;
   let _unresponsiveTimer = null;       // Cancelable delayed-passthrough timer.
   let _emergencyMode = false;          // Emergency passthrough state.
 
@@ -426,7 +429,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     resetRendererHealth();
     /*
      * Start a real navigation during recovery because an already-initialized page will not
-     * send renderer-ready again. did-start-loading rearms the watchdog.
+     * send renderer-ready again. The new main document rearms the watchdog.
      */
     _setOverlayInputIgnored(true);
     mainWindow.reload();
@@ -494,18 +497,18 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     }, HEARTBEAT_CHECK_INTERVAL);
   }
 
-  /*
-   * Require renderer-ready within the startup timeout; otherwise enable emergency
-   * passthrough.
-   */
-  function startReadyWatchdog() {
+  function clearReadyWatchdog() {
     if (_readyTimer) clearTimeout(_readyTimer);
-    _rendererReady = false;
+    _readyTimer = null;
+  }
+
+  // Give each startup signal a bounded wait. The overlay stays parked until both arrive.
+  function startReadyWatchdog(reason, timeout = READY_TIMEOUT_MS) {
+    clearReadyWatchdog();
     _readyTimer = setTimeout(() => {
-      if (!_rendererReady) {
-        emergencyPassthrough('启动就绪超时（渲染进程可能启动失败）');
-      }
-    }, READY_TIMEOUT_MS);
+      _readyTimer = null;
+      emergencyPassthrough(reason);
+    }, timeout);
   }
 
 
@@ -637,21 +640,25 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     parkOverlayShape();
     _overlayAwaitingShape = true;
     let navigationStarted = false;
-    mainWindow.webContents.on('did-start-loading', () => {
-      if (isCurrent(owner)) {
-        _navigationId++;
-        if (_navigationId > 1) _overlayShapeRevision++;
-        resetRendererHealth();
-        /*
-         * Arm the readiness watchdog when navigation starts so a fast renderer-ready event cannot
-         * be reset afterward.
-         */
-        startReadyWatchdog();
-        parkOverlayShape(navigationStarted);
-        _overlayAwaitingShape = true;
-        _initialRevealPending = true;
-        navigationStarted = true;
-      }
+    mainWindow.webContents.on('did-start-navigation', (event) => {
+      // Each main document sends renderer-ready once. Its frames and fragment share that state.
+      if (!isCurrent(owner) || !event.isMainFrame || event.isSameDocument) return;
+      _navigationId++;
+      if (_navigationId > 1) _overlayShapeRevision++;
+      resetRendererHealth();
+      _rendererReady = false;
+      _documentLoadDeadline = now() + DOCUMENT_LOAD_TIMEOUT_MS;
+      startReadyWatchdog(STARTUP_TIMEOUT_REASON);
+      parkOverlayShape(navigationStarted);
+      _overlayAwaitingShape = true;
+      _initialRevealPending = true;
+      navigationStarted = true;
+    });
+    mainWindow.webContents.on('dom-ready', () => {
+      if (!isCurrent(owner)) return;
+      _documentLoadDeadline = null;
+      if (!_rendererReady && !_emergencyMode) startReadyWatchdog(STARTUP_TIMEOUT_REASON);
+      fixOverlayZoom('dom-ready');
     });
     loadRenderer();
 
@@ -670,7 +677,6 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
       fixOverlayZoom('首帧');
       revealInitialOverlay();
     });
-    mainWindow.webContents.on('dom-ready', () => { if (isCurrent(owner)) fixOverlayZoom('dom-ready'); });
 
     // Use native passthrough outside shaped regions; unsupported platforms use dynamic full-screen passthrough.
     setOverlayIdleInput();
@@ -804,7 +810,6 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
       mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
 
-    /* did-start-loading owns watchdog initialization; do not reset readiness after loadFile. */
     startHeartbeatWatchdog();
     return mainWindow;
   }
@@ -871,6 +876,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     if (revision !== _overlayShapeRevision) return;
     if (applyOverlayShape(rects, true)) {
       _overlayShapeReported = true;
+      if (_rendererReady) clearReadyWatchdog();
       if (revision === _overlayShapeRevision) _overlayAwaitingShape = false;
       _syncOverlayInputNow();
       revealInitialOverlay();
@@ -904,25 +910,23 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
   onIpc('renderer-heartbeat', (event) => {
     if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
     resetRendererHealth();
+    if (_documentLoadDeadline !== null && !_emergencyMode) {
+      // Only a loading document gets more time. Heartbeats cannot move its final deadline.
+      const remaining = _documentLoadDeadline - now();
+      if (remaining > 0) startReadyWatchdog(STARTUP_TIMEOUT_REASON, Math.min(remaining, READY_TIMEOUT_MS));
+    }
   });
 
-  /*
-   * Cancel startup timeout after renderer-ready.
-   */
   onIpc('renderer-ready', (event) => {
     if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+    if (_rendererReady || _emergencyMode) return;
+    _documentLoadDeadline = null;
     _rendererReady = true;
-    revealInitialOverlay();
+    if (_overlayShapeReported) clearReadyWatchdog();
+    else startReadyWatchdog('桌面组件区域未完成初始化');
     resetRendererHealth();
     revealInitialOverlay();
-    if (_readyTimer) { clearTimeout(_readyTimer); _readyTimer = null; }
     console.log('[SAFETY] 渲染进程已就绪');
-    /* Keep the overlay parked when no interactive geometry has been reported. */
-    const navigation = _navigationId;
-    later(() => {
-      if (navigation !== _navigationId || _overlayShapeReported) return;
-      emergencyPassthrough('桌面组件区域未完成初始化');
-    }, 600);
   });
 
   /* Read emergency-mode status. */

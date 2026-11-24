@@ -23,6 +23,14 @@ async function fixture(t, mode = '') {
     }
     const content = body.messages[0].content;
     const result = body.messages.find(row => row.role === 'tool');
+    if (result && body.stream && (mode === 'receipt-rejected' || mode === 'receipt-requires-choice' && body.tool_choice === undefined)) {
+      res.writeHead(403, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message: 'synthetic refusal' } }));
+    }
+    if (result && body.stream && mode === 'receipt-truncated') {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      return res.end('data: ' + JSON.stringify({ choices: [{ index: 0, delta: { content: result.content }, finish_reason: null }] }) + '\n\n');
+    }
     const nonce = typeof content === 'string' ? content.match(/[a-f0-9]{16}/)?.[0] : '';
     let message = { content: result ? result.content : Array.isArray(content) ? '582941' : nonce || 'OK' };
     if (body.tools && !result) message = { content: null, tool_calls: [{ id: 'call-fixture', type: 'function',
@@ -165,6 +173,49 @@ test('a connection-only success confirms its output field without inventing unte
   const report = await probe().run(f.conf, ['connection']);
   assert.equal(report.checks.connection.status, 'passed');
   assert.deepEqual(report.compatibility, { maxTokensField: 'max_tokens' });
+});
+
+for (const mode of ['receipt-rejected', 'receipt-truncated', 'receipt-requires-choice']) test(`streamed receipt ${mode} cannot pass toolCalling`, async t => {
+  const f = await fixture(t, mode);
+  const result = await probe().run(f.conf, ['connection', 'toolCalling', 'streaming']);
+  assert.equal(result.checks.connection.status, 'passed');
+  assert.equal(result.checks.streaming.status, 'passed');
+  assert.notEqual(result.checks.toolCalling.status, 'passed');
+  assert.equal(result.checks.toolCalling.stage, 'tool_result');
+});
+test('tool continuation keeps tools and ends on the receipt without forcing another call', async t => {
+  const f = await fixture(t); f.conf.compatibility = { toolChoice: 'named' };
+  const report = await probe().run(f.conf, ['toolCalling']);
+  assert.equal(report.checks.toolCalling.status, 'passed');
+  const body = f.requests[1].body;
+  assert.equal(body.stream, true);
+  assert.deepEqual(body.tools, f.requests[0].body.tools);
+  assert.equal(body.tool_choice, undefined);
+  assert.equal(body.messages.at(-1).role, 'tool');
+});
+test('v2 tool success is retired without dropping independent evidence on partial recheck', () => {
+  const c = require('../main/model-capability-contract.cjs');
+  const old = { reportVersion: 2, configRevision: 'same', checks: Object.fromEntries(
+    ['connection', 'imageInput', 'toolCalling', 'streaming'].map(k => [k, { status: 'passed' }])) };
+  old.verifiedChecks = { ...old.checks };
+  assert.equal(c.profile({}, old).toolCalling.state, 'unknown');
+  const merged = c.mergeEvidence(old, { reportVersion: 3, configRevision: 'same', checks: { connection: { status: 'passed' } } });
+  assert.equal(c.profile({}, merged).toolCalling.state, 'unknown');
+  assert.equal(merged.verifiedChecks.toolCalling, undefined);
+  assert.equal(c.profile({}, merged).streaming.state, 'supported');
+  assert.equal(c.profile({}, merged).imageInput.state, 'supported');
+});
+
+test('verified-only v2 tools retain a recheck notice through a partial check', () => {
+  const c = require('../main/model-capability-contract.cjs');
+  const old = { reportVersion: 2, configRevision: 'same', checks: {}, verifiedChecks: {
+    toolCalling: { status: 'passed', checkedAt: '2026-11-17' } } };
+  const projected = c.publicEvidence(old);
+  assert.equal(projected.checks.toolCalling?.code, 'legacy_recheck_required');
+  assert.equal(projected.verifiedChecks.toolCalling, undefined);
+  const merged = c.mergeEvidence(old, { reportVersion: 3, configRevision: 'same', checks: { connection: { status: 'cancelled' } } });
+  assert.equal(merged.checks.toolCalling?.code, 'legacy_recheck_required');
+  assert.equal(c.profile({}, merged).toolCalling.state, 'unknown');
 });
 
 test('mandatory reasoning probes explicitly request supported low effort without disabling thinking', async () => {

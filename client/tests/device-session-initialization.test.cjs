@@ -61,6 +61,64 @@ test('Runner waits through pending enrollment and starts automatically on first 
   assert.equal(f.calls.filter(call => call === 'runner').length, 1);
 });
 
+test('pending sidebar readers share one bootstrap, stop all business HTTP, and resume once after login', async () => {
+  const f = fixture(), listeners = new Map(), intervals = new Map(); let nextInterval = 0, bootstraps = 0;
+  const win = f.context.window;
+  win.addEventListener = (type, fn) => { if (!listeners.has(type)) listeners.set(type, []); listeners.get(type).push(fn); };
+  win.dispatchEvent = event => { f.events.push(event); for (const fn of listeners.get(event.type) || []) fn(event); };
+  f.context.document = { hidden: false, getElementById: () => null };
+  f.context.setInterval = (fn, ms) => { intervals.set(++nextInterval, { fn, ms }); return nextInterval; };
+  f.context.clearInterval = id => intervals.delete(id);
+  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../components/workspace/workspace-apps.js'), 'utf8'), f.context);
+  f.bridge.deviceAuthBootstrap = async () => { bootstraps++; return {
+    ok: true, stored: true, clientId: 'fixture-install', authState: 'pending', activationRequired: true,
+  }; };
+  win.WorkspaceSidebarApps.mount();
+  await Promise.all(Array.from({ length: 12 }, () => assert.rejects(f.api.sidebarRecommendations(), { code: 'CLIENT_AUTH_REQUIRED' })));
+  for (let i = 0; i < 10; i++) { await f.api.registerClient(); await win.WorkspaceSidebarApps.refresh(); }
+  assert.equal(bootstraps, 1); assert.equal(f.requests.length, 0); assert.equal(intervals.size, 0);
+  const before = f.api.online;
+  await assert.rejects(f.api.im.create({}), { code: 'CLIENT_AUTH_REQUIRED' });
+  await assert.rejects(f.api.setTeamTaskStatus('task-1', 'done'), { code: 'CLIENT_AUTH_REQUIRED' });
+  assert.equal(f.api.online, before, 'local admission failure is not a Hub outage');
+  await f.api.clientAuthPolicy(); assert.equal(f.requests.length, 1, 'public login policy remains accessible');
+  await f.api.clientLogin({ account: 'fixture-bob' }); await flush();
+  assert.equal(f.requests.length, 3, 'one sidebar read and one catalog read after login');
+  assert.equal(intervals.size, 1);
+  f.bridge.deviceAuthBootstrap = async () => identity('bob');
+  for (let i = 0; i < 10; i++) await f.api.registerClient();
+  await flush(); assert.equal(f.requests.length, 3, 'session refresh cannot feed back into sidebar reads');
+  await f.api.clientLogout(); await flush();
+  assert.equal(intervals.size, 0);
+  await assert.rejects(f.api.myModels(), { code: 'CLIENT_AUTH_REQUIRED' });
+  assert.equal(f.requests.length, 3);
+});
+
+test('logout aborts an in-flight protected request and rejects its stale response without an offline event', async () => {
+  const f = fixture(); await f.api.registerClient(); let signal;
+  f.context.fetch = async (_url, options) => {
+    signal = options.signal;
+    return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  };
+  const failed = assert.rejects(f.api.myModels(), { code: 'STALE_TASK_SCOPE' });
+  await flush(); assert.equal(signal.aborted, false);
+  await f.api.clientLogout(); await failed;
+  assert.equal(signal.aborted, true); assert.equal(f.api.online, true);
+});
+
+test('transient renewal failure preserves the account and never falls through to an anonymous business request', async () => {
+  const f = fixture(); await f.api.registerClient();
+  await f.advance(1800001);
+  f.bridge.deviceAuthBootstrap = async () => ({ ok: false, stored: true, error: 'network unavailable' });
+  await assert.rejects(f.api.myModels(), { code: 'DEVICE_AUTH_UNAVAILABLE' });
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.api.clientAuthSnapshot().user.id, 'alice');
+  assert.equal(f.api.clientAuthSnapshot().state, 'active');
+  f.bridge.deviceAuthBootstrap = async () => identity();
+  await f.api.myModels(); assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0].options.headers.Authorization, 'Device fixture-session-alice');
+});
+
 for (const stage of ['version', 'system', 'bootstrap', 'runner']) {
   test(`model-list authentication has a deadline at ${stage}, retries, and ignores the late IPC result`, async () => {
     const f = fixture(), gate = deferred();
@@ -121,11 +179,11 @@ test('switching accounts cancels old initialization; its late identity cannot re
   assert.equal(f.requests.length, 1); assert.equal(f.requests[0].options.headers.Authorization, 'Device fixture-session-bob');
 });
 
-test('initialization started during login is invalidated when the new identity is adopted', async () => {
+test('business requests during login are rejected locally before the new identity is adopted', async () => {
   const f = fixture(), login = deferred(), bootstrap = deferred();
   f.bridge.deviceAuthLogin = () => login.promise; f.bridge.deviceAuthBootstrap = () => bootstrap.promise;
   const signingIn = f.api.clientLogin({ account: 'fixture-bob' }); await flush();
-  const canceled = assert.rejects(f.api.myModels(), { code: 'STALE_TASK_SCOPE' }); await flush();
+  const canceled = assert.rejects(f.api.myModels(), { code: 'CLIENT_AUTH_REQUIRED' }); await flush();
   login.resolve(identity('bob')); await signingIn; await canceled;
   bootstrap.resolve(identity('alice')); await flush();
   await f.api.myModels();
@@ -139,14 +197,13 @@ test('logout invalidates a pending bootstrap and a late answer cannot restore a 
   await f.api.clientLogout(); await canceled;
   gate.resolve(identity('alice')); await flush();
   assert.match(f.api.taskStorageKey('ops'), /@unbound$/);
-  // This is a new bootstrap after logout, not the late, already-consumed IPC.
-  // The main process now refuses renewal because the identity was logged out.
+  // Logged-out readers cannot trigger another bootstrap or business request.
   f.bridge.deviceAuthBootstrap = async () => ({ ok: false, stored: true, status: 401, error: 'login required' });
   f.context.fetch = async (url, options) => {
     assert.equal(options.headers.Authorization, undefined);
     return { ok: false, status: 401, text: async () => '{"detail":"login required"}' };
   };
-  await assert.rejects(f.api.myModels(), { status: 401 });
+  await assert.rejects(f.api.myModels(), { code: 'CLIENT_AUTH_REQUIRED' });
   assert.match(f.api.taskStorageKey('ops'), /@unbound$/);
 });
 

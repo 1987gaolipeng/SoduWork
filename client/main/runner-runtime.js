@@ -19,6 +19,7 @@ let _lastConfig = '';
 let _processCredential = '';
 let _identityOf = null;
 let _sessionOf = null;
+let _canConnect = () => true;
 const _ownedRunners = new Map();
 const _runnerStops = new Set();
 const LOCAL_RPC_PREFIX = '@@SODUWORK_LOCAL_RPC@@';
@@ -238,6 +239,7 @@ function _stored(cfg) {
 }
 
 function _activationConfirmed(app, saved, id) {
+  if (!_canConnect(app, id.hub, id.clientId)) return false;
   // Old configurations could be written before first login. Once Hub has issued
   // a session for this device, it can also start offline on later desktop boots.
   return (saved.activationConfirmed === true && saved.hub === id.hub && saved.clientId === id.clientId)
@@ -571,7 +573,8 @@ function _applyConfig(app, raw) {
   }
 }
 
-function install({ app, ipcMain, identityOf, sessionOf }) {
+function install({ app, ipcMain, identityOf, sessionOf, canConnect }) {
+  _canConnect = canConnect || (() => true);
   _identityOf = identityOf || null;
   _sessionOf = sessionOf;
   ipcMain.handle('runner-configure', async (_event, raw) => _applyConfig(app, raw || {}));

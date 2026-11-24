@@ -66,67 +66,61 @@ _MEM_LINES = 4000               # Bound in-memory events; events.jsonl retains t
 _WIN = os.name == "nt"
 
 
-def _npm_root() -> str:
-    """Locate global npm packages using standard Windows and POSIX installation directories."""
-    if _WIN:
-        prefix = str(os.environ.get("npm_config_prefix") or os.environ.get("NPM_CONFIG_PREFIX") or "").strip()
-        if prefix:
-            return os.path.join(os.path.abspath(prefix), "node_modules")
-        from .agent_npm_runtime import configured_global_root
-        configured = configured_global_root()
-        if configured:
-            return configured
-        return os.path.join(os.environ.get("APPDATA", ""), "npm", "node_modules")
-    home = os.path.expanduser("~")
-    # npm may be installed under a private Runner prefix (for example
-    # /opt/soduwork-node-current).  Looking only in /usr/local made the Runner
-    # discover the wrong global tree: the package was installed successfully,
-    # but Codex's platform dependency could not be found afterwards.  Prefer
-    # the configured/inferred npm prefix before the system fallbacks.
+def _npm_roots() -> list[str]:
+    """Enumerate package trees; an unrelated first tree cannot hide an Agent."""
+    from .agent_npm_runtime import configured_global_root
+    from .agent_installation import known_bin_dirs
     candidates = []
-    for name in ("NPM_CONFIG_PREFIX", "npm_config_prefix"):
+    for name in ("npm_config_prefix", "NPM_CONFIG_PREFIX"):
         prefix = str(os.environ.get(name) or "").strip()
         if prefix:
-            candidates.append(os.path.join(prefix, "lib", "node_modules"))
-    try:
-        npm = shutil.which("npm") or shutil.which("npm.cmd")
+            candidates.append(os.path.join(os.path.abspath(prefix),
+                              *(("node_modules",) if _WIN else ("lib", "node_modules"))))
+    configured = configured_global_root()
+    if configured:
+        candidates.append(configured)
+    if _WIN:
+        candidates.append(os.path.join(os.environ.get("APPDATA", ""), "npm", "node_modules"))
+    else:
+        directories = []
+        npm = shutil.which("npm")
         if npm:
-            raw_path = os.path.abspath(npm)
-            candidates.append(os.path.join(
-                os.path.dirname(os.path.dirname(raw_path)), "lib", "node_modules"))
-            # npm's launcher is often a symlink into <prefix>/lib/node_modules.
-            # Resolve that layout without treating the npm package directory
-            # itself as the prefix.
-            real_path = os.path.realpath(raw_path)
+            directories.append(os.path.dirname(os.path.abspath(npm)))
+            real = os.path.realpath(npm)
             marker = os.sep + "lib" + os.sep + "node_modules" + os.sep
-            if marker in real_path:
-                prefix = real_path.split(marker, 1)[0]
-                candidates.append(os.path.join(prefix, "lib", "node_modules"))
-    except OSError:
-        pass
-    candidates.extend(("/usr/local/lib/node_modules", "/usr/lib/node_modules",
-                       os.path.join(home, ".npm-global", "lib", "node_modules"),
-                       os.path.join(home, ".nvm", "versions")))
-    seen = set()
-    for p in candidates:
-        if p in seen:
-            continue
-        seen.add(p)
-        if os.path.isdir(p):
-            return p
-    return ""
+            if marker in real:
+                candidates.append(real.split(marker, 1)[0] + marker.rstrip(os.sep))
+        directories.extend(known_bin_dirs())
+        candidates.extend(os.path.join(os.path.dirname(p), "lib", "node_modules") for p in directories)
+    return list(dict.fromkeys(candidates))
 
 
-def _real_bin(cands: list[str], names: list[str]) -> str | None:
+def _npm_root() -> str:
+    roots = _npm_roots()
+    if _WIN:
+        return next(iter(roots), "")
+    return next((root for root in roots if os.path.isdir(root)), "")
+
+
+def _real_bin(cands: list[str], names: list[str], *, exclude=None) -> str | None:
     """Find the real executable in known locations before searching PATH. Avoid Windows .cmd and
     .ps1 shims that can reparse multiline prompts; POSIX npm symlinks are safe to resolve
     normally.
     """
+    def rejected(path):
+        return bool((exclude and exclude(path)) or
+                    (_WIN and path.lower().endswith((".ps1", ".cmd", ".bat"))))
+
     for p in cands:
-        if p and os.path.isfile(p):
+        if p and os.path.isfile(p) and not (exclude and exclude(p)):
             return p
+    from .agent_installation import path_directories
+    directories = path_directories(windows=_WIN)
     for n in names:
-        w = shutil.which(n)
+        w = shutil.which(n, path=os.pathsep.join(directories)) if _WIN else shutil.which(n)
+        if not w or rejected(w):
+            w = next((hit for directory in directories
+                      if (hit := shutil.which(n, path=directory)) and not rejected(hit)), None)
         if not w:
             continue
         if _WIN and w.lower().endswith((".ps1", ".cmd", ".bat")):
@@ -194,9 +188,10 @@ def _pi_cli_js() -> str | None:
         return bundled
     root = _npm_root()
     from . import agent_npm_runtime
-    entry = agent_npm_runtime.package_entry("@earendil-works/pi-coding-agent", "pi", root)
-    if entry:
-        return entry
+    for candidate in dict.fromkeys([root, *_npm_roots()]):
+        entry = agent_npm_runtime.package_entry("@earendil-works/pi-coding-agent", "pi", candidate)
+        if entry:
+            return entry
     if not root:
         return None
     p = os.path.join(root, "@earendil-works", "pi-coding-agent", "dist", "cli.js")
@@ -207,9 +202,24 @@ def _pi_bin() -> str | None:
     """Return Node only when both Node and Pi's cli.js are available; the profile supplies cli.js
     as the first argument.
     """
-    if not _pi_cli_js():
+    entry = _pi_cli_js()
+    if not entry:
         return None
-    return _bundled_pi_node() or shutil.which("node") or shutil.which("node.exe")
+    bundled = _bundled_pi_node()
+    if bundled:
+        return bundled
+    from . import agent_npm_runtime
+    from .agent_installation import selected_manifest
+    manifest = selected_manifest("@earendil-works/pi-coding-agent", entry)
+    engine = ""
+    if manifest:
+        try:
+            with open(manifest, encoding="utf8") as stream:
+                engine = str((json.load(stream).get("engines") or {}).get("node") or "")
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+    node = agent_npm_runtime.node_env("pi", engine=engine)
+    return node.get("nodePath") if node.get("ok") else None
 
 
 def _codex_bin() -> str | None:
@@ -224,7 +234,7 @@ def _codex_bin() -> str | None:
     suffix = {"win32": "-pc-windows-msvc", "linux": "-unknown-linux-musl", "darwin": "-apple-darwin"}.get(system)
     if arch and suffix:
         triple = ("x86_64" if arch == "x64" else "aarch64") + suffix
-        for root in package_roots(_npm_root()):
+        for root in dict.fromkeys([*package_roots(_npm_root()), *_npm_roots()]):
             package = os.path.join(root, "@openai", "codex")
             try:
                 with open(os.path.join(package, "package.json"), encoding="utf-8") as stream:
@@ -238,13 +248,22 @@ def _codex_bin() -> str | None:
             native = os.path.join("@openai", f"codex-{system}-{arch}")
             cands.extend(os.path.join(base, "vendor", triple, "bin", exe) for base in (
                 os.path.join(package, "node_modules", native), os.path.join(root, native), package))
-    found = _real_bin(cands, [exe, "codex"])
-    # Codex desktop may add an internal WindowsApps resource directory to PATH.
-    # Ordinary backend processes may lack permission to execute that bundled binary.
-    # Exclude it while retaining the independently installed npm platform executable.
-    if _WIN and found and "\\windowsapps\\openai.codex_" in found.lower():
-        return None
-    return found
+    selected = _real_bin(cands, [exe, "codex"], exclude=lambda path:
+                     _WIN and "\\windowsapps\\openai.codex_" in os.path.normpath(path).replace("/", "\\").lower())
+    if selected or system != "darwin":
+        return selected
+    # macOS GUI processes can inherit a PATH without the standalone CLI's bin directory.
+    from .agent_installation import known_bin_dirs
+    directories = list(known_bin_dirs())
+    home = os.path.expanduser("~")
+    if os.path.isabs(home):
+        pnpm = os.path.join(home, "Library", "pnpm")
+        directories.extend([os.path.join(pnpm, "bin"), pnpm, os.path.join(home, ".bun", "bin")])
+    for directory in directories:
+        candidate = os.path.join(directory, exe)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
 
 
 def _codex_args(sid: str, mode: str, ws: str | None, cfg: dict | None = None,
@@ -904,6 +923,21 @@ def _watch_detached(ref: str) -> None:
 def _prepare_codex_home(env: dict) -> None:
     """Backward-compatible test hook for the Codex skill-directory guard."""
     _codex_runtime_home.clean_skills(env)
+
+
+def bind_command_environment(env: dict, argv: list[str]) -> dict:
+    """Bind child Node lookup to this launch's command, without rediscovery."""
+    from .agent_installation import prepend_node_path
+    command = argv
+    # Only unwrap our bridge. A custom wrapper may use the same option names
+    # while owning its environment and launch semantics itself.
+    if (len(argv) > 2 and argv[0] == sys.executable
+            and argv[1] in ("--acp-bridge", _acp_agents._bridge_path())
+            and "--" in argv):
+        command = argv[argv.index("--") + 1:]
+    if command and os.path.basename(command[0]).lower() in ("node", "node.exe"):
+        prepend_node_path(env, command[0])
+    return env
 
 
 def _env_for(prof: dict, cfg: dict, runtime_ref: str = "", *, require_model: bool = True,

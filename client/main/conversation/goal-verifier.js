@@ -131,12 +131,7 @@ function runtimeRefs(file, source) {
     }
   }
   if (ext === '.css') {
-    const css = /(?:url|@import)\s*\(\s*(["']?)(.*?)\1\s*\)|@import\s+(["'])(.*?)\3/gi;
-    let match = css.exec(source);
-    while (match) {
-      push(match[2] || match[4], 'style');
-      match = css.exec(source);
-    }
+    for (const value of require('./stylesheet-references').references(source)) push(value, 'style');
   }
   if (['.html', '.htm', '.js', '.mjs', '.cjs'].includes(ext)) {
     const moduleRef = /(?:from\s*|import\s*\(\s*)(["'])(.*?)\1/gi;

@@ -19,6 +19,7 @@ import uuid
 from .local_base import (
     _PROFILES, _WIN, _bundled_pi_cli_js, _bundled_pi_node,
     _command_argv, _data_root, _npm_root, _pi_cli_js,
+    bind_command_environment,
 )
 from .acp_agents import runtime_issue as _acp_runtime_issue
 from ..agent_catalog import install_specs
@@ -68,6 +69,12 @@ _LOG_CAP = 400                      # Bound log history, including verbose npm o
 # Shared helpers.
 def _package_files(pkg: str) -> list[str]:
     files = []
+    key = next((key for key, spec in _SPECS.items() if spec.get("pkg") == pkg), "")
+    selected = _pi_cli_js() if key == "pi" else _bin_of(key)
+    if selected:
+        from .agent_installation import selected_manifest
+        manifest = selected_manifest(pkg, selected)
+        return [manifest] if manifest else []
     if pkg == "@earendil-works/pi-coding-agent":
         bundled_cli = _bundled_pi_cli_js()
         if bundled_cli:
@@ -133,6 +140,13 @@ def _selected_cli_version(key: str, *, cached: bool = True) -> str:
     if not executable:
         return ""
     prefix = list(((_PROFILES.get(key) or {}).get("argv_prefix") or (lambda: []))())
+    if (_PROFILES.get(key) or {}).get('acp_key'):
+        from .acp_agents import executable_command
+        try:
+            command = executable_command(key, executable)
+        except RuntimeError:
+            return ''
+        executable, prefix = command[0], [*command[1:], *prefix]
     if not cached:
         return _short(executable, [*prefix, "--version"])
     return _cached_version_probe(executable, [*prefix, "--version"], run=_short,
@@ -280,7 +294,14 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
     # installed CLI on an incompatible Node runtime as unavailable so the
     # Runner never advertises a seat that immediately crashes on dispatch.
     if binp and not bundled and (spec.get("installer") == "npm"):
-        engine = agent_npm_runtime.package_engine(pkg, _npm_root())
+        engine = ""
+        for manifest in _package_files(pkg):
+            try:
+                with open(manifest, encoding="utf8") as stream:
+                    engine = str((json.load(stream).get("engines") or {}).get("node") or "")
+                break
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
         node_issue = node_env(key, engine=engine).get("why") or ""
         if node_issue:
             runtime_issue = node_issue
@@ -349,7 +370,7 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
     # Return history explicitly without mutating the stored record.
     if p:
         p = {**p, "historical": True}
-    return _decorate_agent({
+    agent = {
         "key": key,
         "name": prof.get("name") or key,
         "pkg": pkg,
@@ -382,7 +403,11 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
         "state": state,
         "why": why,
         "probe": p,                 # {ok, detail, at, steps:[...]}
-    })
+    }
+    if key == "dsh" and setup_state == "missing":
+        from .agent_installation import dsh_desktop_detected
+        agent["desktopAppDetected"] = dsh_desktop_detected()
+    return _decorate_agent(agent)
 
 
 def _config_ready(key: str) -> bool:
@@ -760,7 +785,7 @@ def _run_npm(jid: str, key: str, action: str) -> None:
                 raise RuntimeError(stage_issue)
             dsh_runtime.activate_stage(
                 stage, _data_root(), str(plan["version"]),
-                str(plan.get("sha256") or ""))
+                str(plan.get("sha256") or ""), executable=_bin_of(key))
             stage = ""
             _say(jid, "DeepSeek Harness 执行运行时已通过完整性校验并启用。")
         except Exception as exc:  # noqa: BLE001
@@ -933,6 +958,7 @@ def _run_probe_once(jid: str, key: str, llm: dict, *, workspace=None,
     # _why_failed extracts errors while raw output remains available for validation.
     try:
         argv = _command_argv(binp, args, ws, cfg, prof)
+        bind_command_environment(env, argv)
         options = {"timeout": 180}
         code, out = _stream(jid, argv, cwd=ws, env=env, **options,
                             quiet_re=r"^\s*\{", stdin_text=_PROMPT)

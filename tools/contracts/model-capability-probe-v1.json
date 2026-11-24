@@ -27,10 +27,11 @@
         }
       }
     },
-    "toolPrompt": "Call soduwork_capability_echo with value {{value}}. This is a capability check.",
+    "toolPrompt": "Call soduwork_capability_echo with value {{value}}. This is a capability check. After the tool responds, reply only with the tool result value.",
     "receiptPrompt": "Reply only with the tool result value.",
-    "followupStream": false,
-    "followupTools": false
+    "followupStream": true,
+    "followupTools": true,
+    "followupToolChoice": "omitted"
   },
   "cases": [
     {
@@ -953,6 +954,28 @@
       "expect": {
         "status": "inconclusive",
         "code": "temporarily_unavailable"
+      }
+    },
+    {
+      "name": "generic-forbidden-is-not-credential-proof",
+      "check": "toolCalling",
+      "status": 403,
+      "error": {},
+      "expect": {
+        "status": "inconclusive",
+        "code": "request_rejected"
+      }
+    },
+    {
+      "name": "forbidden-explicit-billing-keeps-priority",
+      "check": "toolCalling",
+      "status": 403,
+      "error": {
+        "code": "insufficient_quota"
+      },
+      "expect": {
+        "status": "failed",
+        "code": "billing_unavailable"
       }
     }
   ],

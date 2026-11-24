@@ -213,7 +213,7 @@ if (typeof electron === 'string') {
     await js('openFixture()');
     const platformTicket = (await api('/api/v1/ai-proxy/config?model=platform-model&agent=pi')).body.key;
     assert.ok(platformTicket);
-    assert.equal((await send('quota fixture draft: create the first plugin draft')).ok, true);
+    assert.equal((await send('quota fixture draft: create plugin draft')).ok, true);
     await idle();
     await until(async () => (await control()).body.quota.used >= 56, 'actual usage ledger exhaustion');
     assert.match(fs.readFileSync(path.join(workspace, 'plugin-draft.txt'), 'utf8'), /QUOTA_DRAFT_MARKER/);

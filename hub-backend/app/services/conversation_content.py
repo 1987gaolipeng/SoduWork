@@ -90,8 +90,11 @@ async def owned_endpoint(session, client, runner_id):
 
 async def _call(runner, op, body, session=None):
     from .runner_access_policy import content_transaction
+    from .session_read_budget import deadline_active
     with content_transaction(session):
         reply = await runner.call(op, body, timeout=30)
+    if deadline_active() and (not isinstance(reply, dict) or reply.get("ok") is not True):
+        raise TimeoutError("Session read deadline reached")
     if not isinstance(reply, dict) or reply.get("ok") is not True or not isinstance(reply.get("data"), dict):
         raise HTTPException(503, "会话正文尚未获得终端持久化确认，请重试")
     return reply["data"]

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
 from ..timestamps import iso_utc
+from .usage_values import MAX_REPORTED_COUNTER
 
 
 SOURCE_LABELS = {
@@ -40,28 +41,48 @@ _METRICS = (
 )
 
 
-def _metric_columns(metric_model, session_model=None) -> list:
+_SUM_BASE = 1 << 32
+_PAGE_SIZE = 30
+
+
+def _sum_columns(value, label, sqlite):
+    # PostgreSQL sums BIGINT as NUMERIC. SQLite's SUM can overflow on a
+    # handful of historic counters. Sum their integer halves independently
+    # and combine in Python so neither a float nor a SQL product loses bits.
+    if sqlite:
+        return [func.sum(value % _SUM_BASE).label(label),
+                func.sum(value // _SUM_BASE).label(label + 'High')]
+    return [func.sum(value).label(label)]
+
+
+def _sum_value(row, label):
+    return int(row.get(label) or 0) + int(row.get(label + 'High') or 0) * _SUM_BASE
+
+
+def _metric_columns(daily, event, sqlite) -> list:
     """Build the same metric projection for daily rows and event dimensions.
 
     A session can have multiple daily rows. Distinct event IDs keep the session
     count stable for a multi-day conversation while every counter is summed from
     the actual daily increments.
     """
-    columns = [
-        func.coalesce(func.sum(case((metric_model.currency == "USD", metric_model.cost_microusd), else_=0)
-            if field == "cost_microusd" else getattr(metric_model, field)), 0).label(label)
-        for field, label in _METRICS
-    ]
-    session_model = session_model or metric_model
-    count = (func.count(func.distinct(session_model.id))
-             if session_model is not metric_model else func.count(metric_model.id))
-    return columns + [count.label("sessions")]
+    known_usd = daily.cost_known.is_(True) & (daily.currency == "USD")
+    columns = []
+    for field, label in _METRICS:
+        value = getattr(daily, field)
+        if field == "cost_microusd":
+            value = case((known_usd, value), else_=0)
+        columns.extend(_sum_columns(value, label, sqlite))
+    return columns + [func.count(func.distinct(event.id)).label("sessions"),
+                      func.count(case((known_usd, 1))).label("knownUsd")]
 
 
 def _bucket(row: dict, key: str = "", label: str = "") -> dict:
     item = _empty(key, label)
     for _field, api_name in _METRICS:
-        item[api_name] = int(row.get(api_name) or 0)
+        item[api_name] = _sum_value(row, api_name)
+    item["tokensExact"] = str(item["tokens"])
+    item["knownUsd"] = int(row.get("knownUsd") or 0)
     item["sessions"] = int(row.get("sessions") or 0)
     return item
 
@@ -77,7 +98,7 @@ def _daily_conditions(
     daily, event = _daily_source()
     conditions = [daily.day_key >= first_day, daily.day_key < end_day]
     if user_ids is not None:
-        conditions.append(daily.billing_user_id.in_(user_ids or {"__none__"}))
+        conditions.append(daily.billing_user_id.in_(user_ids))
     if user_id:
         conditions.append(daily.billing_user_id == user_id)
     elif client_id:
@@ -98,6 +119,9 @@ async def overview(
     client_id: str = "",
     source_type: str = "",
     agent_key: str = "",
+    detail: str = "all",
+    page: int = 1,
+    exclude_anomalies: bool = False,
 ) -> dict:
     days = max(1, min(365, int(days or 30)))
     # The UI promises Beijing calendar days. Query the day key written by the
@@ -108,17 +132,21 @@ async def overview(
     end_local = start_local + timedelta(days=days)
     first_day, end_day = start_local.date().isoformat(), end_local.date().isoformat()
     daily, event = _daily_source()
-    conditions = _daily_conditions(
+    scope_conditions = _daily_conditions(
         first_day=first_day, end_day=end_day, user_ids=user_ids, user_id=user_id,
         client_id=client_id, source_type=source_type, agent_key=agent_key)
     joined = daily.__table__.join(event.__table__, daily.usage_event_id == event.id)
+    anomalous = daily.total_tokens > MAX_REPORTED_COUNTER
+    conditions = scope_conditions + ([~anomalous] if exclude_anomalies else [])
+    sqlite = session.get_bind().dialect.name == 'sqlite'
+    metrics = _metric_columns(daily, event, sqlite)
 
-    summary_row = (await session.execute(select(*_metric_columns(daily, event)).
+    summary_row = (await session.execute(select(*metrics).
         select_from(joined).where(*conditions))).mappings().one()
     summary = _bucket(summary_row, "all", "\u5168\u90e8\u7528\u91cf")
 
     source_rows = (await session.execute(select(
-        daily.source_type.label("sourceType"), *_metric_columns(daily, event),
+        daily.source_type.label("sourceType"), *metrics,
     ).select_from(joined).where(*conditions).group_by(daily.source_type))).mappings().all()
     sources = [
         _bucket(row, str(row["sourceType"] or "system"), SOURCE_LABELS.get(
@@ -128,7 +156,7 @@ async def overview(
 
     agent_rows = (await session.execute(select(
         daily.agent_key.label("agent"), daily.model.label("model"),
-        daily.provider.label("provider"), *_metric_columns(daily, event),
+        daily.provider.label("provider"), *metrics,
     ).select_from(joined).where(*conditions).group_by(
         daily.agent_key, daily.model, daily.provider))).mappings().all()
     agents = []
@@ -141,7 +169,7 @@ async def overview(
         agents.append(item)
 
     people_rows = (await session.execute(select(
-        daily.billing_user_id.label("userId"), *_metric_columns(daily, event),
+        daily.billing_user_id.label("userId"), *metrics,
     ).select_from(joined).where(*conditions).group_by(daily.billing_user_id))).mappings().all()
     linked_users = {str(row["userId"] or "") for row in people_rows if row["userId"]}
     users = {}
@@ -160,7 +188,7 @@ async def overview(
         people.append(item)
 
     day_rows = (await session.execute(select(
-        daily.day_key.label("day"), *_metric_columns(daily, event),
+        daily.day_key.label("day"), *metrics,
     ).select_from(joined).where(*conditions).group_by(daily.day_key).
         order_by(daily.day_key))).mappings().all()
     by_day = {str(row["day"]): row for row in day_rows if row["day"]}
@@ -178,46 +206,68 @@ async def overview(
         state = str(row["quality"] or "unknown")
         quality[state if state in quality else "unknown"] += int(row["amount"] or 0)
 
-    recent_rows = (await session.execute(select(daily, event).select_from(joined).
-        where(*conditions).order_by(daily.day_key.desc(), daily.updated_at.desc()).limit(30))).all()
-    task_ids = {str(event_row.task_id or "") for _daily_row, event_row in recent_rows
-                if event_row.task_id}
-    tasks = {}
-    if task_ids:
-        tasks = {item.id: item for item in (await session.execute(
-            select(models.Task).where(models.Task.id.in_(task_ids))
-        )).scalars().all()}
+    # Keep risk and cost evidence for the entire visible selection even when
+    # charts temporarily omit anomalous increments.
+    unpriced = daily.cost_known.is_(False)
+    known_usd = daily.cost_known.is_(True) & (daily.currency == "USD")
+    estimated_usage_usd = known_usd & (event.quality == "estimated")
+    cost_rows = (await session.execute(select(
+        func.count(daily.id).label("records"),
+        func.count(case((anomalous, 1))).label("anomalous"),
+        func.count(case((unpriced, 1))).label("unknown"),
+        func.count(case((anomalous & unpriced, 1))).label("unknownAnomalous"),
+        func.count(case((daily.currency != "USD", 1))).label("otherCurrency"),
+        func.count(case((daily.cost_known.is_(True) & (daily.currency != "USD"), 1))).label("knownOtherCurrency"),
+        func.count(case((known_usd, 1))).label("knownUsd"),
+        func.count(case((estimated_usage_usd, 1))).label("estimatedUsageUsd"),
+        *_sum_columns(case((known_usd, daily.cost_microusd), else_=0), "knownMicrousd", sqlite),
+        *_sum_columns(case((estimated_usage_usd, daily.cost_microusd), else_=0), "estimatedUsageMicrousd", sqlite),
+        *_sum_columns(case((unpriced, daily.total_tokens), else_=0), "unknownTokens", sqlite),
+    ).select_from(joined).where(*scope_conditions))).mappings().one()
+    if detail == "anomalous":
+        detail_conditions = scope_conditions + [anomalous]
+        detail_count = cost_rows["anomalous"]
+    elif detail == "unpriced":
+        detail_conditions = scope_conditions + [unpriced]
+        detail_count = cost_rows["unknown"]
+    else:
+        detail_conditions = conditions
+        detail_count = cost_rows["records"] - (cost_rows["anomalous"] if exclude_anomalies else 0)
+    last_page = max(1, (detail_count + _PAGE_SIZE - 1) // _PAGE_SIZE)
+    page = max(1, min(page, last_page))
+    recent_rows = (await session.execute(select(
+        daily, event, models.Task.title, models.User.display_name, models.User.username,
+    ).select_from(joined).outerjoin(models.Task, models.Task.id == event.task_id).
+        outerjoin(models.User, models.User.id == daily.billing_user_id).
+        where(*detail_conditions).order_by(daily.day_key.desc(), daily.updated_at.desc(), daily.id.desc()).
+        offset((page - 1) * _PAGE_SIZE).limit(_PAGE_SIZE))).all()
 
     recent = []
-    for daily_row, event_row in recent_rows:
-        task = tasks.get(str(event_row.task_id or ""))
-        uid = str(daily_row.billing_user_id or "")
+    for daily_row, event_row, task_title, display_name, username in recent_rows:
         recent.append({
             "id": daily_row.id,
+            "eventId": event_row.id,
             "taskId": str(event_row.task_id or ""),
             "sourceId": str(event_row.source_id or ""),
             # Display task title first, then the client's conversation title.
             # Fall back to the source label for older records without source_title.
-            "title": (task.title if task else "") or str(event_row.source_title or "") or SOURCE_LABELS.get(
+            "title": task_title or str(event_row.source_title or "") or SOURCE_LABELS.get(
                 daily_row.source_type, event_row.source_id or "AI \u4f7f\u7528"),
             "sourceType": daily_row.source_type,
             "sourceLabel": SOURCE_LABELS.get(daily_row.source_type, daily_row.source_type),
             "agent": daily_row.agent_key or "unknown",
             "model": daily_row.model or "",
-            "user": next((item["label"] for item in people if item["userId"] == uid),
-                         "\u672a\u7ed1\u5b9a\u7528\u6237"),
+            "provider": daily_row.provider or "",
+            "user": display_name or username or "\u672a\u7ed1\u5b9a\u7528\u6237",
             "tokens": int(daily_row.total_tokens or 0),
-            "costMicrousd": int(daily_row.cost_microusd or 0) if daily_row.currency == "USD" else 0,
+            "tokensExact": str(daily_row.total_tokens or 0),
+            "anomalous": daily_row.total_tokens > MAX_REPORTED_COUNTER,
+            "costMicrousd": int(daily_row.cost_microusd or 0) if daily_row.cost_known and daily_row.currency == "USD" else 0,
             "costKnown": daily_row.cost_known, "currency": daily_row.currency,
             "durationMs": int(daily_row.duration_ms or 0),
             "quality": event_row.quality or "unknown",
             "occurredAt": iso_utc(daily_row.occurred_at) if daily_row.occurred_at else "",
         })
-    cost_rows = (await session.execute(select(
-        func.count(daily.id).label('records'),
-        func.coalesce(func.sum(case((daily.cost_known.is_(False), 1), else_=0)), 0).label('unknown'),
-        func.coalesce(func.sum(case((daily.currency != 'USD', 1), else_=0)), 0).label('otherCurrency'),
-    ).select_from(joined).where(*conditions))).mappings().one()
     total_rows = max(1, sum(quality.values()))
     reliable = quality["reported"] + quality["reconciled"]
     return {
@@ -226,8 +276,14 @@ async def overview(
         "byAgent": sorted(agents, key=lambda item: item["tokens"], reverse=True),
         "users": sorted(people, key=lambda item: item["tokens"], reverse=True),
         "recent": recent,
-        "costQuality": {"records": int(cost_rows["records"]), "unknown": int(cost_rows["unknown"]),
-                        "otherCurrency": int(cost_rows["otherCurrency"]), "currency": "USD"},
+        "detailPage": {"page": page, "pageSize": _PAGE_SIZE, "total": detail_count},
+        "anomalies": {"records": cost_rows["anomalous"], "tokenLimit": MAX_REPORTED_COUNTER},
+        "costQuality": {**{key: cost_rows[key] for key in (
+            "records", "unknown", "unknownAnomalous", "otherCurrency", "knownOtherCurrency",
+            "knownUsd", "estimatedUsageUsd")},
+            "knownMicrousd": _sum_value(cost_rows, "knownMicrousd"),
+            "estimatedUsageMicrousd": _sum_value(cost_rows, "estimatedUsageMicrousd"),
+            "unknownTokens": str(_sum_value(cost_rows, "unknownTokens")), "currency": "USD"},
         "quality": {**quality, "coveragePct": round(reliable * 100 / total_rows)},
         "filters": {
             "sources": [{"key": key, "label": value} for key, value in SOURCE_LABELS.items()],

@@ -1,4 +1,8 @@
 export default {
+  "按模型名称筛选": "Filter by model name",
+  "选择筛选结果": "Select matching models",
+  "取消选择筛选结果": "Deselect matching models",
+  "将在此服务下添加并启用 {0} 个模型。": "{0} models will be added and enabled for this provider.",
   "留空时使用 16384 Token。请按服务实际限制填写；能力检测不验证最大输出上限。": "When blank, 16384 tokens are used. Set this to your provider’s actual limit; capability tests do not verify the maximum output limit.",
   '模型配置已变更，请重新检测': 'The model configuration changed. Run the check again.',
   '本次检测未通过': 'This test did not pass',
@@ -19,6 +23,7 @@ export default {
   '请检查凭据及模型访问权限': 'Check credentials and model access.',
   '请检查模型 ID 和接口地址': 'Check the model ID and endpoint.',
   '服务明确返回不支持此能力': 'The provider explicitly reported this capability as unsupported.',
+  '服务拒绝了检测请求，原因尚未确认': 'The service rejected the test request. The reason is unconfirmed.',
   '服务未接受检测请求，请检查协议配置': 'The provider rejected the test request. Check protocol settings.',
   '未收到预期结果，暂不能确认能力': 'The expected output was missing. Capability remains unconfirmed.',
   '服务响应格式无法识别': 'The provider response format was not recognized.',
@@ -75,6 +80,11 @@ export default {
 }
 
 export const ja = {
+  "按模型名称筛选": "モデル名で絞り込み",
+  "选择筛选结果": "該当するモデルを選択",
+  "取消选择筛选结果": "該当するモデルの選択を解除",
+  "将在此服务下添加并启用 {0} 个模型。": "このサービスに {0} 個のモデルを追加して有効にします。",
+  '服务拒绝了检测请求，原因尚未确认': 'サービスが検査リクエストを拒否しました。原因はまだ確認できていません。',
   "留空时使用 16384 Token。请按服务实际限制填写；能力检测不验证最大输出上限。": "空欄の場合は 16384 Token を使用します。サービスの実際の制限に合わせて設定してください。能力検査では最大出力上限は検証されません。",
   '模型配置已变更，请重新检测': 'モデル設定が変更されました。もう一度検査してください。',
   '本次检测未通过': '今回の検査は不合格',
@@ -129,6 +139,11 @@ export const ja = {
 }
 
 export const ko = {
+  "按模型名称筛选": "모델 이름으로 필터링",
+  "选择筛选结果": "검색 결과 선택",
+  "取消选择筛选结果": "검색 결과 선택 해제",
+  "将在此服务下添加并启用 {0} 个模型。": "이 공급자에 모델 {0}개를 추가하고 활성화합니다.",
+  '服务拒绝了检测请求，原因尚未确认': '서비스가 검사 요청을 거부했습니다. 원인은 아직 확인되지 않았습니다.',
   "留空时使用 16384 Token。请按服务实际限制填写；能力检测不验证最大输出上限。": "비워 두면 16384 Token을 사용합니다. 서비스의 실제 한도에 맞게 설정하세요. 기능 검사는 최대 출력 한도를 검증하지 않습니다.",
   '模型配置已变更，请重新检测': '모델 설정이 변경되었습니다. 다시 검사해 주세요.',
   '本次检测未通过': '이번 검사 미통과',

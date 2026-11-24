@@ -6,7 +6,17 @@ import logging
 import os
 import uuid
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +26,14 @@ from ..db import get_session
 from ..deps import current_ai_client, current_client
 from ..models import Attachment, Client, Task
 from ..schemas import attachment_to_api
-from ..services import attachment_ownership, resource_access, storage, task_access, task_requirements
+from ..services import (
+    attachment_ownership,
+    resource_access,
+    storage,
+    task_access,
+    task_requirements,
+)
+from ..services.library_conversation_save import stream_digest
 
 router = APIRouter(prefix="/api/v1", tags=["attachments"])
 
@@ -70,6 +87,8 @@ async def _save_attachment(session: AsyncSession, client: Client, target_id: str
     # Stream storage writes on a worker thread so large uploads do not block the event loop.
     # Avoid copying the entire upload into memory.
     file.file.seek(0)
+    digest = await asyncio.to_thread(stream_digest, file.file)
+    attachment.evidence_meta = {**attachment.evidence_meta, "sha256": digest}
     attachment.backend = await asyncio.to_thread(
         storage.put_stream, key, file.file, size, ct)
     session.add(attachment)
@@ -273,15 +292,21 @@ async def delete_attachment(
             raise HTTPException(404, "Attachment not found")
     if a.role == "handoff":
         raise HTTPException(409, "会话交接工作包是恢复凭据，不能单独删除")
-    # Commit metadata deletion before deleting the stored object.
-    # This prevents live metadata from referencing a missing object if the transaction fails.
-    # A leftover storage object can be reclaimed later without breaking user-visible attachment records.
     storage_key, backend = a.storage_key, a.backend
     await session.delete(a)
     await session.commit()
+    await remove_unreferenced_object(session, aid, storage_key, backend)
+    return {"ok": True}
+
+
+async def remove_unreferenced_object(session: AsyncSession, aid: str, storage_key: str, backend: str) -> None:
+    """Clean up the object after the caller commits the metadata deletion."""
     try:
-        await asyncio.to_thread(storage.delete, storage_key, backend)
+        # Older same-name uploads could share an object. Keep it for any surviving row.
+        remaining = await session.scalar(select(Attachment.id).where(
+            Attachment.storage_key == storage_key, Attachment.backend == backend).limit(1))
+        if storage_key and remaining is None:
+            await asyncio.to_thread(storage.delete, storage_key, backend)
     except Exception as exc:  # noqa: BLE001  Storage cleanup failure does not undo the committed deletion.
         log.warning("attachment object cleanup failed (%s): %s",
                     aid, type(exc).__name__)
-    return {"ok": True}

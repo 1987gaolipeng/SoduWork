@@ -8,6 +8,8 @@ Workflow documentation, release procedures, issue forms and the pull request tem
 
 The Runner compatibility matrix runs strict TLS and execution-host cleanup regressions on Windows, macOS, and Linux. It also freezes the production network modules and checks real loopback HTTPS with synthetic certificates. This covers packaged native trust verifiers, exclusive CA overrides and certificate rejection, without changing machine trust stores or contacting real model services. It does not replace full native desktop package acceptance.
 
+The same three-platform matrix checks Agent discovery, npm installation identity, the final Node command and child environment, and DeepSeek native dependency layouts. It includes synthetic filesystem cases and real Node subprocesses where Node is available. Rosetta and differing libc identities are also simulated.
+
 `workflows/security.yml` runs the [pinned local secret scanner](../tools/security/README.md) on the current source inventory, including tests. It does not scan private development history. Before publication, use a verified source export or squash the reviewed source into the public branch without private history.
 
 Ordinary checks use read-only permissions, do not persist checkout credentials, and pin actions to reviewed commit SHAs. Branch pushes and pull requests run without release or production credentials. Release branch pushes and tags do not duplicate checks. See [GitHub's secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use).

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import traceback
 import urllib.error
 from urllib.parse import urlsplit
 import urllib.request
@@ -16,6 +17,14 @@ class ModelUnavailable(ValueError):
         super().__init__(reason)
         self.reason = reason
         self.http_status = http_status
+
+
+class NotesValidationError(ModelUnavailable):
+    """Diagnostics built only from fixed rules, schema paths and numeric positions."""
+    def __init__(self, stage, code, message, **details):
+        super().__init__("invalid_output")
+        self.diagnostic = dict(stage=stage, error_code=code, message=message, **details)
+        self.args = (message,)
 
 
 def is_openrouter(endpoint):
@@ -39,6 +48,38 @@ def log_event(event, **fields):
     print(json.dumps({"event": "release_notes_" + event, "model": safe_model(), **fields}), flush=True)
 
 
+def redact_diagnostic(value):
+    """Preserve original error text while removing credentials and endpoint URLs."""
+    for name, secret in sorted(os.environ.items(), key=lambda item: len(item[1]), reverse=True):
+        if re.search("KEY|TOKEN|SECRET|PASSWORD", name, re.I) and len(secret) >= 4:
+            value = value.replace(secret, "[REDACTED]")
+    value = re.sub(r"https?://[^\s\"'<>]+", "[REDACTED_URL]", value)
+    value = re.sub(r"(?i)(bearer\s+)[^\s\"',;]+", r"\1[REDACTED]", value)
+    return value
+
+
+def exception_diagnostic(error):
+    # No locals, response bodies or reasoning; preserve messages and chained stacks.
+    return {"exception_type": type(error).__name__,
+            "exception_message": redact_diagnostic(str(error)),
+            "traceback": redact_diagnostic("".join(traceback.format_exception(error)))}
+
+
+def log_usage(usage):
+    """Optional provider counters only; never log arbitrary response metadata."""
+    if not isinstance(usage, dict):
+        return
+    counters = {name: usage.get(name) for name in
+                ("prompt_tokens", "completion_tokens", "total_tokens")}
+    details = usage.get("completion_tokens_details")
+    if isinstance(details, dict):
+        counters["reasoning_tokens"] = details.get("reasoning_tokens")
+    counters = {name: value for name, value in counters.items()
+                if type(value) is int and value >= 0}
+    if counters:
+        log_event("usage", **counters)
+
+
 def classify_http(error):
     reason = {401: "credentials_rejected", 403: "access_denied", 404: "model_unavailable",
               429: "rate_limited"}.get(error.code, "provider_error")
@@ -50,8 +91,8 @@ def classify_http(error):
                 reason = "upstream_rate_limited"
             elif "free-models-per-day" in body:
                 reason = "daily_rate_limited"
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as failure:
+            log_event("http_error_details_unavailable", **exception_diagnostic(failure))
     return ModelUnavailable(reason, error.code)
 
 
@@ -93,18 +134,26 @@ def ensure_free_openrouter(model, endpoint, opener):
     except ModelUnavailable:
         raise
     except urllib.error.HTTPError as error:
-        raise ModelUnavailable("catalog_unavailable", error.code) from None
-    except (OSError, ValueError, KeyError, TypeError, InvalidOperation):
-        raise ModelUnavailable("catalog_unavailable") from None
+        raise ModelUnavailable("catalog_unavailable", error.code) from error
+    except (OSError, ValueError, KeyError, TypeError, InvalidOperation) as error:
+        raise ModelUnavailable("catalog_unavailable") from error
     log_event("free_model_verified", provider="openrouter")
 
 
-def report_result(record, elapsed, failure=None):
+def report_result(record, elapsed, failure=None, stage="generation"):
     unavailable = record.get("status") == "unavailable"
     reason = getattr(failure, "reason", "invalid_output") if unavailable else "generated"
     status = getattr(failure, "http_status", None)
+    diagnostic = {}
+    if unavailable and failure is not None:
+        diagnostic = dict(stage=stage, error_code="unexpected_exception",
+                          **exception_diagnostic(failure))
+        if isinstance(failure, NotesValidationError):
+            diagnostic.update(failure.diagnostic)
+        elif isinstance(failure, ModelUnavailable):
+            diagnostic.pop("error_code")
     log_event("completed", status="unavailable" if unavailable else "generated",
-              seconds=round(elapsed, 2), reason=reason, http_status=status)
+              seconds=round(elapsed, 2), reason=reason, http_status=status, **diagnostic)
     descriptions = {
         "configuration": "Model configuration is missing or invalid.",
         "model_unavailable": "The configured model is unavailable or is no longer listed.",
@@ -121,10 +170,20 @@ def report_result(record, elapsed, failure=None):
     }
     if unavailable:
         message = descriptions.get(reason, descriptions["invalid_output"])
+        if diagnostic.get("error_code"):
+            message += " Stage: " + diagnostic["stage"] + "; code: " + diagnostic["error_code"] + "."
+            if diagnostic.get("message"):
+                message += " " + diagnostic["message"]
+            if diagnostic.get("path"):
+                message += " Path: " + diagnostic["path"] + "."
+            if "line" in diagnostic:
+                message += f" JSON line {diagnostic['line']}, column {diagnostic['column']}."
         if status is not None:
             message += f" HTTP {status}."
         message += " Release notes were left empty; packaging can continue."
-        if is_openrouter(os.environ.get("RELEASE_NOTES_API_URL", "")):
+        if reason == "invalid_output":
+            message += " Inspect the validation diagnostic; retry generation in a new candidate run after correcting the output issue."
+        elif is_openrouter(os.environ.get("RELEASE_NOTES_API_URL", "")):
             message += (" Check the OpenRouter model/provider allowlist. If this model is unavailable or paid,"
                         " allow a replacement free model in OpenRouter and update the GitHub repository variable"
                         " RELEASE_NOTES_MODEL. Keep RELEASE_NOTES_API_URL and RELEASE_NOTES_API_KEY_SECRET matched.")
@@ -139,5 +198,6 @@ def report_result(record, elapsed, failure=None):
         try:
             with Path(summary).open("a", encoding="utf-8") as stream:
                 stream.write(f"\n### Release notes\n\nModel: `{safe_model()}` · {elapsed:.2f} seconds\n\n{message}\n")
-        except OSError:
+        except OSError as error:
+            log_event("summary_unavailable", **exception_diagnostic(error))
             print("::warning title=Release notes summary unavailable::Could not append the job summary.", flush=True)

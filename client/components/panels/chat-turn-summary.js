@@ -127,14 +127,16 @@
       return '<div class="nturn-summary" data-chat-node="turn-summary:' + ctx.esc(turn.key) + '">' +
         '<button type="button" data-turn-toggle="' + ctx.esc(turn.key) + '" aria-expanded="' + open +
         '" title="' + label + '" aria-label="' + label + '">' +
-        '<span class="nturn-summary-values" title="' + ctx.esc(tx('包含深度思考与回复')) + '">' + values + '</span>' +
-        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button></div>';
+        '<span class="nturn-summary-values">' + values + '</span><span data-turn-label>' + label + '</span>' +
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>' +
+        '<p data-turn-empty hidden>' + ctx.esc(tx('本轮没有可显示的过程记录。')) + '</p></div>';
     }
     function apply(list) {
       if (!list?.querySelectorAll) return;
       list.querySelectorAll('[data-turn-hidden]').forEach(node => node.removeAttribute('data-turn-hidden'));
       list.querySelectorAll('[data-turn-process]').forEach(node => node.removeAttribute('data-turn-process'));
       const hide = node => node.setAttribute('data-turn-hidden', '');
+      const withProcess = new Set();
       for (const row of Array.from(list.children || [])) {
         const key = row.dataset.chatNode || '';
         const message = /^message:(\d+)$/.exec(key);
@@ -142,23 +144,33 @@
         const index = message ? Number(message[1]) : tools ? Number(tools[1]) :
           /^(?:(?:tools|process):tail|goal-progress:)/.test(key) ? (ctx._snap?.messages?.length || 1) - 1 : -1;
         const turn = byIndex.get(index);
-        if (!turn || turn.outcome || expanded.has(turn.key) || row.classList.contains('user')) continue;
+        if (!turn || turn.outcome || row.classList.contains('user')) continue;
+        const open = expanded.has(turn.key);
         if (message) {
-          row.querySelectorAll(':scope > .nthink').forEach(hide);
-          row.querySelectorAll(':scope > .ntext').forEach(node => {
-            if (index !== turn.finalIndex || Number(node.dataset.block) <= turn.lastToolBlock) hide(node);
+          row.querySelectorAll(':scope > .nthink').forEach(node => {
+            if (open && node.querySelector('[data-thinking-body]')?.textContent.trim()) withProcess.add(turn.key);
+            else hide(node);
           });
-          if (index !== turn.finalIndex) {
+          row.querySelectorAll(':scope > .ntext').forEach(node => {
+            if (index === turn.finalIndex && Number(node.dataset.block) > turn.lastToolBlock) return;
+            if (!open) hide(node);
+            else if (node.textContent.trim() || node.querySelector('img,video,audio')) withProcess.add(turn.key);
+          });
+          if (!open && index !== turn.finalIndex) {
             row.querySelectorAll(':scope > .nmessage-footer').forEach(hide);
             row.setAttribute('data-turn-process', '');
           }
-        } else row.setAttribute('data-turn-process', '');
+        } else if (!open) row.setAttribute('data-turn-process', '');
+        else if (row.childElementCount) withProcess.add(turn.key);
       }
-      list.querySelectorAll('[data-turn-toggle]').forEach(button => {
+      list.querySelectorAll(':scope > .nturn-summary > button[data-turn-toggle]').forEach(button => {
         const open = expanded.has(button.dataset.turnToggle);
         button.setAttribute('aria-expanded', String(open));
         button.title = tx(open ? '收起过程' : '展开过程');
         button.setAttribute('aria-label', button.title);
+        const label = button.querySelector('[data-turn-label]');
+        if (label.textContent !== button.title) label.textContent = button.title;
+        button.parentElement.querySelector('[data-turn-empty]').hidden = !open || withProcess.has(button.dataset.turnToggle);
       });
       if (boundList === list) return;
       boundList = list;

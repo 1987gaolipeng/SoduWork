@@ -135,10 +135,21 @@ window.WorkspaceHost={open:(view,payload={})=>{
   const historyDraft=document.getElementById('nchatInput');
   historyDraft.value='历史会话里尚未发送的内容';
   historyDraft.dispatchEvent(new Event('input',{bubbles:true}));
+  const accountReturn = () => {
+    document.getElementById('wsRailMine').click();
+    document.getElementById('wsBack').click();
+  };
+  accountReturn();
+  chk('个人信息返回原会话并保留草稿', WorkspaceShell.active==='create' &&
+    NativeChat.sessionInfo().sessionId==='saved-7' &&
+    document.getElementById('nchatInput')?.value==='历史会话里尚未发送的内容');
   document.querySelector('.ws-nav-item[data-view="create"]').click();
   const freshDraft=document.getElementById('cpInput');
   freshDraft.value='新会话里尚未发送的内容';
   freshDraft.dispatchEvent(new Event('input',{bubbles:true}));
+  accountReturn();
+  chk('个人信息返回未发送的新对话草稿', document.getElementById('composePanel').dataset.stage==='compose' &&
+    document.getElementById('cpInput').value==='新会话里尚未发送的内容');
   document.querySelector('[data-chat-id="saved-7"]').click();
   chk('切回历史会话恢复未发送内容',await waitFor(()=>document.getElementById('nchatInput')?.value==='历史会话里尚未发送的内容'));
   document.querySelector('.ws-nav-item[data-view="create"]').click();

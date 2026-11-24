@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import automation_models as am, models, realtime
 from app.api import plugins
+from app.api.plugins import PluginVersionTrustRequest
 from app.services import mate_messages, plugin_lifecycle_notifications as notices
 from tests.sqlite_schema import create_fresh_sqlite_schema
 
@@ -129,9 +130,9 @@ class PluginLifecycleNotificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len((await self.inbox())["items"]), 1)
 
     async def test_revoke_targets_affected_version_and_reject_does_not_claim_unpublish(self):
-        await plugins.trust_version("current", {"enabled": False}, self.admin, self.session)
-        await plugins.trust_version("current", {"enabled": False}, self.admin, self.session)
-        await plugins.trust_version("pending", {"enabled": False}, self.admin, self.session)
+        await plugins.trust_version("current", PluginVersionTrustRequest(trusted=False), self.admin, self.session)
+        await plugins.trust_version("current", PluginVersionTrustRequest(trusted=False), self.admin, self.session)
+        await plugins.trust_version("pending", PluginVersionTrustRequest(trusted=False), self.admin, self.session)
         rows = await self.all_rows()
         self.assertEqual({row.recipient_id for row in rows}, {"publisher", "consumer"})
         self.assertEqual(len(rows), 2)
@@ -147,9 +148,9 @@ class PluginLifecycleNotificationTests(unittest.IsolatedAsyncioTestCase):
         plugin = await self.session.get(am.Plugin, "plugin")
         plugin.org_id = None
         await self.session.commit()
-        await plugins.trust_version("current", {"enabled": True, "confirmWithoutEvaluation": True},
+        await plugins.trust_version("current", PluginVersionTrustRequest(trusted=True, confirmWithoutEvaluation=True),
                                     self.admin, self.session)
-        await plugins.trust_version("current", {"enabled": False}, self.admin, self.session)
+        await plugins.trust_version("current", PluginVersionTrustRequest(trusted=False), self.admin, self.session)
         events = list(await self.session.scalars(select(models.AuditLog).where(
             models.AuditLog.target_id == "current").order_by(models.AuditLog.at)))
         self.assertEqual([row.action for row in events], ["plugin.approve", "plugin.revoke"])
@@ -257,7 +258,7 @@ class PluginLifecycleNotificationTests(unittest.IsolatedAsyncioTestCase):
         self.admin = await self.session.get(models.User, "admin")
         with patch.object(notices, "create", side_effect=failed_create):
             with self.assertRaises(ValueError):
-                await plugins.trust_version("current", {"enabled": False}, self.admin, self.session)
+                await plugins.trust_version("current", PluginVersionTrustRequest(trusted=False), self.admin, self.session)
         await self.session.rollback()
         version = await self.session.get(am.PluginVersion, "current")
         self.assertEqual(version.trust_state, "approved")
@@ -275,7 +276,7 @@ class PluginLifecycleNotificationTests(unittest.IsolatedAsyncioTestCase):
             try:
                 with self.assertRaises(ValueError):
                     if revoke:
-                        await plugins.trust_version("current", {"enabled": False}, self.admin, self.session)
+                        await plugins.trust_version("current", PluginVersionTrustRequest(trusted=False), self.admin, self.session)
                     else:
                         await self.policy(installation="not_available")
             finally:
@@ -293,7 +294,7 @@ class PluginLifecycleNotificationTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(self.session, "commit", AsyncMock(side_effect=RuntimeError("isolated commit failure"))):
                 with self.assertRaises(RuntimeError):
                     if revoke:
-                        await plugins.trust_version("current", {"enabled": False}, self.admin, self.session)
+                        await plugins.trust_version("current", PluginVersionTrustRequest(trusted=False), self.admin, self.session)
                     else:
                         await self.policy(installation="not_available")
             await self.session.rollback()
@@ -339,7 +340,7 @@ class PluginLifecycleNotificationTests(unittest.IsolatedAsyncioTestCase):
                     async with sessions() as session:
                         admin = await session.get(models.User, "admin")
                         if revoke:
-                            await plugins.trust_version("version", {"enabled": False}, admin, session)
+                            await plugins.trust_version("version", PluginVersionTrustRequest(trusted=False), admin, session)
                         else:
                             await plugins.update_catalog_policy("plugin", {"installation": "not_available"}, admin, session)
 

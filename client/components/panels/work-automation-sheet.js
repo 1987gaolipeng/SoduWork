@@ -116,12 +116,19 @@
     const preserveSource = !prior.note && (Array.from(original).length > 1500 || context.seed.conversationContext?.text);
     const rhythm = global.ScheduleTiming.infer(global.WorkAutomationBindings.directiveText(fallback), prior,
       context.requestedAt ?? context.seed.requestedAt ?? Date.now());
-    const acceptance = checks(parsed.acceptanceCriteria || parsed.checklist || prior.acceptance);
-    const note = preserveSource ? original : fullText(parsed.note || parsed.description || prior.note || original);
+    const minutes = rhythm.relativeTiming?.minutes;
+    // Correct only model prose that turns a user's one-off shorthand into the same repeated interval.
+    const implicitOnce = minutes && fallback && global.ScheduleTiming.clarifyLeadingDelay(fallback) !== fallback &&
+      global.ScheduleTiming.correctDelayInterval(original, minutes) === original;
+    const modelText = text => implicitOnce && text ? global.ScheduleTiming.correctDelayInterval(text, minutes) : text;
+    const title = modelText(parsed.title) || prior.title || fallback;
+    const note = preserveSource ? original : fullText(modelText(parsed.note || parsed.description) || prior.note || original);
+    const parsedCriteria = parsed.acceptanceCriteria || parsed.checklist;
+    const acceptance = parsedCriteria ? checks(parsedCriteria).map(modelText) : checks(prior.acceptance);
     const taskAdded = note !== prior.note && !global.WorkAutomationBindings.taskNeedsDetail(note) &&
       !global.WorkAutomationBindings.taskNeedsDetail(fallback) && !/待明确|待补充/.test(parsed.title || '');
     const next = Object.assign({}, prior, rhythm, {
-      title: cut(parsed.title || prior.title || fallback, 60),
+      title: cut(title, 60),
       note,
       needsTask: (!prior.note && Boolean(fallback) && (global.WorkAutomationBindings.taskNeedsDetail(fallback) || /待明确|待补充/.test(parsed.title || ''))) ||
         (prior.needsTask === true && !taskAdded),
@@ -174,8 +181,7 @@
         '<header class="waz-head"><div class="waz-head-icon">' +
           '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/>' +
           '<path d="M12 7v5l3.3 2M4.5 4.5l2 2M19.5 4.5l-2 2"/></svg></div>' +
-          '<div><span data-i18n="eyebrow.automation">AUTOMATION</span><h2 id="wazTitle">创建自动化</h2>' +
-          '<p>设定一次，按时交给 Agent 执行，过程和结果留在对话中</p></div>' +
+          '<div><h2 id="wazTitle">创建自动化</h2></div>' +
           '<button type="button" class="waz-close" data-waz-close aria-label="关闭">' +
           '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>' +
         '<main class="waz-body" id="wazBody"></main></section>';
@@ -233,7 +239,7 @@
     // Restoration refreshes candidates only; preserve the original date and manual settings without invoking the model again.
     if (s.cardState) { if (visible()) paintCard(); return visible(); }
     if (!s.cardId && !visible()) { cards().finish(ticket, { phase: 'error', error: '表单已关闭' }); return false; }
-    const options = global.WorkAutomationBindings.candidates(context, directive);
+    const options = global.WorkAutomationBindings.candidates(context, global.ScheduleTiming.clarifyLeadingDelay(directive));
     let parseError = '';
     const parsed = instruction && global.SoduWorkAPI?.parseTaskText
       ? await SoduWorkAPI.parseTaskText(instruction, model, s.attachmentContext || [], options).catch(error => { parseError = errorText(error); return {}; }) : {};
@@ -253,20 +259,14 @@
     const selected = String(current || '');
     if (state.proposal?.bindingIssues?.some(item => item.field === 'assigneeId')) {
       return '<option value="__waz_unresolved__" selected>请确认指定的执行底座</option>' +
-        state.agents.map(item => '<option value="' + esc(item.id) + '">' + esc(item.name || item.id) + '</option>').join('');
+        state.agents.map(item => global.WorkAutomationView.agentOptionHtml(item, '')).join('');
     }
     const items = state.agents.slice();
     if (selected && !items.some(item => String(item.id) === selected)) {
       items.unshift({ id: selected, name: _tx('已保存的执行底座'), available: false });
     }
     if (!items.length) return '<option value="">' + esc(_tx('当前设备没有可选执行底座')) + '</option>';
-    return items.map(item => {
-      const suffix = [item.locationLabel, item.onlineSeats ? _tx(item.onlineSeats + ' 个在线席位') : '',
-        item.available === false ? _tx('当前未就绪') : ''].filter(Boolean);
-      return '<option value="' + esc(item.id) + '"' +
-        (String(item.id) === selected ? ' selected' : '') + '>' +
-        esc((item.name || item.id) + (suffix.length ? ' · ' + suffix.join(' · ') : '')) + '</option>';
-    }).join('');
+    return items.map(item => global.WorkAutomationView.agentOptionHtml(item, selected)).join('');
   }
 
   function agentById(id) {
@@ -330,11 +330,9 @@
     const managed = !canPickModel(agent);
     const options = modelSource(agent);
     const disabled = Boolean(managed || ((!Array.isArray(options) || !options.length) && !current));
-    const hint = managed ? tx('当前底座自行管理模型') :
-      tx('模型与执行底座独立保存，每次自动化运行使用这里的选择');
-    return '<label class="waz-field"><span>' + esc(tx('模型')) + ' <small>' + esc(tx('可独立选择')) + '</small></span>' +
-      '<select name="modelName" aria-describedby="wazModelHint"' + (disabled ? ' disabled' : '') + '>' +
-      modelRows(current, agentId) + '</select><small id="wazModelHint" class="waz-field-hint">' + esc(hint) + '</small></label>';
+    return '<label class="waz-field"><span>' + esc(tx('模型')) + '</span>' +
+      '<select name="modelName"' + (disabled ? ' disabled' : '') + '>' +
+      modelRows(current, agentId) + '</select></label>';
   }
 
   function refreshModelField(preferred) {
@@ -411,8 +409,7 @@
         '<div class="waz-chat-hint" role="status">' + (state.card?.snapshot.chatEditing === false
           ? '已返回普通对话，可点击继续补充来修改自动化。<button type="button" class="waz-button" data-waz-chat-resume>继续补充</button>'
           : '正在完善此自动化，可继续发送消息补充任务或修改时间。<button type="button" class="waz-button" data-waz-chat-exit>返回普通对话</button>') + '</div>' +
-        '<section class="waz-section"><div class="waz-section-title"><span>01</span><div>' +
-          '<h3>每次要完成什么</h3><p>说明目标、输入来源、输出格式和完成标准</p></div></div>' +
+        '<section class="waz-section"><h3 class="waz-section-title">' + esc(tx('任务说明')) + '</h3>' +
           '<label class="waz-field waz-title"><span>自动化名称 <b>*</b></span>' +
             '<input name="title" maxlength="60" value="' + esc(p.title) +
             '" placeholder="例如：每天汇总团队进展"></label>' +
@@ -423,8 +420,8 @@
             '<textarea name="acceptance" rows="3" placeholder="例如：生成简报并附异常证据">' +
             esc(checks(p.acceptance).join('\n')) + '</textarea></label>' + attachmentHtml() +
         '</section>' +
-        '<section class="waz-section"><div class="waz-section-title"><span>02</span><div>' +
-          '<h3>' + esc(tx('什么时候触发')) + '</h3><p>' + esc(tx('选择节奏，再设置日期范围、星期或日期和时间')) + '</p></div></div>' +
+        '<section class="waz-section"><div class="waz-timing-heading"><h3 class="waz-section-title">' + esc(tx('执行时间')) +
+          '</h3><span data-waz-zone>' + esc(p.timeZone || timeZone()) + '</span></div>' +
           '<div class="waz-grid waz-rhythm">' +
             '<label class="waz-field"><span>' + esc(tx('执行方式')) + '</span><select name="every">' +
               (!p.every ? '<option value="" selected>' + esc(tx('请选择执行方式')) + '</option>' : '') +
@@ -432,39 +429,37 @@
                 (item[0] === p.every ? ' selected' : '') + '>' + esc(tx(item[1])) + '</option>').join('') +
             '</select></label>' +
             '<label class="waz-field" data-waz-once><span>' + esc(tx('执行日期时间')) + ' <b>*</b></span>' +
-              '<input name="runAt" type="datetime-local" step="0.001" value="' +
-              esc(global.ScheduleTiming.localInput(p.runAt,p.timeZone || timeZone())) + '"></label>' +
+              '<input name="runAt" type="datetime-local" step="60" value="' +
+              esc(global.ScheduleTiming.localMinute(p.runAt,p.timeZone || timeZone())) + '"></label>' +
             '<div class="waz-field" data-waz-clock><span>' + esc(tx('执行时刻')) + '</span><div class="waz-clock-selects" data-waz-time-selects>' +
               '<select name="clockHour" data-forward-select="compact-time" aria-label="' + esc(tx('小时')) + '">' + global.ScheduleTiming.clockOptions(24, p.atHour) + '</select>' +
               '<span aria-hidden="true">:</span><select name="clockMinute" data-forward-select="compact-time" aria-label="' + esc(tx('分钟')) + '">' +
-              global.ScheduleTiming.clockOptions(60, p.atMinute) + '</select></div><small>' + esc(tx('选择小时和分钟')) + '</small></div>' +
+              global.ScheduleTiming.clockOptions(60, p.atMinute) + '</select></div></div>' +
             '<label class="waz-field" data-waz-minute><span>' + esc(tx('每小时第几分')) + '</span>' +
               '<select name="minute" data-forward-select="compact-time" aria-label="' + esc(tx('分钟')) + '">' + global.ScheduleTiming.clockOptions(60, p.atMinute) + '</select></label>' +
           '</div>' + timingFields(p) +
-          '<div class="waz-timezone"><i></i><span data-waz-zone>' + esc(p.timeZone || timeZone()) +
-          '</span><small id="wazNextRun">' + esc(tx('保存后由服务端计算下一次执行时间')) + '</small></div>' +
+          '<small class="waz-timing-status" id="wazNextRun" role="status"></small>' +
         '</section>' +
-        '<section class="waz-section"><div class="waz-section-title"><span>03</span><div>' +
-          '<h3>由谁、在哪里、按什么方法执行</h3><p>保存前会检查 Agent、Runner 与能力授权</p></div></div>' +
+        '<section class="waz-section"><h3 class="waz-section-title">' + esc(tx('执行设置')) + '</h3>' +
           '<div class="waz-grid">' +
-            '<label class="waz-field"><span>执行底座 <b>*</b></span><select name="assigneeId"' +
-              (!state.agents.length && !p.assigneeId ? ' disabled' : '') + '>' +
-              agentRows(p.assigneeId) + '</select><small>' + esc(state.agentReason || (state.agents.length
-                ? '运行时会在当前设备选择具备所需能力的可用席位'
-                : '请打开 Agent 管理，确认 Runner 已启动并已连接当前环境')) + '</small>' +
-              '<button type="button" class="waz-button" data-waz-reload-agents>刷新底座</button></label>' +
+            '<div class="waz-field"><div class="waz-agent-label"><label for="wazAssignee">执行底座 <b>*</b></label>' +
+              '<button type="button" class="automation-refresh-runtime" data-waz-reload-agents aria-label="刷新底座" title="刷新底座">' +
+              '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3A7 7 0 0 0 17.9 17"/></svg></button></div>' +
+              '<select name="assigneeId" id="wazAssignee"' + (!state.agents.length && !p.assigneeId ? ' disabled' : '') + '>' +
+              agentRows(p.assigneeId) + '</select>' +
+              (state.agentReason || !state.agents.length ? '<small>' + esc(state.agentReason ||
+                '请打开 Agent 管理，确认 Runner 已启动并已连接当前环境') + '</small>' : '') + '</div>' +
             modelField(p.modelName, p.assigneeId) +
             '<label class="waz-field"><span>关联工程 <small>可选</small></span><select name="repoId">' +
               global.WorkAutomationView.optionRows(state.repos, p.repoId, '不指定工程', p.bindingIssues?.some(item => item.field === 'repoId')) + '</select></label>' +
-          '</div>' +
-          '<label class="waz-field"><span>工作方法 <small>可选 · 固定当前版本</small></span>' +
+            '<label class="waz-field"><span>工作方法 <small>可选 · 固定当前版本</small></span>' +
             '<select name="personalPluginKey"><option value="">不用插件 · Agent 自由执行</option>' +
               (p.bindingIssues?.some(item => item.field === 'personalPluginKey') ? '<option value="__waz_unresolved__" selected>请确认指定的工作方法</option>' :
                 p.personalPluginKey && !method ? '<option value="' + esc(p.personalPluginKey) + '" selected>已指定的插件不可用 · 请重新选择</option>' : '') +
               state.methods.map(item => '<option value="' + esc(item.key) + '"' +
                 (String(item.key) === String(p.personalPluginKey || '') ? ' selected' : '') +
                 '>' + esc(item.name) + ' · v' + esc(item.version || '') + '</option>').join('') +
-            '</select></label>' + global.WorkAutomationView.methodFieldsHtml(method, p.pluginInputs || {}) +
+            '</select></label></div>' + global.WorkAutomationView.methodFieldsHtml(method, p.pluginInputs || {}) +
 
 
           '<div class="waz-capabilities" hidden style="display:none"><span>本次运行需要的能力</span><div>' +
@@ -488,7 +483,7 @@
             '><span>工程任务按研发流程执行<small>未指定工程时不启用</small></span></label>' +
         '</section>' +
         '</div><div class="waz-actions"><div class="waz-feedback"><div class="waz-probe waiting" id="wazProbe"><i></i><div><b>正在检查执行条件…</b>' +
-          '<small>Agent、Runner、权限和插件版本会在这里一次说清</small></div></div>' +
+          '<small></small></div></div>' +
         '<div class="waz-error" id="wazError" role="alert"' + (error ? '' : ' hidden') + '>' +
           esc(error || '') + '</div></div>' +
         '<footer class="waz-foot">' + (p.sourceRequirement?.id
@@ -496,7 +491,7 @@
             '<small data-user-content>' + esc(p.sourceRequirement.title || '') + ' · v' + esc(p.sourceRequirement.requirementVersion) + '</small></span></div>'
           : '<label class="waz-enable"><input type="checkbox" name="enabled"' +
             (p.enabled !== false ? ' checked' : '') + '><span><b>' + (state.createdId ? '启用自动化' : '创建后启用') + '</b>' +
-            '<small>关闭时只保存，不会自动运行</small></span></label>') +
+            '</span></label>') +
           '<div class="waz-foot-buttons"><button type="button" class="waz-button" data-waz-cancel>' +
           (state.card?.snapshot.editBase ? '取消修改' : '取消') + '</button><button type="button" class="waz-button primary" data-waz-save' +
           ((state.agents.length || p.assigneeId) ? '' : ' disabled') + '>' + (state.card?.snapshot.editBase ? '保存修改' : p.sourceRequirement?.id ? '保存草稿' : '创建自动化') + '</button></div></footer>' +
@@ -528,6 +523,7 @@
     const zone = (state.proposal && state.proposal.timeZone) || timeZone();
     const dateInput = String(data.get('runAt') || '');
     const priorDate = state.proposal?.runAt || '';
+    const sameMinute = dateInput && dateInput === global.ScheduleTiming.localMinute(priorDate, zone);
     const selectedCaps = [...form.querySelectorAll('input[name=capability]:checked')]
       .filter(input => !input.disabled)
       .map(input => input.value);
@@ -540,11 +536,18 @@
     // keep the already selected value in the draft so a refresh/re-render does
     // not silently clear the model before the schedule is saved.
     const submittedModel = data.get('modelName');
+    // A date input renders an impossible inferred date as empty. Keep the
+    // validation error until a real date is supplied instead of dropping the bound.
+    function rangeDate(field) {
+      const prior = state.proposal?.[field];
+      return String(data.get(field) || (prior && !global.ScheduleTiming.cleanDate(prior) ? prior : ''));
+    }
     const modelName = submittedModel == null
       ? (state.proposal && state.proposal.modelName) : submittedModel;
     return {
       timingIssue: state.proposal?.timingIssue || '',
-      relativeTiming: every === 'once' && dateInput === global.ScheduleTiming.localInput(priorDate,zone)
+      midnightCalendar: state.proposal?.midnightCalendar || null,
+      relativeTiming: every === 'once' && sameMinute
         ? state.proposal?.relativeTiming || null : null,
       needsTask: state.proposal?.needsTask === true,
       bindingIssues: (state.proposal?.bindingIssues || []).slice(),
@@ -552,7 +555,7 @@
       note: fullText(data.get('note')),
       acceptance: checks(data.get('acceptance')),
       every,
-      runAt: every !== 'once' ? null : dateInput === global.ScheduleTiming.localInput(priorDate,zone)
+      runAt: every !== 'once' ? null : sameMinute
         ? priorDate : global.ScheduleTiming.fromLocalInput(dateInput,zone),
       atHour: every === 'hourly' ? 0 : global.ScheduleTiming.clockNumber(clock[0]),
       atMinute: global.ScheduleTiming.clockNumber(every === 'hourly' ? data.get('minute') : clock[1]),
@@ -561,8 +564,8 @@
       monthDays: selectedMonthDays,
       monthDayPolicy: (typeof form.querySelector === 'function' &&
         form.querySelector('input[name=monthDayPolicy]:checked')) ? 'last_day' : 'skip',
-      startDate: String(data.get('startDate') || ''),
-      endDate: String(data.get('endDate') || ''),
+      startDate: rangeDate('startDate'),
+      endDate: rangeDate('endDate'),
       ...(every === 'custom' ? { customRule: fullText(data.get('customRule')).trim() } : {}),
       timeZone: (state.proposal && state.proposal.timeZone) || timeZone(),
       assigneeId: cut(data.get('assigneeId'), 160),
@@ -662,10 +665,7 @@
     const zone = form.querySelector('[data-waz-zone]');
     if (zone) zone.textContent = every === 'custom'
       ? global.ScheduleTiming.customTimeZone(currentTiming.customRule, currentTiming.timeZone) : currentTiming.timeZone;
-    if (hint) hint.toggleAttribute?.('data-custom-preview', every === 'custom');
-    if (hint) hint.textContent = timingError ? tx(timingError) : every === 'once'
-      ? tx('在指定时间触发一次，失败按下方设置重试')
-      : tx('保存后由服务端计算下一次执行时间');
+    if (hint) hint.textContent = timingError ? tx(timingError) : '';
     const flow = form.elements.flow;
     if (flow) {
       flow.disabled = !form.elements.repoId.value;
@@ -915,6 +915,8 @@
     if (['every','runAt','clock','clockHour','clockMinute','minute','customRule'].includes(event.target.name)) {
       state.proposal.timingIssue = ''; state.proposal.relativeTiming = null;
     }
+    if (['every','runAt','clock','clockHour','clockMinute','minute','weekdays','monthDays','monthDayPolicy',
+      'startDate','endDate','customRule'].includes(event.target.name)) state.proposal.midnightCalendar = null;
     if (event.target.name === 'note') state.proposal.needsTask = global.WorkAutomationBindings.taskNeedsDetail(event.target.value);
     if (!state.card?.snapshot.uncertain) updateCard({ phase: 'draft', error: '' });
     if (event.type === 'change' && ['personalPluginKey', 'repoId', 'assigneeId', 'every'].includes(event.target.name)) {
@@ -1009,7 +1011,7 @@
     if (!timingEdit && global.SoduWorkAPI && SoduWorkAPI.parseTaskText) {
       parsed = await SoduWorkAPI.parseTaskText(
         global.WorkAutomationBindings.refinePrompt(before, change), model, state.seed.attachmentContext || [],
-        global.WorkAutomationBindings.candidates(state, directive)).catch(() => ({}));
+        global.WorkAutomationBindings.candidates(state, global.ScheduleTiming.clarifyLeadingDelay(directive))).catch(() => ({}));
     }
     const current = () => state.layer === layer && seq === state.seq && !state.saved && !state.saving;
     if (ticket ? !cards().valid(ticket) : !current()) return false;

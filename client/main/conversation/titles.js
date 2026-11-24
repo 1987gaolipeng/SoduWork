@@ -24,7 +24,8 @@ function read(app, id) {
   let record = null;
   try {
     const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (saved.id === id) record = { title: normalize(saved.title), titleUpdatedAt: Number(saved.titleUpdatedAt) || 0 };
+    if (saved.id === id) record = { title: normalize(saved.title), titleUpdatedAt: Number(saved.titleUpdatedAt) || 0,
+      ...(saved.generatedTitle ? { generatedTitle: normalize(saved.generatedTitle) } : {}) };
   } catch (error) {
     if (error.code !== 'ENOENT') console.warn('[conversation-titles] Could not load saved name:', error.message);
   }
@@ -34,12 +35,15 @@ function read(app, id) {
 function decorate(app, row) {
   if (!row) return row;
   const saved = read(app, row.id || row.sessionId);
-  return saved ? { ...row, ...saved, customTitle: saved.title } : row;
+  return saved ? { ...row, title: saved.title, titleUpdatedAt: saved.titleUpdatedAt, customTitle: saved.title } : row;
 }
-function save(app, id, rawTitle) {
+function save(app, id, rawTitle, { automatic = false } = {}) {
   const file = location(app, id), title = normalize(rawTitle);
   const previous = read(app, id);
-  const record = { id, title, titleUpdatedAt: Math.max(Date.now(), (previous?.titleUpdatedAt || 0) + 1) };
+  if (automatic && previous) return null;
+  const generatedTitle = automatic ? title : previous?.generatedTitle;
+  const record = { id, title, titleUpdatedAt: Math.max(Date.now(), (previous?.titleUpdatedAt || 0) + 1),
+    ...(generatedTitle ? { generatedTitle } : {}) };
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temporary = file + '.' + crypto.randomUUID() + '.tmp';
   try {
@@ -49,7 +53,7 @@ function save(app, id, rawTitle) {
     if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
   }
   caches.set(file, record);
-  return { ...record, customTitle: title };
+  return { id, title, titleUpdatedAt: record.titleUpdatedAt, customTitle: title };
 }
 function remove(app, id) {
   const file = location(app, id);
@@ -57,4 +61,4 @@ function remove(app, id) {
   try { fs.unlinkSync(file); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
 }
-module.exports = { decorate, save, remove, normalize };
+module.exports = { decorate, save, remove, normalize, read };

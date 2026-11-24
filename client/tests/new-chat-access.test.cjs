@@ -33,6 +33,7 @@ function fixture(options = {}) {
   const context = vm.createContext({
     _sharedHistory: null,
     _cloudHandoff: { observe() {} }, _sessionOwners: null, _discardRenderer() {},
+    firstTurnTitle: { enroll() {} },
     skillTurn: require('../main/pi-session/skill-turn'), sendIdentityOf: null,
     app: options.app || { getPath: () => emptyStorage }, path, newChatAccess: consent,
     identityOf: async () => options.identity || defaultIdentity,

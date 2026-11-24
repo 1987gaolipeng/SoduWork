@@ -9,6 +9,8 @@ FastAPI + SQLAlchemy(async) + PostgreSQL（本地开发可回退 SQLite）。
 
 模块职责与状态归属见[首版范围](../docs/release-scope.md)。
 
+首次对话清单根据可用模型目录和当前管理员最近一次桌面端报告显示进度。设备上报底座和模型选择是否就绪。五分钟内未收到新报告时，Hub 会将这两步显示为等待桌面端报告。
+
 ## 快速开始（本地 SQLite，零配置）
 
 ```bash
@@ -21,6 +23,37 @@ python3 -m venv .venv
 ```
 
 打开 http://127.0.0.1:9080/docs 查看 API 文档，健康检查为 `GET /healthz`。
+
+### 自动化只读查询
+
+脚本应连接配置中的 Hub 地址。以下本地开发示例使用 9080 端口。健康检查允许匿名访问。查询账号可见的项目时，通过 `POST /api/v1/admin/login` 获取该账号的访问令牌，由环境变量或 CI 密钥存储提供 `HUB_TOKEN`。账号需要 `task.view` 权限。
+
+```sh
+HUB_URL=http://127.0.0.1:9080
+curl --fail --silent --show-error "$HUB_URL/healthz"
+curl --fail --silent --show-error -H "Authorization: Bearer $HUB_TOKEN" "$HUB_URL/api/v1/admin/projects"
+```
+
+项目响应是 JSON 数组。空数组表示该账号没有可见项目。HTTP 401 表示令牌缺失、无效或已过期，HTTP 403 表示已登录账号缺少所需权限。
+
+## 排查派活排队
+
+Runner 首次接收派活时会在日志中记录执行引用和队列位置。任务排队期间，
+`GET /api/v1/tasks/{tid}/ai-status` 可返回 `runner.waitReason`。
+`resource_pressure` 表示资源准入策略暂停启动新任务。
+`execution_slot` 表示这项工作可用的执行槽已被占用。
+内存使用率达到 92%，或上报的可用内存低于 768 MiB 时，Runner 会暂停启动新任务。
+在上报的内存充足时，如果 CPU 使用率连续至少一秒保持在 95% 或以上，Runner 允许一次执行一个任务。
+采样值低于 95% 后重新计时。CPU 持续高压期间，内存保护仍然优先。
+该字段为可选项。再次查询同一任务即可看到当前等待原因或已开始执行的状态。
+
+对于直接派活，Hub 根据执行引用和准入键向原 Runner 核对持久化回执。匹配的回执或任务专属心跳会续约 90 秒，
+包括因内存压力持续排队的情况。失去确认后，租约检查会返回 `queueLeaseStatus=unconfirmed` 和
+`queueLeaseReason=no_runner_ack`。设备端 ai-status 在 `runner` 下返回这两个字段，管理端在顶层返回。
+Runner 重连会触发持久化队列核对。等待确认期间应保留原派活，以免同一任务重复执行。
+
+队列因资源压力暂停时，Runner 会定期记录 CPU 使用率、可用内存和队列深度。第二个进程尝试打开同一队列时，
+会退出并报告上次登记的持有者 PID 和 Runner 启动标识。
 
 ## 桌面本地 Runner 事件恢复
 
@@ -39,6 +72,16 @@ outbox 移除；Windows 载荷保留 DPAPI 保护，采集标记保持不变。�
 归属路由、重启恢复、归档写入中断和 Hub 事件保留。
 
 ## 受管 Pi 执行
+
+底座发现会检查有界的 npm 前缀、Homebrew 和 nvm 路径，包括未出现在桌面进程继承 PATH 中的安装。所选可执行文件的版本、Node 引擎要求和 DeepSeek 适配器元数据必须来自同一份安装，不能借用无关私有目录中的包信息。Windows Codex 发现会跳过被排除的 WindowsApps 候选并继续搜索。显式底座覆盖、托管运行时归属和原生依赖检查仍生效。只安装 DeepSeek 桌面应用不代表已安装 Runner 所需的 ACP 适配器。
+
+已识别的 npm JavaScript 底座在版本探测和正式执行时使用同一个经过校验的 Node 与包入口，启动脚本旁的 Node 不再覆盖该选择。Node 候选需满足所选包及宿主的最低版本；DeepSeek 启动预检及缓存也跟踪所选 Node 和入口。原生可执行文件及自定义 wrapper 保留显式命令。
+
+DeepSeek 原生包按所选 Node 的平台、架构和 Linux libc 校验，覆盖 Rosetta 与混合运行时安装；无法确认 Node 身份时拒绝启动。正式启动和版本探测的子进程继承所选 Node 目录，不修改 Runner 全局 PATH；Windows 带引号的 PATH 项仍保持原有优先级。
+
+模型能力报告 v3 验证合成工具结果后的流式续答，保留工具且不追加用户消息。已有 v2 工具成功结论需要重新检测，独立证据仍保留；请部署配套桌面更新。模型拒绝错误在 JSON、SSE 和传输日志中共享不透明的 `soduwork-trace` 编号；经过校验的上游请求编号仅用于关联，不参与错误分类。一般 403 的提示不再仅凭状态推断密钥权限。
+
+模型传输拒绝日志区分已识别的限流、计费错误和未分类的 429，不记录供应商响应正文。数字及 HTTP 日期格式的 `Retry-After` 通过既有 JSON/SSE 错误协议传递；超过一天的等待按一天传递，已超出桌面重试预算。计费错误不附带重试等待提示。Hub 不增加重试循环；配套桌面更新仅在既有单轮预算内遵守供应商等待时间。
 
 受管 Pi 执行为每条 Runner 执行记录绑定独立的配置与会话目录，目录位于 Runner 数据根目录下。启动及后续轮次使用同一个明确路径，不依赖继承的桌面 Pi 设置或操作系统主目录解析。模型文件只保存凭据的环境变量引用；模型配置缺失或文件发布失败时，会在 Pi 启动前停止执行。个人 Pi 与桌面本地模型配置保持不变。升级时，只允许将 Runner 记录中明确标识且工作目录匹配的原生会话复制到私有目录，原文件保持不变。已有执行历史的后续轮次必须找到原生会话，不会静默新建会话。
 
@@ -242,17 +285,33 @@ python3 e2e_runner_tls.py --output /absolute/evidence/directory
 
 ## API 概览
 
+AI 代理的图片和视频生成接口按媒体类型接收创作参数，例如图片尺寸或视频时长。模型配置的 `defaults` 优先于请求参数。供应商专用参数可以在模型目录的 `defaults` 中设置。代理会忽略未识别的请求字段。
+
+通过 `POST /api/v1/usage/events` 上报用量时，省略 `occurredAt` 表示使用 Hub 收到事件的时间。上报历史事件时可填写 ISO 8601 时间戳。没有时区偏移的时间戳按 UTC 解释。如果任一事件的时间戳无效，Hub 返回 HTTP 422，整批事件均不入账。 例如，不带偏移量的 16:30 对应北京时间次日 00:30。若要上报北京时间 16:30，请带上 `+08:00`。
+
+省略 `sourceType` 时使用 `chat`。允许的类型为 `chat`、`task`、`workflow`、`automation` 和 `system`，使用所列的小写拼写。任务和工作流上报须关联本设备拥有或当前账号获派的任务。无效类型返回 HTTP 422。每条回执均包含已入账的累计计数，以及 `created`（新建）、`updated`（计数增长）或 `duplicate`（计数没有增长）状态。
+
 - 客户端契约（设备登记 → 管理员激活 → 短期 `Device` 会话；长期设备密钥在 Hub 只存摘要）
   - `GET/POST /api/v1/tasks`、`GET/PATCH/DELETE /api/v1/tasks/{id}`
   - `POST /api/v1/tasks/batch-update`、`POST /api/v1/tasks/clear-done`（只清 done）
   - `POST /api/v1/tasks/{id}/agent/{run|retry|takeover}`
-  - `GET/PUT /api/v1/config`
+  - `GET /api/v1/config?withRevision=true` 返回当前设备设置、可写字段 `_configKeys` 和版本 `_configRevision`。向 `PUT /api/v1/config` 提交改动字段及读取时的版本。未知字段或无效值返回 422，版本过期返回 409，覆盖已有值但缺少版本返回 428。
   - `POST /api/v1/clients/enroll`（登记/心跳，激活后签发短期会话）
   - `WS /api/v1/ws?device=<设备ID>&session=<短期会话>`（实时推送）
 - 管理端
-  - `POST /api/v1/admin/login` `{user,pass}` → 短期登录 token
+  - `POST /api/v1/admin/login` `{user,pass}` → 短期登录 token。五分钟内同一账号登录失败 10 次或同一 IP 失败 30 次后，Hub 返回 HTTP 429，响应头 `Retry-After` 表示还需等待的秒数。多个 Hub 进程通过数据库共享计数，失败记录可在审计日志中按 `admin.login.failed` 查询。
   - `GET /api/v1/admin/clients`、`GET /api/v1/admin/tasks`（需 `Authorization: Bearer <token>`）
   - `POST /api/v1/admin/dispatch` `{title,...,targets:[设备ID]}` → 平台建任务下发（origin=dispatch）
+
+### 列表分页
+
+在 `/api/v1` 下，`admin/users`、`admin/orgs`、`admin/roles`、`admin/domains`、`tasks` 和 `schedules` 在省略分页参数时保留原有数组。传入 `limit`（1–200）或 `offset`（从 0 开始）即可获取 `{items, total}`。只传偏移量时每页默认 50 条。总数按当前身份可见的记录计算，偏移量超过末尾会返回空页。
+
+`GET /api/v1/admin/ai-schedules/{sid}/runs` 默认返回最近 20 条运行记录。整数参数 `limit` 可取 1 至 200，越界返回 HTTP 422。
+
+需要固定响应结构时，使用 `GET /api/v1/admin/client-inventory`。每次响应都包含 `items`、`total`、`counts`、`page`、`pageSize` 和 `offset`。可使用 `page` 和 `pageSize`（1–100，默认 25），或使用 `offset` 和 `limit`。旧的 `admin/clients` 调用仍可获取原有数组，也可通过 `paged=1` 获取对象。
+
+资料库同样支持可选的条数和偏移量，先排列文件夹，再排列文件。返回体保留独立的 `folders` 和 `items` 数组，分页时提供两者合计的 `total`。审批和交付列表接受正整数条数和从 0 开始的偏移量。
 
 ## 客户端接入
 
@@ -333,3 +392,7 @@ python3 e2e_dsh_private_probe.py \
 ```
 
 此显式检查使用生产私有探测作业和 ACP 桥接、实际安装的适配器与运行时，以及合成本机回环模型。先重现旧安装路径错误，再要求修正路径后出现真实模型请求并由 Agent 返回预期响应。检查使用可清理的用户目录、状态和临时目录，阻止 Node 连接非回环地址，并清理自身子进程；不会安装或更新依赖，也不使用真实凭据，不覆盖桌面界面、生产 Hub 或模型服务行为。由于需要已有原生安装，请在离线质量门禁之外单独运行。
+
+## 删除模型服务
+
+持有 `integration.manage` 权限时，通过 `GET /api/v1/admin/model-providers/{id}/deletion-impact` 获取服务版本、影响清单版本、子模型及可见的已保存模型选择。成员名称需要 `user.manage`，需求标题需要 `task.view`，两者均遵守部门可见范围。调用已有的 `DELETE /api/v1/admin/model-providers/{id}` 时，以 `expectedRevision`、`expectedImpact` 传入预览返回的版本，另以 `confirmId` 传入完整服务 ID。旧版请求未预览会返回 HTTP 428。遇到 HTTP 409 时，应重新获取清单并再次确认。内置服务禁止删除。

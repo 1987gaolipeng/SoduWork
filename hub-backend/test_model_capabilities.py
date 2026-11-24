@@ -147,7 +147,15 @@ class CapabilityTests(IsolatedDatabase):
                 status, data = "401 Unauthorized", b'{"error":{"message":"company-private secret internal response"}}'
             elif body.get("stream"):
                 content_type = "text/event-stream"
-                if body.get("tools"):
+                tool_result = next((row for row in body["messages"] if row["role"] == "tool"), None)
+                if tool_result:
+                    if self.mode == "receipt-requires-choice" and "tool_choice" not in body:
+                        status, content_type = "403 Forbidden", "application/json"
+                        data = b'{"error":{"message":"synthetic receipt policy refusal"}}'
+                    else:
+                        data = ("data: " + json.dumps({"choices": [{"index": 0, "delta": {
+                            "content": tool_result["content"]}, "finish_reason": "stop"}]}) + "\n\ndata: [DONE]\n\n").encode()
+                elif body.get("tools"):
                     if self.mode == "json-tools-only":
                         status, content_type = "400 Bad Request", "application/json"
                         data = b'{"error":{"message":"streamed tools request not accepted"}}'
@@ -208,8 +216,8 @@ class CapabilityTests(IsolatedDatabase):
         tool_request = next(body for _, body in self.requests if body.get("tools"))
         receipt_request = next(body for _, body in self.requests if any(row["role"] == "tool" for row in body["messages"]))
         self.assertTrue(tool_request["stream"])
-        self.assertFalse(receipt_request["stream"])
-        self.assertNotIn("tools", receipt_request)
+        self.assertTrue(receipt_request["stream"])
+        self.assertEqual(receipt_request["tools"], tool_request["tools"])
         self.assertNotIn("tool_choice", receipt_request)
         self.assertTrue(all("Bearer alice-private" in headers for headers, _ in self.requests))
         self.assertEqual(result["capabilityProfile"]["imageInput"]["source"], "verified")
@@ -244,6 +252,19 @@ class CapabilityTests(IsolatedDatabase):
             self.assertEqual(events[0].action, "model.capability_check")
             self.assertEqual(events[0].target_id, "p:model")
             self.assertEqual(events[0].detail, {"checks": {"connection": "passed"}})
+
+    async def test_single_check_reports_its_own_success_and_retains_other_evidence(self):
+        self.mode = "wrong-image"
+        first = (await self.check(checks=["connection", "imageInput"])).json()
+        self.assertFalse(first["ok"])
+        self.assertEqual(first["checks"]["imageInput"]["status"], "inconclusive")
+
+        response = await self.check(checks=["connection"])
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertEqual(result["checks"]["connection"]["status"], "passed")
+        self.assertEqual(result["checks"]["imageInput"], first["checks"]["imageInput"])
+        self.assertTrue(result["ok"])
 
     async def test_admin_recheck_repairs_and_persists_cached_named_tool_choice(self):
         first = await self.check("admin", ["connection"])
@@ -300,6 +321,17 @@ class CapabilityTests(IsolatedDatabase):
         self.assertEqual(fresh.json()["checks"]["connection"]["status"], "passed")
         self.assertEqual(len(self.requests), 1)
 
+    async def test_receipt_probe_uses_runtime_default_choice_and_keeps_independent_stream_check(self):
+        self.mode = "receipt-requires-choice"
+        response = await self.check(checks=["connection", "toolCalling", "streaming"])
+        self.assertEqual(response.status_code, 200)
+        checks = response.json()["checks"]
+        self.assertEqual(checks["connection"]["status"], "passed")
+        self.assertEqual(checks["streaming"]["status"], "passed")
+        self.assertEqual(checks["toolCalling"]["status"], "inconclusive")
+        self.assertEqual(checks["toolCalling"]["code"], "request_rejected")
+        self.assertEqual(checks["toolCalling"]["stage"], "tool_result")
+
     async def test_json_only_tools_do_not_enable_streamed_tool_runtime(self):
         self.mode = "json-tools-only"
         response = await self.check(checks=["toolCalling", "streaming"])
@@ -353,12 +385,16 @@ class CapabilityTests(IsolatedDatabase):
             self.assertIsNone(row["capabilityCheck"])
             self.assertEqual(row["capabilityProfile"]["imageInput"]["state"], "unknown")
 
-    async def test_timeout_unsupported_and_bad_answer_have_distinct_truthful_results(self):
+    async def test_timeout_keeps_capability_unconfirmed(self):
         self.mode = "timeout"
         with patch.object(probe, "TIMEOUT", .15):
             result = (await self.check(checks=["imageInput"])).json()
         self.assertEqual(result["checks"]["imageInput"]["status"], "inconclusive")
+        self.assertEqual(result["checks"]["imageInput"]["code"], "timeout")
         self.assertEqual(result["capabilityProfile"]["imageInput"]["state"], "unknown")
+
+    async def test_unsupported_and_bad_answer_have_distinct_truthful_results(self):
+        # Keep timeout cancellation on a separate listener from response checks.
         self.mode = "wrong-image"
         result = (await self.check(checks=["imageInput"])).json()
         self.assertEqual(result["checks"]["imageInput"]["code"], "expected_output_missing")
@@ -595,7 +631,7 @@ class CapabilityTests(IsolatedDatabase):
         self.assertEqual(before["capabilityCheck"]["checks"]["toolCalling"]["code"], "legacy_recheck_required")
         self.assertEqual(before["capabilityProfile"]["toolCalling"]["state"], "unknown")
         result = (await self.check(checks=["connection"])).json()
-        self.assertEqual(result["reportVersion"], 2)
+        self.assertEqual(result["reportVersion"], 3)
         self.assertEqual(result["verifiedChecks"]["imageInput"]["status"], "passed")
         self.assertEqual(result["imageRouting"], "native")
         self.assertNotIn("toolCalling", result["verifiedChecks"])

@@ -39,13 +39,14 @@ async function run(conf, requested = CHECKS, options = {}) {
   const signal = AbortSignal.any([total, options.signal].filter(Boolean));
   let calls = 0, negotiations = 0, reasoningStreamReported = false, blocked = false;
   let client, activeSignal = signal;
-  async function execute(messages, stream = false, withTools = false) {
+  async function execute(messages, stream = false, withTools = false, continuation = false) {
     while (true) {
       if (calls >= 7) throw Object.assign(Error('Request budget exhausted'), { code: 'REQUEST_BUDGET' });
       signal.throwIfAborted(); calls++;
       const operationSignal = AbortSignal.any([signal, AbortSignal.timeout(options.timeoutMs || 30000)]);
       activeSignal = operationSignal;
       const body = request.payload(conf, state, messages, stream, withTools ? tools : undefined);
+      if (continuation) delete body.tool_choice;
       try {
         const data = await client.chat.completions.create(body, { signal: operationSignal }).asResponse();
         const response = await collect(data, stream, withTools, operationSignal);
@@ -85,7 +86,7 @@ async function run(conf, requested = CHECKS, options = {}) {
           const challenge = (options.challenge || image.challenge)(); expected = challenge.expected;
           content = [{ type: 'text', text: 'Read the six digits in this image. Reply only with those digits.' },
             { type: 'image_url', image_url: { url: challenge.url } }];
-        } else if (check === 'toolCalling') content = 'Call soduwork_capability_echo with value ' + expected + '. This is a capability check.';
+        } else if (check === 'toolCalling') content = 'Call soduwork_capability_echo with value ' + expected + '. This is a capability check. After the tool responds, reply only with the tool result value.';
         const messages = [{ role: 'user', content }];
         const response = await execute(messages, check === 'streaming' || check === 'toolCalling', check === 'toolCalling');
         let passed = check === 'imageInput' ? typeof response.message.content === 'string' && response.message.content.trim() === expected
@@ -105,10 +106,10 @@ async function run(conf, requested = CHECKS, options = {}) {
               argumentsValue.value !== expected || Object.keys(argumentsValue).length !== 1) invalidTool('tool_arguments_invalid');
           stage = 'tool_result';
           const value = nonce();
-          const followup = await execute([...messages, response.message, { role: 'tool', tool_call_id: call.id, content: value },
-            { role: 'user', content: 'Reply only with the tool result value.' }]);
+          // Match runtime continuation: streamed, tools retained, receipt last.
+          const followup = await execute([...messages, response.message, { role: 'tool', tool_call_id: call.id, content: value }], true, true, true);
           if (followup.finish !== 'stop') invalidTool('tool_result_finish_reason_mismatch');
-          if (followup.message.tool_calls?.length || followup.message.function_call || followup.message.content?.trim() !== value) invalidTool('tool_receipt_mismatch');
+          if (followup.legacyCallObserved || followup.message.tool_calls?.length || followup.message.function_call || followup.message.content?.trim() !== value) invalidTool('tool_receipt_mismatch');
           confirmedCompatibility.toolChoice = state.compatibility.toolChoice;
           passed = true;
         }
@@ -126,7 +127,7 @@ async function run(conf, requested = CHECKS, options = {}) {
     checks[check] = { ...result, stage, checkedAt };
     options.progress?.({ check, ...checks[check] });
   }
-  return { reportVersion: 2, apiFamily: API_FAMILY, checks, checkedAt: stamp(), reasoningStreamReported,
+  return { reportVersion: 3, apiFamily: API_FAMILY, checks, checkedAt: stamp(), reasoningStreamReported,
     compatibility: confirmedCompatibility, requestCount: calls };
 }
 module.exports = { run };

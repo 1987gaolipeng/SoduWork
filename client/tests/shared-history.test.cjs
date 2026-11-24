@@ -413,3 +413,37 @@ test('catalog scope retains persisted protection without disclosing protected ID
   assert.deepEqual(denied.localCatalog.items, [], 'Catalog IDs and aliases obey the full row protection boundary');
   assert.equal((await f.store.list({ limit: 20 })).items.length, signals.length, 'Filtering does not delete protected records');
 });
+
+test('observing an unstarted empty Runner draft does not persist an untitled replica until a turn starts', async t => {
+  const f = setup(t), actor = identity();
+  const listeners = new Set();
+  const state = { started: false, title: '', messages: [], status: 'idle', inFlight: false };
+  const handle = {
+    sessionId: 'runner-unused-draft',
+    ref: 'chat-runner-unused',
+    adapterId: 'qwen',
+    inFlight: () => state.inFlight,
+    snapshot: () => ({ status: state.status, messages: state.messages.slice(), tools: [] }),
+    historyRow: () => ({
+      id: 'runner-unused-draft', ref: 'chat-runner-unused', adapterId: 'qwen',
+      title: state.title, nativeSessionStarted: state.started, usedHarnesses: state.started ? ['qwen'] : [],
+      cwd: f.root, at: 1000, count: state.messages.length, state: state.status,
+    }),
+    on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    async close() { listeners.clear(); return true; },
+  };
+  f.history.observe(handle, actor);
+  await f.history.capture(handle, actor);
+  assert.equal(await f.store.get('runner-unused-draft'), null);
+  assert.equal((await f.history.list()).items.length, 0);
+
+  state.started = true;
+  state.title = 'First runner prompt';
+  state.messages.push({ role: 'user', text: 'First runner prompt' });
+  await f.history.capture(handle, actor);
+  const saved = await f.store.get('runner-unused-draft');
+  assert.equal(saved?.id, 'runner-unused-draft');
+  assert.equal(saved?.title, 'First runner prompt');
+  assert.equal(saved?.count, 1);
+  await handle.close();
+});

@@ -12,9 +12,15 @@
 
 **A chat ends with an answer. A SoduWork request ends when the person who asked signs off.**
 
+<a href="https://trendshift.io/repositories/350333?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-350333" target="_blank" rel="noopener noreferrer">
+  <img src="https://trendshift.io/api/badge/trendshift/repositories/350333/daily" alt="mdiri-ai/SoduWork — #1 GitHub Trending Repository" width="250" height="55" />
+</a>
+
 **Multi-harness · Multi-agent · Self-hosted**
 
 Works with Pi · OpenCode · DeepSeek Harness · Qwen Code · Kimi Code · Codex Harness · Codex
+
+**Run from source**
 
 ```sh
 git clone https://github.com/mdiri-ai/SoduWork
@@ -27,7 +33,9 @@ cd SoduWork
 | Windows PowerShell | `.\start.cmd --desktop` |
 | Windows Command Prompt | `start.cmd --desktop` |
 
-[Website](https://soduwork.ai) | [Live demo](https://soduwork.ai) | [Documentation](docs/README.md) | [Docs website](https://dev.soduwork.ai) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
+For source setup, we recommend [Python 3.12.x](https://www.python.org/downloads/) and [Node.js 22.x](https://nodejs.org/) (22.19.0 or later in that series). The clone command uses [Git](https://git-scm.com/downloads).
+
+**[Windows desktop app](https://github.com/mdiri-ai/SoduWork/releases/latest)** | [Website](https://soduwork.ai) | [Live demo](https://soduwork.ai) | [Documentation](docs/README.md) | [Docs website](https://dev.soduwork.ai) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/mdiri-ai/SoduWork)](https://github.com/mdiri-ai/SoduWork/releases)
@@ -90,9 +98,11 @@ cd SoduWork
 
 > SoduWork is in public beta. Try it and tell us what you think, and evaluate it before using it in production.
 
-You need Python 3.12+, Node.js 22.19+ and Git.
+Clone the repository with Git or extract a source archive. See the [source setup guide](docs/getting-started.en.md) for prerequisites.
 
-From the cloned repository, run `sh start.sh --desktop` on macOS/Linux, `.\start.cmd --desktop` in Windows PowerShell, or `start.cmd --desktop` in Command Prompt.
+From the repository root, run `sh start.sh --desktop` on macOS/Linux, `.\start.cmd --desktop` in Windows PowerShell, or `start.cmd --desktop` in Command Prompt.
+
+If Windows says a command “is not recognized”, check which command it names. For `git`, `python` or `node`, check that the corresponding tool is installed and on `PATH`, then reopen Command Prompt. See the [source setup guide](docs/getting-started.en.md).
 
 The first run installs dependencies, then starts the Hub, the admin console and the desktop client on this computer. Set a password for the `admin` account (12–128 characters) when asked. Then add a model provider under **Model catalog** in the admin console, start a chat in the client and try a small task. Pi is built in.
 
@@ -188,7 +198,7 @@ Who asked, who did the work, which plugin ran and who approved it is always on r
 A harness is the agent runtime that does the work. It is not the model. SoduWork connects every harness through one adapter interface, so issues, plugins and review don't depend on any single harness. Switch harnesses mid-conversation and keep the history and the working folder. Programs that support the Agent Client Protocol (ACP) can be added with a catalog declaration.
 
 <details>
-<summary>Supported harnesses (9)</summary>
+<summary>Supported harnesses (7)</summary>
 
 | Harness | Models | How it connects |
 | --- | --- | --- |

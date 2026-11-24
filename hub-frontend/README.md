@@ -8,9 +8,39 @@ React + Vite application for Hub administration. Entry point: `src/main.jsx`; ro
 
 Manage organizations, accounts, clients, execution networks, models, capabilities, tasks, approvals, plugins, and release configuration. Hub enforces authorization; hiding a button is not an access check.
 
+Copy a management page's address to share it or open it in another tab. For example, `/#/identity` opens Identity for accounts with access. Use the browser's Back and Forward buttons to revisit pages. On the Users page, reloading restores the current administrator's search and department filters in that tab. Copied links open the page with fresh filters.
+
+Projects, registered repositories, departments and professional profiles open in the business view. New records inherit a test designation from the creating account or parent record. After an upgrade, review unclassified records by keyword, select up to 200 matching entries and confirm their names before changing the source or archiving them. Archived entries can be restored from the archived view. The user editor offers active business and unclassified profiles available to the selected department.
+
 The model catalog starts with a compact service/model and live-load summary. Expand the overview for configuration, hourly metrics and request distribution; service and concurrency actions stay available while it is collapsed. Enabled services stay ahead of disabled ones, with custom services first within each group. A newly created service is temporarily brought into view; reopening restores that stable group order.
 
+Before deleting a custom model service, review its model list and the visible members and open issues with matching shared-model selections. Model selections stored by name can match more than one service. Enter the exact service ID to delete it. A changed preview requires confirmation again.
+
 Service cards adapt from one to four columns according to the available content width. View opens model details in a dialog without resizing or rearranging the service grid. Add, discover and configure actions remain visible; enable/disable and deletion are in the More popover, with the existing deletion confirmation retained.
+
+## Interface language
+
+A saved language takes precedence over the first supported browser preference, with English as the final fallback. A Traditional Chinese preference currently uses Simplified Chinese and shows a notice only when that preference supplied the effective fallback. Choosing any supported language, including the displayed Simplified Chinese option, saves an explicit choice and clears the notice. Reloading respects that choice. Reading an existing profile does not rewrite its stored language tags or other settings.
+
+## Handling approvals and failed runs
+
+In Operations, open the pending human review count to see the requests in your scope. The queue shows how long each request has waited and, when your role allows, its requirement, version and remaining reviewers. A request is marked overdue at its deadline or after 24 hours if it has no deadline. An assigned reviewer can vote or transfer an eligible assignment with permission for that gate. Request and requirement creators with approval permission can withdraw pending requests. Super administrators can manage withdrawals and transfers. Withdrawing a request stops the linked gate and requires a fresh approval before work can continue. Delivery acceptance stays with the requirement creator.
+
+Open a recent failure to inspect its requirement or the failed node's logs. After correcting the cause, operators with run permission can retry an eligible node. AI nodes using the shared model gateway can retry with another available organization model. The original attempt stays in the run history.
+
+## Setting up your first chat
+
+Administrators with integration management access can open the **First chat checklist** on the governance overview. Connect a model service, then select the service to add or discover a chat model. The last two links open the desktop runtime and model settings. Sign in to the desktop with the same account so its readiness appears here. Choose **Check again** to refresh progress. **Skip checklist** hides it for your account in this browser, and **Show first chat checklist** brings it back.
+
+## Reviewing Skill access
+
+In the capability catalog, bundled Skills show a summary in the interface language. Expand a summary to read the author's original description. Use the switch to stage a policy change. **Save access policy** lists the Skills to add and remove. It estimates the impact from active devices' Skill selections and their owners' departments. A device matching several changes counts once. Confirm to apply the policy on the next execution, or cancel to return to the draft.
+
+## Investigating usage and cost
+
+On **Usage and Cost**, open the anomaly count to see the original record IDs and exact token counts, including records older than the latest 30. The dashboard flags daily ledger records above one billion tokens. Exclude those records to compare the remaining trend and usage by scenario.
+
+Open the unpriced records to check the affected models. Enter the highest applicable provider rate in USD per million tokens to estimate the cost of that usage. With a budget for the selected period, the calculator shows the share that priced USD usage and the estimated amount would consume together. The calculation is local to the page.
 
 ## Automation template dates
 

@@ -169,6 +169,86 @@ class UsageAccountingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['costQuality']['unknown'], 1)
         self.assertEqual(result['costQuality']['otherCurrency'], 1)
 
+    async def test_first_estimated_receipt_is_visible_until_better_evidence_arrives(self):
+        await self.report(10, cost=0.25, quality='estimated')
+        initial = await analytics.overview(self.session)
+        self.assertEqual(initial['recent'][0]['quality'], 'estimated')
+        self.assertEqual(initial['costQuality']['estimatedUsageMicrousd'], 250_000)
+        self.assertEqual(initial['summary']['costMicrousd'], 250_000)
+        await self.report(10, cost=0.25, quality='reconciled')
+        await self.report(10, cost=0.25, quality='estimated')
+        final = await analytics.overview(self.session)
+        self.assertEqual(final['recent'][0]['quality'], 'reconciled')
+        self.assertEqual(final['costQuality']['estimatedUsageUsd'], 0)
+        self.assertEqual(final['summary']['costMicrousd'], 250_000)
+
+    async def test_historical_anomalies_and_unpriced_cost_are_scoped_and_pageable(self):
+        now = datetime.now(timezone.utc)
+        threshold = 1_000_000_000
+        huge = 10**18 + 1
+
+        facts = []
+        def fact(key, tokens, days_old=0, owner=self.user.id, quality='reported',
+                 cost=None, currency='USD', cost_known=None):
+            at = now - timedelta(days=days_old)
+            dimensions = dict(billing_user_id=owner, source_type='chat', agent_key='fixture',
+                              occurred_at=at, total_tokens=tokens, input_tokens=tokens,
+                              cost_microusd=cost or 0, currency=currency)
+            self.session.add(models.AIUsageEvent(id=key, idempotency_key=key, source_id=key,
+                                                  quality=quality, **dimensions))
+            facts.append(models.AIUsageDaily(usage_event_id=key,
+                day_key=at.astimezone(timezone(timedelta(hours=8))).date().isoformat(),
+                cost_known=(cost is not None if cost_known is None else cost_known), **dimensions))
+
+        # Insert historical facts directly. Today's reporting endpoint rejects these counters.
+        for i in range(31):
+            fact(f'anomaly-{i}', huge, days_old=3)
+        for i in range(30):
+            fact(f'normal-{i}', 1, cost=0)
+        fact('boundary', threshold, cost=2, quality='estimated')
+        fact('other-currency', 1, currency='CNY', cost=4)
+        fact('unknown-cost', 2, cost=42, cost_known=False)
+        fact('older', huge, days_old=45)
+        fact('foreign', huge, owner='other-owner')
+        await self.session.flush()
+        self.session.add_all(facts)
+        await self.session.commit()
+
+        scope = dict(user_ids={self.user.id}, agent_key='fixture', source_type='chat')
+        report = await analytics.overview(self.session, **scope)
+        self.assertEqual(report['anomalies'], {'records': 31, 'tokenLimit': threshold})
+        self.assertTrue(all(not row['anomalous'] for row in report['recent']))
+        self.assertEqual(report['costQuality']['knownUsd'], 31)
+        self.assertEqual(report['costQuality']['knownMicrousd'], 2)
+        self.assertEqual(report['costQuality']['estimatedUsageUsd'], 1)
+        self.assertEqual(report['costQuality']['estimatedUsageMicrousd'], 2)
+        self.assertEqual(report['costQuality']['knownOtherCurrency'], 1)
+        self.assertEqual(report['costQuality']['unknown'], 32)
+        self.assertEqual(report['costQuality']['unknownTokens'], str(31 * huge + 2))
+        self.assertEqual(report['costQuality']['unknownAnomalous'], 31)
+        for bucket in ['trend', 'bySource', 'byAgent', 'users']:
+            self.assertEqual(sum(row['tokens'] for row in report[bucket]), 31 * huge + threshold + 33)
+            self.assertEqual(sum(row['costMicrousd'] for row in report[bucket]), 2)
+
+        first = await analytics.overview(self.session, detail='anomalous', **scope)
+        second = await analytics.overview(self.session, detail='anomalous', page=2, **scope)
+        rows = first['recent'] + second['recent']
+        self.assertEqual(second['detailPage'], {'page': 2, 'pageSize': 30, 'total': 31})
+        self.assertEqual({row['sourceId'] for row in rows}, {f'anomaly-{i}' for i in range(31)})
+        self.assertTrue(all(row['anomalous'] and row['tokensExact'] == str(huge) and row['eventId'] for row in rows))
+
+        clean = await analytics.overview(self.session, exclude_anomalies=True, detail='unpriced', **scope)
+        self.assertEqual(clean['summary']['tokens'], threshold + 33)
+        self.assertEqual(clean['summary']['costMicrousd'], 2)
+        self.assertEqual(clean['detailPage']['total'], 32)
+        self.assertEqual(clean['anomalies'], report['anomalies'])
+        self.assertEqual(clean['costQuality'], report['costQuality'])
+        self.assertTrue(all(not row['costKnown'] and row['costMicrousd'] == 0 for row in clean['recent']))
+
+        empty = await analytics.overview(self.session, user_ids=set(), detail='anomalous')
+        self.assertEqual(empty['anomalies']['records'], 0)
+        self.assertEqual(empty['recent'], [])
+
     def test_exact_integer_counters_and_decimal_half_up_costs(self):
         self.assertEqual(ledger.normalize_usage({'total': 9007199254740993})['total_tokens'], 9007199254740993)
         self.assertEqual(ledger.normalize_usage({'input': 2, 'cost': 0.0000015})['cost_microusd'], 2)

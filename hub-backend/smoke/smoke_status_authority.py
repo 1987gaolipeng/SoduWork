@@ -6,6 +6,9 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from datetime import datetime, timezone
+
+from sqlalchemy import select
 
 _TEMP = tempfile.TemporaryDirectory(prefix="soduwork-status-authority-smoke-")
 DB = str(Path(_TEMP.name) / "test.db")
@@ -118,6 +121,69 @@ async def main():
         chk("③ run 结束后客户端能改状态了",
             await task_status.mark(s, t_run, "done", why="测试") and t_run.status == "done")
         await s.rollback()
+
+    # Existing completed records must not gain a reset event when admission fails.
+    async with SessionLocal() as s:
+        completed = models.Task(id="t-reset-plain", title="Completed record", status="done", owner_client_id="c-sa")
+        managed = models.Task(id="t-reset-managed", title="Managed completed record", status="done", owner_client_id="c-sa")
+        reopened = models.Task(id="t-reset-reopen", title="Reopened completed record", status="done", owner_client_id="c-sa")
+        s.add_all([completed, managed, reopened, am.WorkflowRun(id="r-reset", task_id=managed.id,
+            plugin_id="p1", plugin_version_id="pv-sa", binding_id="b-reset", state="running")])
+        await s.commit()
+        for task, target, engine_owned in ((completed, "doing", True), (managed, "todo", False)):
+            applied = await task_status.mark(s, task, target, engine=engine_owned,
+                                            why="Rejected fixture transition", refresh_memory=False)
+            await s.commit()
+            events = list((await s.scalars(select(models.TaskEvent).where(
+                models.TaskEvent.task_id == task.id,
+                models.TaskEvent.kind == "status.reset_from_done"))).all())
+            chk("rejected completed transition preserves its state: " + task.id,
+                not applied and task.status == "done")
+            chk("rejected completed transition commits no reset event: " + task.id,
+                not events, [event.detail for event in events])
+        applied = await task_status.mark(s, reopened, "todo", why="Authorized fixture reopening",
+                                        refresh_memory=False)
+        await s.commit()
+        events = list((await s.scalars(select(models.TaskEvent).where(
+            models.TaskEvent.task_id == reopened.id,
+            models.TaskEvent.kind == "status.reset_from_done"))).all())
+        chk("authorized reopening of an existing completed record remains available",
+            applied and reopened.status == "todo")
+        chk("authorized reopening records exactly its applied reset",
+            len(events) == 1 and events[0].detail == {
+                "from": "done", "to": "todo", "reason": "Authorized fixture reopening"})
+        from app.services import task_rework
+        archived_at = datetime.now(timezone.utc)
+        for name, status, archived in (("archived", "done", archived_at), ("canceled", "cancel", None)):
+            protected = models.Task(id="t-rework-" + name, title="Protected old record",
+                                    status=status, archived_at=archived, owner_client_id="c-sa")
+            s.add(protected)
+            await s.commit()
+            result = await task_rework.resume_after_rejection(
+                s, protected, "Fixture review feedback", wait_for_executor=True)
+            events = list((await s.scalars(select(models.TaskEvent).where(
+                models.TaskEvent.task_id == protected.id,
+                models.TaskEvent.kind == "status.reset_from_done"))).all())
+            chk("rework preserves closed-record protection: " + name,
+                protected.status == status and protected.archived_at == archived)
+            chk("protected rework neither starts a model nor records a reset: " + name,
+                result["started"] is False and not events)
+        rejected = models.Task(id="t-rework-completed", title="Previously completed delivery",
+                               status="done", owner_client_id="c-sa")
+        artifact = am.ArtifactVersion(id="v-rework-completed", task_id=rejected.id,
+            kind="files", state="review", checksum="fixture-checksum",
+            source_ref="conversation:original-executor", manifest={"files": []})
+        s.add_all([rejected, artifact])
+        await s.commit()
+        result = await task_rework.resume_after_rejection(s, rejected, "Revise the original result",
+            artifact_version_id=artifact.id, request_id="q-rework-completed", wait_for_executor=True)
+        pending = rejected.work_routing["reworkPending"]
+        chk("authorized rejection reopens the same completed requirement", rejected.status == "doing")
+        chk("rejection keeps original bindings and waits for the executor",
+            result["started"] is False and result["waitingForExecutor"]
+            and pending["ref"] == artifact.source_ref and pending["versionId"] == artifact.id
+            and pending["requestId"] == "q-rework-completed" and pending["state"] == "awaiting_executor")
+
 
     # Reject new direct status writes that bypass the shared service.
     offenders = []

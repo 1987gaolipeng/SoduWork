@@ -30,6 +30,7 @@ from .local_base import (
     _pid_alive,
     _save_meta,
     _store_dir,
+    bind_command_environment,
 )
 
 log = logging.getLogger('uvicorn.error')
@@ -330,11 +331,19 @@ def spawn(
         launch_state['retry'].clear()
         tree_stopped = terminate()
         unconfirmed_saved = False
+        retry_requested = False
         while True:
             try:
                 exited = proc.poll() is not None
                 if tree_stopped and exited:
                     break
+                # After waking, recheck the original host before retrying a failed cleanup.
+                # A dead host cannot confirm the state of the tree we failed to stop.
+                if (retry_requested and not tree_stopped and not exited
+                        and not launch_state.get('unverifiable')):
+                    tree_stopped = terminate()
+                    retry_requested = False
+                    continue
             except (OSError, subprocess.SubprocessError):
                 exited = False
             if not tree_stopped and exited:
@@ -354,12 +363,9 @@ def spawn(
                 except Exception as exc:  # noqa: BLE001 - Keep the in-memory fence even if archival fails.
                     log.warning('Unconfirmed launch state could not be saved: %s', type(exc).__name__)
                 unconfirmed_saved = True
-            if launch_state['retry'].wait(.1):
+            retry_requested = launch_state['retry'].wait(.1)
+            if retry_requested:
                 launch_state['retry'].clear()
-                # Once the host is gone, a new PID-only check cannot reconstruct
-                # the subtree whose cleanup failed. Never promote that to exit.
-                if not launch_state.get('unverifiable'):
-                    tree_stopped = terminate() or tree_stopped
         with _LOCK:
             current = _RUNS.get(ref) or {}
             if current.get('_workerIdentity') is owner and current.get('_hostCleanup') is launch_state:
@@ -404,6 +410,7 @@ def spawn(
                     del env[key]
             env['SODUWORK_DESKTOP_CONTROL_SCOPE'] = f'runner:{ref}:{desktop_round}'
             argv = _command_argv(exe, args, ws, cfg or {}, prof or {})
+            bind_command_environment(env, argv)
             from . import access_broker
             # Recheck after command preparation without holding the run lock
             # across the broker's own condition locks and server lifecycle.

@@ -20,6 +20,7 @@ const reportDetails = {
   expected_output_mismatch: '回复内容与检测要求不符',
 };
 const additionalDiagnostics = {
+  request_rejected: '服务拒绝了检测请求，原因尚未确认',
   stream_error: '服务在逐步返回回复时报告错误',
   stream_not_observed: '未收到逐步返回的回复，暂不能确认能力',
   response_truncated: '回复提前结束，未能完成检测',
@@ -30,7 +31,7 @@ const badgeMessages = ['最近检测：{0}', '手动配置：{0}', '已有配置
   '服务拒绝了本次图片请求。对话沿用上次通过的结果，你仍可发图。', '对话沿用上次通过的结果，你仍可发图。'];
 const badgeText = (html, index = 0) => [...html.matchAll(/<span class="md-cap-badge [^"]*"[^>]*>([\s\S]*?)<\/span>/g)][index]?.[1].replace(/<[^>]*>/g, '') || '';
 function checkedModel(status, { state = 'supported', config = {} } = {}) {
-  const result = { checks: { imageInput: { status, checkedAt: '2026-11-17T00:00:00Z' } },
+  const result = { reportVersion: 3, checks: { imageInput: { status, checkedAt: '2026-11-17T00:00:00Z' } },
     verifiedChecks: { imageInput: { status: state === 'supported' ? 'passed' : 'unsupported', checkedAt: '2026-11-16T00:00:00Z' } } };
   return { config, capabilityCheck: result, capabilityProfile: contract.profile(config, result) };
 }
@@ -613,4 +614,18 @@ for (const localOnly of [false, true]) test('capability checks refuse a company 
   assert.equal(f.evaluate('_mdChecks.size'), 0);
   assert.equal(f.evaluate('JSON.stringify(_mdMyModels)'), models);
   assert.equal(f.draft(), before);
+});
+
+for (const locale of ['zh-CN', 'en-US']) test('retired v2 tool evidence clearly requests recheck in ' + locale, () => {
+  const host = capabilityLocaleHost(); host.SoduWorkI18n.setLocale(locale); vm.runInContext(source, host);
+  const old = { reportVersion: 2, checks: { toolCalling: { status: 'passed', checkedAt: '2026-11-17' },
+    streaming: { status: 'passed' } }, verifiedChecks: { toolCalling: { status: 'passed', checkedAt: '2026-11-16' } } };
+  const evidence = contract.publicEvidence(old);
+  const model = { capabilityCheck: evidence, capabilityProfile: contract.profile({}, evidence) };
+  const text = badgeText(host.ModelCapabilitiesUI.badges(model), 1);
+  assert.ok(text.includes(host.SoduWorkI18n.translateText('\u65e7\u7248\u68c0\u6d4b\u7ed3\u679c\u9700\u8981\u91cd\u65b0\u9a8c\u8bc1')), text);
+  assert.ok(!text.includes(host.SoduWorkI18n.translateText('\u68c0\u6d4b\u901a\u8fc7')), text);
+  const report = host.ModelCapabilitiesUI.report(evidence);
+  assert.ok(!report.includes('\u4e0a\u6b21\u9a8c\u8bc1\uff1a\u4e0d\u652f\u6301'));
+  assert.equal(old.checks.toolCalling.status, 'passed');
 });

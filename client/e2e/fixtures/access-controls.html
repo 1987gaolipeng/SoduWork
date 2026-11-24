@@ -7,12 +7,16 @@
 </head><body><div id="card"></div><section id="composer" class="compose-panel" hidden><div class="cp-box"><div class="cp-modelwrap"><button>Fixture Model</button></div></div></section>
 <script src="../../core/locales/en-US.js"></script>
 <script src="../../core/locales/en-US-chat.js"></script>
+<script src="../../core/locales/ja-JP.js"></script>
+<script src="../../core/locales/ja-JP-gap-pages.js"></script>
+<script src="../../core/locales/ko-KR.js"></script>
+<script src="../../core/locales/ko-KR-gap-pages.js"></script>
 <script src="../../components/panels/access-controls.js"></script>
 <script src="../../components/panels/work-composer.js"></script>
 <script src="../../components/panels/panels-compose-runtime.js"></script>
 <script src="../../components/panels/compose-surface.js"></script>
 <script>
-let locale='zh-CN'; window.SoduWorkI18n={t:s=>locale==='en-US'?(SoduWorkLocaleMessages['en-US'][s]||s):s};
+let locale='zh-CN'; window.SoduWorkI18n={t:s=>SoduWorkLocaleMessages[locale]?.[s] || s};
 window.esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 window.draw=(request,lang,options)=>{locale=lang||locale; document.getElementById('card').innerHTML=request?AccessControls.render(request,esc,options):'';};
 window.drawComposer=()=>{document.getElementById('card').hidden=true;const p=document.getElementById('composer');p.hidden=false;p.style.marginTop='260px';ComposeSurface.create({})._upgradeStartComposer(p);document.getElementById('cpPermissionPop').classList.add('show');};

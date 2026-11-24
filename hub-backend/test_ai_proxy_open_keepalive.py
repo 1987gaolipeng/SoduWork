@@ -45,6 +45,30 @@ class OpenKeepaliveTests(unittest.IsolatedAsyncioTestCase):
                       "400 context_length_exceeded", "401 " + raw, "429 " + raw):
             self.assertNotIn("最大输出 Token", model_errors.public_failure(value))
 
+    async def test_thinking_disabled_rejection_returns_actionable_message(self):
+        raw = json.dumps({"error": {"code": "InvalidParameter",
+                                    "message": "thinking.type `disabled` is not supported by this model",
+                                    "type": "BadRequest"}})
+        error = model_errors.UpstreamError(400, raw)
+
+        expected = json.loads(ai_proxy._proxy_error(error).body)
+        self.assertEqual(expected["error"]["code"], "thinking_disabled_unsupported")
+        self.assertEqual(expected["error"]["status"], 400)
+        self.assertIn("始终开启", expected["error"]["message"])
+
+        async def boom():
+            raise error
+
+        streamed = await ai_proxy._open_then_stream(None, boom)
+        body = b"".join(await self._drain(streamed))
+        await streamed.background()
+        frames = [json.loads(line[6:]) for line in body.split(b"\n") if line.startswith(b"data: ")]
+        self.assertEqual(frames, [expected])
+
+        public = model_errors.public_failure(f"400 {raw}")
+        self.assertIn("始终开启", public)
+        self.assertNotIn("始终开启", model_errors.public_failure("400 Unsupported parameter: max_tokens"))
+
     async def _drain(self, response, first=None, limit=64):
         it = response.body_iterator.__aiter__()
         chunks = [first] if first is not None else []

@@ -20,10 +20,10 @@ async def prepare(session, client, ctx: dict, assignee: dict,
         # it afresh for this dispatch instead of relying on the current
         # device's in-memory or already-scrubbed configuration.
         credential_owner = credential_client or client
-        wanted = requested or model_catalog.agent_model(credential_owner, cli)
+        wanted, provider = model_catalog.agent_choice(credential_owner, cli, requested)
         # Explicit and saved Agent choices must not silently become another model
         # when their provider/key is removed. resolve() already enforces that rule.
-        llm = await model_catalog.resolve(session, credential_owner, wanted)
+        llm = await model_catalog.resolve(session, credential_owner, wanted, provider_id=provider)
         if not llm:
             if wanted:
                 raise ValueError("模型「%s」当前不可用，请重新选择可用模型" % wanted)

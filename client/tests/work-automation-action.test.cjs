@@ -77,7 +77,7 @@ test('automation sheet translates model selector text on initial render and refr
 
   const initial = modelField('', 'local:pi');
   assert.match(initial, /value="gpt-5" selected/);
-  assert.match(initial, /The model is saved independently and each run uses this choice/);
+  assert.match(initial, /<span>Model<\/span>/);
   assert.doesNotMatch(initial, /请选择模型|模型与执行底座独立保存/);
   assert.match(modelRows('missing-model', 'local:pi'), /value="gpt-5" selected/);
   state.modelOptions = [];
@@ -94,7 +94,6 @@ test('automation sheet translates model selector text on initial render and refr
   assert.equal(select.disabled, false);
 
   assert.match(modelField('', 'local:codex'), /Managed by this runtime/);
-  assert.match(modelField('', 'local:codex'), /This runtime manages its model/);
   assert.doesNotMatch(modelField('', 'local:codex'), /由底座自身管理模型|当前底座自行管理模型/);
   state.modelOptions = [];
   assert.match(modelRows('', 'local:pi'), /No models are available/);

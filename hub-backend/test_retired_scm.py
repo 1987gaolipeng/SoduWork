@@ -124,10 +124,11 @@ class RetiredExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_admin_creation_rejects_old_scm_without_storing_repository(self):
         from app.api import admin
         session = AsyncMock()
-        session.get.return_value = NS(org_id="org")
+        session.scalar.return_value = NS(org_id="org", is_archived=False, data_source="business")
         with self.assertRaises(HTTPException) as raised:
-            await admin.add_repo("p", {"name": "fixture", "scm": "gerrit"}, NS(), session)
+            await admin.add_repo("p", {"name": "fixture", "scm": "gerrit"}, NS(is_super=True), session)
         self.assertEqual(raised.exception.status_code, 400)
+        self.assertEqual(raised.exception.detail, scm.GERRIT_RETIRED)
         session.add.assert_not_called()
         session.commit.assert_not_awaited()
 

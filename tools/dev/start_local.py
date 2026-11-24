@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 from contextlib import closing, contextmanager
+import errno
 import getpass
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import signal
 import socket
@@ -80,7 +82,6 @@ def secure_directory(state: Path) -> None:
         result = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"],
                                 capture_output=True, check=True,
                                 **spawn_options())
-        import re
         match = re.search(rb"S-\d+(?:-\d+)+", result.stdout)
         if not match:
             raise StartupError("Could not determine your Windows account for private data permissions.")
@@ -115,6 +116,10 @@ def initialize(state: Path, username: str) -> dict:
     return config
 
 
+class DataDirectoryInUse(StartupError):
+    """Another source launcher holds the OS lock for this state directory."""
+
+
 @contextmanager
 def exclusive(state: Path):
     """OS-held lock is released on Ctrl+C, errors, or a killed launcher."""
@@ -128,16 +133,16 @@ def exclusive(state: Path):
                 handle.write(b"0")
                 handle.flush()
             handle.seek(0)
-            try:
+        try:
+            if os.name == "nt":
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            except OSError as exc:
-                raise StartupError("This SoduWork data directory is already running. Use its existing window.") from exc
-        else:
-            import fcntl
-            try:
+            else:
+                import fcntl
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError as exc:
-                raise StartupError("This SoduWork data directory is already running. Use its existing window.") from exc
+        except OSError as exc:
+            if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK}:
+                raise
+            raise DataDirectoryInUse("Another SoduWork launcher is using this data directory.") from exc
         locked = True
         yield
     finally:
@@ -203,8 +208,11 @@ def assert_available(host: str, port: int) -> None:
         try:
             probe.bind((host, port))
         except OSError as exc:
-            raise StartupError(f"Port {port} is already in use. Existing services were left running. "
-                               "Choose another port with --port.") from exc
+            if exc.errno == errno.EADDRINUSE or getattr(exc, 'winerror', None) == 10048:
+                raise StartupError(f"Port {port} is already in use. Existing services were left running. "
+                                   "Choose another port with --port.") from exc
+            raise StartupError(f"Cannot bind to {host}:{port}: {exc}. "
+                               "Check --host and your network configuration.") from exc
 
 
 def runtime_environment(state: Path, config: dict, password: str, host: str, port: int) -> dict:
@@ -386,6 +394,31 @@ def desktop_profile(state: Path) -> Path:
     return profile
 
 
+def request_workspace_activation(state: Path) -> bool:
+    """Ask only the running desktop for this profile to show its workspace."""
+    try:
+        endpoint = desktop_profile(state) / "source-workspace-activation.json"
+        with endpoint.open("rb") as stream:
+            raw = stream.read(513)
+        if len(raw) > 512:
+            return False
+        record = json.loads(raw)
+        if not isinstance(record, dict):
+            return False
+        port, token = record.get("port"), record.get("token")
+        if type(port) is not int or not 1 <= port <= 65535:
+            return False
+        if not isinstance(token, str) or not re.fullmatch(r"[0-9a-f]{64}", token):
+            return False
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+            client.settimeout(2)
+            client.connect(("127.0.0.1", port))
+            client.send(b"open-workspace " + token.encode("ascii"))
+            return client.recv(32) == b"opened"
+    except (StartupError, OSError, ValueError):
+        return False
+
+
 def launch_desktop(state: Path, client: Path, env: dict, base: str, output) -> subprocess.Popen:
     """The source session owns a separate profile and never rewrites an installed client."""
     profile = desktop_profile(state)
@@ -507,6 +540,22 @@ def main(argv=None) -> int:
                 return 0
             serve(state, config, args)
         return 0
+    except DataDirectoryInUse as exc:
+        if args.desktop and not args.prepare_only:
+            if request_workspace_activation(state):
+                print("已唤起现有桌面工作区 / Reopened the existing desktop workspace.", flush=True)
+                return 0
+            print("桌面端未确认打开工作区。如果首次启动仍在进行，请等待原启动终端完成后再试。"
+                  "若桌面端已就绪，请点击托盘图标。如需重启，请在原启动终端按 Ctrl+C，"
+                  "等待服务停止后，再用相同数据目录运行带 --desktop 的启动命令。\n"
+                  "The desktop did not confirm opening the workspace. If startup is still in progress, "
+                  "wait for it to finish in the original terminal and try again. If the desktop is ready, "
+                  "click its tray icon. To restart, "
+                  "press Ctrl+C in the original terminal, wait for shutdown, then run the launcher "
+                  "with --desktop and the same data directory.", file=sys.stderr)
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
     except KeyboardInterrupt:
         print("\nSoduWork stopped. Your data is retained.")
         return 0

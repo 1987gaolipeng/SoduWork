@@ -5,6 +5,7 @@ import asyncio
 import os
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 
 import httpx
@@ -34,13 +35,10 @@ class FakeGitLab:
     type = "gitlab"
     scheduled = False
 
-    def verify(self, config: dict) -> dict:
-        assert config.get("_auth_secret") == "saved-password"
-        return {"ok": True, "user": config.get("_auth_user"), "kind": config.get("_auth_kind")}
-
-    def list_repositories(self, config: dict) -> list[dict]:
-        assert config.get("token") == "runtime-only-token"
-        return [{
+    def __init__(self):
+        self.listing = threading.Event()
+        self.resume = threading.Event()
+        self.rows = [{
             "externalId": "repo-88",
             "fullName": "enterprise/analytics",
             "displayName": "analytics",
@@ -51,6 +49,16 @@ class FakeGitLab:
             "visibility": "private",
         }]
 
+    def verify(self, config: dict) -> dict:
+        assert config.get("_auth_secret") == "saved-password"
+        return {"ok": True, "user": config.get("_auth_user"), "kind": config.get("_auth_kind")}
+
+    def list_repositories(self, config: dict) -> list[dict]:
+        assert config.get("token") == "runtime-only-token"
+        self.listing.set()
+        assert self.resume.wait(timeout=10), "catalog smoke did not release the connector"
+        return self.rows
+
     def list_branches(self, config: dict, external_id: str) -> list[str]:
         assert config.get("token") == "runtime-only-token"
         assert external_id == "repo-88"
@@ -59,7 +67,7 @@ class FakeGitLab:
 
 async def main() -> None:
     original = REGISTRY.get("gitlab")
-    REGISTRY["gitlab"] = FakeGitLab()
+    fake = REGISTRY["gitlab"] = FakeGitLab()
     try:
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
@@ -92,11 +100,22 @@ async def main() -> None:
             ok(empty.status_code == 200 and empty.json()["items"] == [],
                "catalog starts empty")
 
-            synced = await http.post(
-                "/api/v1/admin/integrations/integration-http/repositories/sync",
-                headers=headers, json={"clientId": "client-http"})
+            sync_url = "/api/v1/admin/integrations/integration-http/repositories/sync"
+            sync = asyncio.create_task(http.post(
+                sync_url, headers=headers, json={"clientId": "client-http"}))
+            try:
+                ok(await asyncio.to_thread(fake.listing.wait, 10), "connector reached listing")
+                progress = await http.get(sync_url, headers=headers)
+                ok(progress.status_code == 200 and progress.json() == {"stage": "listing"},
+                   "in-flight listing is observable through a separate request")
+                ok((await http.get(sync_url)).status_code == 401, "progress requires authentication")
+            finally:
+                fake.resume.set()
+                synced = await sync
             ok(synced.status_code == 200 and synced.json()["total"] == 1,
                "catalog sync works through HTTP")
+            ok((await http.get(sync_url, headers=headers)).json() == {"stage": None},
+               "completed sync no longer reports a live stage")
 
             catalog = await http.get(
                 "/api/v1/admin/repository-catalog?"
@@ -142,6 +161,19 @@ async def main() -> None:
                 json={"projectId": "project-http-b", "branch": "main"})
             ok(duplicate_copy.status_code == 409,
                "duplicate copied mapping is rejected")
+
+            fake.rows = [dict(fake.rows[0], externalId="tmp-repo"), {}]
+            failed = await http.post(sync_url, headers=headers, json={})
+            ok(failed.status_code == 409, "invalid catalog data fails the sync")
+            ok((await http.get(sync_url, headers=headers)).json() == {"stage": None},
+               "a failed sync releases its progress")
+            retained = (await http.get("/api/v1/admin/repository-catalog", headers=headers)).json()
+            ok([row["id"] for row in retained["items"]] == [catalog_id],
+               "phase updates never publish a partial catalog")
+            fake.rows = []
+            synced_empty = await http.post(sync_url, headers=headers, json={})
+            ok(synced_empty.status_code == 200 and synced_empty.json()["total"] == 0
+               and synced_empty.json()["inactive"] == 1, "empty sync has a successful zero count")
 
             account_url = "/api/v1/admin/integrations/integration-http/pull-account"
             saved = await http.post(account_url, headers=headers,
