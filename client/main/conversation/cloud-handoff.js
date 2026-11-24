@@ -36,9 +36,12 @@ function serviceUrlFromPage(items) {
     }
     const host = String(item.host || '').trim();
     const port = Number(item.port);
+    const hostname = host.includes(':') && !host.startsWith('[') ? '[' + host + ']' : host;
     if (host && Number.isInteger(port) && port > 0 && port < 65536 &&
-        /^[a-z0-9][a-z0-9._:-]{0,252}$/i.test(host)) {
-      return 'http://' + host + ':' + port + '/';
+        /^(?:[a-z0-9][a-z0-9._-]{0,252}|\[[a-f0-9:.]+\])$/i.test(hostname)) {
+      const url = 'http://' + hostname + ':' + port + '/';
+      try { new URL(url); return url; }
+      catch (_) { /* Invalid listener metadata must not replace an earlier usable address. */ }
     }
   }
   return '';
