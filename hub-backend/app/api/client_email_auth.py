@@ -158,6 +158,9 @@ async def email_code_login(body: EmailProof,
     client = await _device_with_key(session, body.device, x_device_key or "")
     try:
         email = await _consume(session, body, "login")
+        # The proof is one-time: commit the consumption before the login itself so a
+        # later ClientAccessError rollback cannot hand the code back for reuse.
+        await session.commit()
         user = await email_auth.verified_user(session, email)
         if user is None:
             # Ownership is proved before offering explicit registration; no account is created.
