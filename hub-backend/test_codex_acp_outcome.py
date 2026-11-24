@@ -129,6 +129,31 @@ class CodexAcpOutcomeTests(unittest.TestCase):
                 self.assertEqual(prompts, ["Original synthetic task"])
                 close.assert_called_once_with()
 
+    def test_cleanup_failure_is_one_diagnostic_and_keeps_the_primary_outcome(self):
+        rejection = "The 'fixture' model is not supported when using Codex with a ChatGPT account."
+        cleanup = "ACP cleanup failed: [Errno 1] Operation not permitted"
+        for result, primary in (({"stopReason": "end_turn"}, []), (
+                prompt_result({"severity": "error", "title": rejection}),
+                [{"name": "AcpBridgeError", "message": rejection}])):
+            with self.subTest(rejected=bool(primary)):
+                acp, request, prompts = self.fixture("codex", result)
+                args = SimpleNamespace(agent=["fixture"], cwd=self.temp.name, agent_name="codex",
+                                       permission="readonly", session="retained-session", terminal=False)
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with patch.object(acp, "start"), patch.object(acp, "request", side_effect=request), \
+                        patch.object(acp.access, "apply"), patch.object(bridge, "_parse", return_value=args), \
+                        patch.object(bridge, "_utf8_stdio"), patch.object(bridge, "AcpBridge", return_value=acp), \
+                        patch.object(bridge.sys, "stdin", io.StringIO("Synthetic turn")), \
+                        patch.object(bridge.sys, "stdout", stdout), patch.object(bridge.sys, "stderr", stderr), \
+                        patch.object(acp, "close", side_effect=bridge.BridgeError(cleanup)) as close:
+                    self.assertEqual(bridge.main(), 2)
+                events = [json.loads(line) for line in stdout.getvalue().splitlines()]
+                self.assertEqual([event["error"] for event in events if "error" in event],
+                                 [*primary, {"name": "AcpCleanupError", "message": cleanup}])
+                self.assertEqual(stderr.getvalue(), "")
+                self.assertEqual(prompts, ["Synthetic turn"])
+                close.assert_called_once_with()
+
     def test_runner_source_closure_includes_the_typed_failure_parser(self):
         backend = Path(__file__).resolve().parent
         sources = runner_sources.build_inputs(backend, backend.parent)

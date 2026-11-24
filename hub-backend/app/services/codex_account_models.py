@@ -1,31 +1,7 @@
 """Project the model catalog observed by the executing account Codex CLI."""
-import json
-import os
 from pathlib import Path
-import stat
 
 from . import agent_execution_options as options, codex_account_home, codex_model_catalog
-from .native_history_archive import stamp
-
-_MAX_CACHE_BYTES = 16 * 1024 * 1024
-
-
-def _cache(home: str) -> tuple[dict, tuple]:
-    target = Path(home) / "models_cache.json"
-    if target.resolve(strict=True) != target:
-        raise ValueError("Unexpected Codex catalog location")
-    info = target.lstat()
-    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > _MAX_CACHE_BYTES:
-        raise ValueError("Unusable Codex catalog")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-    with os.fdopen(os.open(target, flags), "rb") as stream:
-        if stamp(os.fstat(stream.fileno())) != stamp(info):
-            raise ValueError("Codex catalog replaced")
-        content = stream.read(info.st_size + 1)
-        if len(content) != info.st_size or target.resolve(strict=True) != target or stamp(target.lstat()) != stamp(info):
-            raise ValueError("Codex catalog changed")
-    value = json.loads(content)
-    return (value if isinstance(value, dict) else {}), stamp(info)
 
 
 def list_models(data_root: str, ref: str = "") -> dict:
@@ -39,15 +15,9 @@ def list_models(data_root: str, ref: str = "") -> dict:
         if not home:
             return result
         executable = agent_setup._bin_of("codex")
-        try:
-            cached, before = _cache(home)
-        except (OSError, ValueError, RuntimeError):
-            cached, before = {}, None
-        rows, source = codex_model_catalog.discover(executable, cached)
+        rows, source = codex_model_catalog.discover(executable, home)
         if (rows is None or codex_account_home.model_catalog_home(root, ref) != home
                 or agent_setup._bin_of("codex") != executable):
-            return result
-        if before is not None and stamp((Path(home) / "models_cache.json").lstat()) != before:
             return result
     except (OSError, ValueError, RuntimeError):
         return result

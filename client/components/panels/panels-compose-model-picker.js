@@ -303,7 +303,8 @@
 
   function codexHtml(selected) {
     const selectedModel = modelById(selected.modelName);
-    const reason = nativeReason && !nativeModels.length ? catalogNote(nativeReason, nativeRetryable) : '';
+    const reason = nativeReason && !nativeModels.length
+      ? '<div class="cp-native-note is-warning">' + escape(tx(nativeReason)) + '</div>' : '';
     if (nativeView === 'models') return heading('Codex · 使用本机账号', true) +
       '<div class="cp-model-scroll cp-native-models">' + [{ id: '', label: tx('Codex 默认') }, ...nativeModels].map((item) =>
         '<button type="button" class="cp-mrow' + (item.id === selected.modelName ? ' on' : '') +
@@ -311,12 +312,6 @@
           '<span class="cp-mtxt"><b>' + escape(item.label) + '</b></span></button>').join('') +
       emptyList() + '</div>' + reason;
     return reason + effortCard(selected, selectedModel);
-  }
-
-  function catalogNote(reason, retryable) {
-    if (!reason) return '';
-    return '<div class="cp-native-note" role="status">' + escape(tx(reason)) +
-      (retryable ? ' <button type="button" data-native-refresh>' + escape(tx('刷新')) + '</button>' : '') + '</div>';
   }
 
   // Both composers use the same native account model and effort surface.
@@ -497,7 +492,6 @@
     }
     if (row.id === 'codex') {
       if (nativeLoaded === row.id && !force) return render();
-      if (!nativeModels.length) { nativeReason = '正在加载模型…'; nativeRetryable = false; render(); }
       try {
         const bridge = api();
         const response = prepared || await bridge?.runtimeModels?.(row.id);
@@ -694,7 +688,6 @@
     pop.addEventListener('click', (event) => {
       event.stopPropagation();
       if (event.target.closest('[data-model-close]')) { close(); button.focus?.(); return; }
-      if (event.target.closest('[data-native-refresh]')) { if (!loading) void refresh(true); return; }
       if (event.target.closest('[data-native-list]')) {
         nativeView = 'models'; searchQuery = ''; render();
         if (nativeRetryable && !loading) void refresh(true);
@@ -892,7 +885,7 @@
 
   global.ComposeModelPicker = { bind, close, refresh, ready, value, prepareRuntimeSwitch, resetNewDraft, resetDirectory, restoreSelection, releasePreference,
     hasManualChoice: () => state(runtime().id).modelChosen,
-    nativeEffort: { catalogNote, html: effortCard, paint: paintEffortCard, levels: effortChoices, defaultLevel: defaultEffort },
+    nativeEffort: { html: effortCard, paint: paintEffortCard, levels: effortChoices, defaultLevel: defaultEffort },
     label: () => currentLabel(runtime(), state(runtime().id)) };
   const scopeChanged = () => {
     if (activeScope && activeScope !== loadContext().key) void refresh();

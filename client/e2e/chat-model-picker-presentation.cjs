@@ -113,17 +113,21 @@ if (typeof electron === 'string') {
     assert.ok(await js('document.querySelector(".nmodel-pop").hidden'));
     report.checks.push('Provider search, selection, focus restoration and thinking switch preserve existing next-message semantics; fixed/unsupported thinking cannot be toggled');
     await js(`state.adapterId='codex';state.selection={name:'',model:{id:''}};window.nativeCalls=0;
-      soduWorkAPI.conversationSession.runtimeModels=async()=>++nativeCalls<3
-        ? {ok:false,catalogAvailable:false,models:[]}
+      soduWorkAPI.conversationSession.runtimeModels=async()=>++nativeCalls===1 ? new Promise(resolve=>window.finishCold=resolve)
+        : nativeCalls===2 ? {ok:false,catalogAvailable:false,models:[]}
         : {ok:true,catalogAvailable:true,models:[{id:'account-model',label:'Account model'}]};
       SoduWorkAPI.myModels=async()=>{throw Error('Account models cannot use managed quota')};controls.render()`);
-    await open();
-    await until('document.querySelector("[data-native-refresh]")');
-    await click('[data-native-list]');
-    await until('nativeCalls===2 && document.querySelector("[data-native-refresh]")');
+    await click('.nmodel-button'); await until('typeof finishCold==="function"');
+    assert.match(await js('document.querySelector(".nmodel-options").textContent'), /正在加载/);
+    assert.equal(await js('document.querySelector(".cp-effort-card")'), null);
+    await js('finishCold({ok:false,catalogAvailable:false,models:[]});void 0');
+    await until('document.querySelector(".cp-effort-card")');
+    assert.ok(await js('document.querySelector("[data-effort-reset]") && document.querySelector("[data-effort-slider]").disabled'));
+    assert.equal(await js('document.querySelector("[data-native-refresh], [data-native-catalog-note]")'), null);
+    await click('[data-native-list]'); await until('nativeCalls===2');
     assert.deepEqual(await js('Array.from(document.querySelectorAll("[data-model-name]"),e=>e.dataset.modelName)'), ['']);
-    assert.match(await js('document.querySelector(".nmodel-pop").textContent'), /暂时无法读取/);
-    await click('[data-native-refresh]');
+    assert.match(await js('document.querySelector(".nmodel-button").title'), /暂时无法读取/);
+    await click('[data-native-back]'); await click('[data-native-list]');
     await until(`document.querySelector('[data-model-name="account-model"]')`);
     assert.deepEqual(await js('Array.from(document.querySelectorAll("[data-model-name]"),e=>e.dataset.modelName)'), ['', 'account-model']);
     assert.equal(await js('state.selection.name'), '');

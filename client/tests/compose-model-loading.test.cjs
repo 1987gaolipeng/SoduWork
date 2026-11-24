@@ -682,12 +682,13 @@ test('a cold Codex picker retries on entering the model list and preserves the n
   const f = fixture(); f.agent('codex'); f.start();
   f.requests[0].resolve({ ok: true, catalogAvailable: false, retryable: true, models: [] });
   await f.picker.ready();
-  assert.match(f.nodes.cpModelPop.innerHTML, /data-native-refresh/);
+  assert.match(f.nodes.cpModelPop.innerHTML, /cp-native-note is-warning/);
+  assert.doesNotMatch(f.nodes.cpModelPop.innerHTML, /data-native-refresh/);
   f.nodes.cpModelPop.click({ stopPropagation() {}, target: { closest: selector => selector === '[data-native-list]' } });
   assert.equal(f.requests.length, 2);
   f.requests[1].resolve({ ok: false, models: [] }); await f.picker.ready();
   assert.match(f.nodes.cpModelPop.innerHTML, /data-native-model=""/);
-  f.nodes.cpModelPop.click({ stopPropagation() {}, target: { closest: selector => selector === '[data-native-refresh]' } });
+  f.changed();
   f.reply(2, 'discovered-model'); await f.picker.ready();
   assert.match(f.nodes.cpModelPop.innerHTML, /data-native-model="discovered-model"/);
   assert.doesNotMatch(f.nodes.cpModelPop.innerHTML, /data-native-refresh/);

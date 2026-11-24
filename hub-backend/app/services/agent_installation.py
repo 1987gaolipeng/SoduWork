@@ -3,10 +3,45 @@ from __future__ import annotations
 
 import json
 import hashlib
+from functools import lru_cache
 import os
 from pathlib import Path
 import re
 import sys
+import subprocess
+
+
+_MACOS_CODEX_CLI = (
+    "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+    "/Applications/Codex.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+    "/Applications/Codex.app/Contents/Resources/codex",
+)
+
+
+@lru_cache(maxsize=8)
+def _signed_codex(path: str, stamp: tuple) -> bool:
+    # Cache by file identity so a desktop update is verified on the next lookup.
+    requirement = 'anchor apple generic and certificate leaf[subject.OU] = "2DC432GLL2" and identifier "codex"'
+    result = subprocess.run(["/usr/bin/codesign", "--verify", "--strict", "-R=" + requirement, path],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+    return result.returncode == 0
+
+
+def macos_codex_cli() -> str:
+    """Resolve the signed native CLI installed with the macOS Codex desktop."""
+    if sys.platform != "darwin":
+        return ""
+    for candidate in _MACOS_CODEX_CLI:
+        path = Path(candidate)
+        try:
+            if path.resolve(strict=True) != path or not path.is_file() or not os.access(path, os.X_OK):
+                continue
+            info = path.stat()
+            if _signed_codex(candidate, (info.st_dev, info.st_ino, info.st_ctime_ns, info.st_size)):
+                return candidate
+        except (OSError, RuntimeError, subprocess.TimeoutExpired):
+            continue
+    return ""
 
 
 def path_directories(*, windows: bool = False) -> list[str]:
