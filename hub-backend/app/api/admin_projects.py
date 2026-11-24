@@ -413,8 +413,14 @@ async def update_repo(rid: str, body: dict = Body(default_factory=dict),
             raise HTTPException(status_code=400, detail=err)
         kept = {}
         for key in ai_prompts.DEFAULTS:
-            raw = str(v.get(key) or "").strip()
-            if not raw:
+            raw = v.get(key)
+            if key == "steps":
+                # Steps are a list of {key, title, detail}; pass the raw value through so
+                # normalize() can clean it. str() here would stringify the list and
+                # silently discard every customized step on save.
+                if not (isinstance(raw, list) and raw):
+                    continue                               # An empty or absent list inherits the default steps.
+            elif not str(raw or "").strip():
                 continue                                   # An omitted value inherits the global default.
             kept[key] = ai_prompts.normalize({key: raw})[key]   # Normalize each field and apply its fallback.
         r.dev_flow = kept
