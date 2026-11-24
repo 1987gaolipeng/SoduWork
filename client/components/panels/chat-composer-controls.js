@@ -135,7 +135,7 @@
       const selectedName = selection.name || selection.model?.id || state.model?.id || '';
       const updated = catalogScope === modelScope() && rows.find(row => row.name === selectedName);
       const selectedModel = selection.model || state.model;
-      const label = (selectedModel?.unavailable ? selectedModel.label : updated?.label) || selectedModel?.label || selectedModel?.id || '选择模型';
+      const label = nativeMode(state) && !selectedName ? 'Codex 默认' : (selectedModel?.unavailable ? selectedModel.label : updated?.label) || selectedModel?.label || selectedModel?.id || '选择模型';
       button.querySelector('span').textContent = label;
       button.title = '模型：' + label + ' · 用于之后发送的消息';
       button.setAttribute('aria-label', button.title);
@@ -269,12 +269,13 @@
         const runtime = catalog?.ok && catalog.runtimes?.find(item => item.id === adapter);
         if (!runtime) throw new Error('Agent catalog unavailable');
         const native = runtime.modelMode === 'account';
-        const response = native ? (current.cloudHandoff ? { models: [] } : await read(global.soduWorkAPI.conversationSession.runtimeModels(adapter))) :
+        const response = native ? (current.cloudHandoff ? { models: [] } : await read(global.soduWorkAPI.conversationSession.runtimeModels(adapter, current.devicePreview ? undefined : current.ref))) :
           await read(global.SoduWorkAPI.myModels({ localDefaults: !current.cloudHandoff }));
         if (!valid()) return stale();
         if (native) {
           nativeModels = response.models || [];
           rows = nativeModels.map(row => ({ name: row.id, label: row.label || row.id }));
+          if (adapter === 'codex' && !current.cloudHandoff) rows.unshift({ name: '', label: 'Codex 默认' });
         }
         else {
           if (response?.ok === false || !Array.isArray(response?.usable)) throw new Error('Model catalog unavailable');

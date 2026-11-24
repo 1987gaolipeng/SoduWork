@@ -15,7 +15,7 @@
   let loadPromise = null;
   let loadChanged, signalLoadChange;
   let imageModels = [];
-  let nativeModels = [];
+  let nativeModels = [], nativeCatalogAvailable = false;
   let nativeReason = '';
   let activeRuntime = '';
   let activeScope = '';
@@ -147,7 +147,7 @@
       ? '原本地模型已删除或不可用，请重新选择' : '原模型已不可用，请重新选择');
     if (row.id === 'codex') {
       const model = modelById(selected.modelName);
-      const modelLabel = model ? model.label : 'Codex 默认';
+      const modelLabel = model?.label || selected.modelName || tx('Codex 默认');
       const effortLabel = selected.reasoningEffort
         ? EFFORT_LABELS[selected.reasoningEffort] || selected.reasoningEffort : '';
       return modelLabel + (effortLabel ? ' · ' + effortLabel : '');
@@ -306,7 +306,7 @@
     const reason = nativeReason && !nativeModels.length
       ? '<div class="cp-native-note is-warning">' + escape(nativeReason) + '</div>' : '';
     if (nativeView === 'models') return heading('Codex · 使用本机账号', true) +
-      '<div class="cp-model-scroll cp-native-models">' + nativeModels.map((item) =>
+      '<div class="cp-model-scroll cp-native-models">' + [{ id: '', label: tx('Codex 默认') }, ...nativeModels].map((item) =>
         '<button type="button" class="cp-mrow' + (item.id === selected.modelName ? ' on' : '') +
           '" aria-pressed="' + (item.id === selected.modelName) + '" data-native-model="' + escape(item.id) + '">' + check() +
           '<span class="cp-mtxt"><b>' + escape(item.label) + '</b></span></button>').join('') +
@@ -498,13 +498,14 @@
         if (!current()) return;
         if (!response?.ok || !Array.isArray(response.models)) throw Error('模型目录暂时不可用');
         nativeModels = response.models;
+        nativeCatalogAvailable = response.catalogAvailable !== false;
         const selected = state(row.id);
-        const protectedChoice = protectedSelection(selected);
-        if (nativeModels.length && !modelById(selected.modelName) && !protectedChoice) {
-          selected.modelName = (modelById(response.defaultModel) || nativeModels[0]).id;
+        const protectedChoice = selected.modelChosen || protectedSelection(selected);
+        if (nativeCatalogAvailable) {
+          if (!protectedChoice && !modelById(selected.modelName)) selected.modelName = '';
+          selected.unavailable = Boolean(protectedChoice && selected.modelName && !modelById(selected.modelName));
+          reconcileEffort(selected);
         }
-        selected.unavailable = Boolean(protectedChoice && selected.modelName && !modelById(selected.modelName));
-        reconcileEffort(state(row.id));
         nativeReason = String(response && response.reason || '');
         nativeLoaded = row.id;
       } catch (error) {
@@ -567,7 +568,8 @@
     } else if (target.id === 'codex' && !cloud()) {
       response = await api()?.runtimeModels?.(target.id);
       if (!response?.ok || !Array.isArray(response.models)) return null;
-      candidates = response.models.map(model => ({ source: target.id, name: model.id, label: model.label || model.id }));
+      candidates = [{ source: target.id, name: '', label: tx('Codex 默认') },
+        ...response.models.map(model => ({ source: target.id, name: model.id, label: model.label || model.id }))];
     }
     if (!candidates || target.modelMode === 'account' && !candidates.length) {
       candidates = [{ source: 'account', name: '', label: tx('使用底座账号默认模型') }];
@@ -784,7 +786,7 @@
       activeScope = context.key;
       enterpriseModels = [];
       enterpriseDefaultErrors = {}; managedCatalogUnavailable = false; imageModels = []; enterpriseLoaded = false;
-      nativeModels = []; nativeReason = ''; nativeLoaded = '';
+      nativeModels = []; nativeCatalogAvailable = false; nativeReason = ''; nativeLoaded = '';
       nativeView = 'effort';
       close();
     }
@@ -867,8 +869,8 @@
       if (!enterpriseLoaded) { selected.unavailable = true; render(); notify(); return false; }
       clearStaleManagedSelection(row);
     } else if (row.id === 'codex' && !cloud()) {
-      selected.unavailable = Boolean(selected.modelName && (nativeLoaded !== row.id || !modelById(selected.modelName)));
-      if (!selected.unavailable) reconcileEffort(selected);
+      selected.unavailable = Boolean(selected.modelName && nativeCatalogAvailable && !modelById(selected.modelName));
+      if (!selected.unavailable && nativeCatalogAvailable) reconcileEffort(selected);
     } else selected.unavailable = Boolean(selected.modelName);
     render(); notify();
     return !selected.unavailable && !selected.catalogUnavailable;

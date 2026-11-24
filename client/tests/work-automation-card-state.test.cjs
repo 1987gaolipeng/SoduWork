@@ -306,7 +306,8 @@ for (const source of ['local', 'Hub']) test('new automation cards choose their o
   const catalogs = { agents: [{ id: 'local:codex', cli: 'codex', modelPick: false }], modelOptions: [{ name }] };
   assert.equal(f.context.WorkAutomationCardState.defaultModelFor(catalogs, 'local:codex'), '');
   catalogs.agents[0].nativeModelPick = true; catalogs.agents[0].modelOptions = [{ id: 'account-model' }];
-  assert.equal(f.context.WorkAutomationCardState.defaultModelFor(catalogs, 'local:codex'), 'account-model');
+  assert.equal(f.context.WorkAutomationCardState.defaultModelFor(catalogs, 'local:codex'), '');
+  assert.equal(f.context.WorkAutomationCardState.defaultModelFor(catalogs, 'local:codex', 'account-model'), 'account-model');
 });
 
 test('automation cards default to the first local model while explicit available choices remain selectable', async () => {

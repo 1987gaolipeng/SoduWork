@@ -16,7 +16,7 @@ import json
 _CURRENT = contextvars.ContextVar("runner_local_request", default=None)
 _LIMITS = {"work": 8, "query": 8, "probe": 2, "control": 4}
 _QUERIES = {"job.has", "job.status", "job.info", "job.session", "agent.job",
-            "runtime.sessions", "runtime.history.imageReceipts", "runtime.history.qwenCancelledWrites", "runtime.content.read"}
+            "runtime.sessions", "runtime.models", "runtime.history.imageReceipts", "runtime.history.qwenCancelledWrites", "runtime.content.read"}
 _CONTROLS = {"job.stop", "job.permission", "runtime.ping", "runtime.shutdown",
              "desktop.capability.reply"}
 

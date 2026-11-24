@@ -6,12 +6,38 @@ the prompt result; prose and asynchronous session notices are not evidence.
 """
 from __future__ import annotations
 from collections import OrderedDict
+import json
+import re
 
 _AGENTS = {"codex", "codex-harness"}
 _VERSION = 1
 _MAX_TITLE = 2000
 _MALFORMED = "Codex 返回的失败信息无效，无法确认本轮已完成。请更新适配器后重试。"
 _FAILED = "Codex 本轮执行失败，未收到可用的失败说明。"
+ACCOUNT_MODEL_UNAVAILABLE = "当前 Codex 账号无法使用所选模型。请在此会话中切换到 Codex 默认模型或其他可用模型，再发送消息。"
+
+
+def account_model_rejected(agent: str, event: dict) -> bool:
+    """Recognize a terminal account-model rejection, never a tool or progress message."""
+    error = event.get("error")
+    if agent != "codex" or not isinstance(error, dict):
+        return False
+    if event.get("type") != "turn.failed" and error.get("name") != "AcpBridgeError":
+        return False
+    if error.get("code") == "model_not_found":
+        return True
+    message = error.get("message")
+    if not isinstance(message, str):
+        return False
+    detail = message[:4000]
+    if re.search(r"\bmodel is not supported when using Codex with a ChatGPT account\b", detail, re.I):
+        return True
+    try:
+        payload, _ = json.JSONDecoder().raw_decode(detail[detail.index("{"):])
+    except (ValueError, RecursionError):
+        return False
+    provider = payload.get("error", payload) if isinstance(payload, dict) else None
+    return isinstance(provider, dict) and provider.get("code") == "model_not_found"
 
 
 def capabilities(agent_name: str) -> dict:

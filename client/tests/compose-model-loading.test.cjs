@@ -489,8 +489,8 @@ test('Codex slider defaults to medium, preserves supported choices and never bor
     { id: 'empty', label: 'Empty', reasoningLevels: [], defaultReasoning: 'high' },
   ];
   f.requests[0].resolve({ ok: true, models }); await f.picker.ready();
-  assert.equal(f.picker.value().modelName, 'full', 'first available model is selected automatically');
-  assert.equal(f.picker.value().reasoningEffort, 'medium', 'automatic selection is also a real medium effort');
+  assert.equal(f.picker.value().modelName, '', 'unselected accounts let the native runtime resolve its own model');
+  assert.equal(f.picker.value().reasoningEffort, '', 'the native default does not force reasoning settings');
   f.choose('full', true);
   assert.equal(f.picker.value().reasoningEffort, 'medium', 'explicit medium overrides model low default');
   f.effort(2); assert.equal(f.picker.value().reasoningEffort, 'high');
@@ -519,15 +519,15 @@ test('Codex refresh reconciles changed capabilities but a failed refresh preserv
   assert.equal(f.picker.value().reasoningEffort, '', 'account changes discard previous effort');
 });
 
-test('Codex honors an available catalog default and retains a valid manual selection on refresh', async () => {
+test('Codex defers its default to the native runtime and requires an explicit replacement for a missing choice', async () => {
   const f = fixture(); f.agent('codex'); f.start();
   const models = [
     {id:'first',label:'First',reasoningLevels:['medium','high']},
     {id:'preferred',label:'Preferred',reasoningLevels:['medium','high']},
   ];
   f.requests[0].resolve({ok:true,models,defaultModel:'preferred'}); await f.picker.ready();
-  assert.equal(f.picker.value().modelName,'preferred');
-  assert.equal(f.picker.value().reasoningEffort,'medium');
+  assert.equal(f.picker.value().modelName,'');
+  assert.equal(f.picker.value().reasoningEffort,'');
   f.choose('first',true); f.effort(1);
   const refreshed=f.picker.refresh(true);
   f.requests[1].resolve({ok:true,models,defaultModel:'preferred'}); await refreshed;
@@ -535,7 +535,12 @@ test('Codex honors an available catalog default and retains a valid manual selec
   assert.equal(f.picker.value().reasoningEffort,'high');
   const removed=f.picker.refresh(true);
   f.requests[2].resolve({ok:true,models:[models[1]],defaultModel:'missing'}); await removed;
-  assert.equal(f.picker.value().modelName,'preferred','removed selections fall back to an actual available model');
+  assert.equal(f.picker.value().modelName,'first');
+  assert.equal(await f.picker.ready(),false, 'a missing manual choice cannot silently use another model');
+  f.choose('',true);
+  assert.equal(await f.picker.ready(),true);
+  assert.equal(f.picker.value().modelName,'');
+  assert.equal(f.picker.value().reasoningEffort,'');
 });
 
 test('managed model picker translates built-in provider and quota labels', async () => {
@@ -658,4 +663,17 @@ test('a new conversation clears the old cloud model before a delayed local Agent
   assert.equal(f.picker.value().modelName, 'default', 'the new conversation cannot inherit an old cloud selection while local probing waits');
   release(true); await opening;
   assert.equal(f.picker.value().modelName, 'default', 'the cancelled probe cannot restore the previous selection later');
+});
+
+test('a missing native catalog preserves an explicit directory preference and its label', async () => {
+  const f = fixture(); f.agent('codex'); f.start();
+  f.requests[0].resolve({ ok: true, catalogAvailable: false, models: [] });
+  await f.picker.ready();
+  assert.equal(await f.picker.restoreSelection({ adapterId: 'codex', modelName: 'saved', reasoningEffort: 'high' }), true);
+  assert.equal(f.picker.value().modelName, 'saved');
+  assert.equal(f.picker.value().reasoningEffort, 'high');
+  assert.match(f.nodes.cpModelName.textContent, /saved/);
+  f.choose('', true);
+  assert.equal(f.picker.value().modelName, '');
+  assert.equal(f.picker.value().reasoningEffort, '');
 });

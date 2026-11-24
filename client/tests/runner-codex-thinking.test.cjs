@@ -20,7 +20,7 @@ async function fixture(t, options = {}) {
   ];
   t.mock.method(native, 'list', () => ({ ok: true, models: rows }));
   const calls = [], sessions = [];
-  let turn = 0, hold = false, accepted = {};
+  let turn = 0, hold = false, accepted = {}, failure = null;
   const adapter = createRunnerRuntimeAdapter({ app, runtimeSpec: catalog.runtime(options.adapterId || 'codex'),
     runnerRuntime: { async rpc(op, input) {
       calls.push({ op, input });
@@ -34,7 +34,7 @@ async function fixture(t, options = {}) {
         turn++; accepted = input.executionSelection || accepted;
         return { ok: true, data: { ok: true, acceptedSelection: accepted } };
       }
-      if (op === 'job.session') return { ok: true, data: { status: hold ? 'running' : 'done', round: turn,
+      if (op === 'job.session') return { ok: true, data: { status: hold ? 'running' : 'done', round: turn, ...failure,
         activeExecutionSelection: accepted, items: turn ? [{ seq: turn, kind: 'say', text: 'Reply ' + turn }] : [] } };
       throw Error('Unexpected fixture operation: ' + op);
     } }, modelConfig: { fetchModel: async (_identity, name) => ({ ok: true, model: { id: name } }) } });
@@ -46,7 +46,7 @@ async function fixture(t, options = {}) {
   };
   t.after(async () => { for (const session of sessions) await session.dispose(); fs.rmSync(root, { recursive: true, force: true }); });
   return { ...(await open()), app, ref, root, rows, calls, open,
-    hold(value) { hold = value; },
+    hold(value) { hold = value; }, reject(value) { failure = value; },
     requests: () => calls.filter(row => ['job.dispatch', 'job.comment'].includes(row.op)) };
 }
 
@@ -130,4 +130,50 @@ test('non-Codex Runner sessions do not gain a Codex effort contract', async t =>
   const f = await fixture(t, { adapterId: 'qwen' });
   assert.equal(f.session.snapshot().thinking, undefined);
   assert.equal((await f.handle.setThinkingLevel('high')).ok, false);
+});
+
+for (const legacy of [false, true]) test('a rejected Codex model is not replayed and its archive reopens: ' + (legacy ? 'legacy ACP' : 'typed'), async t => {
+  const f = await fixture(t);
+  const error = legacy ? JSON.stringify({ name: 'AcpBridgeError', message: JSON.stringify({ error: {
+    type: 'invalid_request_error', code: 'model_not_found',
+    message: "The 'balanced' model is not supported when using Codex with a ChatGPT account.",
+  } }) }) : '当前 Codex 账号无法使用所选模型。';
+  f.reject({ status: 'failed', error, ...(legacy ? {} : { failureKind: 'native_model_unavailable' }) });
+  const turn = f.session.send({ text: 'Synthetic request' });
+  await wait(() => f.session.snapshot().status === 'unreachable');
+  assert.equal((await turn.completion).ok, false);
+  const blocked = f.session.send({ text: 'Do not resend the rejected model' });
+  assert.equal(blocked.accepted, false);
+  assert.match(blocked.result.reason, /Codex 默认/);
+  assert.equal(f.requests().length, 1, 'the rejection cannot replay the previous request or submit a new one');
+  assert.equal((await f.handle.accountCatalog()).models.some(row => row.id === 'balanced'), false);
+  await f.session.dispose();
+
+  const reopened = await f.open(true);
+  assert.equal(reopened.session.snapshot().modelSelection.name, '');
+  assert.equal((await reopened.handle.selectModel('balanced')).ok, false);
+  assert.equal(f.requests().length, 1, 'opening a failed archive cannot run another turn');
+  assert.equal((await reopened.handle.selectModel('')).ok, true);
+  await wait(() => reopened.session.snapshot().status === 'unreachable');
+  f.reject(null);
+  const continued = reopened.session.send({ text: 'Continue on the native default' });
+  assert.equal((await continued.completion).ok, true);
+  assert.deepEqual(f.requests().at(-1).input.executionSelection, { agentId: 'codex', modelName: '', reasoningEffort: '' });
+});
+
+test('missing catalog evidence preserves a saved model while a verified removal restores the native default', async t => {
+  const f = await fixture(t);
+  await f.session.dispose();
+  let available = false;
+  t.mock.method(native, 'list', () => ({ ok: true, catalogAvailable: available, models: [] }));
+  preference(f.app, f.ref).write('balanced', 'high');
+  const unknown = await f.open(true, { modelName: 'balanced' });
+  assert.equal(unknown.session.snapshot().modelSelection.name, 'balanced');
+  assert.deepEqual(preference(f.app, f.ref).readSelection(), { name: 'balanced', reasoningEffort: 'high' });
+  await unknown.session.dispose();
+  available = true;
+  const removed = await f.open(true);
+  assert.equal(removed.session.snapshot().modelSelection.name, '');
+  assert.equal(preference(f.app, f.ref).read(), '');
+  assert.equal(f.requests().length, 0);
 });

@@ -70,6 +70,61 @@ class LocalRpcTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(forwarded["_localParent"])
             self.assertEqual(forwarded["calls"], request["calls"])
 
+    async def test_account_models_follow_the_native_binding_and_executing_cli(self):
+        from app.services import codex_account_home as account, codex_runtime_home
+        dispatch = self.runner()._local_rpc_dispatch
+
+        async def catalog(ref=None, available=True):
+            packet = await dispatch({"op": "runtime.models", "key": "codex", **({"ref": ref} if ref else {})})
+            self.assertTrue(packet["ok"], packet)
+            self.assertIs(packet["data"]["catalogAvailable"], available)
+            return packet["data"]["models"]
+
+        def write(home, name, version="0.1.0"):
+            home.mkdir(parents=True, exist_ok=True)
+            (home / "models_cache.json").write_text(json.dumps({"client_version": version, "models": [
+                {"slug": name, "display_name": "Native model", "visibility": "list", "default_reasoning_level": "low",
+                 "supported_reasoning_levels": [{"effort": "low"}, {"effort": "unsupported"}], "private": "omitted"},
+                {"slug": "review-only", "visibility": "hide"}, {"slug": name, "visibility": "list"},
+            ]}, indent=2), encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as temp, patch.object(agent_setup, "_selected_cli_version", return_value="codex-cli 0.1.0"), \
+                patch.dict(os.environ, {"SODUWORK_DATA_ROOT": temp, "CODEX_HOME": str(Path(temp) / "desktop")}):
+            root = Path(temp)
+            write(root / "desktop", "desktop-only", "0.2.0")
+            self.assertEqual(await catalog(available=False), [])
+            self.assertEqual(await catalog("new", available=False), [])
+            self.assertFalse((root / "agents").exists(), "Browsing models must not allocate a conversation")
+            write(root / "desktop", "source-account")
+            self.assertEqual([r["id"] for r in await catalog()], ["source-account"])
+            legacy = root / "agents/codex" / codex_runtime_home._folder("old")
+            write(legacy, "session-only")
+            account.activate(temp)
+            selected = Path(account.account_home(temp))
+            self.assertEqual(await catalog(available=False), [], "A private account cannot fall back to a desktop cache")
+            write(selected, "account-model")
+            self.assertEqual([r["id"] for r in await catalog()], ["account-model"])
+            self.assertEqual([r["id"] for r in await catalog("new")], ["account-model"])
+            self.assertEqual(await catalog("old"), [{"id": "session-only", "label": "Native model",
+                            "reasoningLevels": ["low"], "defaultReasoning": "low"}])
+            bound = root / "agents/codex" / codex_runtime_home._folder("bound")
+            self.assertEqual(account.runtime_home(temp, str(bound)), str(selected))
+            self.assertEqual([r["id"] for r in await catalog("bound")], ["account-model"])
+            write(selected, "other-cli", "0.2.0")
+            self.assertEqual(await catalog("bound", available=False), [])
+            cache = selected / "models_cache.json"
+            cache.write_text(json.dumps({"clientVersion": "0.1.0", "models": [{"id": "old-format",
+                             "supportedReasoningLevels": [{}, [], {"name": "high"}, {"effort": []}],
+                             "defaultReasoningLevel": {"unexpected": "value"}}]}), encoding="utf-8")
+            self.assertEqual(await catalog("bound"), [{"id": "old-format", "label": "old-format",
+                             "reasoningLevels": ["high"], "defaultReasoning": ""}])
+            cache.write_text(json.dumps({"client_version": "0.1.0", "models": [{"slug": "hidden", "visibility": "hide"}]}))
+            self.assertEqual(await catalog("bound"), [])
+            self.assertEqual([r["id"] for r in await catalog("old")], ["session-only"])
+            (legacy / "models_cache.json").unlink()
+            os.link(root / "desktop/models_cache.json", legacy / "models_cache.json")
+            self.assertEqual(await catalog("old", available=False), [])
+
     async def test_slow_native_detection_does_not_block_other_session_status_or_stop(self):
         machine = self.runner()
         server = self.create(machine._local_rpc_dispatch)

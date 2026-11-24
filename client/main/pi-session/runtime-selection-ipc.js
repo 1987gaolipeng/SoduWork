@@ -14,6 +14,18 @@ function install({ app, ipcMain, session, identityOf, memories, cloud, publish }
     require('../conversation/requirement-context').identityMatches(handle, identity);
     return handle;
   }
+  ipcMain.handle('pi-session-runtime-models', async (event, adapterId, ref) => {
+    try {
+      if (!ref || adapterId !== 'codex') return await require('../agent-runtime/native-model-catalog').list(adapterId);
+      const handle = await current(event, ref);
+      if (handle.adapterId !== adapterId || !handle.accountCatalog || cloud.guard(handle))
+        return { ok: false, models: [] };
+      const catalog = await handle.accountCatalog();
+      if (await current(event, ref) !== handle || handle.adapterId !== adapterId || cloud.guard(handle))
+        return { ok: false, models: [] };
+      return catalog;
+    } catch (_) { return { ok: false, models: [] }; }
+  });
   ipcMain.handle('pi-session-select-agent', async (event, ref, agentId, rawSelection) => {
     try {
       const handle = await current(event, ref);

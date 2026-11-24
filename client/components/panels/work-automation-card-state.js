@@ -80,7 +80,7 @@
       Number(b.localOnly === true || String(b.name || b.id || '').startsWith('local:')) -
       Number(a.localOnly === true || String(a.name || a.id || '').startsWith('local:')));
     if (selected === 'local:unavailable') return selected;
-    if (agent?.nativeModelPick) return selected || (options.length === 1 ? String(options[0].name || options[0].id || '') : '');
+    if (agent?.nativeModelPick) return selected;
     if (local && catalogs.modelCatalogError) return selected;
     return options.some(item => String(item.name || item.id || '') === selected) ? selected
       : String(options[0]?.name || options[0]?.id || selected);
