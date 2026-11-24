@@ -52,6 +52,7 @@ export const serverMessages = {
   'plugin.mcp.missing': ['尚未启用：{names}', 'Not enabled: {names}', '未有効：{names}', '활성화되지 않음: {names}'],
   'plugin.tools.ready': ['已批准 {count} 个具体工具', '{count} specific tools approved.', '{count} 個のツールを承認済みです。', '도구 {count}개 승인됨.'],
   'plugin.tools.missing': ['尚未选择：{names}', 'Not selected: {names}', '未選択：{names}', '선택되지 않음: {names}'],
+  'model.config.invalid-object': ['模型配置必须是 JSON 对象', 'Model configuration must be a JSON object.', 'モデル設定は JSON オブジェクトで指定してください。', '모델 설정은 JSON 객체여야 합니다.'],
   'model.discovery.invalid-url': ['先填写以 http(s):// 开头的服务地址', 'Enter a service address that starts with http(s)://.', 'http(s):// で始まるサービスアドレスを入力してください。', 'http(s)://로 시작하는 서비스 주소를 입력하세요.'],
   'model.discovery.missing-key': ['先配置组织密钥', 'Configure the organization key first.', '先に組織キーを設定してください。', '먼저 조직 키를 설정하세요.'],
   'model.discovery.invalid-list': ['服务没有返回有效的模型列表', 'The service did not return a valid model list.', 'サービスから有効なモデル一覧が返されませんでした。', '서비스가 올바른 모델 목록을 반환하지 않았습니다.'],

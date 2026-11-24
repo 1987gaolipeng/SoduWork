@@ -53,6 +53,9 @@
   var emailView = null;
   var loginAccountHub = null;
   var loginAccountEdited = false;
+  var loginPreferencesLoaded = false;
+  var rememberAccountInput = null;
+  var autoLoginInput = null;
   var loginReload = null;
   var policyRevision = 0;
   var quotaNotice = null;
@@ -85,7 +88,16 @@
   }
 
   function trackLoginAccount() {
+    rememberAccountInput = gate.querySelector('#soduWorkRememberAccount');
+    autoLoginInput = gate.querySelector('#soduWorkAutoLogin');
     accountInput?.addEventListener('input', function () { loginAccountEdited = true; });
+  }
+
+  function loginPreferencesHtml() {
+    return '<div class="soduwork-auth-preferences">' +
+      '<label><input id="soduWorkRememberAccount" type="checkbox"><span>记住账号</span></label>' +
+      '<label><input id="soduWorkAutoLogin" type="checkbox" aria-describedby="soduWorkAutoLoginHint"><span>在此设备上自动登录</span></label>' +
+      '<p id="soduWorkAutoLoginHint">自动登录使用系统加密保存的设备凭据。</p></div>';
   }
 
   function restoreLoginAccount(reset) {
@@ -94,10 +106,19 @@
     if (reset || (loginAccountHub !== null && loginAccountHub !== hub)) {
       accountInput.value = '';
       loginAccountEdited = false;
+      loginPreferencesLoaded = false;
+      rememberAccountInput.checked = autoLoginInput.checked = false;
     }
     loginAccountHub = hub;
     // Enrollment resolves the saved service before the form adopts its account.
-    if (booting || switchingConnection || gate?.hidden || loginAccountEdited || accountInput.value) return;
+    if (booting || switchingConnection || gate?.hidden) return;
+    if (!loginPreferencesLoaded) {
+      var preferences = bridge?.loginPreferences?.();
+      rememberAccountInput.checked = preferences?.rememberAccount === true;
+      autoLoginInput.checked = preferences?.autoLogin === true;
+      loginPreferencesLoaded = true;
+    }
+    if (loginAccountEdited || accountInput.value) return;
     var remembered = bridge?.rememberedLoginAccount?.();
     if (typeof remembered === 'string') accountInput.value = remembered;
   }
@@ -299,7 +320,7 @@
     submitButton.classList.toggle('is-busy', !!busy);
     submitButton.querySelector('span').textContent = label ||
       (busy ? '\u6b63\u5728\u767b\u5f55' : '\u767b\u5f55\u5e76\u7ee7\u7eed');
-    [accountInput, passwordInput, displayInput].forEach(function (input) {
+    [accountInput, passwordInput, displayInput, rememberAccountInput, autoLoginInput].forEach(function (input) {
       if (input) input.disabled = !!busy;
     });
     if (passwordEye) passwordEye.disabled = !!busy;
@@ -380,7 +401,7 @@
     gate.setAttribute('aria-modal', 'true');
     gate.setAttribute('aria-labelledby', 'soduWorkAuthTitle');
     if (global.EmailAuth) {
-      emailView = global.EmailAuth.mount(gate, { api: api, retry: function () { return boot({ recheckAuth: true }); },
+      emailView = global.EmailAuth.mount(gate, { api: api, preferencesHtml: loginPreferencesHtml(), retry: function () { return boot({ recheckAuth: true }); },
         success: function (result) {
           if (!scheduleLoginReload(result.user)) return false;
           updateIdentity(result.user, result.quota);
@@ -416,7 +437,7 @@
           '</span></label>' +
           '<details class="soduwork-auth-first"><summary>\u9996\u6b21\u4f7f\u7528\uff1f\u53ef\u9009\u586b\u5199\u663e\u793a\u540d</summary>' +
             '<label><span>\u663e\u793a\u540d <em>\u53ef\u9009</em></span><input id="soduWorkAuthDisplayName" name="name" autocomplete="name" maxlength="64" placeholder="\u4f8b\uff1a\u80e1\u8015\u6c38"></label>' +
-          '</details>' +
+          '</details>' + loginPreferencesHtml() +
           '<div class="soduwork-auth-status" role="status" aria-live="polite"></div>' +
           '<div class="soduwork-auth-recovery" hidden>' +
             '<button class="soduwork-auth-retry" type="button" hidden>\u91cd\u8bd5\u8fde\u63a5</button>' +
@@ -617,7 +638,9 @@
       var result = await api().clientLogin({
         account: account,
         password: password,
-        displayName: text(displayInput.value).trim()
+        displayName: text(displayInput.value).trim(),
+        rememberAccount: rememberAccountInput.checked,
+        autoLogin: autoLoginInput.checked
       });
       if (legacySubmission !== attempt) return;
       passwordInput.value = '';
@@ -1044,6 +1067,7 @@
     });
     global.addEventListener('soduwork-data-scope-changed', function () {
       loginReload = null;
+      loginPreferencesLoaded = false;
       invalidateLogin();
       restoreLoginAccount(false);
     });

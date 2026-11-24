@@ -1807,6 +1807,7 @@ async def put_model_def(
     """
     from ..models import ModelDef, ModelProvider
     from ..services import model_catalog, model_config_guard
+    from ..services.model_definition_contracts import ModelConfigTypeError
     pid = str(body.get("providerId") or "").strip()
     name = str(body.get("name") or "").strip()[:160]
     if not pid or not name:
@@ -1837,7 +1838,8 @@ async def put_model_def(
                 m.modality,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            headers = {"X-Error-Code": "model.config.invalid-object"} if isinstance(exc, ModelConfigTypeError) else None
+            raise HTTPException(status_code=400, detail=str(exc), headers=headers) from exc
     if "note" in body:
         m.note = str(body.get("note") or "")[:300]
     try:
@@ -2231,6 +2233,11 @@ async def put_llm_config(
     session: AsyncSession = Depends(get_session),
 ):
     """Update LLM settings; omitted or empty apiKey preserves the existing credential."""
+    # The LLM gateway is platform-level configuration (#1026): revision only
+    # guards concurrent writes, not authorization. Superusers only, mirroring
+    # the alert-config and mail-settings gates.
+    if not user.is_super:
+        raise HTTPException(status_code=403, detail="平台级模型网关配置仅超级管理员可修改")
     import json as _json
 
     from ..models import AppSetting

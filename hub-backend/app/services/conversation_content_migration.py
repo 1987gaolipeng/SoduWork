@@ -109,12 +109,14 @@ async def handoff(session, client, row):
             raise HTTPException(409, "原交接文件校验失败，未删除任何数据")
         options["archiveRef"] = await conversation_content.put(runner_id, row.owner_user_id, "archive:" + row.id, data, session=session)
         options["legacyBlob"] = {"key": key, "backend": backend}
+    # Task maintenance locks the task before its handoff. Follow that order
+    # after the endpoint has sealed the content and before publishing it.
+    current_task = await session.scalar(select(Task).where(Task.id == row.task_id)
+        .with_for_update().execution_options(populate_existing=True)) if task_note is not None else None
     current = await session.scalar(select(ConversationHandoff).where(ConversationHandoff.id == row.id)
         .with_for_update().execution_options(populate_existing=True))
     if not current or current.owner_user_id != client.user_ref or captured != fingerprint([current.options, current.source, current.storage_key, current.backend, current.phase]):
         raise HTTPException(409, "迁移期间交接状态已变化，原文已保留")
-    current_task = await session.scalar(select(Task).where(Task.id == row.task_id)
-        .with_for_update().execution_options(populate_existing=True)) if task_note is not None else None
     if current_task and current_task.note != task_note:
         raise HTTPException(409, "迁移期间会话内容已更新，原文已保留")
     current_briefs = list((await session.scalars(select(TaskEvent).where(TaskEvent.id.in_(brief_versions))
@@ -140,7 +142,7 @@ async def handoff(session, client, row):
     await session.commit()
     legacy = options.get("legacyBlob")
     if legacy:
-        await asyncio.to_thread(storage.delete, legacy["key"], legacy["backend"])
+        await storage.delete_unreferenced(session, legacy["key"], legacy["backend"])
         current.options = {key: value for key, value in options.items() if key != "legacyBlob"}
         await session.commit()
     return {"ok": True, "handoffId": row.id}

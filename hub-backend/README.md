@@ -37,6 +37,16 @@ Direct development uses local configuration and data; keep it separate from real
 
 API documentation: **http://127.0.0.1:9080/docs**. Health check: `GET /healthz`.
 
+### Upgrading local attachment storage
+
+Stop every Hub process that can write to the uploads volume. Back up the database and the entire volume at the same point in time. On NTFS, use a backup that preserves named streams if the deployment predates #336. Start one upgraded Hub with this pair before starting any other writers.
+
+Before serving requests, Hub checks local attachment and conversation handoff references against the older flat and hashed layouts. Each uniquely owned file moves to `uploads/objects-v2/<SHA-256 of the logical key in UTF-8>`. Database keys and display names stay the same. Repeated references to one key are valid. Distinct keys that lead to the same physical file, conflicting sources, or missing active objects require inspection; the preflight leaves the original files in place. An interrupted move can resume on the next startup. Once the volume has its completion marker, reads and deletes use v2 exclusively. Include the marker when moving the volume.
+
+Older Hubs could keep a handoff receipt after deleting its task and archive. An absent archive for such a receipt allows startup when no active reference needs it. If the file still exists, migration preserves it. Attachments used for messages can have no task and still require their bytes.
+
+For a missing active object, use the reported key to locate its database record and a trusted backup from the same deployment. Early Windows installations may have stored bytes in an NTFS named stream. Check ownership and verify the recovered ordinary file against the recorded length and SHA-256 where available. With Hub stopped, place that verified copy at the v2 path for the exact key in the restore copy, preserving the original backup. If ownership or content cannot be established, keep the originals for review. A successful startup and a download matching the original bytes verify recovery. To roll back, stop Hub and restore the old database and uploads volume together before restarting the old version.
+
 ### Read-only automation
 
 Use the configured Hub address. The local development example below uses port 9080. The health check is public. To list the projects visible to an account, obtain its bearer token through `POST /api/v1/admin/login` and provide it in `HUB_TOKEN` through your environment or CI secret store. The account needs the `task.view` permission.
@@ -101,6 +111,8 @@ Recognized npm JavaScript Agents use the same validated Node and package entry f
 DeepSeek native packages follow the selected Node's platform, architecture and Linux libc, including Rosetta and mixed-runtime installations. Unknown Node identities fail closed. Launch and version-probe child processes inherit the selected Node directory without modifying the Runner's global PATH; quoted Windows PATH entries retain their priority.
 
 Model capability report v3 tests streaming continuation after a synthetic tool result, with tools retained and no extra user message. Existing v2 tool successes require rechecking; independent evidence remains available. Deploy the matching desktop update. Model refusals include an opaque `soduwork-trace` marker shared by JSON and SSE errors and the transport log; validated upstream request IDs remain correlation metadata, never error-classification input. Generic 403 guidance does not infer credential permissions from the status alone.
+
+Reading older model configurations preserves valid manual capability declarations when another field is incompatible, without rewriting the database. Saving still validates configuration fields and rejects arrays, strings and other non-object values; explicit `config: null` retains its existing reset behavior. Unknown capabilities are not promoted to supported during reads or upgrades, and an inconclusive capability check does not replace manual declarations.
 
 Model transport refusal logs distinguish recognized rate limits, billing failures and unclassified 429 responses without recording provider bodies. Numeric and HTTP-date `Retry-After` values pass through the existing JSON/SSE error contract; waits above one day are bounded to one day, already beyond the desktop retry budget. Billing errors omit retry hints. The Hub does not add a retry loop; the matching desktop update honors the provider wait only within its existing per-turn budget.
 

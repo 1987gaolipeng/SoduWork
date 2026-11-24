@@ -6,6 +6,7 @@ the existing subprocess transport fixture; only the vendor is synthetic.
 import asyncio
 import json
 from pathlib import Path
+import tempfile
 import threading
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -21,6 +22,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class CloudConversationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_concurrent_submissions_keep_one_input_object(self):
+        payload = b"same request bytes"
+        files = (("one.txt", payload, "text/plain"),)
+        with tempfile.TemporaryDirectory() as uploads, patch.object(storage, "_LOCAL_DIR", uploads):
+            replies = await asyncio.gather(self.create("double-submit", files=files),
+                                           self.create("double-submit", files=files))
+            self.assertEqual([reply.status_code for reply in replies], [200, 200])
+            ready = await self.create("double-submit", files=files)
+            self.assertEqual(ready.json()["phase"], "committed", ready.text)
+            self.assertEqual(self.fixture.peer.calls.count("job.dispatch"), 1)
+            await self.fixture.complete(ready.json()["ref"])
+            row_id = handoffs.identity(self.fixture.client.id, "double-submit")
+            async with db.SessionLocal() as session:
+                row = await session.get(ConversationHandoff, row_id)
+                inputs = list((await session.scalars(select(models.Attachment).where(
+                    models.Attachment.task_id == row.task_id, models.Attachment.role == "input"))).all())
+                self.assertEqual([item["id"] for item in row.options["inputs"]], [item.id for item in inputs])
+                self.assertEqual(len(inputs), 1)
+                self.assertEqual(storage.get(inputs[0].storage_key, inputs[0].backend), payload)
+            objects = [path for path in Path(uploads).rglob("*") if path.is_file()]
+            self.assertEqual(len(objects), 1)
+            self.assertEqual(objects[0].read_bytes(), payload)
+
     async def test_mobile_automatic_review_real_report_transport_and_settlement(self):
         from app import automation_models as am
         from app.services import cloud_acceptance
@@ -353,22 +377,6 @@ class CloudConversationTests(unittest.IsolatedAsyncioTestCase):
             denied = await self.http.post("/api/v1/attachments/" + input_id + "/access",
                 headers={"Authorization": "Device " + self.fixture.other_token})
             self.assertIn(denied.status_code, [403, 404], denied.text)
-
-        with self.subTest("simultaneous identical uploads create one execution and one input object"):
-            before = peer.calls.count("job.dispatch")
-            files = (("one.txt", b"same request bytes", "text/plain"),)
-            replies = await asyncio.gather(self.create("double-submit", files=files),
-                                           self.create("double-submit", files=files))
-            self.assertTrue(all(reply.status_code == 200 for reply in replies), [reply.text for reply in replies])
-            ready = await self.create("double-submit", files=files)
-            self.assertEqual(ready.json()["phase"], "committed", ready.text)
-            self.assertEqual(peer.calls.count("job.dispatch"), before + 1)
-            await self.fixture.complete(ready.json()["ref"])
-            row_id = handoffs.identity(self.fixture.client.id, "double-submit")
-            async with db.SessionLocal() as session:
-                row = await session.get(ConversationHandoff, row_id)
-                self.assertEqual(len(row.options["inputs"]), 1)
-            self.assertEqual(len(list(Path(storage._LOCAL_DIR).glob("cloud-inputs__" + row_id + "__*"))), 1)
 
         with self.subTest("lost database commit ACK preserves referenced inputs for retry"):
             original_commit = AsyncSession.commit

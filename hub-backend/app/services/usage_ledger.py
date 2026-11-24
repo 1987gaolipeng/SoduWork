@@ -318,7 +318,11 @@ async def prepare_client_event(
     if source_type in {"task", "workflow"} and not task_id:
         raise InvalidUsageSource(f"sourceType {source_type} requires a visible taskId")
     from .model_quota import reported_scope
-    raw_usage = dict(payload.get("usage") or {})
+    raw_usage = payload.get("usage")
+    if raw_usage is None:
+        raw_usage = {}
+    elif not isinstance(raw_usage, dict):
+        raise ValueError("usage 必须是对象")
     validate_reported_usage(raw_usage)
     values = {
         "quota_scope": reported_scope(client, payload),
