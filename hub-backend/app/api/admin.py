@@ -2199,6 +2199,11 @@ async def put_llm_config(
     session: AsyncSession = Depends(get_session),
 ):
     """Update LLM settings; omitted or empty apiKey preserves the existing credential."""
+    # The LLM gateway is platform-level configuration (#1026): revision only
+    # guards concurrent writes, not authorization. Superusers only, mirroring
+    # the alert-config and mail-settings gates.
+    if not user.is_super:
+        raise HTTPException(status_code=403, detail="平台级模型网关配置仅超级管理员可修改")
     import json as _json
 
     from ..models import AppSetting
