@@ -206,6 +206,52 @@ class RequirementMaintenanceTests(unittest.IsolatedAsyncioTestCase):
             await session.commit()
         self.assertEqual((await self.call("PATCH", "tasks/shared", json={"archivedAt": 1})).status_code, 200)
 
+    async def test_single_and_bulk_task_deletion_release_handoff_archives(self):
+        from app.conversation_handoff_models import ConversationHandoff
+        from app.services import storage
+
+        self.enterContext(patch.multiple(storage, _LOCAL_DIR=self.temp.name, backend_name=lambda: "local"))
+        archive = "handoffs/shared/archive.zip"
+        pending = "handoffs/migrated/old.zip"
+        neighbor = "att/legacy/notes.txt"
+        for key in (archive, pending, neighbor):
+            storage.put(key, key.encode(), "application/octet-stream")
+        async with self.sessions() as session:
+            for tid in ("private", "shared"):
+                options = {"other": tid}
+                if tid == "private":
+                    options["legacyBlob"] = {"key": pending, "backend": "local"}
+                session.add(ConversationHandoff(id=tid, task_id=tid, owner_client_id="owner",
+                    owner_user_id="owner", transfer_id=tid, phase="committed", request_hash="fingerprint",
+                    receipt={"ref": tid}, storage_key=archive, backend="local", options=options))
+                session.add(models.Attachment(task_id=tid, filename="archive.zip",
+                                              storage_key=archive, backend="local"))
+            session.add(models.Attachment(task_id="legacy", filename="notes.txt",
+                                          storage_key=neighbor, backend="local"))
+            task = await session.get(models.Task, "shared")
+            task.status = "done"
+            task.reviewed_at = datetime.now(timezone.utc)
+            await session.commit()
+
+        removed = await self.call("DELETE", "tasks/private")
+        self.assertEqual(removed.status_code, 200, removed.text)
+        self.assertEqual(storage.get(archive, "local"), archive.encode())
+        with self.assertRaises(FileNotFoundError):
+            storage.get(pending, "local")
+        cleared = await self.call("POST", "tasks/clear-done")
+        self.assertEqual(cleared.json(), {"removed": 1})
+        with self.assertRaises(FileNotFoundError):
+            storage.get(archive, "local")
+        self.assertEqual(storage.get(neighbor, "local"), neighbor.encode())
+        async with self.sessions() as session:
+            for tid in ("private", "shared"):
+                self.assertIsNone(await session.get(models.Task, tid))
+                handoff = await session.get(ConversationHandoff, tid)
+                self.assertEqual((handoff.storage_key, handoff.backend), ("", ""))
+                self.assertEqual(handoff.options, {"other": tid})
+                self.assertEqual((handoff.phase, handoff.request_hash, handoff.receipt),
+                                 ("committed", "fingerprint", {"ref": tid}))
+
     async def test_bulk_delete_checks_every_task_before_deleting_any(self):
         async with self.sessions() as session:
             for tid in ("shared", "private"):

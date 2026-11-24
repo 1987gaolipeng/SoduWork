@@ -291,13 +291,14 @@ async def migrate_local_attachments(session):
     from sqlalchemy import select
 
     from ..conversation_handoff_models import ConversationHandoff
-    from ..models import Attachment
+    from ..models import Attachment, Task
 
     attachments = select(
         Attachment.storage_key, Attachment.size, Attachment.evidence_meta["sha256"].as_string()
     ).where(Attachment.backend == "local", Attachment.storage_key != "")
-    handoffs = select(ConversationHandoff.storage_key, ConversationHandoff.sha256).where(
-        ConversationHandoff.backend == "local", ConversationHandoff.storage_key != "")
+    handoffs = select(ConversationHandoff.storage_key, ConversationHandoff.sha256, Task.id).outerjoin(
+        Task, Task.id == ConversationHandoff.task_id
+    ).where(ConversationHandoff.backend == "local", ConversationHandoff.storage_key != "")
     legacy = ConversationHandoff.options["legacyBlob"]
     cleanup = select(legacy["key"].as_string()).where(
         legacy["backend"].as_string() == "local", legacy["key"].as_string() != "")
@@ -310,10 +311,16 @@ async def migrate_local_attachments(session):
     inventory = {}
     for key, size, digest in await session.execute(attachments):
         _record_evidence(inventory, key, size, digest)
-    for key, digest in await session.execute(handoffs):
-        _record_evidence(inventory, key, None, digest)
+    live = set(inventory)
     pending = set(await session.scalars(cleanup))
-    return await asyncio.to_thread(migrate_local_objects, inventory, pending_cleanup=pending, evidence=inventory)
+    for key, digest, task_id in await session.execute(handoffs):
+        _record_evidence(inventory, key, None, digest)
+        # Older Hubs could delete a task and its archive but leave the handoff row.
+        if task_id is None:
+            pending.add(key)
+        else:
+            live.add(key)
+    return await asyncio.to_thread(migrate_local_objects, live, pending_cleanup=pending, evidence=inventory)
 
 
 async def delete_unreferenced(session, key, backend):

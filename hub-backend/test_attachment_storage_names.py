@@ -317,7 +317,7 @@ class AttachmentInventoryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
         from app.conversation_handoff_models import ConversationHandoff
-        from app.models import Attachment
+        from app.models import Attachment, Task
 
         self.directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(patch.object(storage, "_LOCAL_DIR", str(self.directory)))
@@ -327,6 +327,7 @@ class AttachmentInventoryTests(unittest.IsolatedAsyncioTestCase):
         async with engine.begin() as connection:
             await connection.run_sync(Attachment.__table__.create)
             await connection.run_sync(ConversationHandoff.__table__.create)
+            await connection.run_sync(Task.__table__.create)
         self.session = await self.enterAsyncContext(async_sessionmaker(engine)())
 
     def attachment(self, key, **fields):
@@ -334,9 +335,12 @@ class AttachmentInventoryTests(unittest.IsolatedAsyncioTestCase):
 
         self.session.add(Attachment(task_id="", storage_key=key, **fields))
 
-    def handoff(self, task, key, backend="local", **fields):
+    def handoff(self, task, key, backend="local", *, task_exists=True, **fields):
         from app.conversation_handoff_models import ConversationHandoff
+        from app.models import Task
 
+        if task_exists:
+            self.session.add(Task(id=task, title="Archive owner"))
         self.session.add(ConversationHandoff(
             id=task, task_id=task, transfer_id=task, owner_client_id="client",
             owner_user_id="user", storage_key=key, backend=backend, **fields))
@@ -373,6 +377,35 @@ class AttachmentInventoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(keys[1], str(caught.exception))
         for source in sources:
             self.assertEqual(source.read_bytes(), b"data")
+
+    async def test_deleted_tasks_allow_missing_archives_and_preserve_remaining_bytes(self):
+        gone = "handoff/deleted/gone.zip"
+        kept = "handoff/deleted/kept.zip"
+        payload = b"retained historical archive"
+        self.handoff("deleted", gone, task_exists=False)
+        self.handoff("retained", kept, task_exists=False, sha256=hashlib.sha256(payload).hexdigest())
+        source = self.directory / kept.replace("/", "__")
+        source.write_bytes(payload)
+        await self.session.commit()
+        self.assertEqual(await storage.migrate_local_attachments(self.session), 1)
+        self.assertFalse(source.exists())
+        self.assertEqual(storage.get(kept, "local"), payload)
+        self.assertEqual(await storage.migrate_local_attachments(self.session), 0)
+        with self.assertRaises(FileNotFoundError):
+            storage.get(gone, "local")
+
+    async def test_live_handoff_or_message_reference_still_requires_missing_bytes(self):
+        active = "handoff/live/archive.zip"
+        message = "mate-messages/id/report.txt"
+        self.handoff("current", active)
+        self.handoff("removed", active, task_exists=False)
+        self.handoff("other-removed", message, task_exists=False)
+        self.attachment(message, backend="local")
+        await self.session.commit()
+        with self.assertRaises(FileNotFoundError) as caught:
+            await storage.migrate_local_attachments(self.session)
+        self.assertIn(active, str(caught.exception))
+        self.assertIn(message, str(caught.exception))
 
     async def test_staged_v2_object_is_verified_before_resuming_migration(self):
         key, neighbor = "att/task/1/one.txt", "att/task/2/two.txt"
@@ -429,7 +462,13 @@ class AttachmentInventoryTests(unittest.IsolatedAsyncioTestCase):
         await self.session.commit()
         self.assertFalse(await storage.delete_unreferenced(self.session, key, "local"))
         self.assertEqual(storage.get(key, "local"), b"ordinary archive")
-        await self.session.execute(delete(ConversationHandoff).where(ConversationHandoff.storage_key == key))
+        # Account content migration can still read a handoff archive after its task is gone.
+        self.handoff("historical", key, task_exists=False)
+        await self.session.execute(delete(ConversationHandoff).where(ConversationHandoff.id == "owner"))
+        await self.session.commit()
+        self.assertFalse(await storage.delete_unreferenced(self.session, key, "local"))
+        self.assertEqual(storage.get(key, "local"), b"ordinary archive")
+        await self.session.execute(delete(ConversationHandoff).where(ConversationHandoff.id == "historical"))
         await self.session.commit()
         self.assertTrue(await storage.delete_unreferenced(self.session, key, "local"))
         self.assertFalse(os.path.exists(storage._local_path(key)))

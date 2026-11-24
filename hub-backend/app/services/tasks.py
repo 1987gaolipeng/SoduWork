@@ -792,12 +792,26 @@ async def purge_task_children(
         return {}, []
     from sqlalchemy import delete as _del, update as _update
     from .. import automation_models as am
+    from ..conversation_handoff_models import ConversationHandoff
 
     task_ids = list(dict.fromkeys(str(item) for item in tids if item))
     attachments = list((await session.execute(
         select(models.Attachment).where(models.Attachment.task_id.in_(task_ids))
     )).scalars().all())
     storage_refs = [(row.storage_key, row.backend) for row in attachments if row.storage_key]
+    # Retain each transfer's idempotency receipt, but end its ownership of the
+    # deleted task's archive in the same transaction as the attachment rows.
+    handoffs = await session.scalars(select(ConversationHandoff).where(
+        ConversationHandoff.task_id.in_(task_ids)).with_for_update())
+    for handoff in handoffs:
+        if handoff.storage_key:
+            storage_refs.append((handoff.storage_key, handoff.backend))
+            handoff.storage_key, handoff.backend = "", ""
+        options = handoff.options or {}
+        pending = options.get("legacyBlob")
+        if isinstance(pending, dict) and pending.get("key") and pending.get("backend"):
+            storage_refs.append((pending["key"], pending["backend"]))
+            handoff.options = {key: value for key, value in options.items() if key != "legacyBlob"}
     run_ids = list((await session.execute(
         select(am.WorkflowRun.id).where(am.WorkflowRun.task_id.in_(task_ids))
     )).scalars().all())

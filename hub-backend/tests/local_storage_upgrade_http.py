@@ -49,6 +49,7 @@ def v2_path(key):
 
 async def seed():
     from app import db, models
+    from app.conversation_handoff_models import ConversationHandoff
 
     await db.init_db()
     UPLOADS.mkdir()
@@ -58,6 +59,11 @@ async def seed():
         session.add(models.Client(id=DEVICE, user_ref=OWNER, auth_state="active"))
         session.add(models.Task(id=TASK, title="Upgrade fixture", owner_client_id=DEVICE,
                                 owner_user_id=OWNER, created_by=OWNER))
+        # Previous releases retained the receipt after deleting its task and archive.
+        session.add(ConversationHandoff(id="old-receipt", transfer_id="completed-transfer",
+                                        task_id="already-deleted-task", owner_client_id=DEVICE,
+                                        owner_user_id=OWNER, phase="committed", backend="local",
+                                        storage_key="handoffs/old-receipt/workspace.zip"))
         for aid, name, data in historical_objects():
             key = historical_key(name)
             path = UPLOADS / key.replace("/", "__")
