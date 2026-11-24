@@ -3,6 +3,32 @@
 (function (global) {
   const count = value => Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 
+  function runtimeName(row, overview) {
+    const key = row.agent;
+    if (!key || key === 'unknown' || key === 'app-ai') return '';
+    const names = overview.agentNames || {};
+    if (Object.hasOwn(names, key) && names[key]) return names[key];
+    // Older summaries may lack the display-name map. Match known IDs exactly.
+    const labels = global.AgentBrand?.LABELS || {};
+    return key !== 'custom' && Object.hasOwn(labels, key) ? labels[key] : '';
+  }
+
+  function agentKind(row, overview) {
+    if (row.agent === 'app-ai') return 'direct';
+    return runtimeName(row, overview) ? 'runtime' : 'unidentified';
+  }
+
+  function otherAgentTokens(overviews) {
+    const totals = {direct: 0, unidentified: 0};
+    for (const overview of overviews) {
+      for (const row of overview.byAgent || []) {
+        const kind = agentKind(row, overview);
+        if (kind !== 'runtime') totals[kind] += count(row.tokens) || 0;
+      }
+    }
+    return totals;
+  }
+
   function rank(overviews, dimension) {
     const groups = new Map();
     for (const overview of overviews.filter(Boolean)) {
@@ -16,8 +42,9 @@
           key = JSON.stringify([row.provider || '', row.modelRef || row.model || '']);
           label = row.model || '未知模型';
         } else {
-          key = row.agent || 'unknown';
-          label = overview.agentNames?.[key] || row.agent || '未知底座';
+          if (agentKind(row, overview) !== 'runtime' || !count(row.tokens)) continue;
+          key = row.agent;
+          label = runtimeName(row, overview);
         }
         const group = groups.get(key);
         const tokens = count(row.tokens) || 0;
@@ -48,7 +75,7 @@
     return rows;
   }
 
-  const metrics = { rank, quotaPeriods };
+  const metrics = { rank, quotaPeriods, runtimeName, agentKind, otherAgentTokens };
   if (typeof module !== 'undefined' && module.exports) module.exports = metrics;
   else global.SoduWorkUsageMetrics = metrics;
 })(globalThis);

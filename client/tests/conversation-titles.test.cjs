@@ -80,7 +80,7 @@ function firstTurnFixture(t, options = {}) {
       });
     }, ...options });
   service.enroll(handle);
-  return { app, handle, calls, applied, send: text => service.accepted(handle, service.prepare(handle, text)) };
+  return { app, identity, handle, calls, applied, send: text => service.accepted(handle, service.prepare(handle, text)) };
 }
 
 test('one bounded title request uses the selected model and only visible first-turn text', async t => {
@@ -96,6 +96,23 @@ test('one bounded title request uses the selected model and only visible first-t
   assert.equal(titles.decorate(f.app, { id: 'fixture' }).title, '整理用量记录');
   titles.save(f.app, 'fixture', '个人名称');
   assert.equal(titles.decorate(f.app, { id: 'fixture' }).title, '个人名称');
+});
+
+test('records a device-funded title as a direct call with a known purpose', async t => {
+  const id = 'local:model-' + 'f'.repeat(32);
+  const f = firstTurnFixture(t, {
+    resolveModel: async identity => ({ok:true, localOnly:true,
+      model:{id, localOnly:true, wireModelId:'fixture', baseUrl:identity.hub}}),
+    completion: () => ({choices:[{message:{content:'整理记录'}}], usage:{total_tokens:271}}),
+  });
+  f.handle.snapshot = () => ({modelSelection:{model:{id}}});
+  await f.send('整理这些示例记录并生成一份摘要。'.repeat(4));
+  const accountScope = require('../main/conversation/runtime-segments').scope(f.identity);
+  const report = require('../main/agent-runtime/local-usage.cjs').createLocalUsage(f.app)
+    .read({...f.identity, accountScope}, 7);
+  assert.equal(report.summary.tokens, 271);
+  assert.equal(report.recent[0].agent, 'app-ai');
+  assert.equal(report.recent[0].title, '生成对话标题');
 });
 
 test('short first messages and account-owned agents never start a title request on follow-up', async t => {

@@ -8,7 +8,7 @@ const { epoch } = require('../conversation/message-time');
 const { OPAQUE_REFERENCE } = require('../pi-session/local-model-runtime-privacy.cjs');
 const catalog = require('./runtime-catalog');
 const labels = Object.freeze({
-  chat: '对话', app: '应用', requirement: '需求', task: '需求执行', automation: '定时自动化', model_check: '模型检测',
+  chat: '对话', app: '应用', conversation_title: '生成对话标题', requirement: '需求', task: '需求执行', automation: '定时自动化', model_check: '模型检测',
 });
 const metrics = ['tokens', 'input', 'output', 'cacheRead', 'cacheWrite', 'reasoning', 'requests', 'durationMs', 'costMicrousd'];
 const dayMs = 86400000;
@@ -116,7 +116,7 @@ function overview(db, scope, requestedDays) {
     " COUNT(*) FILTER (WHERE currency<>'USD') AS otherCurrency" + where).get(...bounds), currency: 'USD' };
   quality.coveragePct = Math.round(100 * (quality.reported + quality.reconciled) / Math.max(1, costQuality.records));
   const agentNames = Object.fromEntries(byAgent.map(({ agent }) => [
-    agent, catalog.runtime(agent)?.displayName || (agent === 'app-ai' ? 'App AI' : agent),
+    agent, agent === 'app-ai' ? '应用直接调用模型' : catalog.runtime(agent)?.displayName,
   ]));
   return { days, summary, bySource, byAgent, agentNames, trend, recent, quality, costQuality };
 }
@@ -160,8 +160,51 @@ function createLocalUsage(app) {
       previous.set(handle, { scope, session, receipts, ids });
     } catch (_) { console.warn('[usage] Device usage could not be saved'); }
   }
+  const recoveredScopes = new Set();
+  function recoverRunnerReceipts(identity) {
+    const root = app.getPath('userData');
+    const folder = path.join(root, 'runner', 'data', 'local-runs');
+    const { assertNoLinks } = require('../plugin-resources');
+    const { read: readMetadata } = require('../conversation/metadata-snapshot.cjs');
+    const history = require('../conversation/history-access');
+    const hub = new URL(identity.hub).origin;
+    let entries;
+    try {
+      assertNoLinks(root, folder);
+      entries = fs.readdirSync(folder, { withFileTypes: true });
+    } catch (error) {
+      if (error.code !== 'ENOENT') console.warn('[usage] Runner archives unavailable');
+      return;
+    }
+    for (const entry of entries) {
+      const ref = entry.name;
+      if (!entry.isDirectory() || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(ref)) continue;
+      try {
+        const archive = JSON.parse(readMetadata(root, path.join(folder, ref, 'meta.json')).bytes);
+        // Old receipts froze funding but not the account making each turn.
+        // Only an original local chat dispatch can use its creator's binding.
+        if (archive.ref !== ref || archive.eventDestination !== 'local' || archive.round !== 1 ||
+            archive.admissionKey !== 'dispatch:' + ref || !archive.taskId?.startsWith('chat-') ||
+            !archive.usageReceipts?.some(receipt => receipt?.localOnly === true && receipt.agent === archive.cli)) continue;
+        const row = { id: ref, nativeHistory: true };
+        const local = history.classifyLocal(app, ref, row);
+        if (local.kind !== 'ordinary' || local.ids.length !== 1) continue;
+        const { records, legacy } = local.ownership(ref);
+        const owners = records.concat(legacy || []);
+        if (!owners.some(record => record.hub === hub) ||
+            owners.some(record => record.owner !== identity.accountScope || (record.hub && record.hub !== hub))) continue;
+        observe({ sessionId: ref, usageIdentity: identity }, {
+          usageReceipts: archive.usageReceipts.filter(receipt => receipt?.agent === archive.cli),
+        });
+      } catch (_) { /* An incomplete or unverifiable archive cannot establish usage. */ }
+    }
+  }
   function read(identity, days) {
     const scope = scopeKey(identity);
+    if (!recoveredScopes.has(scope)) {
+      recoverRunnerReceipts(identity);
+      recoveredScopes.add(scope);
+    }
     return access(file, db => {
       db.exec('BEGIN');
       const report = overview(db, scope, days);

@@ -3,6 +3,7 @@
   'use strict';
 
   const sourceNames = { all: '全部', hub: 'Hub 模型', local: '本机配置' };
+  const otherLabels = {direct: '应用直接调用模型', unidentified: '底座未识别'};
   const qualityLabels = { reported: '已上报', reconciled: '已核对', estimated: '估算', unknown: '未知' };
   const byId = id => document.getElementById(id);
   const tr = text => global.SoduWorkI18n?.translateText?.(String(text)) ?? String(text);
@@ -10,7 +11,7 @@
   const missing = '—';
   const pageSize = 5;
   let days = 30, data = null, seq = 0, refreshTimer;
-  let source = 'all', dimension = 'agent', scene = '', page = 0;
+  let source = 'all', dimension = 'agent', scene = '', other = '', page = 0;
   let visibleRecords = [], selectedDay = '';
 
   function esc(value) {
@@ -66,7 +67,7 @@
   }
 
   function resetFilters() {
-    source = 'all'; dimension = 'agent'; scene = ''; page = 0; selectedDay = '';
+    source = 'all'; dimension = 'agent'; scene = ''; other = ''; page = 0; selectedDay = '';
     visibleRecords = [];
   }
   function discard() {
@@ -165,13 +166,16 @@
     return ['hub', 'local'].filter(key => data[key] && (selected === 'all' || selected === key))
       .map(key => [key, data[key]]);
   }
-  function sceneLabel(row) { return row.sourceLabel || row.sourceType || '未知'; }
+  function sceneLabel(row) {
+    return row.sourceType === 'chat' ? '对话' : row.sourceLabel || row.sourceType || '未知';
+  }
   function workTitle(row) {
-    return !row.title || row.title === sceneLabel(row) ? tr(row.title || 'AI 使用') : row.title;
+    if (row.sourceType === 'chat' || !row.title || row.title === sceneLabel(row)) return tr(sceneLabel(row));
+    return row.title;
   }
   function agentName(row, overview) {
-    const key = row.agent;
-    return key && Object.hasOwn(overview.agentNames || {}, key) ? overview.agentNames[key] : key || tr('未知');
+    const kind = global.SoduWorkUsageMetrics.agentKind(row, overview);
+    return kind === 'runtime' ? global.SoduWorkUsageMetrics.runtimeName(row, overview) : tr(otherLabels[kind]);
   }
   function legend(key) {
     return `<span><i class="usage-dot ${key}"></i>${t(sourceNames[key])}</span>`;
@@ -225,33 +229,40 @@
   }
   function ranking(sets) {
     const ranks = global.SoduWorkUsageMetrics.rank(sets, dimension);
-    const total = sum(sets, o=>o.summary?.tokens);
+    const total = dimension === 'agent' ? sum(ranks, row => row.tokens) : sum(sets, o=>o.summary?.tokens);
+    const extra = dimension === 'agent' ? global.SoduWorkUsageMetrics.otherAgentTokens(sets) : {};
+    const supplemental = Object.entries(extra).filter(([,tokens]) => tokens > 0);
     const options = [['agent','按底座'],['model','按模型'],['scene','按工作场景']];
     return `<article class="usage-card usage-ranking" data-ranking-source="${esc(source)}"><div class="usage-line"><h3>${t('用量排行')}</h3><select id="usageGroup" aria-label="${t('排行维度')}">
       ${options.map(([k,v])=>`<option value="${k}" ${k === dimension ? 'selected' : ''}>${t(v)}</option>`).join('')}</select></div>
+      ${dimension === 'agent' && ranks.length ? `<small class="usage-denominator">${t('占已识别底座用量')} · ${number(total)} Tokens</small>` : ''}
       <div class="usage-rank-scroll" tabindex="0" role="region" aria-label="${t('用量排行列表')}">${ranks.map(row => {
         const pct = total ? Math.min(100, 100*row.tokens/total) : 0;
         return `<div class="usage-rank"><div class="usage-line"><span>${dimension === 'scene' ? `<button class="usage-link" data-scene="${esc(row.key)}">${t(row.label)} ›</button>` : t(row.label)}
-          <small>${t('AI 工作')} · ${number(row.sessions)}</small></span><span>${tokenValue(row.tokens)}<small>${total === null ? missing : pct.toFixed(1)+'%'}</small></span></div>
+          <small>${known(row.sessions) ? t('AI 工作')+' · '+number(row.sessions) : ''}</small></span><span>${tokenValue(row.tokens)}<small>${total === null ? missing : pct.toFixed(1)+'%'}</small></span></div>
           <div class="usage-track"><i style="width:${pct}%"></i></div></div>`;
-      }).join('') || `<p>${t('还没有分布数据')}</p>`}</div></article>`;
+      }).join('') || `<p>${t('还没有分布数据')}</p>`}</div>
+      ${supplemental.length ? `<div class="usage-attribution"><small>${t('另计入总用量')}</small>
+        ${supplemental.map(([kind,tokens]) => `<button class="usage-link usage-extra-row" data-other="${kind}"><span>${t(otherLabels[kind])}</span><span>${number(tokens)} Tokens ›</span></button>`).join('')}</div>` : ''}</article>`;
   }
   function recordTable(sources) {
-    const rows = sources.flatMap(([key,o]) => (o.recent || []).filter(row => !scene || row.sourceType === scene)
+    const rows = sources.flatMap(([key,o]) => (o.recent || []).filter(row => (!scene || row.sourceType === scene) &&
+      (!other || global.SoduWorkUsageMetrics.agentKind(row, o) === other))
       .map(row => ({row, key, overview:o}))).sort((a,b) => (Date.parse(b.row.occurredAt)||0) - (Date.parse(a.row.occurredAt)||0));
     const pages = Math.max(1,Math.ceil(rows.length/pageSize));
     page = Math.max(0,Math.min(page,pages-1));
     visibleRecords = rows.slice(page*pageSize,(page+1)*pageSize);
     const chosen = sources.flatMap(([,o])=>o.bySource || []).find(row => row.key === scene);
     return `<section class="usage-card usage-records"><div class="usage-line"><h2 id="usageRecordsTitle" tabindex="-1">${t('最近的 AI 工作')}</h2>
-      <div>${scene ? `<button class="usage-link" id="usageClearScene" aria-label="${t('清除工作场景筛选')}">${t(chosen?.label || scene)} ×</button>` : ''} <small>${t('记录数')} · ${number(sources.length ? rows.length : null)}</small></div></div>
+      <div>${scene || other ? `<button class="usage-link" id="usageClearScene" aria-label="${t(other ? '清除筛选' : '清除工作场景筛选')}">${t(otherLabels[other] || chosen?.label || scene)} ×</button>` : ''} <small>${t('记录数')} · ${number(sources.length ? rows.length : null)}</small></div></div>
       <table><thead><tr>${['工作内容','底座 / 模型','模型来源','日期','Tokens'].map((v,i) => `<th class="${i===1 || i===3 ? 'usage-extra' : ''}" scope="col">${t(v)}</th>`).join('')}</tr></thead><tbody>${visibleRecords.map(({row,key,overview},i) => {
         const name = esc(agentName(row,overview)), date = esc(dateTime(row.occurredAt));
-        return `<tr><td><button class="usage-work" data-record="${i}" data-user-content>${esc(workTitle(row))}</button><small>${t(sceneLabel(row))}</small><small class="usage-mobile">${name} · ${date}</small></td>
+        const title = workTitle(row), label = tr(sceneLabel(row));
+        return `<tr><td><button class="usage-work" data-record="${i}" data-user-content>${esc(title)}</button>${title === label ? '' : `<small>${esc(label)}</small>`}<small class="usage-mobile">${name} · ${date}</small></td>
           <td class="usage-extra">${name}<small data-user-content>${t(row.model || missing)}</small></td><td><span class="usage-badge ${key}">${t(sourceNames[key])}</span></td>
-          <td class="usage-extra">${date}</td><td>${tokenValue(row.tokens)}</td></tr>`;
+          <td class="usage-extra">${date}</td><td>${hasUnknownTokens(row) ? t('用量未知') : tokenValue(row.tokens)}</td></tr>`;
       }).join('') || `<tr><td colspan="5">${t(sources.length ? '最近还没有 AI 工作记录' : '暂无用量数据')}</td></tr>`}</tbody></table>
-      <div class="usage-line usage-foot"><small>${t('北京时间')}</small><div><button id="usagePrev" ${page===0?'disabled':''}>${t('上一页')}</button> <small>${page+1} / ${pages}</small> <button id="usageNext" ${page===pages-1?'disabled':''}>${t('下一页')}</button></div></div></section>`;
+      <div class="usage-line usage-foot"><div><button id="usagePrev" ${page===0?'disabled':''}>${t('上一页')}</button> <small>${page+1} / ${pages}</small> <button id="usageNext" ${page===pages-1?'disabled':''}>${t('下一页')}</button></div></div></section>`;
   }
   function quality(sources) {
     const rows = [];
@@ -260,12 +271,14 @@
       if (key === 'local') rows.push(['本机回执',sum([q.reported,q.reconciled],n=>n)]);
       else rows.push(['已上报',q.reported],['已核对',q.reconciled]);
     }
-    const reliable = sum(rows,row=>row[1]);
-    rows.push(['估算',sum(sources,([,o])=>o.quality?.estimated)],['未知',sum(sources,([,o])=>o.quality?.unknown)]);
-    const total = sum(rows,row=>row[1]);
-    const pct = total && known(reliable) ? Math.round(100*reliable/total)+'%' : missing;
-    return `<section class="usage-card usage-quality"><div class="usage-line"><h2>${t('数据可信度')}</h2><strong>${t('回执覆盖率')} ${pct}</strong></div>
-      <div class="usage-split">${rows.map(([k,v])=>`<span>${t(k)} <b>${number(v)}</b></span>`).join('')}</div></section>`;
+    rows.push(['估算',sum(sources,([,o])=>o.quality?.estimated)],['用量状态未知',sum(sources,([,o])=>o.quality?.unknown)]);
+    const records = sum(rows, row => row[1]);
+    return `<section class="usage-card usage-quality"><div class="usage-line"><h2>${t('数据说明')}</h2><strong>${t('已记录')} · ${number(records)}</strong></div>
+      <div class="usage-split">${rows.filter(([,v])=>v > 0).map(([k,v])=>`<span>${t(k)} <b>${number(v)}</b></span>`).join('')}</div>
+      <small>${t('仅统计可归属当前账号的记录。缺少 Token 数的调用不会增加总用量。')}</small></section>`;
+  }
+  function hasUnknownTokens(row) {
+    return !known(row.tokens) || (row.quality === 'unknown' && row.tokens === 0);
   }
   function details(title, pairs, taskId) {
     byId('usageDialogTitle').textContent = title;
@@ -285,6 +298,10 @@
     const pairs = [['工作场景',tr(sceneLabel(row))],['模型来源',tr(sourceNames[key])],['底座',agentName(row,overview)],['模型',tr(row.model || missing)]];
     for (const [field,label] of [['input','输入 Tokens'],['output','输出 Tokens'],['cacheRead','缓存读取 Tokens'],
       ['cacheWrite','缓存写入 Tokens'],['reasoning','推理 Tokens'],['tokens','合计 Tokens'],['requests','模型请求']]) {
+      if (hasUnknownTokens(row) && field !== 'requests') {
+        if (field === 'tokens') pairs.push([label,tr('用量未知')]);
+        continue;
+      }
       if (known(row[field])) pairs.push([label,number(row[field])]);
     }
     if (known(row.durationMs)) pairs.push(['活跃时长',duration(row.durationMs)]);
@@ -338,9 +355,9 @@
     const button = e.target.closest('button');
     if (!button) return;
     if (button.dataset.source) {
-      source=button.dataset.source; scene=''; page=0; render();
-    } else if (button.dataset.scene || button.id === 'usageClearScene') {
-      scene=button.dataset.scene || ''; page=0; render(); byId('usageRecordsTitle').focus();
+      source=button.dataset.source; scene=''; other=''; page=0; render();
+    } else if (button.dataset.scene || button.dataset.other || button.id === 'usageClearScene') {
+      scene=button.dataset.scene || ''; other=button.dataset.other || ''; page=0; render(); byId('usageRecordsTitle').focus();
     } else if (button.id === 'usageNext' || button.id === 'usagePrev') {
       page += button.id === 'usageNext' ? 1 : -1; render(); byId('usageRecordsTitle').focus();
     } else if (button.hasAttribute('data-record')) recordDetails(Number(button.dataset.record));
