@@ -79,6 +79,34 @@ def streamed_tool(value, *, name="soduwork_capability_echo", arguments=None, ext
 
 
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_plain_tools_retry_requires_a_matching_receipt_and_keeps_controls_out(self):
+        for outcome, status in (("valid", "passed"), ("wrong receipt", "inconclusive"),
+                                ("refused", "unsupported")):
+            with self.subTest(outcome=outcome):
+                def handler(body):
+                    if body.get("stream") or outcome == "refused":
+                        raise UpstreamError(422, '{"error":{"code":"unsupported_tools"}}')
+                    self.assertEqual(set(body), {"model", "messages", "tools"})
+                    if has_tool_result(body):
+                        assistant = body["messages"][-2]
+                        self.assertEqual(assistant["reasoning_content"], "fixture reasoning")
+                        self.assertNotIn("index", assistant["tool_calls"][0])
+                        self.assertEqual(body["messages"][-1]["tool_call_id"], "call-json")
+                        return message(receipt(body) if outcome == "valid" else "wrong")
+                    value = re.search(r"value ([a-f0-9]{16})", body["messages"][0]["content"])[1]
+                    call = {"index": 0, "id": "call-json", "type": "function", "function": {
+                        "name": "soduwork_capability_echo", "arguments": json.dumps({"value": value})}}
+                    return Response({"choices": [{"finish_reason": "tool_calls", "message": {
+                        "role": "assistant", "content": None, "reasoning_content": "fixture reasoning",
+                        "tool_calls": [call]}}]})
+
+                result = await self.run_probe(["toolCalling"], handler, {
+                    **CONF, "thinkingMode": "always", "thinkingFormat": "deepseek"})
+                self.assertEqual(result["checks"]["toolCalling"]["status"], status)
+                self.assertEqual(len(self.requests), 2 if outcome == "refused" else 3)
+                self.assertEqual(result["compatibility"], {})
+                self.assertFalse(result["reasoningStreamReported"])
+
     async def run_probe(self, checks, handler, conf=None):
         self.requests, self.responses = [], []
         async def opened(target, path, encoded, **kwargs):
