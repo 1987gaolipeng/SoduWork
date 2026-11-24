@@ -23,6 +23,7 @@
     "hub.input.inbox": "Team inbox tasks have no recipient. To send a task to someone, assign it to a member.",
     "hub.input.tier": "This environment tier is not supported.",
     "hub.input.host_type": "The hostname must be text.",
+    "hub.input.release_environment": "This task has no available deployment target in the selected environment. Check the release pipeline configuration.",
     "hub.input.host_required": "Enter a hostname to identify this Runner.",
     "hub.input.comment_type": "Comment text must be a string.",
     "hub.input.comment_length": "Comments can contain up to 4,000 characters.",

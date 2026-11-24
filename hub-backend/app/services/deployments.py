@@ -127,7 +127,8 @@ async def _targets(session: AsyncSession, task: models.Task, env_id: str) -> lis
     ).order_by(am.DeploymentTarget.created_at))).scalars().all())
 
 
-async def has_targets(session: AsyncSession, task: models.Task, tier: str = "") -> bool:
+async def has_targets(session: AsyncSession, task: models.Task, tier: str = "", *,
+                      environment_id: str | None = None) -> bool:
     if not task.repo_id:
         return False
     q = select(func.count(am.DeploymentTarget.id)).join(
@@ -136,6 +137,12 @@ async def has_targets(session: AsyncSession, task: models.Task, tier: str = "") 
             am.DeploymentTarget.enabled.is_(True), am.Environment.enabled.is_(True))
     if tier:
         q = q.where(am.Environment.tier == tier)
+    if environment_id is not None:
+        if not environment_id:
+            return False
+        org_id = await environment_service.task_org_id(session, task)
+        q = q.where(am.Environment.id == environment_id,
+                    (am.Environment.org_id.is_(None)) | (am.Environment.org_id == org_id))
     return bool(await session.scalar(q))
 
 
