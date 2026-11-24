@@ -951,13 +951,19 @@ def main() -> int:
         args.agent, args.cwd, args.agent_name, args.permission,
         args.session, allow_terminal=args.terminal)
     try:
-        return bridge.run(prompt)
+        code = bridge.run(prompt)
     except (BridgeError, AccessError, opencode_turn_outcome.OutcomeError) as exc:
         message = _friendly_bridge_error(bridge.agent_name, str(exc))
         _emit({"error": {"name": "AcpBridgeError", "message": message}})
-        return 2
+        code = 2
     finally:
-        bridge.close()
+        try:
+            bridge.close()
+        except (BridgeError, OSError) as exc:
+            # Keep the original turn outcome and report failed cleanup once.
+            _emit({"error": {"name": "AcpCleanupError", "message": str(exc)}})
+            code = 2
+    return code
 
 
 if __name__ == "__main__":

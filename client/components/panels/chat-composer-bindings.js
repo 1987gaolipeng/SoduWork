@@ -49,13 +49,16 @@
       discardStaleChoice();
       if (!active()) return {};
       if (!loaded && !loading) void load();
-      if (devicePreview() && loaded && !error && catalog.some(item => item.id === 'pi') &&
+      const previewAdapter = devicePreview() && ctx._snap.adapterId;
+      // Discovery can temporarily return only Pi while the Runner starts.
+      // A history snapshot or an explicit switch already identifies the selected runtime.
+      if (devicePreview() && !previewAdapter && loaded && !error && catalog.some(item => item.id === 'pi') &&
           !catalog.some(item => item.id === ctx._sessionOptions.adapterId)) {
         ctx._sessionOptions.adapterId = 'pi'; ctx._sessionOptions.modelName = ''; ctx._sessionOptions.modelLabel = '';
         ctx._sessionOptions.reasoningEffort = ''; ctx._sessionOptions.thinkingLevel = '';
         ctx._snap = { ...ctx._snap, modelSelection: null };
       }
-      const adapterId = ctx._sessionOptions.adapterId || 'pi', runtime = catalog.find(item => item.id === adapterId);
+      const adapterId = previewAdapter || ctx._sessionOptions.adapterId || 'pi', runtime = catalog.find(item => item.id === adapterId);
       const mode = ctx._sessionOptions.accessMode || (ctx._sessionOptions.mode === 'readonly' ? 'readonly' :
         devicePreview() && defaultMode === 'full' ? 'standard' : defaultMode);
       const selection = ctx._snap?.modelSelection;
@@ -63,7 +66,8 @@
       const accessControl = devicePreview() && Array.isArray(access?.modes)
         ? { ...access, modes: access.modes.filter(value => value === 'readonly' || value === 'standard') } : access;
       return {draftOnly:true, devicePreview:devicePreview(), archivedModelName:ctx._sessionOptions.archivedModelName,
-        draftId:ctx._sessionId || 'new:' + ctx._viewEpoch, adapterId, displayName:runtime?.displayName || ctx._sessionOptions.displayName,
+        draftId:ctx._sessionId || 'new:' + ctx._viewEpoch, adapterId,
+        displayName:runtime?.displayName || (previewAdapter && ctx._snap.displayName) || ctx._sessionOptions.displayName,
         accessPolicy:accessControl?.supported && accessControl.modes?.includes(mode) ? {mode} : null,
         nextAccessPolicy:null, accessControl:accessControl || null,
         draftAccessHint:ctx._workCards?.draftSelectionError?.() || error || (!loaded ? '正在读取执行选项…' : ''),

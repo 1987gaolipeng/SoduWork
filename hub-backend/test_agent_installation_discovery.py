@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from app.services import acp_agents, agent_npm_runtime as N, agent_setup as A, local_base as L
+from app.services import acp_agents, agent_installation, agent_npm_runtime as N, agent_setup as A, local_base as L
 
 
 class InstallationDiscoveryTests(unittest.TestCase):
@@ -16,6 +16,33 @@ class InstallationDiscoveryTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
+
+    def test_signed_desktop_codex_precedes_unowned_global_install_on_macos(self):
+        with patch.object(N, 'runtime_target', return_value=('darwin', 'arm64')), \
+                patch.object(L, '_WIN', False), patch.object(N, 'private_bin', return_value=''), \
+                patch.object(agent_installation, 'macos_codex_cli', return_value='/desktop/codex'):
+            self.assertEqual(L._codex_bin(), '/desktop/codex')
+            with patch.object(A, '_cached_version_probe', return_value='codex-cli desktop') as version:
+                self.assertEqual(A._version_of('codex'), ('codex-cli desktop', 'cli', ''))
+                self.assertEqual(version.call_args.args[0], '/desktop/codex')
+            with patch.object(N, 'private_bin', return_value='/managed/codex'):
+                self.assertEqual(L._codex_bin(), '/managed/codex')
+
+    def test_desktop_codex_checks_signature_again_after_replacement(self):
+        candidate = self.root / 'codex'
+        candidate.write_bytes(b'original')
+        candidate.chmod(0o755)
+        with patch.object(agent_installation.sys, 'platform', 'darwin'), \
+                patch.object(agent_installation, '_MACOS_CODEX_CLI', (str(candidate),)), \
+                patch.object(agent_installation.subprocess, 'run', side_effect=[
+                    subprocess.CompletedProcess([], 0), subprocess.CompletedProcess([], 1)]) as verify:
+            self.assertEqual(agent_installation.macos_codex_cli(), str(candidate))
+            self.assertEqual(agent_installation.macos_codex_cli(), str(candidate))
+            candidate.write_bytes(b'replacement')
+            self.assertEqual(agent_installation.macos_codex_cli(), '')
+            self.assertEqual(verify.call_count, 2)
+            self.assertEqual(verify.call_args.args[0][0], '/usr/bin/codesign')
+            self.assertIn('anchor apple generic', verify.call_args.args[0][3])
 
     def package(self, root, version):
         directory = root / '@openma/deepseek-harness-acp'

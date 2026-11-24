@@ -231,6 +231,11 @@ def _codex_bin() -> str | None:
     exe = "codex.exe" if _WIN else "codex"
     cands: list[str] = []
     system, arch = runtime_target()
+    if system == "darwin" and not _WIN:
+        from .agent_installation import macos_codex_cli
+        desktop = macos_codex_cli()
+        if desktop:
+            return desktop
     suffix = {"win32": "-pc-windows-msvc", "linux": "-unknown-linux-musl", "darwin": "-apple-darwin"}.get(system)
     if arch and suffix:
         triple = ("x86_64" if arch == "x64" else "aarch64") + suffix

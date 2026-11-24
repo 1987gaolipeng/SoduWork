@@ -240,6 +240,11 @@ def _version_of(key: str) -> tuple[str, str, str]:
         warning = ("找得到程序，但版本自检失败。建议重装。" if binp else
                    "保留了安装记录，但找不到执行程序。请点「重装」补齐。" if recorded else "")
         return recorded, source if recorded else "", warning
+    if key == "codex" and binp:
+        from .agent_installation import macos_codex_cli
+        if binp == macos_codex_cli():
+            version = _cached_version_probe(binp, ["--version"], run=_short)
+            return version, "cli", "" if version else "Codex 版本自检失败"
     ver = _pkg_version(spec.get("pkg", ""))
     if ver:
         return ver, "bundled" if is_bundled(key) else "pkg", (

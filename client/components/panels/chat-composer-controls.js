@@ -149,7 +149,7 @@
       if (savedChoice(state) && selectedModel?.unavailable && !localChoice(state))
         label += global.SoduWorkI18n?.translateText?.('（已保存，当前不可用）') || '（已保存，当前不可用）';
       button.querySelector('span').textContent = label;
-      button.title = '模型：' + label + ' · 用于之后发送的消息';
+      button.title = nativeMode(state) && nativeReason || '模型：' + label + ' · 用于之后发送的消息';
       button.setAttribute('aria-label', button.title);
       // New drafts can choose a model immediately. History needs its own live handle first.
       button.disabled = Boolean(!state.ref && !state.draftOnly || state.runtimeSwitching || state.cloudHandoff && state.cloudHandoff.phase !== 'committed');
@@ -178,27 +178,19 @@
       const selected = nativeSelection(state);
       effortView()?.paint(pop, selected, nativeModels.find(model => model.id === selected.modelName));
     }
-    function paintNativeNote() {
-      const slot = pop.querySelector('[data-native-catalog-note]');
-      if (!slot) return;
-      slot.hidden = !nativeReason;
-      slot.innerHTML = effortView()?.catalogNote?.(nativeReason, nativeRetryable) || '';
-    }
     function renderNativeEffort() {
       const state = options.state();
       pop.classList.add('cp-modelpop', 'show'); pop.dataset.modelView = nativeView;
-      const note = '<div data-native-catalog-note hidden></div>';
       if (nativeView === 'models') {
         pop.innerHTML = '<header class="nmodel-header"><button type="button" data-native-back aria-label="返回推理设置">‹</button><div class="nmodel-heading"><b>选择模型</b><span>Codex · 使用本机账号</span></div><button type="button" data-model-close aria-label="关闭模型选择">×</button></header>' +
           '<label class="nmodel-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg><input type="search" aria-label="搜索模型" placeholder="搜索可用模型"></label>' +
-          '<div class="nmodel-options" role="listbox" aria-label="可用模型"></div>' + note;
+          '<div class="nmodel-options" role="listbox" aria-label="可用模型"></div>';
         list();
       } else {
         const selected = nativeSelection(state), model = nativeModels.find(row => row.id === selected.modelName);
-        pop.innerHTML = note + effortView().html(selected, model);
+        pop.innerHTML = effortView().html(selected, model);
         paintNativeEffort(state);
       }
-      paintNativeNote();
       positionModels();
     }
     function chooseNativeEffort(level) {
@@ -253,13 +245,6 @@
       const current = options.state();
       nativeView = 'effort'; pop.classList.remove('cp-modelpop', 'show'); delete pop.dataset.modelView;
       pop.hidden = false; button.setAttribute('aria-expanded', 'true');
-      if (nativeMode(current)) {
-        if (!rows.length) rows = [{ name: '', label: 'Codex 默认' }];
-        renderNativeEffort(); pop.showPopover?.(); positionModels();
-        pop.querySelector('[data-native-list]')?.focus({ preventScroll: true });
-        await loadModels();
-        return;
-      }
       pop.innerHTML = '<header class="nmodel-header"><div class="nmodel-heading"><b>选择模型</b><span title="只对后续发送的消息生效，不会中断当前轮次">用于本次会话</span></div><button type="button" data-model-close aria-label="关闭模型选择">×</button></header>' +
         '<label class="nmodel-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg><input type="search" aria-label="搜索模型" placeholder="搜索可用模型"></label>' +
         '<div class="nmodel-options" role="listbox" aria-label="可用模型"><p class="nmodel-message">正在加载…</p></div>' +
@@ -286,9 +271,6 @@
     async function readModels(flight) {
       catalogLoads++;
       const current = options.state(), scope = flight.scope;
-      if (nativeMode(current) && !nativeModels.length && !pop.hidden) {
-        nativeReason = '正在加载模型…'; nativeRetryable = false; paintNativeNote();
-      }
       const selectedAtStart = current.selection?.name || current.selection?.model?.id || current.model?.id || '';
       const historyChoice = savedChoice(current);
       const historyLocal = historyChoice && localChoice(current);
@@ -399,7 +381,7 @@
           const before = previousNativeModels.find(model => model.id === selected);
           const after = nativeModels.find(model => model.id === selected);
           if (pop.querySelector('.cp-effort-card') && JSON.stringify(before) === JSON.stringify(after)) {
-            paintNativeEffort(); paintNativeNote();
+            paintNativeEffort();
           }
           else { renderNativeEffort(); pop.querySelector('[data-native-list]')?.focus({ preventScroll: true }); }
           return true;
@@ -408,7 +390,6 @@
           pop.querySelector('.nmodel-options').innerHTML = '<p class="nmodel-message">' +
             (native ? (current.cloudHandoff ? '云端 Agent 暂未提供模型列表。' : '该 Agent 暂未提供可切换的模型。') : '暂无可用模型，请检查模型服务授权。') + '</p>'; return native;
         }
-        if (nativeMode(options.state()) && nativeView === 'models') paintNativeNote();
         const listNode = pop.querySelector('.nmodel-options'), scroll = listNode?.scrollTop || 0;
         const focusedName = pop.contains(document.activeElement) ? document.activeElement?.dataset?.modelName : '';
         list(pop.querySelector('input')?.value || '');
@@ -422,6 +403,7 @@
           nativeReason = '本机 Codex 模型目录暂时无法读取，可继续使用默认模型';
           nativeRetryable = true;
           nativeModels = []; rows = [{ name: '', label: 'Codex 默认' }];
+          render();
           if (!pop.hidden) renderNativeEffort();
           return true;
         }
@@ -450,7 +432,6 @@
     on(pop, 'click', async event => {
       event.stopPropagation();
       if (event.target.closest('[data-model-close]')) { close(true); return; }
-      if (event.target.closest('[data-native-refresh]')) { if (!catalogLoads) void loadModels(); return; }
       if (event.target.closest('[data-native-list]')) {
         nativeView = 'models'; renderNativeEffort(); pop.querySelector('input')?.focus();
         if (nativeRetryable && !catalogLoads) void loadModels();

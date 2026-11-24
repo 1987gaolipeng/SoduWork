@@ -19,8 +19,7 @@ function fixture(settings = {}) {
     setAttribute() {}, removeAttribute() {}, focus() {}, contains: () => false, querySelector: () => null,
     getBoundingClientRect: () => ({ left: 200, right: 300, top: 500 }) });
   const queue = node(), pop = node(), button = node(), label = node(), wrap = node(), el = node(), field = node();
-  const nativeNote = node();
-  pop.querySelector = selector => selector === '[data-native-catalog-note]' ? nativeNote : field; button.querySelector = () => label;
+  pop.querySelector = () => field; button.querySelector = () => label;
   wrap.querySelector = selector => selector === 'button' ? button : selector === '.nmodel-pop' ? pop : null;
   el.querySelector = selector => selector === '#nchatQueue' ? queue : selector === '#nchatModel' ? wrap : null;
   const state = { ref: 'chat', adapterId: 'qwen', model: { id: 'selected', label: 'Selected' } };
@@ -39,7 +38,7 @@ function fixture(settings = {}) {
       onModelsChanged: fn => { changed = fn; return () => {}; },
     } } };
   if (settings.nativeEffort) window.ComposeModelPicker = { nativeEffort: { paint() {}, levels: () => [],
-    html: () => '<div class="cp-effort-card"></div>', catalogNote: (reason, retry) => JSON.stringify({ reason, retry }) } };
+    html: () => '<div class="cp-effort-card"></div>' } };
   if (settings.runtimeWait) window.ChatRuntimePicker = { create: () => ({
     render() {}, wait: settings.runtimeWait, reset() {}, destroy() {},
   }) };
@@ -48,7 +47,7 @@ function fixture(settings = {}) {
     draft: { ready: () => true, destroy() {}, selectModel: (name, label) => ({ ok: true, selection: { name, model: { id: name, label } } }) },
     modelSelected: selection => { state.selection = selection; },
     modelAvailabilityChanged: selection => { state.selection = selection; } }); controls.render();
-  return { state, requests, calls, selections, field, label, controls, nativeNote, pop, changed: () => changed(),
+  return { state, requests, calls, selections, field, label, controls, button, pop, changed: () => changed(),
     owner: value => { owner = value; controls.render(); },
     open: () => button.handlers.get('click')(),
   };
@@ -430,10 +429,11 @@ test('an open Codex chat distinguishes a cold Runner from an empty list and reco
   const f = fixture({ nativeEffort: true, runtimeModels: (adapter, ref) => { refs.push(ref); return results.shift(); } });
   f.state.adapterId = 'codex'; f.state.selection = { name: 'saved', model: { id: 'saved', label: 'Saved model' } };
   f.controls.render(); await f.open();
-  assert.equal(JSON.parse(f.nativeNote.innerHTML).retry, true);
+  assert.match(f.button.title, /暂时无法读取/);
+  assert.doesNotMatch(f.pop.innerHTML, /data-native-refresh|data-native-catalog-note/);
   const click = key => f.pop.handlers.get('click')({ stopPropagation() {}, target: { closest: selector => selector === key } });
   await click('[data-native-list]'); await tick();
-  assert.equal(JSON.parse(f.nativeNote.innerHTML).retry, false);
+  assert.match(f.button.title, /暂未提供可切换的模型/);
   assert.match(f.field.innerHTML, /Codex 默认/);
   assert.equal(f.state.selection.name, 'saved');
   f.changed(); await tick();

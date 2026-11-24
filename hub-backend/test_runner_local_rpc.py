@@ -88,13 +88,18 @@ class LocalRpcTests(unittest.IsolatedAsyncioTestCase):
                 {"slug": "review-only", "visibility": "hide"}, {"slug": name, "visibility": "list"},
             ]}, indent=2), encoding="utf-8")
 
-        def legacy_cli(executable, args, *unused):
+        def scoped_cli(executable, args, env, *unused):
             if args == ["--version"]:
                 return b"codex-cli 0.1.0"
-            raise ValueError("This CLI predates debug models")
+            if args == ["debug", "models", "--bundled"]:
+                return b'{"models":[]}'
+            self.assertEqual(args, ["debug", "models"])
+            cached = Path(env["CODEX_HOME"]) / "models_cache.json"
+            return cached.read_bytes() if cached.exists() else b'{"models":[]}'
+
 
         with tempfile.TemporaryDirectory() as temp, patch.object(agent_setup, "_bin_of", return_value="synthetic-codex.exe"), \
-                patch("app.services.codex_model_catalog._run", side_effect=legacy_cli), \
+                patch("app.services.codex_model_catalog._run", side_effect=scoped_cli), \
                 patch.dict(os.environ, {"SODUWORK_DATA_ROOT": temp, "CODEX_HOME": str(Path(temp) / "desktop")}):
             root = Path(temp)
             write(root / "desktop", "desktop-only", "0.2.0")
