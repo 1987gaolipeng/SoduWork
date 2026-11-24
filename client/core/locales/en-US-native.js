@@ -165,6 +165,8 @@
   "开机自启": "Launch at startup",
   "退出 SoduWork": "Quit SoduWork",
   "SoduWork 已紧急暂停": "SoduWork paused for recovery",
+  "原因：启动就绪超时（渲染进程可能启动失败）。点击托盘图标可恢复。": "The desktop overlay did not finish starting in time. Click the SoduWork tray icon to reload it.",
+  "原因：桌面组件区域未完成初始化。点击托盘图标可恢复。": "The desktop overlay started, but its clickable area was not ready in time. Click the SoduWork tray icon to reload it.",
   "SoduWork · 桌面任务助手": "SoduWork · Desktop task assistant",
   "这台电脑还没连上 SoduWork 后台（先打开桌宠登录一次）": "This computer is not connected to SoduWork. Open SoduWork and sign in first.",
   "后台没给出可用的模型": "The server did not return an available model",

@@ -64,7 +64,7 @@ class HandoffFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.http, self.runner = self.fx.http, self.fx.runner
         self.model_requests = []
 
-        async def resolve(_session, _client, name=""):
+        async def resolve(_session, _client, name="", *, provider_id=""):
             self.model_requests.append(name)
             if name and name != "managed-choice":
                 raise ValueError("Requested model is unavailable")

@@ -49,6 +49,42 @@ function removal(f, attribute, value) {
   return { button, click: () => handlers.get('click')() };
 }
 
+test('Pi guidance counts selectable chat choices for this service only', () => {
+  const catalog = localCatalog([]);
+  const id = catalog.providers[0].id;
+  catalog.usable = [{ providerId: 'another', name: 'shared' },
+    { providerId: id, name: 'local:unavailable' }, { providerId: id, name: 'off', available: false }];
+  catalog.mediaUsable.image = [{ providerId: id, name: 'image' }];
+  const f = fixture(catalog);
+  assert.match(f.detail(), /本地 Pi 可选的对话模型：0 个/);
+  assert.match(f.detail(), /data-mdaddchat=/);
+  f.evaluate('catalog.usable.push({providerId: "local-fixture", name: "shared"})');
+  assert.match(f.detail(), /本地 Pi 可选的对话模型：1 个/);
+  assert.doesNotMatch(f.detail(), /data-mdaddchat=/);
+});
+
+test('guidance distinguishes a read-only service, incompatible protocol and unreadable catalog', () => {
+  const catalog = localCatalog([]);
+  const provider = { id: 'org', name: 'Org', baseUrl: 'https://fixture.invalid', keySet: true };
+  catalog.providers.push(provider);
+  assert.match(fixture(catalog).detail('org'), /请联系管理员/);
+  provider.kind = 'anthropic';
+  assert.match(fixture(catalog).detail('org'), /请使用支持此协议的 Agent/);
+  catalog.managedCatalogUnavailable = true;
+  const f = fixture(catalog);
+  assert.match(f.detail('org'), /data-mdretrycatalog/);
+  assert.doesNotMatch(f.detail('org'), /本地 Pi 可选的对话模型：0 个|data-mdaddchat=/);
+  assert.match(f.detail(), /data-mdaddchat=/);
+});
+
+test('a saved chat definition that cannot be selected leads back to that model', () => {
+  const catalog = localCatalog();
+  catalog.usable = [];
+  const f = fixture(catalog);
+  assert.match(f.detail(), /data-mdreviewchat="local-fixture"/);
+  assert.doesNotMatch(f.detail(), /data-mdaddchat=/);
+});
+
 test('a saved local model is counted once and remains editable despite its catalog mirror', () => {
   const catalog = localCatalog(), before = JSON.stringify(catalog), f = fixture(catalog);
   assert.equal(catalog.providers[0].modelDefs.length, 1, 'execution consumers retain their existing catalog');

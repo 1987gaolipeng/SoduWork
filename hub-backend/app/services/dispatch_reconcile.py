@@ -20,16 +20,24 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from .. import automation_models as am
 from .. import models
-from .task_access import publish_task
 from ..db import SessionLocal
-from . import (ai_exec, ai_remote, execution_sessions, notify, runner_hub,
-               task_events, task_status)
-
+from . import (
+    ai_exec,
+    ai_remote,
+    execution_sessions,
+    notify,
+    runner_access_policy,
+    runner_hub,
+    task_events,
+    task_status,
+)
+from .task_access import publish_task
 
 log = logging.getLogger("uvicorn.error")
 
@@ -69,8 +77,8 @@ def _iso(value: datetime) -> str:
     return _utc(value).isoformat().replace("+00:00", "Z")
 
 
-def _first_uncertain(detail: dict, fallback: datetime) -> datetime:
-    value = str(detail.get("firstUncertainAt") or "").strip()
+def _stamp(value, fallback: datetime) -> datetime:
+    value = str(value or "").strip()
     if value:
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -78,6 +86,10 @@ def _first_uncertain(detail: dict, fallback: datetime) -> datetime:
         except ValueError:
             pass
     return _utc(fallback)
+
+
+def _first_uncertain(detail: dict, fallback: datetime) -> datetime:
+    return _stamp(detail.get("dispatchIntentAt") or detail.get("firstUncertainAt"), fallback)
 
 
 async def candidates(session: AsyncSession, *, now: datetime | None = None,
@@ -94,11 +106,14 @@ async def candidates(session: AsyncSession, *, now: datetime | None = None,
     ))
     rows = list((await session.execute(
         select(event).join(models.Task, models.Task.id == event.task_id).where(
-            event.kind == ai_exec.EV_DISPATCH_UNCERTAIN,
+            or_(event.kind == ai_exec.EV_DISPATCH_UNCERTAIN,
+                and_(event.kind == ai_exec.EV_DISPATCH_STARTED,
+                     event.detail["awaitingDispatchReply"].as_boolean().is_(True))),
             event.at <= now - timedelta(seconds=PROBE_AFTER_SECONDS),
             models.Task.status.in_(("todo", "doing")),
             ~newer_state,
-        ).order_by(event.at.desc(), event.id.desc()).limit(max(1, int(limit)))
+        ).order_by(func.coalesce(event.detail["lastProbeAt"].as_string(), ""),
+                   event.at, event.id).limit(max(1, int(limit)))
     )).scalars().all())
     out: list[Candidate] = []
     for row in rows:
@@ -116,6 +131,52 @@ async def candidates(session: AsyncSession, *, now: datetime | None = None,
     return out
 
 
+def admission_receipt(data: dict, ref: str) -> dict:
+    """Read only the admission state carried by this exact dispatch receipt."""
+    state = execution_sessions.canonical_state(data.get("state"))
+    if (data.get("ref") != ref or data.get("admissionKey") != "dispatch:" + ref
+            or state not in {"queued", "running", "done", "failed", "cancelled"}):
+        return {}
+    position = data.get("queuePosition")
+    receipt = {"state": state, "queued": state == "queued", "admissionKey": data["admissionKey"],
+               "queuePosition": max(0, position) if state == "queued" and type(position) is int else 0,
+               "queueClass": str(data.get("queueClass") or "")[:24]}
+    if data.get("turnCorrelationVersion") == 1:
+        receipt["turnCorrelationVersion"] = 1
+    if data.get("error") and state in {"failed", "cancelled"}:
+        from .dispatch_attempts import public_error
+        receipt["error"] = public_error(data["error"])
+    return receipt
+
+
+def _registration(runner):
+    return (runner, *(str(getattr(runner, key, "") or "")
+                      for key in ("boot_id", "client_id", "owner_user_id", "org_id")))
+
+
+async def _probe_allowed(session, candidate, runner, *, lock=False):
+    if lock:
+        await runner_access_policy.acquire_runner_policy_lock(session, candidate.runner_id)
+    task = await session.get(models.Task, candidate.task_id, populate_existing=True)
+    node = await session.get(am.RunnerNode, candidate.runner_id, with_for_update=lock, populate_existing=True)
+    if task is None or runner_access_policy.denial(node, runner, "job.has"):
+        return False
+    for field, attr in (("runnerClientId", "client_id"), ("runnerOrgId", "org_id"),
+                        ("runnerOwnerUserId", "owner_user_id")):
+        if field in candidate.detail and candidate.detail[field] != str(getattr(runner, attr, "") or ""):
+            return False
+    return await execution_sessions._allowed(session, runner, task, ref=candidate.expected_ref)
+
+
+async def probe_result_current(session, candidate, result):
+    """Recheck the responding connection and its current grant before recording its evidence."""
+    runner = runner_hub.get(candidate.runner_id)
+    if runner is None or result.get("_registration") != _registration(runner):
+        return False
+    allowed = await _probe_allowed(session, candidate, runner, lock=True)
+    return allowed and runner_hub.get(candidate.runner_id) is runner and result["_registration"] == _registration(runner)
+
+
 async def probe(candidate: Candidate) -> dict:
     """Ask the exact Runner for read-only evidence about one deterministic ref."""
     if not candidate.runner_id or not candidate.expected_ref:
@@ -123,6 +184,17 @@ async def probe(candidate: Candidate) -> dict:
     runner = runner_hub.get(candidate.runner_id)
     if runner is None or not runner.alive():
         return {"state": "ambiguous", "reason": "offline", "runnerOnline": False}
+    registration = _registration(runner)
+    async with SessionLocal() as session:
+        allowed = await _probe_allowed(session, candidate, runner)
+    if not allowed or runner_hub.get(candidate.runner_id) is not runner or _registration(runner) != registration:
+        return {"state": "ambiguous", "reason": "route-changed", "runnerOnline": True}
+    result = await _probe_runner(candidate, runner)
+    result["_registration"] = registration
+    return result
+
+
+async def _probe_runner(candidate, runner):
     current_boot = str(getattr(runner, "boot_id", "") or "")
     try:
         reply = await runner.call(
@@ -136,24 +208,49 @@ async def probe(candidate: Candidate) -> dict:
         return {"state": "ambiguous", "reason": "probe-failed",
                 "runnerOnline": True, "error": str(reply.get("error") or "")[:240],
                 "observedBootId": current_boot}
-    data = dict(reply.get("data") or {})
+    data = reply.get("data")
+    if not isinstance(data, dict) or any(type(data[k]) is not bool for k in ("has", "persisted", "inflight")
+                                         if k in data):
+        return {"state": "ambiguous", "reason": "invalid-receipt", "runnerOnline": True}
     observed_boot = str(data.get("bootId") or current_boot)
+    if current_boot and observed_boot != current_boot:
+        return {"state": "ambiguous", "reason": "runner-restarted", "runnerOnline": True,
+                "observedBootId": observed_boot}
+    if ((data.get("ref") and data["ref"] != candidate.expected_ref)
+            or (data.get("admissionKey") and data["admissionKey"] != "dispatch:" + candidate.expected_ref)):
+        return {"state": "ambiguous", "reason": "receipt-mismatch", "runnerOnline": True,
+                "observedBootId": observed_boot}
     persisted = bool(data.get("persisted"))
     inflight = bool(data.get("inflight"))
     has_run = bool(data.get("has"))
     # Legacy Runners only return {has}.  A positive answer remains authoritative.
     if persisted or (has_run and not inflight):
         return {"state": "confirmed", "runnerOnline": True,
+                "receipt": admission_receipt(data, candidate.expected_ref),
                 "observedBootId": observed_boot, "persisted": persisted}
     if inflight:
+        keyed = (data.get("has") is True and data.get("ref") == candidate.expected_ref
+                 and data.get("admissionKey") == "dispatch:" + candidate.expected_ref
+                 and candidate.runner_boot_id and data.get("bootId") == current_boot == candidate.runner_boot_id)
         return {"state": "pending", "reason": "inflight", "runnerOnline": True,
+                "keyedInflight": bool(keyed), "observedBootId": observed_boot}
+    if candidate.detail.get("awaitingDispatchReply"):
+        # This Hub may still be uploading inputs or have a dispatch RPC in flight.
+        # A negative observation cannot release work that could arrive later.
+        return {"state": "pending", "reason": "awaiting-dispatch-reply", "runnerOnline": True,
                 "observedBootId": observed_boot}
-    if (candidate.runner_boot_id and observed_boot
-            and candidate.runner_boot_id == observed_boot):
+    journal_protocol = "admit1" in getattr(runner, "caps", []) or "admissionDurable" in data
+    durable_negative = (data.get("admissionDurable") is True
+                        and data.get("admissionKey") == "dispatch:" + candidate.expected_ref
+                        and data.get("persisted") is False and data.get("inflight") is False)
+    if (data.get("has") is False and candidate.runner_boot_id
+            and data.get("bootId") == current_boot == candidate.runner_boot_id
+            and (not journal_protocol or durable_negative)):
         return {"state": "not-started", "runnerOnline": True,
-                "admissionDurable": ("admit1" in getattr(runner, "caps", [])
-                    and data.get("admissionDurable") is True
-                    and data.get("admissionKey") == "dispatch:" + candidate.expected_ref),
+                "admissionDurable": durable_negative,
+                "observedBootId": observed_boot}
+    if observed_boot == candidate.runner_boot_id:
+        return {"state": "ambiguous", "reason": "unconfirmed-receipt", "runnerOnline": True,
                 "observedBootId": observed_boot}
     return {"state": "ambiguous", "reason": "runner-restarted",
             "runnerOnline": True, "observedBootId": observed_boot}
@@ -168,11 +265,52 @@ async def _latest_state(session: AsyncSession, task_id: str):
 
 
 def _same_attempt(event, candidate: Candidate) -> bool:
-    if event is None or event.kind != ai_exec.EV_DISPATCH_UNCERTAIN:
+    if event is None:
         return False
     detail = dict(event.detail or {})
-    return (str(detail.get("attemptId") or "") == candidate.attempt_id
+    return ((event.kind == ai_exec.EV_DISPATCH_UNCERTAIN
+             or (event.kind == ai_exec.EV_DISPATCH_STARTED and detail.get("awaitingDispatchReply")))
+            and detail.get("awaitingDispatchReply") == candidate.detail.get("awaitingDispatchReply")
+            and str(detail.get("attemptId") or "") == candidate.attempt_id
             and str(detail.get("expectedRef") or "") == candidate.expected_ref)
+
+
+async def _ack_overdue(session, task_id, detail, first_at, now, seconds):
+    cutoff = now - timedelta(seconds=seconds)
+    last_ack = _stamp(detail.get("lastRunnerReplyAt"), first_at)
+    if last_ack > cutoff:
+        return False
+    # Queued heartbeats may arrive while the original dispatch RPC is still waiting.
+    # The session holds the Hub's receipt time even if the Runner has since disconnected.
+    from ..automation_models import ExecutionSession
+    ref = detail.get("expectedRef") or ""
+    receipt = select(ExecutionSession.metadata_).where(
+        ExecutionSession.task_id == task_id, ExecutionSession.ref == ref,
+        ExecutionSession.runner_id == detail.get("runnerId"), ExecutionSession.state == "queued")
+    if "runnerClientId" in detail:
+        receipt = receipt.where(ExecutionSession.runner_client_id == detail["runnerClientId"])
+    meta = await session.scalar(receipt) or {}
+    if meta.get("round", 1) == 1 and meta.get("admissionKey") in (None, "", "dispatch:" + ref):
+        last_ack = max(last_ack, _stamp(meta.get("queueLeaseCheckedAt"), last_ack))
+    return last_ack <= cutoff
+
+
+async def status_for_uncertain(session: AsyncSession, task_id: str, *, now: datetime | None = None) -> dict:
+    """Expose an overdue first ACK without fabricating a Runner execution session."""
+    from .queued_dispatch_lease import LEASE_SECONDS
+    latest = await _latest_state(session, task_id)
+    if latest is None:
+        return {}
+    detail = latest.detail or {}
+    if (latest.kind != ai_exec.EV_DISPATCH_UNCERTAIN and
+            (latest.kind != ai_exec.EV_DISPATCH_STARTED or not detail.get("awaitingDispatchReply"))):
+        return {}
+    ref = detail.get("expectedRef")
+    if not detail.get("runnerId") or not ref:
+        return {}
+    if not await _ack_overdue(session, task_id, detail, _first_uncertain(detail, latest.at), _utc(now), LEASE_SECONDS):
+        return {"ref": ref}
+    return {"ref": ref, "queueLeaseStatus": "unconfirmed", "queueLeaseReason": "no_runner_ack"}
 
 
 def _runner_cli(detail: dict) -> str:
@@ -186,6 +324,10 @@ async def apply_probe(session: AsyncSession, candidate: Candidate, result: dict,
                       *, now: datetime | None = None) -> tuple[str, models.Task | None]:
     """Apply one probe under the task row lock; safe across multiple Hub instances."""
     now = _utc(now)
+    if session.get_bind().dialect.name == "sqlite":
+        # SQLite ignores FOR UPDATE. Reserve the write before checking the attempt.
+        await session.execute(update(models.Task).where(models.Task.id == candidate.task_id)
+                              .values(updated_at=models.Task.updated_at).execution_options(synchronize_session=False))
     task = (await session.execute(select(models.Task).where(
         models.Task.id == candidate.task_id).with_for_update())).scalar_one_or_none()
     if task is None or task.status not in {"todo", "doing"}:
@@ -196,6 +338,9 @@ async def apply_probe(session: AsyncSession, candidate: Candidate, result: dict,
     detail = dict(latest.detail or {})
     observed_boot = str(result.get("observedBootId") or "")
     state = str(result.get("state") or "ambiguous")
+    if (state in {"confirmed", "not-started"} or result.get("keyedInflight")) and not await probe_result_current(
+            session, candidate, result):
+        return "stale", task
 
     if state == "confirmed":
         cli = _runner_cli(detail)
@@ -214,24 +359,21 @@ async def apply_probe(session: AsyncSession, candidate: Candidate, result: dict,
             "retryable": False,
             "uncertain": False,
         }
-        task_events.record(
-            session, task.id, ai_exec.EV_DISPATCHED, healed, actor="SoduWork")
-        await execution_sessions.record_dispatch(session, task, {
-            "issueId": candidate.expected_ref,
-            "provider": "runner",
-            "runnerId": candidate.runner_id,
-            "host": candidate.host,
-            "assigneeId": healed["assigneeId"],
-            "assigneeCli": cli,
-            "agentCli": cli,
-            "model": detail.get("model") or "",
-        })
+        healed.pop("error", None)
+        row = await execution_sessions.record_dispatch(session, task, {
+            **healed, **(result.get("receipt") or {}), "agentCli": cli})
+        meta = row.metadata_ or {}
+        healed.update(state=row.state, queued=row.state == "queued",
+                      queuePosition=meta.get("queuePosition", 0), queueClass=meta.get("queueClass", ""))
+        task_events.record(session, task.id, ai_exec.EV_DISPATCHED, healed, actor="SoduWork")
         if task.status == "todo":
             await task_status.mark(session, task, "doing", why="Runner 存在性探针接回")
         ai_remote.remember(candidate.expected_ref, candidate.runner_id)
         return "confirmed", task
 
     if state == "not-started":
+        if detail.get("lastRunnerReplyAt") != candidate.detail.get("lastRunnerReplyAt"):
+            return "stale", task
         released = await task_status.mark(
             session, task, "todo", why="Runner 明确确认未启动")
         summary = ("执行机已确认本次需求没有启动，需求已安全退回待办，可以重新安排执行"
@@ -254,8 +396,11 @@ async def apply_probe(session: AsyncSession, candidate: Candidate, result: dict,
         return "released" if released else "attention", task
 
     first_at = _first_uncertain(detail, candidate.at)
-    if ((now - first_at).total_seconds() >= ATTENTION_AFTER_SECONDS
-            and not bool(detail.get("attentionRaised"))):
+    if result.get("keyedInflight"):
+        detail["lastRunnerReplyAt"] = _iso(now)
+    latest.detail = {**detail, "lastProbeAt": _iso(now)}
+    if not detail.get("attentionRaised") and await _ack_overdue(
+            session, task.id, detail, first_at, now, ATTENTION_AFTER_SECONDS):
         online = bool(result.get("runnerOnline"))
         reason = str(result.get("reason") or "")
         if reason == "offline":
@@ -321,6 +466,8 @@ async def reconcile_once(*, now: datetime | None = None,
                     await session.commit()
                     if task is not None:
                         await _publish(session, task, action)
+                elif action == "pending":
+                    await session.commit()
                 else:
                     await session.rollback()
             counts[action] = counts.get(action, 0) + 1

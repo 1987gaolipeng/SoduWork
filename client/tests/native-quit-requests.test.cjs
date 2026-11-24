@@ -117,6 +117,7 @@ test('mixed native, command-line and activation requests retain twenty unique fi
   const start=main.indexOf("  app.on('second-instance'"),end=main.indexOf('  _fileOpen.fromCommand',start);
   assert.ok(start>=0&&end>start,'production second-instance handler remains available');
   vm.runInNewContext(main.slice(start,end),{app:h.app,_quitRelaunch:h.state,_fileOpenModule:fileOpen,_fileOpen:h.broker,
+    _firstChatLinks:require('../main/first-chat-links.cjs'),
     _linuxStartup:{focusRecovery:()=>false},openDeskWindow:()=>h.calls.push('workspace'),console});
   h.state.markQuitting();
   for(const file of paths.slice(0,10))h.open(file);

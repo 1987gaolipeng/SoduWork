@@ -1,3 +1,4 @@
+import { ja as firstChatJa, ko as firstChatKo } from './first-chat.js'
 import { ja as auditJa, ko as auditKo } from './audit.js'
 import { ja as automationTemplatesJa, ko as automationTemplatesKo } from './automation-templates.js'
 import { ja as capabilityCatalogJa, ko as capabilityCatalogKo } from './capability-catalog.js'
@@ -9,6 +10,7 @@ import { ja as legalJa, ko as legalKo } from './legal-documents.js'
 import { ja as governanceJa, ko as governanceKo } from './governance-overview.js'
 import { ja as insightsMetricsJa, ko as insightsMetricsKo } from './insights-metrics.js'
 import { ja as usageCenterJa, ko as usageCenterKo } from './usage-center.js'
+import { ja as modelProviderDeletionJa, ko as modelProviderDeletionKo } from './model-provider-deletion.js'
 import { ja as modelRuntimeOverviewJa, ko as modelRuntimeOverviewKo } from './model-runtime-overview.js'
 import { ja as connectorJa, ko as connectorKo } from './connector-management.js'
 import { ja as cloudRunnerJa, ko as cloudRunnerKo } from './cloud-runner-management.js'
@@ -17,6 +19,18 @@ import { ja as quotaJa, ko as quotaKo } from './quota-management.js'
 import { ja as accessCatalogJa, ko as accessCatalogKo } from './access-catalog.js'
 import { ja as operationsJa, ko as operationsKo } from './operations-overview.js'
 const ja = {
+  "选择代码源…": "コードソースを選択…",
+  "请先在「系统集成」接入 GitLab 或 GitHub，然后回到这里同步仓库目录。": "「システム連携」で GitLab または GitHub を接続してから、ここでリポジトリ一覧を同期してください。",
+  "请先接入代码源": "先にコードソースを接続してください",
+  "从仓库目录选择仓库和分支，需求才能准确落到对应工程。": "リポジトリ一覧からリポジトリとブランチを選び、課題を対応するプロジェクトに割り当てます。",
+  "使用 8–128 个字符，不能全为空白。": "8～128文字で、空白以外の文字を1文字以上含めてください。",
+  "请联系插件管理员启用流程。": "プラグイン管理者にワークフローの有効化を依頼してください。",
+  "前往插件与应用？未保存的场景修改将丢失。": "プラグインとアプリに移動しますか？ シナリオの未保存の変更は失われます。",
+  "前往插件与应用配置流程": "プラグインとアプリでワークフローを設定",
+  "默认流程不可用": "既定のワークフローは利用できません",
+  "请选择可用流程或“不指定”，也可以在「插件与应用」配置流程。": "利用可能なワークフローまたは「指定しない」を選択してください。「プラグインとアプリ」でワークフローを設定できます。",
+  "不可用的流程：{0}": "利用できないワークフロー：{0}",
+  '升级动态加载失败': '更新状況を読み込めませんでした',
   'Anthropic 服务根地址': 'Anthropic サービスのルート URL',
   '连接成功，本次读取到 {0} 个模型。': '接続に成功しました。モデルを {0} 件取得しました。',
   '示例：{0}。': '例：{0}。',
@@ -48,9 +62,12 @@ const ja = {
   '自动化模板': '自動化テンプレート', '运行监控': '実行モニター', '执行网络': '実行ネットワーク', '用量与成本': '使用量とコスト',
   '项目与仓库': 'プロジェクトとリポジトリ', '仓库目录': 'リポジトリカタログ', '模型目录': 'モデルカタログ', '插件与应用': 'プラグインとアプリ',
   '能力目录': '機能カタログ', '系统集成': 'システム連携', '组织架构': '組織', '组织记忆': '組織メモリ', '工作目录': '作業カタログ',
+  '所属组织': '所属組織', '默认负责人组织': '既定で担当者の組織',
   '用户管理': 'ユーザー管理', '角色权限': 'ロールと権限', '身份接入': 'ID 接続', '审计日志': '監査ログ', '保存': '保存', '取消': 'キャンセル',
   '关闭': '閉じる', '确定': '確認', '删除': '削除', '编辑': '編集', '添加': '追加', '刷新': '更新', '搜索': '検索', '重试': '再試行',
   '加载中…': '読み込み中…', '语言': '言語', '界面语言': '表示言語', '我的设置': 'マイ設定', '服务运行正常': 'サービスは正常です',
+  '自定义': 'カスタム', '上传中，请勿关闭': 'アップロード中 — ウィンドウを閉じないでください', '上传中…': 'アップロード中…',
+  '当前系统语言为繁体中文，暂以简体中文显示。待繁体中文语言包上线后自动切换。': 'システム言語は繁体中国語です。現在簡体中国語で表示されています。繁体中国語の言語パック提供時に自動的に切替されます。',
   '正在确认服务': 'サービスを確認中', '服务连接异常': 'サービス接続の問題', '同事': 'メンバー', '首页': 'ホーム', '返回': '戻る', '创建': '作成',
   '打开': '開く', '查看': '表示', '导出': 'エクスポート', '导入': 'インポート', '测试连接': '接続をテスト', '启用': '有効化', '停用': '無効化',
   '云端环境': 'クラウド環境', '连接器': 'コネクター', '插件': 'プラグイン', '技能': 'スキル', '模型': 'モデル', '智能体': 'エージェント',
@@ -63,6 +80,18 @@ const ja = {
 };
 
 const ko = {
+  "选择代码源…": "코드 소스 선택…",
+  "请先在「系统集成」接入 GitLab 或 GitHub，然后回到这里同步仓库目录。": "시스템 연동에서 GitLab 또는 GitHub를 연결한 후 여기에서 저장소 목록을 동기화하세요.",
+  "请先接入代码源": "먼저 코드 소스를 연결하세요.",
+  "从仓库目录选择仓库和分支，需求才能准确落到对应工程。": "저장소 목록에서 저장소와 브랜치를 선택해 이슈를 해당 프로젝트에 연결하세요.",
+  "使用 8–128 个字符，不能全为空白。": "8~128자로 입력하고 공백이 아닌 문자를 하나 이상 포함하세요.",
+  "请联系插件管理员启用流程。": "플러그인 관리자에게 워크플로 활성화를 요청하세요.",
+  "前往插件与应用？未保存的场景修改将丢失。": "플러그인 및 앱으로 이동할까요? 저장하지 않은 시나리오 변경 사항은 사라집니다.",
+  "前往插件与应用配置流程": "플러그인 및 앱에서 워크플로 구성",
+  "默认流程不可用": "기본 워크플로를 사용할 수 없습니다",
+  "请选择可用流程或“不指定”，也可以在「插件与应用」配置流程。": "사용 가능한 워크플로 또는 ‘지정 안 함’을 선택하세요. ‘플러그인 및 앱’에서 워크플로를 구성할 수 있습니다.",
+  "不可用的流程：{0}": "사용할 수 없는 워크플로: {0}",
+  '升级动态加载失败': '업데이트 활동을 불러오지 못했습니다',
   'Anthropic 服务根地址': 'Anthropic 서비스 루트 URL',
   '连接成功，本次读取到 {0} 个模型。': '연결했습니다. 모델 {0}개를 가져왔습니다. ',
   '示例：{0}。': '예: {0}. ',
@@ -94,9 +123,12 @@ const ko = {
   '自动化模板': '자동화 템플릿', '运行监控': '실행 모니터링', '执行网络': '실행 네트워크', '用量与成本': '사용량 및 비용',
   '项目与仓库': '프로젝트 및 저장소', '仓库目录': '저장소 카탈로그', '模型目录': '모델 카탈로그', '插件与应用': '플러그인 및 앱',
   '能力目录': '기능 카탈로그', '系统集成': '시스템 통합', '组织架构': '조직', '组织记忆': '조직 메모리', '工作目录': '작업 카탈로그',
+  '所属组织': '소속 조직', '默认负责人组织': '기본값: 담당자 조직',
   '用户管理': '사용자 관리', '角色权限': '역할 및 권한', '身份接入': 'ID 연동', '审计日志': '감사 로그', '保存': '저장', '取消': '취소',
   '关闭': '닫기', '确定': '확인', '删除': '삭제', '编辑': '편집', '添加': '추가', '刷新': '새로 고침', '搜索': '검색', '重试': '다시 시도',
   '加载中…': '로드 중…', '语言': '언어', '界面语言': '인터페이스 언어', '我的设置': '내 설정', '服务运行正常': '서비스가 정상입니다',
+  '自定义': '사용자 지정', '上传中，请勿关闭': '업로드 중 — 창을 닫지 마세요', '上传中…': '업로드 중…',
+  '当前系统语言为繁体中文，暂以简体中文显示。待繁体中文语言包上线后自动切换。': '시스템 언어가 번체 중국어입니다. 현재 간체 중국어로 표시됩니다. 번체 중국어 언어팩 제공 시 자동으로 전환됩니다.',
   '正在确认服务': '서비스 확인 중', '服务连接异常': '서비스 연결 문제', '同事': '동료', '首页': '홈', '返回': '뒤로', '创建': '생성',
   '打开': '열기', '查看': '보기', '导出': '내보내기', '导入': '가져오기', '测试连接': '연결 테스트', '启用': '사용', '停用': '사용 중지',
   '云端环境': '클라우드 환경', '连接器': '커넥터', '插件': '플러그인', '技能': '스킬', '模型': '모델', '智能体': '에이전트',
@@ -113,6 +145,6 @@ const ko = {
 const shellMessages = locale => Object.fromEntries(Object.entries(dictionary['zh-CN']).map(([key, source]) => [source, dictionary[locale][key]]))
 
 export const messagesByLocale = Object.freeze({
-  'ja-JP': Object.freeze({ ...shellMessages('ja-JP'), ...auditJa, ...automationTemplatesJa, ...ja, ...connectorJa, ...cloudRunnerJa, ...modelJa, ...quotaJa, ...accessCatalogJa, ...operationsJa, ...governanceJa, ...insightsMetricsJa, ...usageCenterJa, ...modelRuntimeOverviewJa, ...capabilityCatalogJa, ...legalJa }),
-  'ko-KR': Object.freeze({ ...shellMessages('ko-KR'), ...auditKo, ...automationTemplatesKo, ...ko, ...connectorKo, ...cloudRunnerKo, ...modelKo, ...quotaKo, ...accessCatalogKo, ...operationsKo, ...governanceKo, ...insightsMetricsKo, ...usageCenterKo, ...modelRuntimeOverviewKo, ...capabilityCatalogKo, ...legalKo }),
+  'ja-JP': Object.freeze({ ...shellMessages('ja-JP'), ...firstChatJa, ...auditJa, ...automationTemplatesJa, ...ja, ...connectorJa, ...cloudRunnerJa, ...modelJa, ...quotaJa, ...accessCatalogJa, ...operationsJa, ...governanceJa, ...insightsMetricsJa, ...usageCenterJa, ...modelRuntimeOverviewJa, ...modelProviderDeletionJa, ...capabilityCatalogJa, ...legalJa }),
+  'ko-KR': Object.freeze({ ...shellMessages('ko-KR'), ...firstChatKo, ...auditKo, ...automationTemplatesKo, ...ko, ...connectorKo, ...cloudRunnerKo, ...modelKo, ...quotaKo, ...accessCatalogKo, ...operationsKo, ...governanceKo, ...insightsMetricsKo, ...usageCenterKo, ...modelRuntimeOverviewKo, ...modelProviderDeletionKo, ...capabilityCatalogKo, ...legalKo }),
 });

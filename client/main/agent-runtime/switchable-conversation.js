@@ -243,7 +243,9 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
     inFlight: () => switching || Boolean(raw.inFlight?.()),
     historyRow(s) {
       const current = raw.historyRow?.(s);
-      return { ...current, id: publicId, ref: publicRef,
+      if (!current && (!record || (!raw.taskIds?.length && !segments.hasHistory(record)))) return null;
+      const base = current || { ...segments.row(record), count: (prefix.messages || []).length };
+      return { ...base, id: publicId, ref: publicRef,
         usedHarnesses: harnesses.merge(harnesses.fromRecord(record),
           current?.usedHarnesses || harnesses.fromSnapshot(raw.snapshot(), raw.adapterId)),
         ...(record ? { title: segments.title(record) || current?.title || '' } : {}),

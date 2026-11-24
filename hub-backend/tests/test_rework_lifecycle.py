@@ -296,6 +296,64 @@ class ReworkLifecycleApi(_Base):
                     models.TaskEvent.task_id == task.id, models.TaskEvent.kind == "ai.rework")))
                 self.assertEqual({row.detail["turnId"] for row in events}, {"revision", "delivery-recovery"})
 
+    async def test_status_reads_leave_runner_outputs_uncollected(self):
+        from contextlib import ExitStack
+        from unittest.mock import AsyncMock
+        from app.api import admin, tasks
+        from app.services import ai_exec, code_delivery
+
+        async with self.sessions() as session:
+            task = await self._fixture(session)
+            admin_user = await session.get(models.User, "u-owner")
+            admin_user.is_super = True
+            worker = await session.get(models.Client, "dev-1")
+            session.add(models.TaskEvent(task_id=task.id, kind=ai_exec.EV_DISPATCHED,
+                                         detail={"ref": "run-1", "provider": "local"}))
+            await session.commit()
+            snapshot = {"ok": True, "artifactUrl": "https://example.invalid/report"}
+            with ExitStack() as stack:
+                stack.enter_context(patch.object(ai_exec, "load", AsyncMock(return_value={})))
+                collect = stack.enter_context(patch.object(ai_exec, "status_sync", return_value=snapshot))
+                stack.enter_context(patch.object(ai_exec, "preview_status_sync", return_value={
+                    "ok": True, "artifactUrl": "", "done": True, "round": 3, "finalText": "Read-only report"}))
+                stack.enter_context(patch.object(ai_exec, "runner_info_sync", return_value={"done": True}))
+                usage = stack.enter_context(patch.object(ai_exec, "session_sync", return_value={"ok": False}))
+                stack.enter_context(patch.object(code_delivery, "repo_for", AsyncMock(return_value=object())))
+                check = stack.enter_context(patch.object(code_delivery, "check", AsyncMock(
+                    return_value={"stage": "none", "applies": False, "delivered": False})))
+                for _ in range(2):
+                    await tasks.ai_status_task(task.id, worker, session)
+                    await tasks.ai_status_task(task.id, worker, session, ref="run-1")
+                    status = await admin.admin_ai_status_task(task.id, admin_user, session)
+                    self.assertEqual((status["round"], status["finalText"]), (3, "Read-only report"))
+                async with self.sessions() as reader:
+                    persisted = await reader.get(models.Task, task.id)
+                    self.assertFalse(persisted.artifact_url)
+                    self.assertNotIn(ai_exec.EV_ARTIFACTS, await self._kinds(reader, task.id))
+                    self.assertIsNone(await reader.scalar(select(models.AuditLog.id)))
+                usage.assert_not_called()
+                check.assert_not_awaited()
+                collect.assert_not_called()
+                reviewer = await session.get(models.Client, "c-review")
+                from fastapi import HTTPException
+                with self.assertRaises(HTTPException) as denied:
+                    await tasks.sync_ai_status_task(task.id, "run-1", reviewer, session)
+                self.assertEqual(denied.exception.status_code, 403)
+                with self.assertRaises(HTTPException) as stale:
+                    await admin.admin_sync_ai_status_task(task.id, "old-run", admin_user, session)
+                self.assertEqual(stale.exception.status_code, 409)
+                collect.assert_not_called()
+                await tasks.sync_ai_status_task(task.id, "run-1", worker, session)
+                await admin.admin_sync_ai_status_task(task.id, "run-1", admin_user, session)
+                status = await admin.admin_ai_status_task(task.id, admin_user, session)
+                self.assertEqual(status["artifactUrl"], snapshot["artifactUrl"])
+                async with self.sessions() as reader:
+                    self.assertEqual((await reader.get(models.Task, task.id)).artifact_url, snapshot["artifactUrl"])
+                    self.assertEqual((await self._kinds(reader, task.id)).count(ai_exec.EV_ARTIFACTS), 1)
+                    entry = await reader.scalar(select(models.AuditLog).where(models.AuditLog.action == "task.execution.sync"))
+                    self.assertEqual((entry.target_id, entry.detail["ref"], entry.detail["hasArtifactUrl"]),
+                                     (task.id, "run-1", True))
+
     async def test_pinned_reconciliation_rejects_missing_changed_or_unavailable_runner(self):
         from fastapi import HTTPException
         from app.api import tasks as tasks_api
@@ -305,7 +363,7 @@ class ReworkLifecycleApi(_Base):
             task = await self._fixture(session, task_id="t-pinned")
             worker = await session.get(models.Client, "dev-1")
             with self.assertRaises(HTTPException) as missing:
-                await tasks_api.ai_status_task(task.id, worker, session, ref="original")
+                await tasks_api.sync_ai_status_task(task.id, "original", worker, session)
             self.assertEqual(missing.exception.status_code, 409)
             session.add(models.TaskEvent(task_id=task.id, kind=ai_exec.EV_DISPATCHED,
                 detail={"ref": "original"}))
@@ -314,11 +372,11 @@ class ReworkLifecycleApi(_Base):
                  patch.object(ai_exec, "status_sync", return_value={"ok": False}) as read, \
                  patch.object(ai_exec, "pull_artifacts", AsyncMock()) as collect:
                 with self.assertRaises(HTTPException) as changed:
-                    await tasks_api.ai_status_task(task.id, worker, session, ref="other")
+                    await tasks_api.sync_ai_status_task(task.id, "other", worker, session)
                 self.assertEqual(changed.exception.status_code, 409)
                 read.assert_not_called()
                 with self.assertRaises(HTTPException) as unavailable:
-                    await tasks_api.ai_status_task(task.id, worker, session, ref="original")
+                    await tasks_api.sync_ai_status_task(task.id, "original", worker, session)
                 self.assertEqual(unavailable.exception.status_code, 502)
                 read.assert_called_once_with({}, "original")
                 collect.assert_not_called()

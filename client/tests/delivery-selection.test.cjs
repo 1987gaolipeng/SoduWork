@@ -122,6 +122,43 @@ test('explicit final links disambiguate drafts without losing referenced website
   assert.equal(result.manifest.entryPath, 'index.html');
 });
 
+test('rework receipts preserve requested paths and explicit replacements without promoting review notes', async t => {
+  const {requestedExtension} = require('../main/conversation/delivery-selection');
+  assert.equal(requestedExtension('Do not convert to HTML.', {explicitOnly:true}), '');
+  assert.equal(requestedExtension('Generate an analysis of the current HTML.', {explicitOnly:true}), '');
+  assert.equal(requestedExtension('Convert to HTML.', {explicitOnly:true}), '.html');
+  const f = fixture(t);
+  f.write('findings.md', 'The original is still incorrect.');
+  f.messages('Fix the original delivery.', 'Reviewed again: [findings](findings.md)');
+  let form;
+  t.mock.method(global, 'fetch', async (_url, options) => {
+    form = options.body;
+    return Response.json({ok:true});
+  });
+  async function replay(options) {
+    const payload = await taskDelivery.capture(f.handle, 'completed', {}, options);
+    await taskDelivery.send({hub:'https://fixture.invalid'}, '/tasks/test', {}, JSON.parse(JSON.stringify(payload)));
+    return form;
+  }
+  await replay();
+  assert.deepEqual(form.getAll('paths'), ['findings.md']);
+  assert.deepEqual(form.getAll('declaredPaths'), []);
+  assert.equal(form.get('replacements'), null);
+  f.manifest({deliverables:[{path:'findings.md'}]});
+  await replay();
+  assert.deepEqual(form.getAll('declaredPaths'), []);
+  assert.equal(form.get('replacements'), null);
+
+  f.write('site/index.html', '<link rel="stylesheet" href="theme.css">');
+  f.write('site/theme.css', 'body { color: navy }');
+  f.manifest({deliverables:[{path:'site/index.html', replaces:['docs/source.md']}]});
+  await replay({requestedFormat:'.html'});
+  assert.deepEqual(form.getAll('declaredPaths'), ['site/index.html']);
+  assert.deepEqual(JSON.parse(form.get('replacements')), {'site/index.html':['docs/source.md']});
+  await replay({paths:{required:new Set(['site/index.html']), named:new Set()}});
+  assert.deepEqual(form.getAll('declaredPaths'), ['site/index.html']);
+});
+
 test('website verification captures cannot enter a bundle through primary or supporting declarations', async t => {
   const f = fixture(t);
   f.write('index.html','<img src="assets/hero.png">'); f.write('assets/hero.png','page asset');

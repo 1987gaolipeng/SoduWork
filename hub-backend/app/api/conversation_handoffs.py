@@ -35,7 +35,7 @@ async def prepare(transfer_id: str, file: UploadFile = File(...), options: str =
 @router.get("/{transfer_id}")
 async def status(transfer_id: str, client=Depends(current_client), session=Depends(get_session)):
     row = await svc.get(session, client, transfer_id)
-    return svc.public(await svc.refresh(session, row))
+    return svc.public(row)
 
 
 @router.post("/{transfer_id}/commit")

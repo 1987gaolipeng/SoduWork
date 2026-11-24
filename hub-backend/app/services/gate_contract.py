@@ -129,6 +129,18 @@ def _declared_attachment_ids(context: dict) -> set[str]:
     return out
 
 
+async def references_attachment(session: AsyncSession, row: models.Attachment) -> bool:
+    """Check the task's fixed versions and approval evidence before withdrawing an input."""
+    if (row.evidence_meta or {}).get("gateRequestId"):
+        return True
+    versions = await session.scalars(select(am.ArtifactVersion).where(am.ArtifactVersion.task_id == row.task_id))
+    if any(row.id in _manifest_attachment_ids(version) for version in versions):
+        return True
+    contexts = await session.scalars(select(am.ApprovalRequest.context).where(am.ApprovalRequest.task_id == row.task_id))
+    return any(row.id in _declared_attachment_ids(context or {})
+               or row.id in ((context or {}).get("gate") or {}).get("evidenceRefs", []) for context in contexts)
+
+
 def belongs_to_artifact(row, artifact: am.ArtifactVersion) -> bool:
     """A reused execution source cannot widen a frozen file delivery to older rounds."""
     if artifact.kind not in {"files", "manual", "output", "text", "url"}:

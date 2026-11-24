@@ -11,6 +11,26 @@ function clock() {
     clearTimeout: id => timers.delete(id),
     expire() { for (const [id, callback] of [...timers]) if (timers.delete(id)) callback(); } };
 }
+function timeline() {
+  let now = 0, next = 0;
+  const timers = new Map();
+  class FakeDate extends Date { static now() { return now; } }
+  return {
+    Date: FakeDate,
+    setTimeout(callback, delay) { const id = ++next; timers.set(id, { at: now + delay, callback }); return id; },
+    clearTimeout: id => timers.delete(id),
+    pending: () => timers.size,
+    async advance(milliseconds) {
+      const end = now + milliseconds;
+      for (;;) {
+        const first = [...timers].filter(([, timer]) => timer.at <= end).sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
+        if (!first) break;
+        const [id, timer] = first; timers.delete(id); now = timer.at; timer.callback(); await tick();
+      }
+      now = end; await tick();
+    },
+  };
+}
 function fixture(settings = {}) {
   let owner = 'hub/device/alice', changed;
   const node = () => ({ hidden: true, dataset: {}, style: {}, handlers: new Map(), innerHTML: '', textContent: '',
@@ -18,17 +38,26 @@ function fixture(settings = {}) {
     addEventListener(type, callback) { this.handlers.set(type, callback); },
     setAttribute() {}, removeAttribute() {}, focus() {}, contains: () => false, querySelector: () => null,
     getBoundingClientRect: () => ({ left: 200, right: 300, top: 500 }) });
-  const queue = node(), pop = node(), button = node(), label = node(), wrap = node(), el = node(), field = node();
-  pop.querySelector = () => field; button.querySelector = () => label;
+  const queue = node(), pop = node(), button = node(), label = node(), wrap = node(), el = node(), field = node(), search = node();
+  search.value = '';
+  let markup = '';
+  Object.defineProperty(pop, 'innerHTML', { get: () => markup, set(value) {
+    markup = value;
+    field.innerHTML = value.match(/<div class="nmodel-options"[^>]*>([\s\S]*?)<\/div>/)?.[1] || '';
+  } });
+  pop.querySelector = selector => selector === '.nmodel-options' ? field :
+    ['input', '[data-model-search]'].includes(selector) ? search : null;
+  pop.querySelectorAll = () => [];
+  button.querySelector = () => label;
   wrap.querySelector = selector => selector === 'button' ? button : selector === '.nmodel-pop' ? pop : null;
   el.querySelector = selector => selector === '#nchatQueue' ? queue : selector === '#nchatModel' ? wrap : null;
   const state = { ref: 'chat', adapterId: 'qwen', model: { id: 'selected', label: 'Selected' } };
-  const requests = [], calls = [], selections = [];
+  const requests = [], calls = [], selections = [], runtimeCalls = [], statuses = [];
   const window = { ...node(), innerWidth: 1000, innerHeight: 800, SoduWorkModelChoice: require('../core/model-choice'),
     setTimeout: settings.clock?.setTimeout || setTimeout, clearTimeout: settings.clock?.clearTimeout || clearTimeout,
     SoduWorkAPI: { taskStorageKey: () => owner, myModels: () => { const item = deferred(); requests.push(item); return item.promise; } },
     soduWorkAPI: { conversationSession: {
-      runtimes: async () => settings.runtimes ? settings.runtimes() : ({ ok: true, runtimes: [{ id: 'pi', modelMode: 'managed' }, { id: 'qwen', modelMode: 'managed' }, { id: 'codex', modelMode: 'account' }] }),
+      runtimes: async options => { runtimeCalls.push(options); return settings.runtimes ? settings.runtimes(options) : ({ ok: true, runtimes: [{ id: 'pi', modelMode: 'managed' }, { id: 'qwen', modelMode: 'managed' }, { id: 'codex', modelMode: 'account' }] }); },
       runtimeModels: async id => { calls.push(id); return { models: [{ id: 'account-choice' }] }; },
       selectModel: async (ref, name) => { selections.push({ ref, name });
         if (settings.selectModel) return settings.selectModel(ref, name);
@@ -38,13 +67,17 @@ function fixture(settings = {}) {
   if (settings.runtimeWait) window.ChatRuntimePicker = { create: () => ({
     render() {}, wait: settings.runtimeWait, reset() {}, destroy() {},
   }) };
-  vm.runInNewContext(source, { window, SoduWorkModelChoice: window.SoduWorkModelChoice, document: node(), AbortController });
+  vm.runInNewContext(source, { window, SoduWorkModelChoice: window.SoduWorkModelChoice, document: node(), AbortController, Date: settings.clock?.Date || Date });
   const controls = window.ChatComposerControls.create(el, { state: () => state, say() {},
+    catalogChanged: status => statuses.push(status),
     modelSelected: selection => { state.selection = selection; },
     modelAvailabilityChanged: selection => { state.selection = selection; } }); controls.render();
-  return { state, requests, calls, selections, field, label, controls, changed: () => changed(),
+  return { state, requests, calls, selections, field, label, controls, pop, search, runtimeCalls, statuses, changed: () => changed(),
     owner: value => { owner = value; controls.render(); },
     open: () => button.handlers.get('click')(),
+    retry: () => pop.handlers.get('click')({ target: {
+      closest: selector => selector === '[data-model-retry]' ? node() : null,
+    }, preventDefault() {}, stopPropagation() {} }),
   };
 }
 const catalog = { usable: [{ name: 'managed', label: 'Managed choice' }, { name: 'local:private', localOnly: true, label: 'Private choice' }] };
@@ -240,12 +273,12 @@ test('closing a picker does not invalidate a same-conversation send catalog read
   assert.deepEqual(f.selections, []);
 });
 
-test('runtime discovery times out visibly without allowing a late response to start model discovery', async () => {
-  const time = clock(), runtime = deferred();
+test('exhausted runtime discovery ignores late responses and a later send can retry', async () => {
+  const time = timeline(), runtime = deferred();
   const f = fixture({ clock: time, runtimes: () => runtime.promise });
   const pending = f.controls.waitForAccess();
   const rejected = assert.rejects(pending, { code: 'MODEL_CATALOG_TIMEOUT', message: /读取模型列表超时/ });
-  await tick(); time.expire(); await rejected;
+  await tick(); await time.advance(24000); await rejected;
   assert.equal(f.requests.length, 0);
   runtime.resolve({ ok: true, runtimes: [{ id: 'qwen', modelMode: 'managed' }] }); await tick();
   assert.equal(f.requests.length, 0); assert.deepEqual(f.selections, []);
@@ -329,4 +362,177 @@ test('a cancelled execution-option choice remains a refusal without starting mod
   const f = fixture({ runtimeWait: async () => false });
   assert.equal(await f.controls.waitForAccess(), false);
   assert.equal(f.requests.length, 0); assert.deepEqual(f.selections, []);
+});
+
+
+test('send timeout leaves a later valid directory response able to finish the open picker', async () => {
+  const time = timeline(), runtime = deferred();
+  const f = fixture({ clock: time, runtimeWait: () => runtime.promise });
+  const send = f.controls.waitForAccess();
+  const refused = assert.rejects(send, { code: 'MODEL_CATALOG_TIMEOUT' });
+  await tick(); await time.advance(1000); runtime.resolve(true); await tick();
+  assert.equal(f.requests.length, 1);
+  const opened = f.open(); await tick();
+  assert.match(f.field.innerHTML, /\u6b63\u5728\u52a0\u8f7d/);
+  await time.advance(11000); await refused;
+  await time.advance(500);
+  f.requests[0].resolve({ usable: [{ name: 'selected', label: 'Recovered choice' }] });
+  await opened;
+  assert.match(f.field.innerHTML, /Recovered choice/);
+  assert.doesNotMatch(f.field.innerHTML, /\u6b63\u5728\u52a0\u8f7d/);
+  assert.equal(f.requests.length, 1, 'finishing the shared read does not start another request');
+  assert.deepEqual(f.selections, [], 'a late catalog must not repeat or replace a confirmed selection');
+  assert.equal(time.pending(), 0);
+});
+
+test('a confirmed empty directory ends loading and keeps the saved model identity', async () => {
+  const f = fixture();
+  const opened = f.open(); await tick(); f.requests[0].resolve({ usable: [] }); await opened;
+  assert.doesNotMatch(f.field.innerHTML, /\u6b63\u5728\u52a0\u8f7d/);
+  assert.match(f.field.innerHTML, /\u6682\u65e0\u53ef\u7528\u6a21\u578b/);
+  assert.equal(f.state.selection.name, 'selected');
+  assert.equal(f.state.selection.model.unavailable, true);
+  assert.equal(f.controls.modelCatalogState().blocked, true);
+  assert.equal(f.statuses.at(-1).status, 'empty');
+  assert.deepEqual(f.selections, []);
+});
+
+test('model directory discovery reads runtime metadata without probing unrelated Agents', async () => {
+  const f = fixture();
+  const opened = f.open(); await tick(); f.requests[0].resolve({ usable: [{ name: 'selected' }] }); await opened;
+  assert.equal(f.runtimeCalls.length, 1);
+  assert.equal(f.runtimeCalls[0]?.catalogOnly, true);
+});
+
+
+test('a timed-out directory retries once and ignores the obsolete response after recovery', async () => {
+  const time = timeline(), f = fixture({ clock: time });
+  const opened = f.open(); await tick();
+  await time.advance(12000);
+  assert.equal(f.requests.length, 2, 'one automatic retry follows the first read timeout');
+  f.requests[1].resolve({ usable: [{ name: 'selected', label: 'Fresh catalog' }] }); await opened;
+  assert.match(f.field.innerHTML, /Fresh catalog/);
+  f.requests[0].resolve({ usable: [{ name: 'local:obsolete', label: 'Obsolete' }] }); await tick();
+  assert.doesNotMatch(f.field.innerHTML, /Obsolete/);
+  assert.deepEqual(f.selections, []);
+  assert.equal(f.controls.modelCatalogState().status, 'ready');
+  await time.advance(24000); assert.equal(f.requests.length, 2);
+  assert.equal(time.pending(), 0);
+});
+
+test('repeated directory timeouts end loading and a visible retry recovers without changing the valid choice', async () => {
+  const time = timeline(), f = fixture({ clock: time });
+  const opened = f.open(); await tick(); await time.advance(24000); await opened;
+  assert.equal(f.requests.length, 2, 'automatic retries are bounded');
+  assert.match(f.field.innerHTML, /data-model-retry/);
+  assert.doesNotMatch(f.field.innerHTML, /\u6b63\u5728\u52a0\u8f7d/);
+  assert.equal(f.controls.modelCatalogState().status, 'error');
+  assert.equal(time.pending(), 0);
+  const retried = f.retry(); await tick();
+  assert.equal(f.requests.length, 3);
+  f.requests[2].resolve({ usable: [{ name: 'selected', label: 'Manual recovery' }] }); await retried; await tick();
+  assert.match(f.field.innerHTML, /Manual recovery/);
+  assert.equal(f.controls.modelCatalogState().status, 'ready');
+  assert.deepEqual(f.selections, []);
+});
+
+test('storage and authentication failures stay visible without automatic retry or model deletion', async () => {
+  for (const code of ['LOCAL_STORAGE_UNAVAILABLE', 'AUTH_REQUIRED', 'UNSUPPORTED_FORMAT']) {
+    const time = timeline(), f = fixture({ clock: time });
+    const opened = f.open(); await tick();
+    f.requests[0].reject(Object.assign(Error('private diagnostic'), { code })); await opened;
+    assert.equal(f.requests.length, 1);
+    assert.equal(f.controls.modelCatalogState().status, 'error');
+    assert.match(f.field.innerHTML, /data-model-retry/);
+    assert.doesNotMatch(f.field.innerHTML, /private diagnostic/);
+    assert.equal(f.state.model.id, 'selected'); assert.deepEqual(f.selections, []);
+    const failureMarkup = f.field.innerHTML;
+    f.pop.handlers.get('input')({ target: { value: 'query', matches: selector => selector === 'input[type=search]' } });
+    assert.equal(f.field.innerHTML, failureMarkup, 'search cannot replace a failed load with a misleading empty result');
+    await time.advance(24000); assert.equal(f.requests.length, 1);
+  }
+});
+
+test('closing and reopening during the automatic retry shares the current directory request', async () => {
+  const time = timeline(), f = fixture({ clock: time });
+  const first = f.open(); await tick(); await time.advance(12000);
+  await f.open(); assert.equal(f.pop.hidden, true);
+  const reopened = f.open(); await tick();
+  assert.equal(f.requests.length, 2);
+  f.requests[1].resolve({ usable: [{ name: 'selected', label: 'Current choice' }] });
+  await Promise.all([first, reopened]);
+  assert.equal(f.pop.hidden, false);
+  assert.match(f.field.innerHTML, /Current choice/);
+  assert.deepEqual(f.selections, []);
+});
+
+test('an account change during automatic retry prevents old models from entering the new picker', async () => {
+  const time = timeline(), f = fixture({ clock: time });
+  const old = f.open(); await tick(); await time.advance(12000);
+  f.owner('hub/device/bob');
+  const current = f.open(); await tick(); assert.equal(f.requests.length, 3);
+  f.requests[2].resolve({ usable: [{ name: 'selected', label: 'Bob choice' }] }); await current;
+  f.requests[1].resolve({ usable: [{ name: 'local:alice', label: 'Alice private' }] });
+  f.requests[0].resolve({ usable: [{ name: 'local:alice-old', label: 'Alice previous' }] }); await old;
+  assert.match(f.field.innerHTML, /Bob choice/);
+  assert.doesNotMatch(f.field.innerHTML, /Alice/);
+  assert.deepEqual(f.selections, []);
+  assert.equal(f.controls.modelCatalogState().status, 'ready');
+});
+
+
+test('a pending model selection shows the loaded directory without replaying the mutation', async () => {
+  const time = timeline(), selection = deferred();
+  const f = fixture({ clock: time, selectModel: () => selection.promise });
+  const opened = f.open(); await tick();
+  f.requests[0].resolve({ usable: [{ name: 'local:replacement', label: 'Replacement' }] }); await tick();
+  assert.match(f.field.innerHTML, /Replacement/);
+  assert.equal(f.controls.modelCatalogState().status, 'ready');
+  const refused = assert.rejects(f.controls.waitForAccess(), { code: 'MODEL_SELECTION_UNCONFIRMED' });
+  await tick(); await time.advance(24000); await refused;
+  assert.equal(f.requests.length, 1);
+  assert.deepEqual(f.selections, [{ ref: 'chat', name: 'local:replacement' }]);
+  selection.resolve({ ok: true, selection: { name: 'local:replacement', model: { id: 'local:replacement', label: 'Replacement' } } });
+  await opened;
+  assert.equal(f.state.selection.name, 'local:replacement');
+  assert.equal(f.selections.length, 1);
+});
+
+test('destroying a picker during retry prevents late selections and additional requests', async () => {
+  const time = timeline(), f = fixture({ clock: time });
+  const opened = f.open(); await tick(); await time.advance(12000);
+  assert.equal(f.requests.length, 2);
+  f.controls.destroy(); await opened;
+  f.requests[1].resolve({ usable: [{ name: 'local:late', label: 'Late choice' }] }); await tick();
+  await time.advance(24000);
+  assert.deepEqual(f.selections, []);
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.state.model.id, 'selected');
+  assert.equal(time.pending(), 0);
+});
+
+
+test('catalog state blocks an unconfigured draft until a usable model is selected', async () => {
+  const f = fixture(); f.state.model = null; f.state.selection = { name: '' }; f.controls.render(); await tick();
+  assert.equal(f.controls.modelCatalogState().status, 'loading');
+  assert.equal(f.controls.modelCatalogState().blocked, true);
+  const opened = f.open(); f.requests[0].resolve({ usable: [] }); await opened;
+  assert.equal(f.controls.modelCatalogState().blocked, true);
+  const retried = f.retry(); await tick();
+  f.requests[1].resolve({ usable: [{ name: 'available', label: 'Available' }] }); await retried;
+  assert.equal(f.controls.modelCatalogState().status, 'ready');
+  assert.equal(f.controls.modelCatalogState().blocked, false);
+  assert.equal(f.state.selection.name, 'available');
+});
+
+test('ordinary renders cannot restart failed catalog reads for an unconfigured draft', async () => {
+  const time = timeline(), f = fixture({ clock: time });
+  f.state.model = null; f.state.selection = { name: '' }; f.controls.render(); await tick();
+  const opened = f.open(); await time.advance(24000); await opened;
+  assert.equal(f.requests.length, 2);
+  for (let i = 0; i < 5; i++) { f.controls.render(); await tick(); }
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.controls.modelCatalogState().status, 'error');
+  assert.equal(f.controls.modelCatalogState().blocked, true);
+  assert.match(f.field.innerHTML, /data-model-retry/);
 });

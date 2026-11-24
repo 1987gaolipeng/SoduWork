@@ -1,7 +1,7 @@
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
 import React, { useEffect, useState } from 'react'
 import { api } from '../api.js'
-import { Icon, Loading, Modal, toast } from '../ui.jsx'
+import { Confirm, Icon, Loading, Modal, toast } from '../ui.jsx'
 import './plugin-publishers.css'
 
 
@@ -18,6 +18,12 @@ export function PluginPublisherKeys({ onClose }) {
   const [form, setForm] = useState(EMPTY)
   const [busy, setBusy] = useState('')
   const [confirmId, setConfirmId] = useState('')
+  const [discardEntry, setDiscardEntry] = useState(false)
+  const edited = Object.values(form).some(Boolean)
+
+  function clearEntry() {
+    setAdding(false); setForm(EMPTY); setDiscardEntry(false)
+  }
 
   async function load() {
     setError('')
@@ -48,8 +54,11 @@ export function PluginPublisherKeys({ onClose }) {
     setBusy('')
   }
 
-  return <Modal scope="plugin-page" wide title={tx("可信发布者")} icon="shield" onClose={onClose}
-    foot={<button className="btn btn-ghost" onClick={onClose}>{tx("关闭")}</button>}>
+  return <Modal dirty={edited} scope="plugin-page" wide title={tx("可信发布者")} icon="shield" onClose={onClose}
+    foot={dismiss => <button className="btn btn-ghost" onClick={dismiss}>{tx("关闭")}</button>}>
+    {discardEntry && <Confirm title={tx("放弃未保存的改动")} text={tx("关闭后，此次未保存的改动将丢失。")}
+      cancelText={tx("继续编辑")} confirmText={tx("放弃改动")} danger focusCancel
+      onClose={() => setDiscardEntry(false)} onConfirm={clearEntry} />}
     <div className="publisher-intro">
       <div><b>{tx("只登记公钥，不上传私钥")}</b><span>{tx("签名有效能证明插件包来自已登记发布者且内容未被改动；最终发布仍需经过预检、评测和管理员审核。")}</span></div>
       <button className="btn btn-primary" onClick={() => setAdding((value) => !value)}>
@@ -71,7 +80,7 @@ export function PluginPublisherKeys({ onClose }) {
           placeholder={tx("由谁维护、用于哪类企业插件")}
           onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
       <div className="publisher-form-actions"><button className="btn btn-ghost"
-        onClick={() => { setAdding(false); setForm(EMPTY) }}>{tx("取消")}</button>
+        onClick={() => edited ? setDiscardEntry(true) : clearEntry()}>{tx("取消")}</button>
         <button className="btn btn-primary" disabled={busy === 'create'}
           onClick={create}>{busy === 'create' ? tx("正在校验…") : tx("校验并登记")}</button></div>
     </section>}
@@ -103,6 +112,7 @@ export function PluginPublisherCandidate({ version, pluginName, onClose, onRegis
   const uiLocale = useLocale();
   const [candidate, setCandidate] = useState(null)
   const [form, setForm] = useState({ publisherName: '', description: '' })
+  const [initialForm, setInitialForm] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -111,10 +121,12 @@ export function PluginPublisherCandidate({ version, pluginName, onClose, onRegis
     try {
       const row = await api.pluginPublisherCandidate(version.id)
       setCandidate(row)
-      setForm({
+      const initial = {
         publisherName: row.publisherName || '',
         description: tx("由个人插件提交申请，经管理员核对登记"),
-      })
+      }
+      setInitialForm(initial)
+      setForm(initial)
     } catch (e) {
       setCandidate(null)
       setError(e.message || tx("发布身份加载失败"))
@@ -135,8 +147,8 @@ export function PluginPublisherCandidate({ version, pluginName, onClose, onRegis
     setBusy(false)
   }
 
-  return <Modal scope="plugin-page" title={tx("核对发布身份")} icon="shield" onClose={onClose}
-    foot={<><button className="btn btn-ghost" disabled={busy} onClick={onClose}>{tx("取消")}</button>
+  return <Modal dirty={initialForm && (form.publisherName !== initialForm.publisherName || form.description !== initialForm.description)} scope="plugin-page" title={tx("核对发布身份")} icon="shield" onClose={onClose}
+    foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
       <button className="btn btn-primary" disabled={busy || !candidate || !form.publisherName.trim()}
         onClick={trust}>{busy ? tx("正在重新验签…") : tx("登记公钥并继续审核")}</button></>}>
     {error && <div className="publisher-error"><Icon name="alert" /><span>{error}</span><button onClick={load}>{tx("重试")}</button></div>}

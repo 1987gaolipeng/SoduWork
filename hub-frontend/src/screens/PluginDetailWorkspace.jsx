@@ -256,7 +256,7 @@ function CapabilitySummary({ version, hasWorkflow }) {
       <Capability icon="sparkle" label="AI" value={(cap.agentKinds || []).join('、') || ((cap.nodeTypes || []).includes('ai') ? tx("自动选择") : tx("不需要"))} />
       <Capability icon="plug" label={tx("技能")} value={(cap.skills || []).join('、') || tx("无")} />
       <Capability icon="link" label={tx("连接器")} value={(cap.mcpServers || []).join('、') || tx("无")} />
-      <Capability icon="desktop" label={tx("执行能力")} value={(cap.runtime || []).join('、') || tx("基础执行")} />
+      <Capability icon="monitor" label={tx("执行能力")} value={(cap.runtime || []).join('、') || tx("基础执行")} />
       <Capability icon="key" label={tx("密钥")} value={(cap.secrets || []).join('、') || tx("无")} />
     </div>
   </section>

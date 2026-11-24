@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { orgOptions, matchesOption } from '../src/org-options.js'
+import { orgOptions, matchesOption, visibleOrgRows } from '../src/org-options.js'
 
 const orgs = [
   { id: 'root', name: '研发中心' },
@@ -28,4 +28,17 @@ test('search accepts partial names, ancestor keywords, whitespace and mixed case
 test('visible partial organization scope retains its root and cycles cannot recurse forever', () => {
   assert.equal(orgOptions([{ id: 'a', name: '可见部门', parentId: 'hidden' }])[0].path, '可见部门')
   assert.deepEqual(orgOptions([{ id: 'a', name: 'A', parentId: 'b' }, { id: 'b', name: 'B', parentId: 'a' }]), [])
+})
+
+test('filtered hierarchy retains active children without showing excluded ancestors or changing stored parents', () => {
+  const rows = [
+    { id: 'root', parentId: 'outside-scope' },
+    { id: 'test', parentId: 'root', dataSource: 'test' },
+    { id: 'archived', parentId: 'test', isArchived: true },
+    { id: 'child', parentId: 'archived' },
+  ]
+  const visible = visibleOrgRows(rows, row => !row.isArchived && row.dataSource !== 'test')
+  assert.deepEqual(visible.map(row => [row.id, row.parentId]), [['root', undefined], ['child', 'root']])
+  assert.equal(rows[3].parentId, 'archived')
+  assert.deepEqual(visibleOrgRows(rows, row => row.id === 'child').map(row => row.parentId), [undefined])
 })

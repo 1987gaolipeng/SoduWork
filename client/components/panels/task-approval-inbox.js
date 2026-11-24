@@ -80,10 +80,13 @@
       const body = panel?.querySelector('[data-confirmation-list]');
       if (!body) return;
       const items = result.items || [];
-      body.innerHTML = items.length ? items.map(item =>
-        '<button type="button" class="task-confirmation-row" data-confirmation-task="' + esc(item.taskId) + '" data-confirmation-id="' + esc(item.id) + '">' +
-        '<span class="task-confirmation-dot" aria-hidden="true"></span><span><b>' + esc(item.task?.title || '待确认需求') + '</b><small>' +
-        esc(labels[item.action] || '需求确认') + ' · 在需求详情里查看证据并处理</small></span><span aria-hidden="true">›</span></button>').join('') :
+      body.innerHTML = items.length ? items.map(item => {
+        const summary = typeof item.context?.summary === 'string' ? item.context.summary.trim() : '';
+        const detail = summary ? '<span data-user-content>' + esc(summary) + '</span>' : '在需求详情里查看证据并处理';
+        return '<button type="button" class="task-confirmation-row" data-confirmation-task="' + esc(item.taskId) + '" data-confirmation-id="' + esc(item.id) + '">' +
+          '<span class="task-confirmation-dot" aria-hidden="true"></span><span><b>' + esc(item.task?.title || '待确认需求') + '</b><small>' +
+          esc(labels[item.action] || '需求确认') + ' · ' + detail + '</small></span><span aria-hidden="true">›</span></button>';
+      }).join('') :
         '<p class="task-confirmation-empty">暂无需要你确认的需求</p>';
     } finally {
       requests.delete(seq);
