@@ -33,7 +33,7 @@ class Clock {
   }
 }
 
-function harness(t, { readyDuringLoad = false, synchronousBlur = false } = {}) {
+function harness(t, { readyDuringLoad = false, synchronousBlur = false, translate = value => value } = {}) {
   const timers = new Clock();
   const app = new EventEmitter();
   const screen = new EventEmitter();
@@ -105,16 +105,17 @@ function harness(t, { readyDuringLoad = false, synchronousBlur = false } = {}) {
     focus() { this.focusCount++; }
     loadFile(file) {
       this.file = file;
+      this.webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
       this.webContents.emit('did-start-loading');
       if (readyDuringLoad) ready(this);
       return Promise.resolve();
     }
-    reload() { this.reloads++; this.webContents.emit('did-start-loading'); }
+    reload() { this.reloads++; this.loadFile(this.file); }
     close() { this.destroyed = true; this.emit('closed'); }
   }
   const controller = create({ app, screen, ipcMain, BrowserWindow, globalShortcut, Notification,
     powerMonitor, timers, now: () => timers.time, getRendererRoot: () => 'C:/SoduWork/client',
-    getIcon: () => 'icon', translate: (value) => value,
+    getIcon: () => 'icon', translate,
     getWorkWindows: () => workWindows });
   t.after(() => controller.dispose());
   function send(channel, win, ...args) { ipcMain.emit(channel, { sender: win.webContents }, ...args); }
@@ -128,6 +129,31 @@ function harness(t, { readyDuringLoad = false, synchronousBlur = false } = {}) {
   return { controller, timers, screen, ipcMain, powerMonitor, app, shortcuts, notices, windows,
     workWindows, send, ready, query };
 }
+
+test('startup timeout notifications identify the missing signal and reload action in each native locale', t => {
+  const locale = require('../main/native-locale.cjs');
+  const previous = locale.getLocale();
+  t.after(() => locale.setLocale(previous));
+  for (const [id, startup, region, retry] of [
+    ['zh-CN', '启动就绪超时', '桌面组件区域', '点击托盘图标'],
+    ['en-US', 'finish starting', 'clickable area', 'tray icon'],
+    ['ja-JP', '起動が完了', 'クリックできる範囲', 'トレイアイコン'],
+    ['ko-KR', '시작을 완료', '클릭할 수 있는 영역', '트레이 아이콘'],
+  ]) {
+    locale.setLocale(id);
+    const h = harness(t, { translate: locale.translate });
+    const win = h.controller.createWindow();
+    h.timers.tick(120000);
+    const first = h.notices[0];
+    assert.ok(first.options.body.includes(startup) && first.options.body.includes(retry), first.options.body);
+    first.emit('click');
+    assert.equal(win.reloads, 1);
+    h.send('renderer-ready', win);
+    h.timers.tick(120000);
+    const second = h.notices[1];
+    assert.ok(second.options.body.includes(region) && second.options.body.includes(retry), second.options.body);
+  }
+});
 
 test('blur keeps visible native regions while every input path waits for a fresh renderer revision', (t) => {
   const h = harness(t);
@@ -270,6 +296,68 @@ test('ready received inside loadFile survives startup and busy/GC heartbeat gaps
   h.timers.tick(45000);
   assert.equal(h.controller.emergency, false);
   assert.equal(h.notices.length, 0);
+});
+
+test('subframe loads and fragment navigation preserve the initialized overlay', t => {
+  const h = harness(t), win = h.controller.createWindow();
+  h.ready(win);
+  const shape = h.query('window-get-overlay-shape', win);
+  for (const navigation of [
+    { isMainFrame: false, isSameDocument: false },
+    { isMainFrame: true, isSameDocument: true },
+  ]) {
+    win.webContents.emit('did-start-navigation', navigation);
+    win.webContents.emit('did-start-loading');
+    h.timers.tick(15000);
+    assert.equal(h.controller.emergency, false);
+    assert.deepEqual(h.query('window-get-overlay-shape', win), shape);
+    assert.equal(win.visible, true);
+  }
+});
+
+test('a slow document with regular heartbeats can finish rendering and reveal the overlay', t => {
+  const h = harness(t), win = h.controller.createWindow();
+  for (let i = 0; i < 10; i++) {
+    h.timers.tick(2000);
+    h.send('renderer-heartbeat', win);
+  }
+  assert.equal(h.controller.emergency, false);
+  assert.equal(win.visible, false);
+  assert.equal(win.ignored, true);
+  win.webContents.emit('dom-ready');
+  h.ready(win);
+  h.timers.tick(60000);
+  assert.equal(win.visible, true);
+  assert.equal(h.controller.emergency, false);
+});
+
+test('heartbeats cannot keep an unfinished document or a failed initialization alive forever', t => {
+  const h = harness(t), win = h.controller.createWindow();
+  h.send('renderer-heartbeat', win);
+  for (let i = 0; i < 30; i++) {
+    h.timers.tick(2000);
+    h.send('renderer-heartbeat', win);
+  }
+  assert.equal(h.controller.emergency, true);
+  h.controller.recoverFromEmergency();
+  h.send('renderer-heartbeat', win);
+  h.timers.tick(5000);
+  win.webContents.emit('dom-ready');
+  h.timers.tick(14999);
+  h.send('renderer-heartbeat', win);
+  assert.equal(h.controller.emergency, false);
+  h.timers.tick(1);
+  assert.equal(h.controller.emergency, true);
+});
+
+test('a loading document that stops sending heartbeats still times out', t => {
+  const h = harness(t), win = h.controller.createWindow();
+  h.timers.tick(8000);
+  h.send('renderer-heartbeat', win);
+  h.timers.tick(14999);
+  assert.equal(h.controller.emergency, false);
+  h.timers.tick(1);
+  assert.equal(h.controller.emergency, true);
 });
 
 test('other work windows cannot supply overlay ready, heartbeat or shape', (t) => {

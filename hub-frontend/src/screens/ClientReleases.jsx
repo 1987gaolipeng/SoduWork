@@ -33,7 +33,9 @@ const ATTEMPT_STATE_ORDER = ['installed', 'downloading', 'installing', 'waiting'
 
 function fmtSize(bytes) {
   const n = Number(bytes) || 0
-  if (!n) return '—'
+  if (!Number.isFinite(n) || n <= 0) return '—'
+  if (n < 1024) return n + ' B'
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
   if (n >= 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB'
   return (n / 1024 / 1024).toFixed(1) + ' MB'
 }
@@ -103,11 +105,13 @@ export default function ClientReleases() {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [confirmEnable, setConfirmEnable] = useState(null)   // Release awaiting enablement.
   const [toggling, setToggling] = useState('')
-  const [downloading, setDownloading] = useState('')
+  const [pendingDownloads, setPendingDownloads] = useState([])
   // Per-device update version and stage.
   const [attempts, setAttempts] = useState([])
   const [counts, setCounts] = useState({})
   const [attemptsLoading, setAttemptsLoading] = useState(true)
+  const [attemptsError, setAttemptsError] = useState(null)
+  const refreshAttempts = useRef(null)
   const [releaseFilter, setReleaseFilter] = useState('')
   const [stateFilter, setStateFilter] = useState('all')
   const manage = can('client.update')
@@ -129,27 +133,43 @@ export default function ClientReleases() {
     setLoading(false)
   }, [])
 
-  const loadAttempts = useCallback(async () => {
-    setAttemptsLoading(true)
-    try {
-      const data = await api.clientUpdateAttempts({ releaseId: releaseFilter, state: stateFilter })
-      setAttempts(Array.isArray(data && data.attempts) ? data.attempts : [])
-      setCounts((data && data.counts) || {})
-    } catch (e) {
-      // Update-activity failure must not block the release list.
-      setAttempts([])
-      setCounts({})
-    }
-    setAttemptsLoading(false)
-  }, [releaseFilter, stateFilter])
-
   useEffect(() => { load() }, [load])
-  useEffect(() => { loadAttempts() }, [loadAttempts])
-  // Poll active update progress every ten seconds.
+
   useEffect(() => {
-    const timer = setInterval(loadAttempts, 10000)
-    return () => clearInterval(timer)
-  }, [loadAttempts])
+    let active = true
+    let pending = false
+    setAttempts([])
+    setCounts({})
+    setAttemptsError(null)
+
+    async function refresh() {
+      if (pending) return
+      pending = true
+      setAttemptsLoading(true)
+      try {
+        const data = await api.clientUpdateAttempts({ releaseId: releaseFilter, state: stateFilter })
+        if (active) {
+          setAttempts(Array.isArray(data?.attempts) ? data.attempts : [])
+          setCounts(data?.counts || {})
+          setAttemptsError(null)
+        }
+      } catch (error) {
+        if (active) setAttemptsError(error?.message || '')
+      } finally {
+        pending = false
+        if (active) setAttemptsLoading(false)
+      }
+    }
+
+    refreshAttempts.current = refresh
+    refresh()
+    const timer = setInterval(refresh, 10000)
+    return () => {
+      active = false
+      clearInterval(timer)
+      refreshAttempts.current = null
+    }
+  }, [releaseFilter, stateFilter])
 
   async function toggle(row, enabled) {
     setToggling(row.id)
@@ -205,6 +225,7 @@ export default function ClientReleases() {
                 <summary>{tx("更新内容")}</summary><div data-user-content>{notes}</div>
               </details>)}
             {group.rows.map((row) => {
+              const downloading = pendingDownloads.find(id => id === row.id)
               const plat = PLATFORM_META[row.platform] || { label: row.platform || '?', mark: '?' }
               return <div key={row.id} className="cr-row">
                 <span className="cr-platform">
@@ -224,10 +245,10 @@ export default function ClientReleases() {
                 <span className="cr-actions">
                   {manage && <button className="admin-text-action" disabled={!!downloading}
                     onClick={async () => {
-                      setDownloading(row.id)
+                      setPendingDownloads(ids => [...ids, row.id])
                       try { await api.downloadClientRelease(row.id, row.artifactName) }
                       catch (error) { toast(error.message || tx("请稍后重试")) }
-                      finally { setDownloading('') }
+                      finally { setPendingDownloads(ids => ids.filter(id => id !== row.id)) }
                     }}>{tx(downloading === row.id ? "下载中" : "下载")}</button>}
                   {manage && (row.enabled
                     ? <button className="admin-text-action" disabled={toggling === row.id}
@@ -261,16 +282,17 @@ export default function ClientReleases() {
       attempts={attempts}
       counts={counts}
       loading={attemptsLoading}
+      error={attemptsError}
       releaseFilter={releaseFilter}
       stateFilter={stateFilter}
       onReleaseFilter={setReleaseFilter}
       onStateFilter={setStateFilter}
-      onRefresh={loadAttempts} />
+      onRefresh={() => refreshAttempts.current?.()} />
   </section>
 }
 
 /* Show per-device update activity after release dispatch. */
-function AttemptsPanel({ releases, attempts, counts, loading,
+function AttemptsPanel({ releases, attempts, counts, loading, error = null,
                          releaseFilter, stateFilter, onReleaseFilter, onStateFilter, onRefresh }) {
   const orderedCounts = ATTEMPT_STATE_ORDER
     .filter((s) => (counts[s] || 0) > 0)
@@ -292,8 +314,8 @@ function AttemptsPanel({ releases, attempts, counts, loading,
             <option key={s} value={s}>{ATTEMPT_STATE_META[s].label}</option>)}
         </select>
         <button className="admin-text-action" onClick={onRefresh}
-          disabled={loading} aria-label={tx("刷新升级动态")}>
-          {loading ? tx("刷新中…") : tx("刷新")}
+          disabled={loading} aria-label={error === null ? tx("刷新升级动态") : tx("重试")}>
+          {loading ? tx("刷新中…") : error === null ? tx("刷新") : tx("重试")}
         </button>
       </div>
     </div>
@@ -302,6 +324,9 @@ function AttemptsPanel({ releases, attempts, counts, loading,
         <span key={row.state} className={`cr-count-badge is-${row.tone}`}>
           {row.label} {row.n}
         </span>)}
+    </div>}
+    {error !== null && <div className="cr-error" role="alert">
+      <b>{tx("升级动态加载失败")}</b>{error && <div>{error}</div>}
     </div>}
     {attempts.length ? <div className="cr-attempts-list" role="rowgroup">
       <div className="cr-table-head cr-attempt-head" role="row">
@@ -339,7 +364,7 @@ function AttemptsPanel({ releases, attempts, counts, loading,
         </div>
       })}
     </div>
-    : <div className="cr-attempts-empty">
+    : error !== null ? null : loading ? <Loading /> : <div className="cr-attempts-empty">
       <b>{tx("还没有升级任务")}</b>
       <p>{tx("设备在检查更新时会收到启用的版本；也可以在设备详情里手动下发升级。")}</p>
     </div>}
@@ -385,9 +410,9 @@ function UploadModal({ onClose, onDone }) {
     setBusy(false)
   }
 
-  return <Modal title={tx("上传客户端发布")} icon="send" onClose={busy ? undefined : onClose}
-    foot={<>
-      <button className="btn btn-ghost" disabled={busy && progress.sent} onClick={() => busy ? controller.current?.abort() : onClose()}>
+  return <Modal dirty={!busy && Boolean(bundleName || installerName)} title={tx("上传客户端发布")} icon="send" onClose={busy ? undefined : onClose}
+    foot={dismiss => <>
+      <button className="btn btn-ghost" disabled={busy && progress.sent} onClick={() => busy ? controller.current?.abort() : dismiss()}>
         {busy ? tx("上传中，请勿关闭") : tx("取消")}
       </button>
       <button className="btn btn-primary" disabled={busy} onClick={submit}>

@@ -84,6 +84,26 @@ test('deleted and outside-workspace reads open an isolated readonly workbench sn
   assert.deepEqual(f.requests, [], 'snapshot cannot read or write the filesystem');
 });
 
+test('command records show escaped, bounded input and output from the selected execution', () => {
+  const f = fixture(), first = { id: 'first-command', name: 'bash', state: 'done',
+    args: { command: 'echo <tag>' }, result: 'output <tag>\n' + 'x'.repeat(120000) + '\nexit 0' };
+  assert.equal(f.wb.openCommandRecord(first), true); f.flush();
+  assert.match(f.body.innerHTML, /echo &lt;tag&gt;/);
+  assert.match(f.body.innerHTML, /output &lt;tag&gt;/);
+  assert.match(f.body.innerHTML, /exit 0/);
+  assert.ok(f.body.innerHTML.length < first.result.length);
+  assert.doesNotMatch(f.body.innerHTML, /<tag>|data-wb-code-save/);
+  const firstTab = f.tabIds()[0];
+  assert.equal(f.wb.openCommandRecord({ id: 'second-command', name: 'bash', state: 'error',
+    args: { command: 'check' }, result: 'second command failed' }), true);
+  f.flush(); assert.match(f.body.innerHTML, /second command failed/);
+  assert.doesNotMatch(f.body.innerHTML, /exit 0/);
+  f.click('data-wb-tab', { wbTab: firstTab }); f.flush();
+  assert.match(f.body.innerHTML, /exit 0/);
+  assert.doesNotMatch(f.body.innerHTML, /second command failed/);
+  assert.deepEqual(f.requests, []); assert.deepEqual(f.details, []);
+});
+
 test('same filename snapshots remain separate from writable tabs and newer output index contents', () => {
   const f = fixture(), file = 'same.html';
   assert.equal(f.wb.openPath(file, { change: { action: 'created', after: { text: 'live workspace' } } }), true);

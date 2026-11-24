@@ -94,6 +94,8 @@ export default function RepositoryIssueSync({ row, onClose, onUpdated }) {
   }
 
   const dirty = !!data && (draft.enabled !== !!data.enabled || draft.startedLabel.trim() !== (data.startedLabel || ''))
+  const memberDirty = data?.members?.some(member => Object.hasOwn(memberDrafts, member.externalUserId) &&
+    memberDrafts[member.externalUserId] !== (member.userId || ''))
   async function run() {
     if (!data?.enabled || dirty) return
     const epoch = begin('run')
@@ -146,9 +148,9 @@ export default function RepositoryIssueSync({ row, onClose, onUpdated }) {
     finally { finish(epoch) }
   }
 
-  return <Modal scope="repository-issue-sync" title={tx('Issue 自动同步：{0}', [row.displayName || row.fullName])} onClose={onClose}
-    footer={<>
-      <button className="btn btn-ghost" onClick={onClose}>{tx('关闭')}</button>
+  return <Modal scope="repository-issue-sync" title={tx('Issue 自动同步：{0}', [row.displayName || row.fullName])} dirty={dirty || memberDirty} onClose={onClose}
+    footer={dismiss => <>
+      <button className="btn btn-ghost" onClick={dismiss}>{tx('关闭')}</button>
       <button className="btn btn-primary" disabled={loading || !!busy || !data || !dirty} onClick={save}>{busy === 'save' ? tx('正在保存…') : tx('保存设置')}</button>
     </>}>
     <div className="rc-issue-dialog">

@@ -33,14 +33,14 @@ if (typeof electron === 'string') {
     keychain: process.platform === 'darwin' ? 'Chromium test keychain' : 'Platform safeStorage backend',
     boundary: 'Actual Electron model page, api.js, production local-model IPC and safeStorage encryption API; macOS test keychain, synthetic loopback Hub, native pointer clicks and Chromium typing. No real account, user profile, provider or model call; no system keychain permission validation.' };
   const key = 'synthetic-local-model-key', hubWrites = [], blocked = [], requests = [];
-  const managed = { revision: 'fixture-1', providers: ['company-first', 'company-second'].map(id => ({
+  const managed = { revision: 'fixture-1', defaultModels: { pi: 'shared-model' }, providers: ['company-first', 'company-second'].map(id => ({
     id, name: id, baseUrl: 'https://fixture.invalid/v1', kind: 'openai-compat', keySet: true,
     modelNames: ['shared-model'], modelDefs: [{ name: 'shared-model', label: 'Shared model', modality: 'chat' }],
   })), myModels: [], usable: ['company-first', 'company-second'].map(providerId => ({
     providerId, name: 'shared-model', label: 'Shared model', keyFrom: 'org' })), mediaUsable: {} };
   managed.providers.push({id:'custom-personal-fixture', name:'Personal Hub service', personal:true,
     baseUrl:'https://personal.example.invalid/v1', kind:'openai-compat', modelNames:[], modelDefs:[]});
-  let win, server, hub, localId, holdLocalSaves = false, failedHubWrites = 0;
+  let win, composer, server, hub, localId, holdLocalSaves = false, failedHubWrites = 0;
   const pendingLocalSaves = [];
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   const js = code => win.webContents.executeJavaScript(code, true);
@@ -125,6 +125,7 @@ if (typeof electron === 'string') {
     ipcMain.handle('fixture-before-local-save', () => holdLocalSaves
       ? new Promise(resolve => pendingLocalSaves.push(resolve)) : undefined);
     const store = require('../main/local-model-store.cjs');
+    ipcMain.on('fixture-models-changed', () => composer?.webContents.send('models-changed'));
     const preload = path.join(temp, 'preload.cjs');
     fs.writeFileSync(preload, `const {contextBridge,ipcRenderer}=require('electron'); let closeDeskWindowCalls=0;
       contextBridge.exposeInMainWorld('soduWorkAPI',{
@@ -132,6 +133,8 @@ if (typeof electron === 'string') {
         localModels:{get:()=>ipcRenderer.invoke('local-models-get'),save:async input=>{
           await ipcRenderer.invoke('fixture-before-local-save');return ipcRenderer.invoke('local-models-save',input)},
           test:(id,name)=>ipcRenderer.invoke('local-models-test',id,name)},
+        broadcast:domain=>{if(domain==='models')ipcRenderer.send('fixture-models-changed')},
+        onModelsChanged:fn=>{ipcRenderer.on('models-changed',fn);return ()=>ipcRenderer.removeListener('models-changed',fn)},
         closeDeskWindow:()=>{closeDeskWindowCalls++},
         getCloseDeskWindowCalls:()=>closeDeskWindowCalls});`);
     const styles = ['theme/variables.css', 'components/panels/panels-schedules.css', 'components/panels/panels-agents.css',
@@ -150,8 +153,15 @@ if (typeof electron === 'string') {
       preload, sandbox: true, contextIsolation: true, nodeIntegration: false, offscreen: true, backgroundThrottling: false,
       partition: 'local-model-catalog-' + require('node:crypto').randomUUID() } });
     const desk = pathToFileURL(path.join(client, 'desk.html')).href;
+    const composeUrl = desk + '?view=compose';
+    const composeHtml = '<!doctype html><meta charset="utf-8"><div class="cp-modelwrap">' +
+      '<button id="cpModelBtn"><span id="cpModelName"></span></button><div id="cpModelPop"></div></div>' +
+      ['core/api-work-plugins.js', 'api.js', 'core/model-choice.js', 'components/panels/panels-compose-model-picker.js']
+        .map(file => '<script src="' + file + '"></script>').join('') +
+      '<script>ComposeModelPicker.bind({api:()=>soduWorkAPI})</script>';
     win.webContents.session.protocol.handle('file', request => request.url === desk
       ? new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+      : request.url === composeUrl ? new Response(composeHtml, { headers: { 'content-type': 'text/html; charset=utf-8' } })
       : net.fetch(request.url, { bypassCustomProtocolHandlers: true }));
     win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (request, done) => {
       const allowed = new URL(request.url).origin === hub;
@@ -185,7 +195,29 @@ if (typeof electron === 'string') {
     await until('_mdLoadState==="ready"&&!_mdSaveFlight&&_mdData.localRevision===1');
     assert.equal(store.get().myModels.length, 0, 'Saving the service leaves the model form unsubmitted');
     assert.equal(await js('document.querySelector("[data-padd]").value'), 'shared-model');
+    assert.equal(await js('document.querySelector(".md-pi-guidance b").textContent'), '本地 Pi 可选的对话模型：0 个');
+    assert.equal(await js('document.activeElement.dataset.mdaddchat'), localId, 'first save reveals the next action');
+    await click('[data-mdaddchat]');
+    assert.equal(await js('document.activeElement.dataset.padd'), localId);
+    assert.equal(await js('document.querySelector("[data-paddtype]").value'), 'chat');
+    composer = new BrowserWindow({ show: false, webPreferences: {
+      session: win.webContents.session, preload, sandbox: true, contextIsolation: true, backgroundThrottling: false } });
+    const compose = script => composer.webContents.executeJavaScript(script, true);
+    await composer.loadURL(composeUrl);
+    await compose('ComposeModelPicker.refresh(true)');
+    await compose('document.getElementById("cpModelBtn").click()');
+    await compose('document.querySelector("[data-model=shared-model]").click()');
     await click('[data-madd]'); await saved(2);
+    assert.equal(await js('document.querySelector(".md-pi-guidance b").textContent'), '本地 Pi 可选的对话模型：1 个');
+    const localRef = store.get().usable[0].name;
+    const row = 'document.querySelector(' + JSON.stringify('[data-model="' + localRef + '"]') + ')';
+    for (let i = 0; i < 100 && !await compose('!!' + row); i++) await delay(50);
+    assert.equal(await compose('ComposeModelPicker.value().modelName'), 'shared-model');
+    await compose('document.getElementById("cpModelBtn").click()');
+    await compose(row + '.click()');
+    assert.equal(await compose('ComposeModelPicker.value().modelName'), localRef);
+    assert.equal(await compose('SoduWorkAPI.myModels().then(catalog => catalog.defaultModels.pi)'), 'shared-model');
+    record('Saving a provider guides to its chat form and broadcasts the new selectable choice to a separate Pi composer');
     assert.equal(await js('notices.some(message=>message.includes("模型配置已保存"))'), true);
     assert.equal(await js('notices.some(message=>message.includes("没存上"))'), false);
     await js('window.pickerRefreshFailures=0');
@@ -255,7 +287,8 @@ if (typeof electron === 'string') {
     record('Deleting the edited model clears its draft, rejects detached callbacks during save and stays removed after reopening');
 
     for (const name of ['retained-model', 'removed-sibling']) {
-      await click('[data-mdeditor] summary'); await fill('[data-padd]', name); await click('[data-madd]');
+      await click(name === 'retained-model' ? '[data-mdaddchat]' : '[data-mdeditor] summary');
+      await fill('[data-padd]', name); await click('[data-madd]');
     }
     await until('_mdLoadState==="ready"&&!_mdDirty&&_mdData.localRevision===7');
     await assertLocalCount(2);
@@ -336,7 +369,7 @@ if (typeof electron === 'string') {
     }
   }).finally(async () => {
     releaseLocalSaves();
-    win?.destroy();
+    composer?.destroy(); win?.destroy();
     if (server) await new Promise(resolve => server.close(resolve));
     fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify({ ok: report.ok, cases: report.cases.length, output, error: report.error }));

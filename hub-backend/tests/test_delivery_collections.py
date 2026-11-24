@@ -722,6 +722,8 @@ class DeliveryCollectionsTests(DeliveryCollectionsTestCase):
                         files={"file": ("delivery.zip", package, "application/zip")})
                     self.assertEqual(upload.status_code, 200, upload.text)
                     delivery_id = upload.json()["delivery"]["id"]
+                # Receiving the body can precede FastAPI releasing its request session.
+                await asyncio.wait_for(asyncio.gather(*server.server_state.tasks), 5)
                 await self.engine.dispose()
                 async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", trust_env=False) as phone_http:
                     listed = await phone_http.get("/api/v1/deliveries", headers={"Authorization": tokens["phone"]})

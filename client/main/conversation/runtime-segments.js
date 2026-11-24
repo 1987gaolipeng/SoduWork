@@ -108,6 +108,11 @@ function identities(app) {
 function title(record) {
   return require('./automatic-title').resolve(record?.title, record?.prefix);
 }
+function hasHistory(record) {
+  // A manifest records the Agent selection even when neither Agent has run yet.
+  return Boolean(record && (record.prefix?.messages?.length || record.prefix?.tools?.length ||
+    record.active.started || title(record) || harnesses.fromRecord(record).length));
+}
 function row(record) {
   return { id: record.id, title: title(record), cwd: record.cwd, adapterId: record.active.adapterId,
     usedHarnesses: harnesses.fromRecord(record),
@@ -154,4 +159,4 @@ function brief(snapshot) {
     'Verify current files when needed; this bounded transcript may omit older details.\n' +
     lines.join('\n\n').slice(-28000) + '\nRecent operations:\n' + tools.join('\n').slice(-6000) + '\n[End handover]';
 }
-module.exports = { read, snapshot, save, flush, assertOwner, list, identities, row, title, mergeHistory, remove, brief, scope, rowHistoryIds };
+module.exports = { read, snapshot, save, flush, assertOwner, list, identities, row, title, hasHistory, mergeHistory, remove, brief, scope, rowHistoryIds };

@@ -65,6 +65,12 @@ def fake_agent():
                 time.sleep(1)
             result = {"protocolVersion": 1, "agentCapabilities": {"loadSession": scenario != "unsupported"}}
         elif method in {"session/new", "session/load", "session/resume"}:
+            if agent == "opencode":
+                from tests.opencode_peer_session import create_session, require_session
+                if method == "session/new":
+                    create_session(os.environ, "native-kept", os.getcwd())
+                else:
+                    require_session(os.environ, params["sessionId"], os.getcwd())
             if method != "session/new":
                 resumed = True
                 assert params["sessionId"] == "native-kept"
@@ -156,6 +162,10 @@ class TransitionTests(unittest.TestCase):
         self.temp.cleanup()
 
     def start(self, scenario="stream", agent="qwen", mode="standard"):
+        if agent == "opencode":
+            from tests.opencode_peer_session import environment
+            handle = patch.dict(os.environ, environment(self.ws / ("opencode-" + str(len(self.refs)))), clear=True)
+            handle.start(); self.patches.append(handle)
         profile = dict(local_base._PROFILES[agent])
         profile.update(bin=lambda: sys.executable, needs_llm=False,
             command=lambda exe, args, ws, cfg: [sys.executable, "-B", str(ROOT / "app/services/acp_bridge.py"),
