@@ -11,13 +11,17 @@ from pathlib import Path
 import tempfile
 import textwrap
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 _tmp = tempfile.TemporaryDirectory(prefix="soduwork-smoke-admin-security-")
 os.environ["DATABASE_URL"] = (
     "sqlite+aiosqlite:///" + (Path(_tmp.name) / "security.db").as_posix())
+CONSOLE_ORIGIN = "https://console.example.test"
+os.environ["CORS_ORIGINS"] = CONSOLE_ORIGIN
 
 import httpx  # noqa: E402
+from fastapi import Response  # noqa: E402
 from sqlalchemy import func, select  # noqa: E402
 from route_test_support import api_routes  # noqa: E402
 
@@ -60,6 +64,39 @@ def check(name: str, condition: bool, detail="") -> None:
     else:
         failed += 1
         print("  FAIL  " + name + ("  << " + str(detail)[:500] if detail else ""))
+
+
+async def admin_cache_contract(client, headers):
+    def check_headers(label, reply, status, *vary):
+        fields = [field.strip().lower() for field in reply.headers.get("vary", "").split(",")]
+        check(label, reply.status_code == status and reply.headers.get("cache-control") == "no-store"
+              and all(fields.count(field) == 1 for field in vary),
+              (reply.status_code, reply.headers.get("cache-control"), fields))
+
+    for path in ("users", "audit", "orgs", "llm-config", "mail-settings", "quotas", "alert-config"):
+        reply = await client.get(f"/api/v1/admin/{path}", headers={**headers, "Origin": CONSOLE_ORIGIN})
+        check_headers(f"admin/{path} keeps origin and varies by authorization", reply, 200, "origin", "authorization")
+
+    denied = await client.get("/api/v1/admin/users")
+    check_headers("authentication errors use the same cache policy", denied, 401, "authorization")
+
+    for extra in (None, "aUtHoRiZaTiOn"):
+        payload = Response(headers={"Vary": "Accept-Language", "Cache-Control": "public, max-age=60"})
+        payload.headers.append("Vary", "Accept-Encoding")
+        if extra:
+            payload.headers.append("Vary", extra)
+        with patch("app.api.admin._me_payload", return_value=payload):
+            reply = await client.get("/api/v1/admin/me", headers=headers)
+        check_headers("admin policy preserves all Vary fields and prevents route caching",
+                      reply, 200, "accept-language", "accept-encoding", "authorization")
+
+    with patch("app.api.admin._me_payload", side_effect=RuntimeError("fixture")):
+        error = await client.get("/api/v1/admin/me", headers=headers)
+    check_headers("unexpected admin errors use the same cache policy", error, 500, "authorization")
+
+    other = await client.get("/api/v1/administration", headers=headers)
+    check("similarly named paths stay outside the admin cache policy",
+          other.status_code == 404 and "authorization" not in other.headers.get("vary", "").lower())
 
 
 def dependency_calls(dependant):
@@ -228,6 +265,57 @@ async def batch_user_audits(client, actor, headers):
     return {("POST", path)}
 
 
+async def catalog_batch_audits(client, actor, headers):
+    """Only credit routes whose HTTP mutations and per-target audits actually persist."""
+    cases = (
+        ("projects", models.Project, "", {"org_id": "org-security-a"}),
+        ("repositories", models.Repo, "audit-projects-1", {"project_id": "audit-projects-1"}),
+        ("orgs", models.OrgUnit, "", {}),
+        ("professions", models.Position, "org-security-a", {"org_id": "org-security-a"}),
+    )
+    verified = set()
+    for resource, model, scope_id, fields in cases:
+        path = f"/api/v1/admin/business-records/{resource}"
+        ids = [f"audit-{resource}-{suffix}" for suffix in (1, 2)]
+        async with SessionLocal() as session:
+            session.add_all([model(id=uid, name=uid, data_source="legacy", **fields) for uid in ids])
+            await session.commit()
+
+        before = {"dataSource": "legacy", "isArchived": False}
+        passed_route = True
+        for action, after in (
+            ("test", {"dataSource": "test", "isArchived": False}),
+            ("business", {"dataSource": "business", "isArchived": False}),
+            ("archive", {"dataSource": "business", "isArchived": True}),
+            ("restore", {"dataSource": "business", "isArchived": False}),
+        ):
+            audit_ids = set()
+            body = {"ids": ids, "action": action, "scopeId": scope_id}
+            for changed in (len(ids), 0):
+                response = await client.post(path, headers=headers, json=body)
+                async with SessionLocal() as session:
+                    rows = (await session.scalars(select(model).where(model.id.in_(ids)))).all()
+                    events = (await session.scalars(select(models.AuditLog).where(
+                        models.AuditLog.target_id.in_(ids), models.AuditLog.action == "catalog." + action))).all()
+                event_ids = {event.id for event in events}
+                ok = (response.status_code == 200 and response.json() == {"changed": changed}
+                      and {row.id for row in rows} == set(ids)
+                      and all((row.data_source, row.is_archived) == (after["dataSource"], after["isArchived"])
+                              for row in rows)
+                      and len(events) == len(ids) and {event.target_id for event in events} == set(ids)
+                      and all(event.actor_id == actor and event.target_type == model.__tablename__
+                              and event.target_label == event.target_id
+                              and event.detail == {"before": before, "after": after} for event in events)
+                      and (changed > 0 or event_ids == audit_ids))
+                check(f"{resource} {action} ({changed} changed) persists state and one audit per change", ok)
+                passed_route = passed_route and ok
+                audit_ids = event_ids
+            before = after
+        if passed_route:
+            verified.add(("POST", path))
+    return verified
+
+
 def audit_contract(verified) -> None:
     missing = []
     seen_exemptions = set()
@@ -369,9 +457,9 @@ async def main() -> None:
     async with httpx.AsyncClient(
         transport=transport, base_url="http://soduwork.test"
     ) as client:
+        await admin_cache_contract(client, super_headers)
         verified = await approval_audits(client, super_user.id, super_headers)
         verified.update(await batch_user_audits(client, super_user.id, super_headers))
-        audit_contract(verified)
         denied = await client.post(
             "/api/v1/admin/orgs", headers=ordinary_headers,
             json={"name": "越权新部门", "parentId": "org-security-a"})
@@ -602,6 +690,11 @@ async def main() -> None:
               and all(action in actions for action in (
                   "binding.upsert", "task.assign", "binding.delete", "integration.create",
                   "integration.update", "integration.token.rotate")), actions)
+
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://soduwork.test") as client:
+        verified.update(await catalog_batch_audits(client, super_user.id, super_headers))
+    audit_contract(verified)
 
 
 async def run() -> None:

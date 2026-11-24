@@ -391,7 +391,8 @@ def _decision_error(out: dict) -> HTTPException:
         "gate_evidence": str(out.get("detail") or "\u8bf7\u5148\u8865\u9f50\u95e8\u7981\u8bc1\u636e"),
         "invalid_artifact": str(out.get("detail") or "\u5f53\u524d\u6210\u679c\u8fd8\u4e0d\u80fd\u9a8c\u6536"),
     }.get(reason, str(out.get("detail") or "审批没有生效"))
-    return HTTPException(status_code=status, detail=detail)
+    headers = {"X-Error-Code": out["errorCode"]} if out.get("errorCode") else None
+    return HTTPException(status_code=status, detail=detail, headers=headers)
 
 
 async def _rework_note(session: AsyncSession, task: Task, request_id: str,

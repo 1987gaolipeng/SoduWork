@@ -107,7 +107,8 @@ def _latest_personal(rows: list[models.DailyReport]) -> list[models.DailyReport]
 def _active_items(report: models.DailyReport) -> int:
     items = [item for item in list(report.items or []) if isinstance(item, dict)]
     if items:
-        return sum(not bool(item.get("closedInPeriod", item.get("closedToday"))) for item in items)
+        return sum(1 for item in items if not item.get("backlogOnly")
+                   and not item.get("closedInPeriod", item.get("closedToday")))
     # Legacy rows without item snapshots counted all touched tasks in active_count, including done.
     return max(0, int(report.active_count or 0) - int(report.done_count or 0))
 
@@ -119,6 +120,9 @@ def _member_facts(reports: list[models.DailyReport]) -> dict[str, list[dict]]:
         owner = report.user_name or report.user_id
         for item in list(report.items or []):
             title = _clip(item.get("title") or "未命名事项", 100)
+            if item.get("backlogOnly"):
+                facts["nextFocus"].append(_entry(title, report.id, owner=owner))
+                continue
             progress = [_clip(value, 140) for value in (item.get("progress") or []) if _clip(value)]
             detail = "；".join(progress[:2])
             text = title + (("：" + detail) if detail else "")

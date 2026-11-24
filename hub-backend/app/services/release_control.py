@@ -576,6 +576,12 @@ async def decide(session: AsyncSession, task: models.Task, actor, *, action: str
     note = str(note or "").strip()
     if decision == "reject" and not note:
         return {"ok": False, "reason": "note"}
+    if action == "deploy" or environment_id:
+        from . import deployments
+        if not await deployments.has_targets(session, task, environment_id=environment_id):
+            return {"ok": False, "reason": "invalid_environment",
+                    "errorCode": "hub.input.release_environment",
+                    "detail": "当前任务在所选环境中没有可用的部署目标，请检查发布链配置"}
     from . import artifact_version_guard
     await artifact_version_guard.lock_task(session, task.id)
     artifact = await session.get(am.ArtifactVersion, artifact_version_id) \
@@ -664,6 +670,8 @@ async def decide(session: AsyncSession, task: models.Task, actor, *, action: str
                     continue_existing_merge = True
                 elif artifact.kind == "code":
                     await ensure_request(session, task, artifact, "merge", context={
+                        **{key: req.context[key] for key in ("workflowRunId", "nodeRunId")
+                           if (req.context or {}).get(key)},
                         "summary": f"合并 {artifact.branch} → {artifact.target}",
                         "commit": artifact.commit_sha,
                     })

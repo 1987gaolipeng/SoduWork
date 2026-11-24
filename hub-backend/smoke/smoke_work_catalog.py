@@ -21,7 +21,7 @@ from app.api import admin as admin_api  # noqa: E402
 from app.api import work_catalog as work_catalog_api  # noqa: E402
 from app.auth import hash_password  # noqa: E402
 from app.db import Base, SessionLocal, engine  # noqa: E402
-from app.schemas import AdminLogin, task_to_api  # noqa: E402
+from app.schemas import AdminLogin, UserUpdate, task_to_api  # noqa: E402
 from app.services import rbac, tasks, work_catalog  # noqa: E402
 
 
@@ -250,6 +250,56 @@ async def main() -> None:
             invalid_error = str(error)
         ok("不属于" in invalid_error,
            "cross-tenant profession id was accepted")
+        active = await work_catalog_api.create_profession(
+            {"orgId": child.id, "name": "Assigned before archiving"}, user, session)
+        await admin_api.update_user(user.id, UserUpdate(positions=[active["id"]]), user, session)
+        archived = await admin_api.update_position(active["id"], {"enabled": False}, user, session)
+        test_profile = await admin_api.create_position(
+            {"orgId": child.id, "name": "Explicit test profile", "dataSource": "test"}, user, session)
+        managed = await work_catalog_api.admin_catalog(child.id, user, session)
+        options = await admin_api.list_positions(user, session, org_id=child.id)
+        hidden_ids = {archived["id"], test_profile["id"]}
+        ok(archived["isArchived"] and not archived["enabled"] and
+           hidden_ids <= {r["id"] for r in managed["professions"]} and
+           hidden_ids.isdisjoint(r["id"] for r in options),
+           "profession availability differs between management and assignment")
+        ok(all(r["dataSource"] == "business" for r in options if r["isSystem"]),
+           "the built-in professions were marked as unclassified")
+        unchanged = await admin_api.update_user(
+            user.id, UserUpdate(orgId=child.id, positions=[archived["id"], "p_dev"]), user, session)
+        ok(unchanged["positions"] == [archived["id"], "p_dev"],
+           "editing the same employee discarded their historical assignment")
+        try:
+            await admin_api.update_user(
+                user.id, UserUpdate(positions=[test_profile["id"]]), user, session)
+        except HTTPException as error:
+            ok(error.status_code == 400, "unexpected HTTP status on an unavailable assignment")
+        else:
+            raise AssertionError("new test profile assignment succeeded")
+        await admin_api.update_user(user.id, UserUpdate(positions=["p_dev"]), user, session)
+        try:
+            await work_catalog_api.update_profession(
+                active["id"], {"orgId": root.id, "enabled": True}, user, session)
+        except HTTPException as error:
+            # 400: legacy service-level mismatch check; 403: _target_org scope rejection —
+            # both mean the cross-org write is refused.
+            ok(error.status_code in (400, 403), "unexpected HTTP status on a mismatched catalog write")
+        else:
+            raise AssertionError("inherited profession was changed from another catalog")
+        for org_state in ("archived", "test"):
+            if org_state == "archived":
+                outsider.is_archived = True
+            else:
+                outsider.is_archived = False
+                outsider.data_source = "test"
+            await session.commit()
+            hidden_in_scope = await work_catalog.profession_rows(session, outsider.id)
+            hidden_in_all = await rbac.list_positions(session)
+            ok(other_profile.id not in {r.id for r in hidden_in_scope} and
+               other_profile.id not in {r["id"] for r in hidden_in_all},
+               f"previously active profession leaked from its {org_state} department")
+        outsider.data_source = "business"
+        await session.commit()
 
         base_research = next(
             row for row in await work_catalog.scenario_rows(session, root.id)

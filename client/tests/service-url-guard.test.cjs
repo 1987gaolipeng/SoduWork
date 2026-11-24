@@ -27,6 +27,54 @@ test('real local and cloud listeners remain valid service URLs', () => {
   assert.equal(preview._normalizeAddress('http://192.0.2.20:4173/'), 'http://192.0.2.20:4173/');
 });
 
+test('cloud loopback listeners resolve to IPv6 Runner hosts and preserve URL components', () => {
+  const suffix = ':4173/review/%E4%B8%AD%E6%96%87.html?view=1#result';
+  for (const host of ['2001:db8::20', '[2001:db8::20]']) {
+    for (const listener of ['localhost', '127.0.0.1', '0.0.0.0', '[::]', '[::1]']) {
+      const url = info.normalizeUrl('https://' + listener + suffix, { cloud: true, cloudHost: host });
+      assert.equal(url, 'https://[2001:db8::20]' + suffix, host + ' / ' + listener);
+      assert.equal(preview._normalizeAddress(url), url);
+    }
+  }
+});
+
+test('cloud previews wait for a valid target instead of opening desktop loopback', () => {
+  const output = 'Local: http://localhost:4173/review?view=1#result';
+  for (const cloudHost of ['', 'bad/host', 'runner.test:8080', 'user@runner.test',
+    'https://runner.test/', '2001:db8::invalid', '[2001:db8::20']) {
+    const rows = info.services([command('npm run dev', output)], { cloud: true, cloudHost });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].url, '', cloudHost);
+    assert.equal(rows[0].unreachable, true, cloudHost);
+    assert.equal(rows[0].state, '等待云端地址', cloudHost);
+  }
+  const published = 'https://preview.example.test/review?view=1#result';
+  assert.equal(info.services([command('start-managed-app', '', { previewUrl: published })],
+    { cloud: true, cloudHost: 'bad/host' })[0].url, published);
+});
+
+test('structured IPv6 listener metadata produces an address accepted by native preview', () => {
+  for (const host of ['2001:db8::20', '[2001:db8::20]', '::ffff:192.0.2.20']) {
+    const rows = info.services([command('node server.js', '', { host, port: 4173 })],
+      { cloud: true, cloudHost: host });
+    assert.equal(rows.length, 1, host);
+    const expectedHost = new URL('http://' + (host.startsWith('[') ? host : '[' + host + ']')).hostname;
+    assert.equal(rows[0].url, 'http://' + expectedHost + ':4173/', host);
+    assert.equal(rows[0].unreachable, false, host);
+    assert.equal(preview._normalizeAddress(rows[0].url), rows[0].url);
+  }
+});
+
+test('existing IPv4, DNS and local previews retain their address behavior', () => {
+  for (const host of ['192.0.2.20', 'runner.example.test']) {
+    const options = { cloud: true, cloudHost: host };
+    const url = 'http://' + host + ':4173/';
+    assert.equal(info.normalizeUrl('localhost:4173', options), url);
+    assert.equal(info.services([command('node server.js', '', { host, port: 4173 })], options)[0].url, url);
+  }
+  assert.equal(info.normalizeUrl('http://[::1]:4173/'), 'http://127.0.0.1:4173/');
+});
+
 const command = (cmd, output = '', metadata = {}) => ({ id: 'tool', name: 'bash',
   args: { command: cmd }, state: 'done', result: output, ...metadata });
 

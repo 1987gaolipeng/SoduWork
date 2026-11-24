@@ -27,7 +27,7 @@ python-pptx>=1.0,<2
 httpx>=0.28,<0.29
 # MIT: use installed OS trust for Runner WSS, gateway HTTPS and downloads.
 truststore==0.10.5
-Pillow>=13.0,<14
+-r requirements-image.txt
 PyJWT[crypto]>=2.10,<3
 # Require the patched release even when upgrading a Hub-only installation.
 # Keep this unconditional pin aligned with requirements-runner.txt.

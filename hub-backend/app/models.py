@@ -258,7 +258,12 @@ def _freeze_task_owner_on_transfer(mapper, connection, task):
         _freeze_task_owner_on_insert(mapper, connection, task)
 
 
-class Project(Base):
+class BusinessRecord:
+    data_source: Mapped[str] = mapped_column(String(12), default="legacy", server_default="legacy")
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+
+
+class Project(BusinessRecord, Base):
     """Project grouping for tasks sharing a goal, with dependencies controlling execution order."""
     __tablename__ = "project"
 
@@ -279,7 +284,7 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class Repo(Base):
+class Repo(BusinessRecord, Base):
     """A code repository within a project. Store local_dir relative to each device's configured
     workspace and resolve absolute paths at dispatch. Keep repository credentials outside this
     business record.
@@ -483,7 +488,7 @@ class IntegrationBinding(Base):
 
 # Organizational structure, users, and RBAC roles.
 
-class OrgUnit(Base):
+class OrgUnit(BusinessRecord, Base):
     """Department-tree node; an empty parent_id identifies a root department."""
     __tablename__ = "org_unit"
 
@@ -505,7 +510,7 @@ class Role(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class Position(Base):
+class Position(BusinessRecord, Base):
     """Professional profile describing expertise independently of role permissions, workflow
     responsibilities, and executors.
     """

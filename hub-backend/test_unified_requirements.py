@@ -251,6 +251,25 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.json()["visibility"], expected)
             self.assertEqual(result.json()["requirementStage"], extra.get("triageStage", "ready"))
 
+    async def test_batch_update_reports_missing_ids_and_persists_valid_task(self):
+        created = await self.call("POST", "tasks", json={"title": "Batch update", "status": "todo"})
+        self.assertEqual(created.status_code, 200, created.text)
+        task_id = created.json()["id"]
+
+        response = await self.call("POST", "tasks/batch-update", json={
+            "ids": ["ghost-id-1", task_id, "ghost-id-2"],
+            "patch": {"status": "doing"},
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(result["statusRejected"], 0)
+        self.assertEqual(result.get("missing"), ["ghost-id-1", "ghost-id-2"])
+
+        saved = await self.call("GET", f"tasks/{task_id}")
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(saved.json()["status"], "doing")
+
     async def test_preparation_version_conflict_and_forbidden_execution_fields(self):
         blocked = await self.call("PATCH", "tasks/shared", "peer", json={"triageStage": "clarifying", "requirementVersion": 1})
         self.assertEqual(blocked.status_code, 403, blocked.text)

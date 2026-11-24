@@ -643,7 +643,7 @@ function BulkImportModal({ data, busy, onClose, onConfirm }) {
       {result && <div className="plugin-bulk-result">
         <b>{tx("导入完成：")}{result.imported}{tx(" 个成功，")}{result.failed}{tx(" 个未导入")}</b>
         {(result.items || []).map((item) => <span className={item.ok ? 'ok' : 'bad'} key={item.filename}>
-          <i>{item.ok ? '✓' : '!'}</i><strong>{item.filename}</strong><small>{item.ok ? tx("已进入待审核列表") : item.error}</small>
+          <i>{item.ok ? '✓' : '!'}</i><strong>{item.filename}</strong><small>{item.ok ? tx("已进入待审核列表") : serverMessage(item.errorMessage, item.error)}</small>
         </span>)}
       </div>}
     </div>
