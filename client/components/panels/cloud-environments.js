@@ -9,6 +9,7 @@
     return global.SoduWorkI18n ? global.SoduWorkI18n.translateText(text) : text;
   };
   const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 16H6a4 4 0 0 1-.4-8 6.4 6.4 0 0 1 12.2-1A4.5 4.5 0 0 1 18 16h-1M8 20h8M12 16v4"/></svg>';
+  const emptyIcon = '<svg class="ws-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.25 18.5H6.5a4 4 0 1 1 .2-8 5.75 5.75 0 0 1 11.2-1.75A4.9 4.9 0 0 1 17 18.5Z"/></svg>';
   const refreshIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3A7 7 0 0 0 17.9 17"/></svg>';
   let panel = null, data = null, timer = null, generation = 0, loading = false, owner = '';
   const agentJobs = Object.create(null);
@@ -184,7 +185,7 @@
     body.dataset.signature = signature;
     const opened = Array.from(body.querySelectorAll('details[open][data-ce-disclosure]')).map(item => [item.closest('[data-ce-server]')?.dataset.ceServer, item.dataset.ceDisclosure]);
     body.innerHTML = '<div class="ce-content">' +
-      (rows.length ? '<div class="ce-servers">' + rows.map(rowView).join('') + '</div>' : '<div class="ce-empty">' + icon + '<h3>还没有专属云端执行机</h3><p>' + (data.permissions?.canCreate ? '添加一台你自己的远程电脑。连接完成后，云端会话会自动使用它。' : '当前账号暂时没有配置权限，请联系管理员开通。') + '</p>' + (data.permissions?.canCreate ? '<button type="button" class="ce-primary" data-ce-add>配置专属执行机</button>' : '') + '</div>') +
+      (rows.length ? '<div class="ce-servers">' + rows.map(rowView).join('') + '</div>' : '<div class="ce-empty">' + emptyIcon + '<h3>还没有专属云端执行机</h3><p>' + (data.permissions?.canCreate ? '添加一台你自己的远程电脑。连接完成后，云端会话会自动使用它。' : '当前账号暂时没有配置权限，请联系管理员开通。') + '</p>' + (data.permissions?.canCreate ? '<button type="button" class="ce-primary" data-ce-add>配置专属执行机</button>' : '') + '</div>') +
       (rows.length ? '<p class="ce-footer-note">在新会话中选择云端执行，即可使用这台电脑。</p>' : '') + '</div>';
     for (const item of body.querySelectorAll('details[data-ce-disclosure]')) {
       if (opened.some(([id, key]) => id === item.closest('[data-ce-server]')?.dataset.ceServer && key === item.dataset.ceDisclosure)) item.open = true;

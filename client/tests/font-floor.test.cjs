@@ -80,14 +80,14 @@ test('production UI typography never drops below the 12px product floor', () => 
   const traceCss = fs.readFileSync(path.join(ROOT, 'components', 'panels', 'task-trace-view.css'), 'utf8');
   const themeCss = fs.readFileSync(path.join(ROOT, 'theme', 'variables.css'), 'utf8');
   const workspaceCss = fs.readFileSync(path.join(ROOT, 'theme', 'workspace-experience.css'), 'utf8');
-  assert.match(themeCss, /--font-min-readable:\s*12px/);
-  assert.match(workspaceCss, /--font-min-readable:\s*12px/);
+  assert.match(themeCss, /--font-min-readable:\s*var\(--ui-font-12,\s*12px\)/);
+  assert.match(workspaceCss, /--font-min-readable:\s*var\(--ui-font-12,\s*12px\)/);
   assert.match(workspaceCss, /--text-xs:12px;--text-sm:13px;--text-base:14px;--text-md:15px/);
-  assert.match(dialogueCss, /#cpChat\{[\s\S]*?--font-min-readable:12px;--text-xs:12px;--text-sm:13px;--text-base:14px;--text-md:15px;/);
-  assert.match(dialogueCss, /#cpChat \.nchat-scroll\{[\s\S]*?--font-min-readable:14px;--text-xs:14px;--text-sm:14px;--text-base:14px;--text-md:15px;/);
-  assert.match(dialogueCss, /#composePanel\{--font-min-readable:12px;--text-xs:12px;--text-sm:13px;--text-base:14px;--text-md:15px\}/);
-  assert.match(dialogueCss, /\.ntext\{[^}]*font-size:14px/);
-  assert.match(traceCss, /\.tfd-shell\{[\s\S]*?--font-min-readable:12px;--text-xs:12px;--text-sm:13px;--text-base:14px;--text-md:15px;/,
+  assert.match(dialogueCss, /#cpChat\{[\s\S]*?--font-min-readable:var\(--ui-font-12,\s*12px\);--text-xs:12px;--text-sm:13px;--text-base:14px;--text-md:15px;/);
+  assert.match(dialogueCss, /#cpChat \.nchat-scroll\{[\s\S]*?--font-min-readable:var\(--ui-font-14,\s*14px\);--text-xs:14px;--text-sm:14px;--text-base:14px;--text-md:15px;/);
+  assert.match(dialogueCss, /#composePanel\{--font-min-readable:var\(--ui-font-12,\s*12px\);--text-xs:12px;--text-sm:13px;--text-base:14px;--text-md:15px\}/);
+  assert.match(dialogueCss, /\.ntext\{[^}]*font-size:var\(--ui-font-14,\s*14px\)/);
+  assert.match(traceCss, /\.tfd-shell\{[\s\S]*?--font-min-readable:var\(--ui-font-12,\s*12px\);--text-xs:12px;--text-sm:13px;--text-base:14px;--text-md:15px;/,
     'trace cards must use the compact UI floor instead of the transcript reading token');
   const files = [...walk(ROOT), ...walk(ADMIN_ROOT)];
   const issues = files.flatMap(inspect);

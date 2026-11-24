@@ -1,6 +1,7 @@
 (function (global) {
   'use strict';
   let currentDialog = null;
+  let waitingPanelTab = '';
   const tabs = ['security', 'devices', 'privacy'];
   const api = () => global.SoduWorkAPI;
   const ui = () => global.AccountUI;
@@ -20,6 +21,7 @@
     mount(ui().modal(document.body, '个人信息', navigation(), 'ac-center'), initial);
   }
   function closePanel() {
+    waitingPanelTab = '';
     if (currentDialog?.embedded) {
       currentDialog.close();
       return;
@@ -40,8 +42,15 @@
     }
     currentDialog?.close();
     const snapshot = api().clientAuthSnapshot();
+    waitingPanelTab = '';
     if (!snapshot?.user?.id) {
       document.getElementById('personalAccountSummary')?.replaceChildren();
+      if (global.__deskPanel === 'preferences') {
+        waitingPanelTab = initial;
+        if (snapshot?.state !== 'pending' && snapshot?.state !== 'quota') {
+          host.textContent = '正在加载…'; return;
+        }
+      }
       host.textContent = '请先登录后管理个人信息。'; return;
     }
     host.innerHTML = navigation();
@@ -331,5 +340,10 @@
     api().clientAuthMe().then(result => { if (alive(revision) && result.user) { user = result.user; if (tab === 'security') security(); } }).catch(() => {});
   }
   function openProfileEditor() { return currentDialog?.openProfileEditor?.(); }
+  if (global.__deskPanel === 'preferences') {
+    global.addEventListener('soduwork-device-auth', () => {
+      if (waitingPanelTab) openInPanel(waitingPanelTab);
+    });
+  }
   global.AccountCenter = { open, openInPanel, closePanel, openProfileEditor };
 })(window);

@@ -18,7 +18,7 @@
 }
 .pui-turn-prompt-bubble{
   width:fit-content;max-width:76%;box-sizing:border-box;padding:10px 14px;
-  border-radius:15px 15px 5px 15px;background:var(--bg-2);color:var(--ink-1);font-size:max(var(--font-min-readable, 14.5px), 13.5px);
+  border-radius:15px 15px 5px 15px;background:var(--bg-2);color:var(--ink-1);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13-5, 13.5px));
   font-weight:400;line-height:1.62;letter-spacing:.005em;white-space:pre-wrap;overflow-wrap:anywhere
 }
 .pui-surface-inline.is-archived{
@@ -42,8 +42,8 @@
 .pui-revision-bar:hover{background:color-mix(in srgb,var(--bg-2) 72%,transparent)}
 .pui-revision-bar:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 30%,transparent);outline-offset:-2px}
 .pui-revision-bar span{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:10px}
-.pui-revision-bar b{font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:570;color:var(--ink-2);white-space:nowrap}
-.pui-revision-bar i{min-width:0;overflow:hidden;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-style:normal;font-weight:400;text-overflow:ellipsis;white-space:nowrap}
+.pui-revision-bar b{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));font-weight:570;color:var(--ink-2);white-space:nowrap}
+.pui-revision-bar i{min-width:0;overflow:hidden;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));font-style:normal;font-weight:400;text-overflow:ellipsis;white-space:nowrap}
 .pui-revision-bar em{flex:0 0 auto;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px);font-style:normal;font-weight:400}
 .pui-revision-body[hidden]{display:none!important}
 .pui-surface-inline.is-archived.is-expanded{background:var(--bg-0)}
@@ -65,10 +65,10 @@
 .pui-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 18px;
   border-bottom:1px solid var(--line-2);background:var(--bg-0)}
 .pui-dialog-head>div{min-width:0;display:flex;align-items:baseline;gap:10px}
-.pui-dialog-head b{overflow:hidden;color:var(--ink-1);font-size:15px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.pui-dialog-head b{overflow:hidden;color:var(--ink-1);font-size:var(--ui-font-15, 15px);font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 .pui-dialog-head small{overflow:hidden;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px);text-overflow:ellipsis;white-space:nowrap}
 .pui-dialog-head button,.pui-external-actions button{min-height:32px;padding:0 11px;border:1px solid var(--line-2);
-  border-radius:9px;background:var(--bg-0);color:var(--ink-2);font:500 14.5px/1 var(--font-ui,inherit);cursor:pointer}
+  border-radius:9px;background:var(--bg-0);color:var(--ink-2);font:500 var(--ui-font-14-5, 14.5px)/1 var(--font-ui,inherit);cursor:pointer}
 .pui-dialog-head button:hover,.pui-external-actions button:hover{border-color:var(--line);background:var(--bg-1);color:var(--ink)}
 .pui-dialog-web,.detail-plugin-surfaces{min-width:0;min-height:0}
 .pui-external{position:relative;height:100%;min-height:420px;display:grid;grid-template-rows:48px minmax(0,1fr);
@@ -76,7 +76,7 @@
 .pui-external-toolbar{z-index:2;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 14px;
   border-bottom:1px solid var(--line-2);background:color-mix(in srgb,var(--bg-0) 96%,transparent)}
 .pui-external-copy{min-width:0;display:flex;align-items:baseline;gap:9px}
-.pui-external-copy b{overflow:hidden;color:var(--ink-1);font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:590;text-overflow:ellipsis;white-space:nowrap}
+.pui-external-copy b{overflow:hidden;color:var(--ink-1);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));font-weight:590;text-overflow:ellipsis;white-space:nowrap}
 .pui-external-copy small{overflow:hidden;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 11.5px);text-overflow:ellipsis;white-space:nowrap}
 .pui-external-actions{flex:0 0 auto;display:flex;align-items:center;gap:7px}
 .pui-external-canvas{min-width:0;min-height:0;background:#fff}
@@ -87,10 +87,10 @@
 .detail-plugin-surfaces{height:clamp(540px,calc(100vh - 330px),820px);border:1px solid var(--line-2);border-radius:14px;overflow:hidden;background:#fff}
 .detail-plugin-surfaces[hidden]{display:none!important}
 .detail-plugin-surfaces .pui-external{min-height:100%}
-.pui-external-empty{height:100%;display:grid;place-items:center;padding:32px;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 13px);text-align:center}
+.pui-external-empty{height:100%;display:grid;place-items:center;padding:32px;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));text-align:center}
 @media(max-width:700px){
   .pui-surface-inline{margin:8px 8px 2px;border-radius:12px}
-  .pui-turn-prompt-bubble{max-width:84%;font-size:max(var(--font-min-readable, 14.5px), 13px)}
+  .pui-turn-prompt-bubble{max-width:84%;font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px))}
   .pui-revision-bar i{display:none}
   .pui-layer{padding:10px}.pui-dialog{width:calc(100vw - 20px);border-radius:14px}
   .pui-layer-external .pui-dialog{width:calc(100vw - 20px);height:calc(100vh - 20px)}

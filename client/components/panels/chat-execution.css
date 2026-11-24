@@ -1,6 +1,6 @@
 /* Live reasoning stays visible in a bounded reading area, then folds when complete. */
 .nthink{border:0;padding:0;min-width:0}
-.nthink-head{appearance:none;border:0;background:transparent;font:400 14px/1.6 var(--font-ui);
+.nthink-head{appearance:none;border:0;background:transparent;font:400 var(--ui-font-14, 14px)/1.6 var(--font-ui);
   color:var(--ink-3);display:inline-flex;align-items:center;gap:8px;padding:2px 0;cursor:pointer}
 .nthink-head:hover{color:var(--ink-2)}
 .nthink-head:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
@@ -9,7 +9,7 @@
 .nthink-caret{width:13px;height:13px;margin-left:1px;opacity:0;transition:opacity .14s ease,transform .14s ease}
 .nthink-head:hover .nthink-caret,.nthink-head:focus-visible .nthink-caret{opacity:1}
 .nthink.open .nthink-caret{transform:rotate(90deg)}
-.nthink-body{display:none;box-sizing:border-box;font:400 14px/1.8 var(--font-ui);color:var(--ink-3);
+.nthink-body{display:none;box-sizing:border-box;font:400 var(--ui-font-14, 14px)/1.8 var(--font-ui);color:var(--ink-3);
   white-space:pre-wrap;overflow-wrap:anywhere;padding:8px 10px 4px 0;max-height:144px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
 .nthink.open .nthink-body{display:block}
 .ntool-head>.ntool-icon,.ntool-batch-head>.ntool-icon{width:18px;height:18px;flex:none;fill:none;stroke:var(--ink-3);stroke-width:1.55;stroke-linecap:round;stroke-linejoin:round}
@@ -75,7 +75,7 @@
 .ntool.open .ntool-body{display:block}
 
 /* Borderless execution rows match the transcript; hover never changes geometry. */
-.ntool,.ntool-batch{font:400 14px/1.6 var(--font-ui);align-self:flex-start}
+.ntool,.ntool-batch{font:400 var(--ui-font-14, 14px)/1.6 var(--font-ui);align-self:flex-start}
 .ntool-batch.open,.ntool.open{align-self:stretch}
 
 /* Keep write/edit cards collapsed in the conversation and display code changes in the side pane. */
@@ -91,7 +91,7 @@
   padding:0 10px 0 16px;border-bottom:1px solid color-mix(in srgb,var(--line) 66%,transparent)}
 .ntool-drawer-head>svg{width:16px;height:16px;flex:none;fill:none;stroke:var(--ink-4);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .ntool-drawer-title{min-width:0;flex:1 1 auto;display:flex;align-items:baseline;gap:8px}
-.ntool-drawer-title b{font-size:max(var(--font-min-readable, 12px), 12.5px);font-weight:560;color:var(--ink-2);white-space:nowrap}
+.ntool-drawer-title b{font-size:max(var(--font-min-readable, 12px), var(--ui-font-12-5, 12.5px));font-weight:560;color:var(--ink-2);white-space:nowrap}
 .ntool-drawer-title small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   font-size:max(var(--font-min-readable, 12px), 11px);color:var(--ink-5);font-family:var(--mono,ui-monospace,Consolas,monospace)}
 .ntool-drawer-close{appearance:none;border:0;background:transparent;width:30px;height:30px;flex:none;border-radius:8px;
@@ -106,7 +106,7 @@
 .ntool-drawer-body .nd-hunk{margin:2px 0 6px}
 .ntool-drawer-body .nd-skip{margin:0 0 10px}
 
-.nchat-runtime-pop .nchat-runtime-name { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
-.nchat-runtime-pop [role="status"] { padding: 8px 12px; font-size: 12px; color: var(--text-secondary); }
+.nchat-runtime-pop .nchat-runtime-name { display: inline-flex; align-items: center; gap: 8px; font-size: var(--ui-font-13, 13px); }
+.nchat-runtime-pop [role="status"] { padding: 8px 12px; font-size: var(--ui-font-12, 12px); color: var(--text-secondary); }
 button.wc-agent-badge { border: 0; background: transparent; font: inherit; cursor: pointer; }
 button.wc-agent-badge:disabled { opacity: .5; cursor: default; }

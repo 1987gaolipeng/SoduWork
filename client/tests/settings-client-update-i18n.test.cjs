@@ -47,7 +47,9 @@ function bootClientUpdateCard(initialCfg = { uiScale: 'medium', fontScale: 'medi
     console, setTimeout, clearTimeout,
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     document: {
-      documentElement: { lang: '', dataset: {}, style: { setProperty() {} } },
+      documentElement: { lang: '', dataset: {}, style: {
+        setProperty(k, v) { this[k] = String(v); }, getPropertyValue(k) { return this[k] || ''; }
+      } },
       readyState: 'complete', body: null, title: '',
       createTreeWalker: () => ({ nextNode: () => null, currentNode: null }),
       addEventListener(type, fn) { (listeners['doc:' + type] = listeners['doc:' + type] || []).push(fn); },

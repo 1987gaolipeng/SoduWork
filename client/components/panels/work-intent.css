@@ -3,14 +3,14 @@
   /* Goal/task controls are UI chrome. Keep their 12px floor even when they
      are rendered inside the transcript, whose body text intentionally stays
      at its established reading size. */
-  --font-min-readable: 12px;
+  --font-min-readable: var(--ui-font-12, 12px);
   position: relative; display: inline-flex; align-items: center; flex: 0 0 auto;
 }
 .wi-tool {
   min-width: 32px; height: 30px; padding: 0 8px; border: 0; border-radius: 9px;
   background: transparent; color: var(--ink-3, #7b8491); cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  font: 500 12px/1 var(--font-ui, sans-serif);
+  font: 500 var(--ui-font-12, 12px)/1 var(--font-ui, sans-serif);
   transition: background-color .14s ease, color .14s ease, transform .14s ease;
 }
 .wi-tool > svg {
@@ -46,7 +46,7 @@
 }
 .wi-choice:hover, .wi-choice.on { background: var(--bg-2, #f1f4f8); color: var(--ink-0, #1c2430); }
 .wi-choice > span:last-child { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-.wi-choice b { font-size: max(var(--font-min-readable, 14.5px), 13px); font-weight: 560; color: var(--ink-1, #293241); }
+.wi-choice b { font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px)); font-weight: 560; color: var(--ink-1, #293241); }
 .wi-choice i { font-size: max(var(--font-min-readable, 14.5px), 11.5px); line-height: 1.4; font-style: normal; color: var(--ink-4, #8f98a5); }
 .wi-choice-icon {
   width: 30px; height: 30px; flex: 0 0 auto; border-radius: 9px;
@@ -63,7 +63,7 @@
 }
 
 .wi-brief {
-  --font-min-readable: 12px;
+  --font-min-readable: var(--ui-font-12, 12px);
   display: none; grid-template-columns: auto minmax(250px, 1fr) 28px; align-items: center; gap: 11px;
   margin: 0 12px 7px; padding: 8px 3px 2px 7px;
   border-top: 1px solid color-mix(in srgb, var(--line, #e4e8ee) 62%, transparent);
@@ -82,7 +82,7 @@
 }
 .wi-brief-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .wi-brief-copy b {
-  color: var(--ink-1, #293241); font-size: max(var(--font-min-readable, 14.5px), 12.5px); font-weight: 560; line-height: 1.35; white-space: nowrap;
+  color: var(--ink-1, #293241); font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px)); font-weight: 560; line-height: 1.35; white-space: nowrap;
 }
 .wi-brief-copy i {
   max-width: 190px; overflow: hidden; color: var(--ink-4, #8f98a5); font-size: max(var(--font-min-readable, 14.5px), 10.5px);
@@ -107,7 +107,7 @@
 .compose-panel .work-composer .wi-acceptance-row textarea {
   display: block; width: 100%; height: 32px; min-height: 32px; max-height: 68px; box-sizing: border-box;
   padding: 6px 7px; overflow-y: auto; resize: none; border: 0; outline: 0; background: transparent;
-  color: var(--ink-1, #293241); font: 400 12.5px/1.55 var(--font-ui, sans-serif);
+  color: var(--ink-1, #293241); font: 400 var(--ui-font-12-5, 12.5px)/1.55 var(--font-ui, sans-serif);
 }
 .wi-acceptance-row textarea::placeholder { color: var(--ink-5, #a1a8b2); }
 /*
@@ -131,7 +131,7 @@
 .wi-schedule-row[hidden] { display: none; }
 .wi-schedule-row [hidden] { display: none!important; }
 .wi-schedule-custom { display:flex;flex-direction:column;gap:5px;flex:1 1 100%;min-width:0;color:var(--ink-3);font-size:var(--font-min-readable,14.5px); }
-.wi-schedule-custom textarea { width:100%;min-height:96px;max-height:220px;box-sizing:border-box;resize:vertical;padding:8px;border:1px solid var(--line);border-radius:7px;background:var(--bg-0);color:var(--ink);font:14px/1.6 var(--font-mono,monospace); }
+.wi-schedule-custom textarea { width:100%;min-height:96px;max-height:220px;box-sizing:border-box;resize:vertical;padding:8px;border:1px solid var(--line);border-radius:7px;background:var(--bg-0);color:var(--ink);font:var(--ui-font-14, 14px)/1.6 var(--font-mono,monospace); }
 .wi-schedule-custom textarea:focus-visible { outline:2px solid var(--accent);outline-offset:1px; }
 .wi-schedule-custom small { color:var(--ink-4);line-height:1.5; }
 .wi-schedule-row > span {
@@ -141,7 +141,7 @@
   height: 26px; box-sizing: border-box; padding: 0 6px;
   border: 1px solid color-mix(in srgb, var(--line, #e4e8ee) 90%, transparent); border-radius: 7px;
   background: var(--bg-0, #fff); color: var(--ink-1, #293241);
-  font: 400 12px/1 var(--font-ui, sans-serif);
+  font: 400 var(--ui-font-12, 12px)/1 var(--font-ui, sans-serif);
 }
 .wi-schedule-row select:focus-visible, .wi-schedule-row input[type="time"]:focus-visible {
   border-color: color-mix(in srgb, var(--ink-3, #7b8491) 44%, var(--line, #e4e8ee)); outline: none;
@@ -213,14 +213,14 @@
   /* The expanded phase list is a compact status surface, not transcript
      content. Its local token prevents #cpChat's 14.5px reading token from
      stretching the rows and moving the right-hand status column. */
-  --font-min-readable: 12px;
+  --font-min-readable: var(--ui-font-12, 12px);
   --wi-progress: 0deg; position: relative; z-index: 18; display: none;
   width: 100%; min-height: 42px; box-sizing: border-box; align-items: center;
   grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding: 4px 5px 4px 7px;
   border: 1px solid color-mix(in srgb, var(--line, #e4e8ee) 88%, transparent); border-radius: 13px;
   background: color-mix(in srgb, var(--bg-0, #fff) 97%, var(--bg-2, #f1f4f8));
   box-shadow: 0 8px 24px -20px rgba(25, 38, 60, .44); color: var(--ink-2, #596273);
-  font-size: max(var(--font-min-readable, 14.5px), 12.5px); line-height: 1.35;
+  font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px)); line-height: 1.35;
 }
 .wi-rail.show {
   display: grid;
@@ -236,7 +236,7 @@
   min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px;
 }
 .wi-rail-toggle b {
-  overflow: hidden; color: var(--ink-2, #596273); font-size: max(var(--font-min-readable, 14.5px), 12.25px); font-weight: 560;
+  overflow: hidden; color: var(--ink-2, #596273); font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-12-25, 12.25px)); font-weight: 560;
   text-overflow: ellipsis; white-space: nowrap;
 }
 .wi-rail-copy i {
@@ -292,7 +292,7 @@
 .wi-rail-panel[hidden] { display: none; }
 .wi-rail-panel header { display: flex; align-items: flex-start; gap: 10px; padding: 5px 5px 7px 7px; }
 .wi-rail-panel header > span { min-width: 0; display: grid; flex: 1; gap: 2px; }
-.wi-rail-panel header b { color: var(--ink-1, #293241); font-size: max(var(--font-min-readable, 14.5px), 12.5px); font-weight: 560; }
+.wi-rail-panel header b { color: var(--ink-1, #293241); font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px)); font-weight: 560; }
 .wi-rail-panel header i {
   overflow: hidden; color: var(--ink-4, #8f98a5); font-size: max(var(--font-min-readable, 14.5px), 12px); font-style: normal;
   text-overflow: ellipsis; white-space: nowrap;
@@ -314,7 +314,7 @@
 .is-running > .wi-step-mark { border-color: var(--accent, #3478f6); color: var(--accent, #3478f6); }
 .is-blocked > .wi-step-mark { border-color: var(--s-cancel, #d94d5c); color: var(--s-cancel, #d94d5c); }
 .is-paused > .wi-step-mark { border-color: #d28a16; color: #9a6815; }
-.wi-rail-panel li > span:nth-child(2) { overflow: hidden; font-size: max(var(--font-min-readable, 14.5px), 12.25px); text-overflow: ellipsis; white-space: nowrap; }
+.wi-rail-panel li > span:nth-child(2) { overflow: hidden; font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-12-25, 12.25px)); text-overflow: ellipsis; white-space: nowrap; }
 .wi-rail-panel li > i { font-size: max(var(--font-min-readable, 14.5px), 12px); font-style: normal; white-space: nowrap; }
 
 @keyframes wi-rise {
@@ -353,11 +353,11 @@
 .nqueue-goal-slot > .wi-rail {
   width: 100%; min-height: 34px; padding: 3px 10px 1px; gap: 6px; margin: 0;
   border: 1px solid var(--line); border-bottom: 0; border-radius: 16px 16px 0 0;
-  background: var(--bg-0); box-shadow: none; font-size: max(var(--font-min-readable, 14.5px), 13px); line-height: 1.5;
+  background: var(--bg-0); box-shadow: none; font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px)); line-height: 1.5;
 }
 .nqueue-goal-slot .wi-rail-toggle { min-height: 28px; padding: 0; gap: 11px; border-radius: 7px; }
 .nqueue-goal-slot .wi-rail-ring { margin-inline: 6px; }
-.nqueue-goal-slot .wi-rail-toggle b { font-size: max(var(--font-min-readable, 14.5px), 13px); font-weight: 500; }
+.nqueue-goal-slot .wi-rail-toggle b { font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px)); font-weight: 500; }
 .nqueue-goal-slot .wi-rail-action { width: 28px; height: 28px; border-radius: 7px; }
 .nqueue-goal-slot .wi-rail-actions { padding-left: 0; }
 .nqueue-goal-slot .wi-rail-panel { width: min(390px, calc(100vw - 80px)); }

@@ -6,7 +6,7 @@
 <style>
   :root { color-scheme:light; --bg:#f3f4f6; --text:#3f3f46; --hover:#e4e4e7; --active:#fff; --focus:#6366f1; }
   * { box-sizing:border-box; }
-  html,body { margin:0; height:100%; background:var(--bg); overflow:hidden; color:var(--text); font:12px 'Alibaba PuHuiTi','Segoe UI',sans-serif; cursor:default; }
+  html,body { margin:0; height:100%; background:var(--bg); overflow:hidden; color:var(--text); font:max(12px,calc(12px * var(--font-scale,1))) 'Alibaba PuHuiTi','Segoe UI',sans-serif; cursor:default; }
   #startup { position:absolute; inset:30px 0 0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:32px; text-align:center; }
   #startup[hidden] { display:none; }
   #startup-icon { width:56px; height:56px; border-radius:12px; object-fit:contain; }
@@ -15,8 +15,8 @@
   #startup-mark [hidden] { display:none; }
   /* Older running main processes can load this file into a title-only view. */
   @media (max-height:60px) { #startup { display:none; } }
-  #startup-name { margin:0; font-size:18px; font-weight:600; }
-  #startup-note { margin:0; font-size:14px; opacity:.75; }
+  #startup-name { margin:0; font-size:max(12px,calc(18px * var(--font-scale,1))); font-weight:600; }
+  #startup-note { margin:0; font-size:max(12px,calc(14px * var(--font-scale,1))); opacity:.75; }
   #retry { padding:9px 18px; border:1px solid var(--hover); border-radius:7px; background:var(--active); }
   #bar { display:flex; align-items:center; gap:5px; height:30px; padding:0 150px 0 10px; -webkit-app-region:drag; user-select:none; }
   /* macOS native traffic lights occupy the left edge of the hidden title bar. */
@@ -66,6 +66,7 @@
     const act = (name, id) => api.action(name, id).catch(() => {});
     function render(state) {
       if (!state || !Array.isArray(state.tabs)) return;
+      document.documentElement.style.setProperty('--font-scale', state.fontScale || '1');
       document.documentElement.dataset.embedded = String(!!state.embedded);
       const startup = document.getElementById('startup');
       startup.hidden = state.startup === 'ready';

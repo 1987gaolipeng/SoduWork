@@ -10,9 +10,9 @@ test('task picker uses product font families, never local Windows font overrides
  assert.match(css,/var\(--font-ui,system-ui\)/);assert.match(picker,/var\(--font-display,var\(--font-ui,system-ui\)\)/);
  assert.doesNotMatch(css,/Segoe UI|Microsoft YaHei/);
 });
-test('task picker uses a compact fixed scale with a 12px readable floor',()=>{
- assert.match(picker,/--task-text-xs:12px/);assert.match(picker,/--task-text-sm:13px/);
- assert.match(picker,/--task-text-base:14px/);assert.match(picker,/--task-text-title:18px/);
+test('task picker uses the shared UI scale with a 12px readable floor',()=>{
+ assert.match(picker,/--task-text-xs:var\(--ui-font-12,\s*12px\)/);assert.match(picker,/--task-text-sm:var\(--ui-font-13,\s*13px\)/);
+ assert.match(picker,/--task-text-base:var\(--ui-font-14,\s*14px\)/);assert.match(picker,/--task-text-title:var\(--ui-font-18,\s*18px\)/);
  assert.doesNotMatch(picker,/--task-text-(?:xs|sm|base|title):[^;]*var\(--font-scale/);
  assert.doesNotMatch(picker,/font-size:\s*\d+px/);assert.doesNotMatch(picker,/font-size:[^;}]+!important/);
 });
@@ -25,7 +25,7 @@ test('task picker inherits shared radii, shadows and scrollbar without local chr
  assert.match(css,/prefers-reduced-motion:reduce/);
 });
 test('task picker stays concise and keeps its own 12px readable floor',()=>{
- assert.match(picker,/--font-min-readable:12px/);
+ assert.match(picker,/--font-min-readable:var\(--ui-font-12,\s*12px\)/);
  assert.doesNotMatch(pickerSource,/保留当前会话的上下文、Agent、模型与工作目录/);
  assert.doesNotMatch(pickerSource,/带入说明与材料，按当前会话顺序执行/);
  assert.match(pickerSource,/暂无可添加的待办/);

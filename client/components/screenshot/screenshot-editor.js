@@ -235,6 +235,8 @@
       if (!capture || typeof capture.dataUrl !== 'string' || !capture.dataUrl.startsWith('data:image/png;base64,')) throw new Error('未获取到屏幕图像，请重试。');
       if (!M.validImage(capture.width, capture.height)) throw new Error('屏幕图像尺寸超出支持范围。');
       const themeColor = typeof capture.theme === 'string' ? capture.theme : capture.theme?.accent;
+      const fontScale = capture.theme?.tokens?.['--font-scale'];
+      if (fontScale) document.documentElement.style.setProperty('--font-scale', fontScale);
       if (/^#[\da-f]{6}$/i.test(themeColor || '')) document.documentElement.style.setProperty('--accent', themeColor);
       await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error('无法读取屏幕图像。')); image.src = capture.dataUrl; });
       if (!M.validImage(image.naturalWidth, image.naturalHeight)) throw new Error('屏幕图像尺寸超出支持范围。');

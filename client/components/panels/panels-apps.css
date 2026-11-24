@@ -12,13 +12,13 @@
   padding: 26px 36px 0; user-select: none;
 }
 .appsx-title {
-  margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 1.25;
+  margin: 0; font-family: var(--font-display); font-size: var(--ui-font-24, 24px); line-height: 1.25;
   font-weight: 700; color: var(--ink); letter-spacing: .2px;
   display: inline-flex; align-items: center;
 }
 .appsx-title-gift { display: inline-flex; width: 27px; height: 27px; margin-right: 10px; flex: none; }
 .appsx-title-gift svg { width: 100%; height: 100%; }
-.appsx-sub { margin: 6px 0 0; font-size: 13.5px; color: var(--ink-3); }
+.appsx-sub { margin: 6px 0 0; font-size: var(--ui-font-13-5, 13.5px); color: var(--ink-3); }
 .appsx-title-wrap { min-width: 0; margin-inline-start: max(0px, calc((100% - 1440px) / 2)); }
 .appsx-tools { display: flex; align-items: center; gap: 10px; flex: none; padding-top: 2px; }
 .appsx-search {
@@ -32,7 +32,7 @@
 .appsx-search svg { width: 16px; height: 16px; flex: none; }
 .appsx-search input {
   flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
-  font: inherit; font-size: 13px; color: var(--ink);
+  font: inherit; font-size: var(--ui-font-13, 13px); color: var(--ink);
 }
 .appsx-search input::placeholder { color: var(--ink-4); }
 /* The wrapper owns focus; override the workspace's generic input outline. */
@@ -52,33 +52,33 @@ html[data-desk-panel] .appsx-search input:focus-visible { outline: none; box-sha
   display: inline-flex; align-items: center; gap: 6px; flex: none;
   height: 36px; padding: 0 16px; border: 0; border-radius: var(--r-full);
   background: var(--ink); color: var(--bg-0);
-  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  font: inherit; font-size: var(--ui-font-13, 13px); font-weight: 600; cursor: pointer;
   transition: background .15s var(--ease), transform .1s var(--ease);
 }
 .appsx-pill:hover { background: color-mix(in srgb, var(--ink) 84%, #000); }
 .appsx-pill:active { transform: scale(.98); }
 .appsx-pill svg { width: 13px; height: 13px; }
 #appsAdd { padding-inline: 24px; }
-.appsx-pill.small { height: 32px; padding: 0 14px; font-size: 12.5px; }
+.appsx-pill.small { height: 32px; padding: 0 14px; font-size: var(--ui-font-12-5, 12.5px); }
 
 /* Open the creation window directly from the Add button. */
 
 /* Use neutral theme tokens for local installation badges, independent of application type. */
 .appsx-cache{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;color:var(--ink-3)}
 .appsx-cache>div{display:grid;gap:5px;min-width:0}
-.appsx-cache b{font-size:14px;font-weight:500;color:var(--ink-2)}
-.appsx-cache small{font-size:12px;line-height:1.5}
+.appsx-cache b{font-size:var(--ui-font-14, 14px);font-weight:500;color:var(--ink-2)}
+.appsx-cache small{font-size:var(--ui-font-12, 12px);line-height:1.5}
 .appsx-cache button{flex-shrink:0}
 .appsx-source-tag {
   flex: none; display: inline-flex; align-items: center;
   height: 18px; padding: 0 8px; border-radius: var(--r-full);
-  font-size: 12px; font-weight: 500; line-height: 1; white-space: nowrap;
+  font-size: var(--ui-font-12, 12px); font-weight: 500; line-height: 1; white-space: nowrap;
   color: var(--ink-3); background: var(--bg-2); border: 1px solid var(--line);
 }
 .appsx-card-headline { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .appsx-version-tag {
   flex: none; max-width: 100px; overflow: hidden; text-overflow: ellipsis;
-  font-size: 12px; line-height: 18px; white-space: nowrap; color: var(--ink-3);
+  font-size: var(--ui-font-12, 12px); line-height: 18px; white-space: nowrap; color: var(--ink-3);
   visibility: hidden;
 }
 .appsx-card:hover .appsx-version-tag,
@@ -93,9 +93,9 @@ html[data-desk-panel] .appsx-search input:focus-visible { outline: none; box-sha
 .appsx-section { --appsx-card-max: 680px; margin-top: 44px; min-width: 0; overflow: hidden; container: apps-list / inline-size; }
 .appsx-section:first-child { margin-top: 26px; }
 .appsx-sec-head { display: flex; align-items: center; gap: 5px; }
-.appsx-sec-head h2 { margin: 0; font-size: 17px; font-weight: 700; color: var(--ink); }
-.appsx-section-empty { margin: 12px 0 0; color: var(--ink-3); font-size: 13px; line-height: 1.6; }
-.appsx-market-error { padding: 12px 14px; border-radius: var(--r-md); background: var(--bg-1); color: var(--ink-2); font-size: 13px; line-height: 1.6; }
+.appsx-sec-head h2 { margin: 0; font-size: var(--ui-font-17, 17px); font-weight: 700; color: var(--ink); }
+.appsx-section-empty { margin: 12px 0 0; color: var(--ink-3); font-size: var(--ui-font-13, 13px); line-height: 1.6; }
+.appsx-market-error { padding: 12px 14px; border-radius: var(--r-md); background: var(--bg-1); color: var(--ink-2); font-size: var(--ui-font-13, 13px); line-height: 1.6; }
 .appsx-card-add { flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--accent); }
 .appsx-card-add svg { width: 20px; height: 20px; }
 .appsx-sec-head svg { width: 16px; height: 16px; color: var(--ink-4); }
@@ -128,11 +128,11 @@ html[data-desk-panel] .appsx-search input:focus-visible { outline: none; box-sha
 .appsx-app-ico.big svg { width: 22px; height: 22px; }
 .appsx-card-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .appsx-card-txt b {
-  font-size: 14px; font-weight: 600; color: var(--ink);
+  font-size: var(--ui-font-14, 14px); font-weight: 600; color: var(--ink);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .appsx-card-txt small {
-  font-size: 12.5px; color: var(--ink-3);
+  font-size: var(--ui-font-12-5, 12.5px); color: var(--ink-3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .appsx-card-acts {
@@ -167,10 +167,10 @@ html[data-desk-panel] .appsx-search input:focus-visible { outline: none; box-sha
 .appsx-cover-tools{display:flex;align-items:center;justify-content:center;gap:4px}
 .appsx-cover-meta{display:flex;align-items:center;gap:8px;padding-top:0;min-width:0}
 .appsx-cover-meta .appsx-app-ico{box-sizing:border-box;width:36px;height:36px;padding:3px;border-radius:50%}
-.appsx-cover-meta .appsx-card-txt b{font-size:24px;line-height:1.3;font-weight:700}
-.appsx-card-open{flex:none;padding:8px 16px;border:1px solid #111;border-radius:var(--r-full);background:#111;color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.appsx-cover-meta .appsx-card-txt b{font-size:var(--ui-font-24, 24px);line-height:1.3;font-weight:700}
+.appsx-card-open{flex:none;padding:8px 16px;border:1px solid #111;border-radius:var(--r-full);background:#111;color:#fff;font:inherit;font-size:var(--ui-font-13, 13px);font-weight:600;cursor:pointer}
 .appsx-card-open:hover{background:#292929;border-color:#292929}
-.appsx-cover-desc{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin:6px 0 0;height:38px;min-height:38px;line-height:19px;font-size:12.5px;color:var(--ink-2)}
+.appsx-cover-desc{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin:6px 0 0;height:38px;min-height:38px;line-height:19px;font-size:var(--ui-font-12-5, 12.5px);color:var(--ink-2)}
 [data-apps-section="recommended"] .appsx-grid{row-gap:18px;overflow:hidden}
 .appsx-secret-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--bg-1)}
 .appsx-secret-edit{border:0;background:transparent;color:var(--accent);font:inherit;cursor:pointer}
@@ -193,31 +193,31 @@ html[data-desk-panel] .appsx-search input:focus-visible { outline: none; box-sha
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 15px 18px 11px; border-bottom: 1px solid var(--line-2);
 }
-.appsx-modal-head b { font-size: 14px; color: var(--ink); }
+.appsx-modal-head b { font-size: var(--ui-font-14, 14px); color: var(--ink); }
 .appsx-modal-body { padding: 14px 18px 4px; display: grid; gap: 13px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .appsx-settings-info { display: flex; align-items: flex-start; gap: 12px; padding: 2px 0 12px; border-bottom: 1px solid var(--line-2); }
 .appsx-settings-icon { display: grid; place-items: center; width: 48px; height: 48px; flex: none; color: var(--ink-2); }
 .appsx-settings-icon img { width: 100%; height: 100%; object-fit: contain; border-radius: 10px; }
 .appsx-settings-icon svg { width: 36px; height: 36px; }
 .appsx-settings-copy { display: grid; gap: 5px; min-width: 0; }
-.appsx-settings-name { font-size: 15px; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
-.appsx-settings-version { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
-.appsx-settings-description { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
-.appsx-field { display: grid; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.appsx-settings-name { font-size: var(--ui-font-15, 15px); line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
+.appsx-settings-version { font-size: var(--ui-font-12, 12px); line-height: 1.4; color: var(--ink-3); }
+.appsx-settings-description { margin: 0; font-size: var(--ui-font-12-5, 12.5px); line-height: 1.55; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.appsx-field { display: grid; gap: 6px; font-size: var(--ui-font-12-5, 12.5px); color: var(--ink-2); }
 .appsx-field input, .appsx-field textarea {
   box-sizing: border-box; min-width: 0; width: 100%; font: inherit; color: var(--ink); background: var(--bg-1);
   border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; resize: vertical;
 }
 .appsx-field input:focus, .appsx-field textarea:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-.appsx-modal-note { margin: 0; font-size: 12px; line-height: 1.55; color: var(--ink-3); }
+.appsx-modal-note { margin: 0; font-size: var(--ui-font-12, 12px); line-height: 1.55; color: var(--ink-3); }
 .appsx-modal-foot { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 18px 16px; }
 .appsx-modal-foot .push { flex: 1; }
 .appsx-publish { flex: none; padding: 7px 12px; border: 1px solid var(--line-2); border-radius: var(--r-full); background: transparent; color: var(--ink-2); font: inherit; cursor: pointer; }
 .appsx-publish:hover { background: var(--bg-2); }
 .appsx-publish:disabled { opacity: .6; cursor: default; }
-.appsx-remove { border: 0; padding: 7px 0; background: transparent; color: var(--s-critical, #c64151); font: inherit; font-size: 12.5px; cursor: pointer; }
+.appsx-remove { border: 0; padding: 7px 0; background: transparent; color: var(--s-critical, #c64151); font: inherit; font-size: var(--ui-font-12-5, 12.5px); cursor: pointer; }
 .appsx-remove:hover { color: color-mix(in srgb, var(--s-critical, #c64151) 78%, var(--ink)); }
-.appsx-settings-error { color: var(--s-critical, #c64151); font-size: 12px; line-height: 1.5; }
+.appsx-settings-error { color: var(--s-critical, #c64151); font-size: var(--ui-font-12, 12px); line-height: 1.5; }
 .appsx-settings-error[hidden] { display: none; }
 
 /* Joined creation tabs with local categories and a separate web connection panel. */
@@ -230,21 +230,21 @@ html[data-desk-panel] .appsx-search input:focus-visible { outline: none; box-sha
   position: relative; min-width: 0; padding: 30px 24px; border: 0; border-radius: 0; outline: none;
   background: transparent; color: var(--ink-3); font: inherit; cursor: pointer; box-shadow: none;
 }
-.appsx-create-opt b { font-size: 19px; font-weight: 650; }
+.appsx-create-opt b { font-size: var(--ui-font-19, 19px); font-weight: 650; }
 .appsx-create-opt.selected { color: var(--ink); }
 .appsx-create-opt:focus-visible b { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 7px; }
-.appsx-create-badge { position: absolute; top: 12px; right: 44px; padding: 2px 8px; border-radius: var(--r-full); background: var(--accent-soft); color: var(--accent); font-size: 12px; }
+.appsx-create-badge { position: absolute; top: 12px; right: 44px; padding: 2px 8px; border-radius: var(--r-full); background: var(--accent-soft); color: var(--accent); font-size: var(--ui-font-12, 12px); }
 /* Both panels share one grid cell: hidden content still sizes the surface, preventing jumps. */
 .appsx-create-content { grid-area: 2 / 1; min-width: 0; padding: 22px 28px 14px; background: var(--bg-0); }
 .appsx-create-content[hidden] { display: block; visibility: hidden; pointer-events: none; }
-.appsx-create-intro { margin: 0 0 20px; font-size: 13px; line-height: 1.7; color: var(--ink-3); }
+.appsx-create-intro { margin: 0 0 20px; font-size: var(--ui-font-13, 13px); line-height: 1.7; color: var(--ink-3); }
 .appsx-create-storage-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; margin-bottom: 18px; }
 .appsx-create-storage { display: flex; flex: none; flex-wrap: wrap; gap: 10px 28px; min-width: 0; margin: 0; padding: 0; border: 0; color: var(--ink); }
-.appsx-create-storage label { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.appsx-create-storage label { display: inline-flex; align-items: center; gap: 8px; font-size: var(--ui-font-14, 14px); cursor: pointer; }
 .appsx-create-storage input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .appsx-create-storage input[type="radio"] { cursor: pointer !important; }
 .appsx-create-storage input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.appsx-create-storage-hint { flex: 1 1 240px; min-width: 0; margin: 0; font-size: 12px; line-height: 1.7; text-align: right; color: var(--ink-3); }
+.appsx-create-storage-hint { flex: 1 1 240px; min-width: 0; margin: 0; font-size: var(--ui-font-12, 12px); line-height: 1.7; text-align: right; color: var(--ink-3); }
 .appsx-create-category:disabled { opacity: .55; cursor: default; }
 .appsx-create-category:disabled .appsx-create-start { opacity: 0; }
 .appsx-create-categories { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
@@ -257,31 +257,31 @@ html[data-desk-panel] .appsx-search input:focus-visible { outline: none; box-sha
 .appsx-create-category:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .appsx-create-ico { display: inline-flex; color: var(--accent); }
 .appsx-create-ico svg { width: 36px; height: 36px; }
-.appsx-create-category b { font-size: 15px; }
-.appsx-create-category small { grid-column: 1 / -1; color: var(--ink-3); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
-.appsx-create-start { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; justify-content: center; width: max-content; min-width: 110px; box-sizing: border-box; text-align: center; white-space: nowrap; padding: 5px 16px; border-radius: var(--r-full); background: var(--ink); color: var(--bg-0); font-size: 12px; opacity: 0; transition: opacity .14s var(--ease); }
+.appsx-create-category b { font-size: var(--ui-font-15, 15px); }
+.appsx-create-category small { grid-column: 1 / -1; color: var(--ink-3); font-size: var(--ui-font-12, 12px); line-height: 1.7; overflow-wrap: anywhere; }
+.appsx-create-start { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; justify-content: center; width: max-content; min-width: 110px; box-sizing: border-box; text-align: center; white-space: nowrap; padding: 5px 16px; border-radius: var(--r-full); background: var(--ink); color: var(--bg-0); font-size: var(--ui-font-12, 12px); opacity: 0; transition: opacity .14s var(--ease); }
 .appsx-create-category:hover .appsx-create-start, .appsx-create-category:focus-visible .appsx-create-start { opacity: 1; }
-.appsx-create-fit { margin: 20px 0 0; color: var(--ink-3); text-align: center; font-size: 12px; line-height: 1.7; }
+.appsx-create-fit { margin: 20px 0 0; color: var(--ink-3); text-align: center; font-size: var(--ui-font-12, 12px); line-height: 1.7; }
 .appsx-create-web { text-align: center; }
 .appsx-create-web-icon { display: inline-flex; margin: 10px 0; color: var(--accent); }
 .appsx-create-web-icon svg { width: 40px; height: 40px; }
-.appsx-create-web h3 { margin: 6px 0 12px; font-size: 20px; color: var(--ink); }
+.appsx-create-web h3 { margin: 6px 0 12px; font-size: var(--ui-font-20, 20px); color: var(--ink); }
 .appsx-create-recommendations { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 24px 0; text-align: left; }
 .appsx-create-recommendations > div { display: grid; gap: 8px; padding: 18px 16px; border-radius: 12px; background: var(--bg-1); }
-.appsx-create-recommendations b { font-size: 14px; color: var(--ink); }
-.appsx-create-recommendations small { color: var(--ink-3); font-size: 12px; line-height: 1.7; }
+.appsx-create-recommendations b { font-size: var(--ui-font-14, 14px); color: var(--ink); }
+.appsx-create-recommendations small { color: var(--ink-3); font-size: var(--ui-font-12, 12px); line-height: 1.7; }
 .appsx-create-web > .appsx-pill { justify-content: center; min-width: 160px; }
 @media (hover: none) { .appsx-create-start { opacity: 1; } }
 @media (max-width: 480px) {
   .appsx-create-content { padding: 18px 16px 12px; }
   .appsx-create-storage-hint { text-align: left; }
-  .appsx-create-opt b { font-size: 16px; }
+  .appsx-create-opt b { font-size: var(--ui-font-16, 16px); }
   .appsx-create-categories, .appsx-create-recommendations { grid-template-columns: minmax(0, 1fr); }
 }
 .appsx-create-foot { gap: 8px; background: var(--bg-0); }
 .appsx-create-install {
   border: 0; border-radius: 9px; padding: 7px 11px; background: var(--bg-2); color: var(--ink-2);
-  font: inherit; font-size: 12.5px; cursor: pointer;
+  font: inherit; font-size: var(--ui-font-12-5, 12.5px); cursor: pointer;
 }
 .appsx-create-install:hover { background: color-mix(in srgb, var(--bg-2) 92%, var(--ink)); color: var(--ink); }
 .appsx-create-install:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -298,13 +298,13 @@ html[data-desk-panel] .appsx-search input:focus-visible { outline: none; box-sha
   border-radius: 16px; background: var(--bg-2); color: var(--ink-4);
 }
 .appsx-empty-ico svg { width: 25px; height: 25px; }
-.appsx-empty b { font-size: 15px; color: var(--ink); }
-.appsx-empty span { font-size: 12.5px; color: var(--ink-3); line-height: 1.6; }
+.appsx-empty b { font-size: var(--ui-font-15, 15px); color: var(--ink); }
+.appsx-empty span { font-size: var(--ui-font-12-5, 12.5px); color: var(--ink-3); line-height: 1.6; }
 .appsx-empty .appsx-pill { margin-top: 14px; }
-.appsx-loading { padding: 52px 0; text-align: center; font-size: 13px; color: var(--ink-4); }
+.appsx-loading { padding: 52px 0; text-align: center; font-size: var(--ui-font-13, 13px); color: var(--ink-4); }
 .apps-inline-note {
   margin: 0 0 12px; padding: 9px 12px; border-radius: var(--r-md);
-  background: var(--bg-2); font-size: 12.5px; color: var(--ink-2);
+  background: var(--bg-2); font-size: var(--ui-font-12-5, 12.5px); color: var(--ink-2);
 }
 
 /* Wrap toolbar actions and narrow the search field in small windows. */
@@ -336,21 +336,21 @@ html[data-desk-panel="workspace"] #appsClose { display: none; }
   box-shadow: var(--shadow-xl);
   display: flex; flex-direction: column; gap: 12px;
 }
-.apps-modal header b { font-size: 14px; color: var(--ink); display: block; }
-.apps-modal header small { color: var(--ink-3); font-size: 12px; }
+.apps-modal header b { font-size: var(--ui-font-14, 14px); color: var(--ink); display: block; }
+.apps-modal header small { color: var(--ink-3); font-size: var(--ui-font-12, 12px); }
 .apps-modal-body .apps-install-head { display: flex; gap: 12px; align-items: flex-start; }
-.apps-modal-body .apps-install-head b { font-size: 13px; color: var(--ink); }
-.apps-modal-body .apps-install-head p { margin: 2px 0; font-size: 12px; color: var(--ink-2); }
-.apps-modal-body .apps-install-head em { font-style: normal; font-size: 12px; color: var(--ink-3); }
+.apps-modal-body .apps-install-head b { font-size: var(--ui-font-13, 13px); color: var(--ink); }
+.apps-modal-body .apps-install-head p { margin: 2px 0; font-size: var(--ui-font-12, 12px); color: var(--ink-2); }
+.apps-modal-body .apps-install-head em { font-style: normal; font-size: var(--ui-font-12, 12px); color: var(--ink-3); }
 .apps-modal-body progress { display: block; width: 100%; height: 5px; margin-top: 12px; accent-color: var(--accent); }
-.apps-modal-note { margin: 0; font-size: 12px; color: var(--ink-3); }
-.apps-modal-error { margin: 0; font-size: 12px; color: #d1242f; }
+.apps-modal-note { margin: 0; font-size: var(--ui-font-12, 12px); color: var(--ink-3); }
+.apps-modal-error { margin: 0; font-size: var(--ui-font-12, 12px); color: #d1242f; }
 .apps-modal footer { display: flex; gap: 8px; }
 .apps-modal footer .push { flex: 1; }
-.appsx-parameter{display:grid;gap:6px;margin:14px 0;color:var(--ink-2);font-size:13px}
+.appsx-parameter{display:grid;gap:6px;margin:14px 0;color:var(--ink-2);font-size:var(--ui-font-13, 13px)}
 .appsx-parameter input:not([type=checkbox]),.appsx-parameter textarea,.appsx-parameter select{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--bg-0);color:var(--ink);font:inherit}
 .appsx-parameter input:focus-visible,.appsx-parameter textarea:focus-visible,.appsx-parameter select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.nplugin-checks{grid-column:1/-1;padding:8px 0;font-size:12px;color:var(--ink-2)}
+.nplugin-checks{grid-column:1/-1;padding:8px 0;font-size:var(--ui-font-12, 12px);color:var(--ink-2)}
 .nplugin-checks p{margin:5px 0}.nplugin-checks [data-state=passed]{color:var(--success,#21845c)}
 .nplugin-checks [data-state=failed]{color:var(--danger,#c64c50)}
 
@@ -358,6 +358,6 @@ html[data-desk-panel="workspace"] #appsClose { display: none; }
 .appsx-card-description .appsx-source-tag { height:auto; padding:0; border:0; border-radius:0; background:transparent; }
 .appsx-description-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
 
-.appsx-developer-field { display:flex; align-items:center; gap:16px; margin:18px 0; font-size:13px; color:var(--ink-3); }
+.appsx-developer-field { display:flex; align-items:center; gap:16px; margin:18px 0; font-size:var(--ui-font-13, 13px); color:var(--ink-3); }
 .appsx-developer-field input, .appsx-developer-field select { min-width:0; flex:1; border:1px solid var(--line); background:var(--bg-1); color:var(--ink); border-radius:var(--r-md); padding:10px 12px; font:inherit; }
 .appsx-developer-field b { font-weight:500; color:var(--ink-2); }

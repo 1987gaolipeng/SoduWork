@@ -58,7 +58,7 @@
   box-shadow:0 8px 32px color-mix(in srgb,var(--ink) 14%,transparent);
   color:var(--ink-2);font-size:max(var(--font-min-readable,14.5px),12px)}
 .crew-pop-head{display:flex;align-items:baseline;gap:8px;padding:4px 6px 8px;border-bottom:1px solid var(--line-2)}
-.crew-pop-head b{color:var(--ink);font-size:max(var(--font-min-readable,14.5px),13px);font-weight:600}
+.crew-pop-head b{color:var(--ink);font-size:max(var(--font-min-readable,14.5px),var(--ui-font-13, 13px));font-weight:600}
 .crew-pop-task{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--ink-4);font-size:max(var(--font-min-readable,14.5px),11px)}
 .crew-pop-body{padding-top:4px}
@@ -69,7 +69,7 @@
 .crew-pop-row>.agent-brand>img{width:20px;height:20px;object-fit:contain}
 .crew-pop-row>.agent-brand-pi>img{width:20px;height:20px;max-width:none}
 .crew-pop-name{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  color:var(--ink-2);font-size:max(var(--font-min-readable,14.5px),12.5px);font-weight:500}
+  color:var(--ink-2);font-size:max(var(--font-min-readable,14.5px),var(--ui-font-12-5, 12.5px));font-weight:500}
 .crew-pop-model{flex:none;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--ink-4);font-size:max(var(--font-min-readable,14.5px),10.5px)}
 .crew-pop-state{flex:none;display:inline-flex;align-items:center;gap:5px;

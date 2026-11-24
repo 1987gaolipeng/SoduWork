@@ -228,9 +228,14 @@
   }
   host.openShortcutSettings = open; host.closeShortcutSettings = close;
   host.addEventListener('soduwork-locale-change', () => { render(); status(); });
-  host.addEventListener('soduwork-store-hydrated', () => { if (state) { state.rows = configuredRows(); syncMenu(); render(); } });
+  function reloadBindings() {
+    if (!state) return;
+    state.rows = configuredRows();
+    syncMenu(); render();
+  }
+  host.addEventListener('soduwork-store-hydrated', reloadBindings);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
-  Object.assign(api, { open, close, capture, getRows: () => (state?.rows || configuredRows()).map(row => ({ ...row })),
+  Object.assign(api, { open, close, capture, reloadBindings, getRows: () => (state?.rows || configuredRows()).map(row => ({ ...row })),
     execute: id => { const row = (state?.rows || configuredRows()).find(row => row.id === id); if (row) execute(row); },
     getBinding: id => (state?.rows || configuredRows()).find(row => row.id === id)?.binding || '', isRecording: () => !!state?.editingId });
   return api;

@@ -4,32 +4,35 @@
 // The shared DOM carries only visuals; the nonce and handlers stay isolated.
 function annotationPage(config) {
   const KEY = '__soduWorkbenchInspectorCleanup';
+  if (config.fontScaleOnly) { window[KEY]?.setFontScale?.(config.fontScale); return true; }
   if (window[KEY] && window[KEY].update) return window[KEY].update(config);
   try { if (typeof window[KEY] === 'function') window[KEY](); } catch (_) {}
   const host = document.createElement('div');
   host.id = '__soduwork-annotations';
   host.style.cssText = 'all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
   const shadow = host.attachShadow({ mode: 'open' });
+  const setFontScale = scale => host.style.setProperty('--note-font-scale', scale || '1');
+  setFontScale(config.fontScale);
   shadow.innerHTML = `<style>
-    :host{--note-accent:#316ee4;--note-accent-hover:#2863d1;--note-ink:#263449;--note-muted:#66758a;--note-line:#e5eaf1;--note-wash:#f6f8fc;--note-surface:#fff;font:14.5px/1.5 "Alibaba PuHuiTi","Alibaba Sans","Segoe UI Variable","Segoe UI",system-ui,sans-serif;color:var(--note-ink);color-scheme:light}
+    :host{--note-font-size:max(12px,calc(14.5px * var(--note-font-scale,1)));--note-accent:#316ee4;--note-accent-hover:#2863d1;--note-ink:#263449;--note-muted:#66758a;--note-line:#e5eaf1;--note-wash:#f6f8fc;--note-surface:#fff;font:var(--note-font-size)/1.5 "Alibaba PuHuiTi","Alibaba Sans","Segoe UI Variable","Segoe UI",system-ui,sans-serif;color:var(--note-ink);color-scheme:light}
     *{box-sizing:border-box} [hidden]{display:none!important}
     .outline{position:fixed;border:1.5px solid var(--note-accent);background:#3478f60a;box-shadow:0 0 0 1px #ffffff80 inset;pointer-events:none;border-radius:5px}
-    button{appearance:none;border:1px solid transparent;border-radius:9px;background:var(--note-wash);color:var(--note-ink);padding:7px 12px;font:500 14.5px/1.5 "Alibaba PuHuiTi","Alibaba Sans","Segoe UI Variable","Segoe UI",system-ui,sans-serif;cursor:pointer;user-select:none;transition:background-color 140ms,border-color 140ms,box-shadow 140ms,color 140ms}
+    button{appearance:none;border:1px solid transparent;border-radius:9px;background:var(--note-wash);color:var(--note-ink);padding:7px 12px;font:500 var(--note-font-size)/1.5 "Alibaba PuHuiTi","Alibaba Sans","Segoe UI Variable","Segoe UI",system-ui,sans-serif;cursor:pointer;user-select:none;transition:background-color 140ms,border-color 140ms,box-shadow 140ms,color 140ms}
     button:focus-visible{outline:2px solid var(--note-accent);outline-offset:3px}
     .pin{position:fixed;display:grid;place-items:center;width:26px;height:26px;padding:0;border:2px solid var(--note-surface);border-radius:9px 9px 9px 3px;background:var(--note-accent);color:#fff;box-shadow:0 0 0 1px #2457a61c,0 2px 4px #18386926,0 5px 12px #18386918,inset 0 1px 0 #ffffff30;pointer-events:auto;font-weight:650;line-height:1;font-variant-numeric:tabular-nums}
     .pin:hover{background:var(--note-accent-hover);box-shadow:0 0 0 3px #3478f61c,0 3px 8px #18386926,inset 0 1px 0 #ffffff30}
     .pin:active{background:#225cc8}
-    .editor{position:fixed;width:min(356px,calc(100vw - 20px));max-height:calc(100vh - 20px);overflow:auto;padding:16px;background:var(--note-surface);color:var(--note-ink);font:14.5px/1.5 "Alibaba PuHuiTi","Alibaba Sans","Segoe UI Variable","Segoe UI",system-ui,sans-serif;border:1px solid #dfe5ee;border-radius:16px;box-shadow:0 2px 5px #182a4510,0 12px 32px #182a451c,0 28px 64px #182a4512;pointer-events:auto;cursor:default}
+    .editor{position:fixed;width:min(356px,calc(100vw - 20px));max-height:calc(100vh - 20px);overflow:auto;padding:16px;background:var(--note-surface);color:var(--note-ink);font:var(--note-font-size)/1.5 "Alibaba PuHuiTi","Alibaba Sans","Segoe UI Variable","Segoe UI",system-ui,sans-serif;border:1px solid #dfe5ee;border-radius:16px;box-shadow:0 2px 5px #182a4510,0 12px 32px #182a451c,0 28px 64px #182a4512;pointer-events:auto;cursor:default}
     .editor header{display:flex;gap:10px;align-items:center;margin-bottom:13px;min-height:28px}
     .editor header::before{content:"";flex:0 0 28px;width:28px;height:28px;border:1px solid #3478f617;border-radius:9px;background:#3478f60c url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%233478f6' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 18 3.5 21V6a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H7Z'/%3E%3Cpath d='M8 8h8M8 12h5'/%3E%3C/svg%3E") center/16px no-repeat}
     .editor header span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;letter-spacing:.1px}
-    .editor .close{display:grid;place-items:center;flex:0 0 28px;width:28px;height:28px;padding:0;border-radius:8px;background:transparent;color:var(--note-muted);font:400 22px/1 "Segoe UI",sans-serif}
+    .editor .close{display:grid;place-items:center;flex:0 0 28px;width:28px;height:28px;padding:0;border-radius:8px;background:transparent;color:var(--note-muted);font:400 calc(22px * var(--note-font-scale,1))/1 "Segoe UI",sans-serif}
     .editor .close:hover{background:#eef1f6;color:var(--note-ink)}
-    textarea{display:block;width:100%;min-height:96px;max-height:160px;resize:vertical;padding:11px 12px;border:1px solid var(--note-line);border-radius:10px;font:14.5px/1.65 "Alibaba PuHuiTi","Alibaba Sans","Segoe UI Variable","Segoe UI",system-ui,sans-serif;color:var(--note-ink);background:var(--note-wash);outline:none;caret-color:var(--note-accent);cursor:text;transition:border-color 140ms,background-color 140ms,box-shadow 140ms}
+    textarea{display:block;width:100%;min-height:96px;max-height:160px;resize:vertical;padding:11px 12px;border:1px solid var(--note-line);border-radius:10px;font:var(--note-font-size)/1.65 "Alibaba PuHuiTi","Alibaba Sans","Segoe UI Variable","Segoe UI",system-ui,sans-serif;color:var(--note-ink);background:var(--note-wash);outline:none;caret-color:var(--note-accent);cursor:text;transition:border-color 140ms,background-color 140ms,box-shadow 140ms}
     textarea::placeholder{color:var(--note-muted);opacity:1}
     textarea:focus{background:var(--note-surface);border-color:#3478f685;box-shadow:0 0 0 3px #3478f610}
     footer{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;margin-top:12px}
-    small{grid-column:1/-1;color:var(--note-muted);font-size:14.5px;line-height:1.4}
+    small{grid-column:1/-1;color:var(--note-muted);font-size:var(--note-font-size);line-height:1.4}
     .delete{grid-column:1;justify-self:start;background:transparent;color:#7b6370;padding-inline:10px}
     .delete:hover{background:#fff1f2;color:#b43a50;border-color:#f5dce2}
     .save{grid-column:2;background:var(--note-accent);color:#fff;border-color:#2865d6;box-shadow:inset 0 1px 0 #ffffff24,0 1px 2px #1740871a;font-weight:600;padding-inline:14px;white-space:nowrap}
@@ -185,6 +188,7 @@ function annotationPage(config) {
     host.remove(); delete window[KEY];
   };
   cleanup.update = next => { state = next; if (!state.enabled) closeEditor(); schedule(); return true; };
+  cleanup.setFontScale = setFontScale;
   window[KEY] = cleanup;
   schedule(); return true;
 }

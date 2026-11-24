@@ -47,7 +47,7 @@
 #personalAccountPanel .personal-account-head h1 {
   margin: 0;
   color: var(--ink);
-  font: 650 18px/1.4 var(--font-display);
+  font: 650 var(--ui-font-18, 18px)/1.4 var(--font-display);
   letter-spacing: -.02em;
 }
 #personalAccountPanel .personal-account-head p {
@@ -85,7 +85,7 @@
 #personalAccountPanel :is(h2, h3) {
   margin: 0 0 8px;
   color: var(--ink);
-  font: 650 16px/1.5 var(--font-display);
+  font: 650 var(--ui-font-16, 16px)/1.5 var(--font-display);
 }
 #personalAccountPanel :is(.ac-muted, .ac-status, .ac-info-row, .ac-form label, .ac-setting-row b, .ac-setting-row > div > span, .ac-avatar-actions .ac-muted, .ac-text) {
   font-size: var(--account-text);
@@ -112,7 +112,7 @@
 #personalAccountPanel .ac-setting-row:last-child { border-bottom: 0; }
 #personalAccountPanel .personal-account-summary > .soduwork-account-settings { margin: 0; padding: 0; border: 0; background: transparent; }
 #personalAccountPanel .set-kline { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
-#personalAccountPanel :is(.soduwork-account-settings .k, .soduwork-account-name) { font-size: 16px; font-weight: 650; }
+#personalAccountPanel :is(.soduwork-account-settings .k, .soduwork-account-name) { font-size: var(--ui-font-16, 16px); font-weight: 650; }
 #personalAccountPanel :is(.soduwork-account-id, .soduwork-account-badge, .soduwork-quota-head, .soduwork-quota-note) { font-size: var(--account-text); }
 #personalAccountPanel .soduwork-account-person { grid-template-columns: 52px minmax(0, 1fr) auto; min-width: 0; gap: 14px; }
 #personalAccountPanel .soduwork-account-person > span:nth-child(2) { min-width: 0; }

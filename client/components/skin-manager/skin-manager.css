@@ -34,7 +34,7 @@
 }
 .sm-title{
   display:flex;align-items:center;gap:10px;
-  font-size:var(--text-xl);font-weight:700;color:var(--ink);
+  font-size:max(var(--font-min-readable, 12px), calc(var(--text-xl) * var(--font-scale, 1)));font-weight:700;color:var(--ink);
 }
 .sm-title .ico{
   width:28px;height:28px;border-radius:var(--r-sm);
@@ -43,7 +43,7 @@
   display:flex;align-items:center;justify-content:center;
 }
 .sm-sub{
-  font-size:var(--text-sm);color:var(--ink-4);
+  font-size:max(var(--font-min-readable, 12px), calc(var(--text-sm) * var(--font-scale, 1)));color:var(--ink-4);
   margin-top:3px;
 }
 .sm-close{
@@ -51,7 +51,7 @@
   border:none;border-radius:var(--r-sm);
   background:transparent;
   color:var(--ink-4);
-  font-size:15px;
+  font-size:var(--ui-font-15, 15px);
   display:flex;align-items:center;justify-content:center;
   transition:background-color .15s ease,color .15s ease,transform .12s ease;
   flex-shrink:0;
@@ -75,7 +75,7 @@
   position:relative;
   display:flex;align-items:center;gap:8px;
   padding:4px 0 4px 12px;
-  font-size:var(--text-md);font-weight:600;color:var(--ink-2);
+  font-size:max(var(--font-min-readable, 12px), calc(var(--text-md) * var(--font-scale, 1)));font-weight:600;color:var(--ink-2);
   margin-bottom:10px;
 }
 .skin-section-title::before{
@@ -84,7 +84,7 @@
   background:var(--accent);
 }
 .skin-section-title .hint{
-  font-size:var(--text-sm);font-weight:400;color:var(--ink-4);
+  font-size:max(var(--font-min-readable, 12px), calc(var(--text-sm) * var(--font-scale, 1)));font-weight:400;color:var(--ink-4);
 }
 
 /* Skin grid. */
@@ -248,12 +248,12 @@
   text-align:left;
 }
 .skin-info .si-name{
-  font-size:var(--text-sm);font-weight:600;color:var(--ink-2);
+  font-size:max(var(--font-min-readable, 12px), calc(var(--text-sm) * var(--font-scale, 1)));font-weight:600;color:var(--ink-2);
   margin-bottom:3px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .skin-info .si-desc{
-  font-size:var(--text-xs);color:var(--ink-4);
+  font-size:max(var(--font-min-readable, 12px), calc(var(--text-xs) * var(--font-scale, 1)));color:var(--ink-4);
   line-height:1.4;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
@@ -296,22 +296,22 @@
   width:36px;height:36px;border-radius:50%;
   background:var(--accent);color:#fff;
   display:flex;align-items:center;justify-content:center;
-  font-size:var(--text-lg);font-weight:600;flex-shrink:0;
+  font-size:max(var(--font-min-readable, 12px), calc(var(--text-lg) * var(--font-scale, 1)));font-weight:600;flex-shrink:0;
   box-shadow:var(--shadow-xs);
 }
 .skin-user-bar .su-info{flex:1;min-width:0;}
 .skin-user-bar .su-name{
-  font-size:var(--text-md);font-weight:600;color:var(--ink);
+  font-size:max(var(--font-min-readable, 12px), calc(var(--text-md) * var(--font-scale, 1)));font-weight:600;color:var(--ink);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .skin-user-bar .su-uid{
-  font-size:var(--text-xs);color:var(--ink-4);font-family:var(--font-mono);
+  font-size:max(var(--font-min-readable, 12px), calc(var(--text-xs) * var(--font-scale, 1)));color:var(--ink-4);font-family:var(--font-mono);
   margin-top:2px;
 }
 .skin-user-bar .su-edit{
   width:28px;height:28px;border-radius:var(--r-sm);border:none;
   background:var(--bg-2);color:var(--ink-3);
-  font-size:max(var(--font-min-readable, 14.5px), 14px);
+  font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px));
   display:flex;align-items:center;justify-content:center;
   transition:background-color .15s ease;
 }

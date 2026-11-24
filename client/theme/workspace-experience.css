@@ -7,7 +7,7 @@ html[data-desk-panel]{
   --font-ui:"Alibaba PuHuiTi 3.0","Alibaba PuHuiTi","Segoe UI Variable Text","Noto Sans SC","Source Han Sans SC",system-ui,sans-serif;
   --font-display:"Alibaba PuHuiTi 3.0","Alibaba PuHuiTi","Segoe UI Variable Display","Noto Sans SC","Source Han Sans SC",system-ui,sans-serif;
   --font-latin:"Alibaba Sans","Segoe UI Variable Text","Inter",system-ui,sans-serif;
-  --font-min-readable:12px;
+  --font-min-readable:var(--ui-font-12, 12px);
   --text-xs:12px;--text-sm:13px;--text-base:14px;--text-md:15px;
   --text-lg:17px;--text-xl:20px;--text-2xl:24px;
   --ux-ink:#19202c;--ux-muted:#6f7785;--ux-faint:#9aa2af;
@@ -17,7 +17,7 @@ html[data-desk-panel]{
 }
 
 html[data-desk-panel="workspace"] body{
-  color:var(--ux-ink);font-size:max(var(--font-min-readable, 14.5px), 14px);line-height:1.55;
+  color:var(--ux-ink);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px));line-height:1.55;
   font-synthesis:none;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility
 }
 
@@ -30,7 +30,7 @@ html[data-desk-panel="workspace"] :is(button,input,textarea,select,label,summary
   -webkit-user-select:none;user-select:none
 }
 html[data-desk-panel="workspace"] :is(input,textarea,select,[contenteditable="true"]){
-  font-family:var(--font-ui);font-size:max(var(--font-min-readable, 14.5px), 13.5px)}
+  font-family:var(--font-ui);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13-5, 13.5px))}
 
 /* Use one consistent page heading per window. */
 html[data-desk-panel="workspace"] :is(
@@ -45,12 +45,12 @@ html[data-desk-panel="workspace"] :is(
 html[data-desk-panel="workspace"] :is(
   .dk-head-title,.hb-title,.ap-head-copy>b,.tp-head-title,.sch-h-title,.np-title,.sm-title
 ){
-  font-family:var(--font-display);font-size:22px;font-weight:650;
+  font-family:var(--font-display);font-size:var(--ui-font-22, 22px);font-weight:650;
   line-height:1.25;letter-spacing:-.025em;color:var(--ux-ink)
 }
 html[data-desk-panel="workspace"] :is(
   .dk-head-sub,.ap-head-copy>small,.tp-head-sub,.sch-h-sub,.np-sub,.sm-sub
-){font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.45;color:var(--ux-muted)}
+){font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));line-height:1.45;color:var(--ux-muted)}
 html[data-desk-panel="workspace"] :is(
   .dk-head-kicker,.ap-head-copy>span,.tp-head-kicker,.sch-h-kicker
 ){
@@ -62,7 +62,7 @@ html[data-desk-panel="workspace"] :is(
 html[data-desk-panel="workspace"] :is(
   .btn-mini,.dk-head button,.ap-icon-btn,.ap-tabs button,.tp-tabs button,
   .sch-head button,.np-head button,.sm-head button
-){font-family:var(--font-ui);font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:550}
+){font-family:var(--font-ui);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));font-weight:550}
 html[data-desk-panel="workspace"] :is(
   .btn-mini,.dk-head button,.ap-icon-btn,.sch-head button,.np-head button,.sm-head button
 ){min-height:36px;border-radius:10px}
@@ -83,20 +83,20 @@ html[data-desk-panel="workspace"] .cfg-panel .cfg-summary-main small,
 html[data-desk-panel="workspace"] .cfg-panel .ca-section-main small,
 html[data-desk-panel="workspace"] .cfg-panel .ag-row-x,
 html[data-desk-panel="workspace"] .cfg-panel .md-row-n{
-  font-size:max(var(--font-min-readable, 14.5px), 12.5px);line-height:1.55;color:var(--ux-muted)
+  font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));line-height:1.55;color:var(--ux-muted)
 }
 html[data-desk-panel="workspace"] .cfg-panel .cfg-eyebrow{font-size:max(var(--font-min-readable, 14.5px), 10.5px)}
 html[data-desk-panel="workspace"] .cfg-panel :is(.ag-row-nm,.md-row-nm,.ca-section-main b){
-  font-size:15px;font-weight:620
+  font-size:var(--ui-font-15, 15px);font-weight:620
 }
 
 /* Allow wide task traces while internal content blocks constrain text line length. */
-html[data-desk-panel="workspace"] .tfd-shell{gap:12px;font-size:14.5px}
+html[data-desk-panel="workspace"] .tfd-shell{gap:12px;font-size:var(--ui-font-14-5, 14.5px)}
 html[data-desk-panel="workspace"] .tfd-hero{padding:18px 20px;border-radius:14px}
-html[data-desk-panel="workspace"] .tfd-hero h3{font-size:21px}
+html[data-desk-panel="workspace"] .tfd-hero h3{font-size:var(--ui-font-21, 21px)}
 html[data-desk-panel="workspace"] .tfd-loop-list button{min-height:60px}
 html[data-desk-panel="workspace"] :is(.tfd-route-wrap,.tfd-section){padding:15px 16px;border-radius:14px}
-html[data-desk-panel="workspace"] .tfd-route li b{font-size:max(var(--font-min-readable, 14.5px), 13.5px)}
+html[data-desk-panel="workspace"] .tfd-route li b{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13-5, 13.5px))}
 html[data-desk-panel="workspace"] .tfd-node>summary{min-height:48px}
 html[data-desk-panel="workspace"] .tfd-evidence-gallery img{height:148px}
 html[data-desk-panel="workspace"] .tfd-section-head>div>span,
@@ -107,18 +107,18 @@ html[data-desk-panel="workspace"] .tfd-stage-extras{gap:9px}
 /* Begin with natural conversation and formalize tasks when ongoing collaboration is needed. */
 html[data-desk-panel="workspace"] .cp-mid{gap:8px;padding-bottom:7vh}
 html[data-desk-panel="workspace"] .cp-hero{
-  font-family:var(--font-display);font-size:clamp(24px,2.2vw,30px);font-weight:500;
+  font-family:var(--font-display);font-size:max(var(--font-min-readable, 12px), calc(clamp(24px,2.2vw,30px) * var(--font-scale, 1)));font-weight:500;
   letter-spacing:-.015em;color:var(--ink-2);line-height:1.4;text-align:center;text-wrap:balance
 }
 html[data-desk-panel="workspace"] .cp-hero-note{
-  max-width:42em;margin:4px 0 16px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 14px);line-height:1.75;text-align:center;text-wrap:balance
+  max-width:42em;margin:4px 0 16px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px));line-height:1.75;text-align:center;text-wrap:balance
 }
 html[data-desk-panel="workspace"] .cp-box{width:min(820px,100%);border-radius:17px}
 html[data-desk-panel="workspace"] .cp-box:focus-within{
   border-color:color-mix(in srgb,var(--line) 100%,transparent);
   box-shadow:0 1px 2px rgba(16,24,40,.04),0 0 28px -20px rgba(16,24,40,.3)
 }
-html[data-desk-panel="workspace"] .cp-box>textarea{min-height:112px;padding:19px 21px 7px;font-size:16px}
+html[data-desk-panel="workspace"] .cp-box>textarea{min-height:112px;padding:19px 21px 7px;font-size:var(--ui-font-16, 16px)}
 
 @media(max-width:920px){
   html[data-desk-panel="workspace"] :is(
@@ -142,14 +142,14 @@ html[data-desk-panel="add"] .add-page-head{
 }
 html[data-desk-panel="add"] .add-page-title{
   min-width:0;display:flex;align-items:baseline;flex-wrap:wrap;gap:0;
-  color:var(--ux-ink);font:650 20px/1.25 var(--font-display);letter-spacing:-.02em
+  color:var(--ux-ink);font:650 var(--ui-font-20, 20px)/1.25 var(--font-display);letter-spacing:-.02em
 }
 html[data-desk-panel="add"] .add-page-kicker{
   flex-basis:100%;display:block;margin:0 0 3px;color:var(--accent);
-  font:650 14.5px/1 var(--font-latin);letter-spacing:.13em
+  font:650 var(--ui-font-14-5, 14.5px)/1 var(--font-latin);letter-spacing:.13em
 }
 html[data-desk-panel="add"] .add-page-sub{
-  margin-left:12px;color:var(--ux-muted);font:400 14.5px/1.45 var(--font-ui);letter-spacing:0
+  margin-left:12px;color:var(--ux-muted);font:400 var(--ui-font-14-5, 14.5px)/1.45 var(--font-ui);letter-spacing:0
 }
 html[data-desk-panel="add"] #addMask .aiq{margin-bottom:8px}
 html[data-desk-panel="add"] #addMask .field{margin-bottom:10px}

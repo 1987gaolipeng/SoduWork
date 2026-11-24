@@ -13,7 +13,7 @@ function attach({ owner, item, createView, loadTarget, safeWebUrl, openExternal,
   // identity stable even after the initial page closes, while IPC resolves the
   // actual source page through pages rather than this active-view accessor.
   Object.defineProperty(item, 'view', { configurable: true, get: () => active()?.view || first.view });
-  const state = () => ({ embedded: !!item.embeddedHost, activeId, startup: active()?.startup || 'loading', canRetry: !!active()?.canRetry && active()?.startup !== 'ready', appLabel: item.label, appVersion: item.appVersion || '', icon: item.icon || '', canBack: !!active()?.view.webContents.navigationHistory.canGoBack(),
+  const state = () => ({ embedded: !!item.embeddedHost, fontScale: owner.fontScale || '1', activeId, startup: active()?.startup || 'loading', canRetry: !!active()?.canRetry && active()?.startup !== 'ready', appLabel: item.label, appVersion: item.appVersion || '', icon: item.icon || '', canBack: !!active()?.view.webContents.navigationHistory.canGoBack(),
     tabs: [...pages.values()].map(page => {
       const wc = page.view.webContents;
       let fallback = '新页面';

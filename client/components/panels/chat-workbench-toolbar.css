@@ -18,7 +18,7 @@
 .ncw-browserbar>.ncw-annotate-action[aria-pressed="true"]{color:var(--accent);background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 32%,var(--line))}
 .ncw-address,.ncw-document-name{box-sizing:border-box;height:34px;min-width:0;display:flex;align-items:center;gap:8px;flex:1;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:color-mix(in srgb,var(--bg-1) 50%,var(--bg-0));color:var(--ink-4)}
 .ncw-address:focus-within{outline:2px solid color-mix(in srgb,var(--accent) 45%,transparent);outline-offset:1px}
-.ncw-browserbar input,.ncw-dochead .ncw-address input,.ncw-document-name b{min-width:0;width:100%;flex:1;margin:0;border:0;outline:0;background:transparent;color:var(--ink-2);font:400 14.5px/1.4 var(--font-ui,inherit);text-align:center;text-overflow:ellipsis;white-space:nowrap;overflow:hidden}
+.ncw-browserbar input,.ncw-dochead .ncw-address input,.ncw-document-name b{min-width:0;width:100%;flex:1;margin:0;border:0;outline:0;background:transparent;color:var(--ink-2);font:400 var(--ui-font-14-5, 14.5px)/1.4 var(--font-ui,inherit);text-align:center;text-overflow:ellipsis;white-space:nowrap;overflow:hidden}
 /* The rounded address container owns focus; suppress the workspace input outline. */
 html[data-desk-panel="workspace"] .ncw-address input:focus-visible{outline:none;outline-offset:0}
 .ncw-browserbar input[readonly]{color:var(--ink-3)}
@@ -47,18 +47,18 @@ html[data-desk-panel="workspace"] .ncw-address input:focus-visible{outline:none;
 .ncw-tooltab:hover,.ncw-tooltab[aria-pressed="true"]{background:var(--bg-2);color:var(--ink-2)}
 .ncw-tabwrap{position:relative;display:flex;flex:0 1 208px;min-width:92px;max-width:208px;height:34px}
 .ncw-tabwrap.fixed{flex:0 0 92px;min-width:92px}.ncw-tabwrap>button:first-child{appearance:none;border:0;background:transparent;
-  color:var(--ink-4);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 12.5px);width:100%;min-width:0;border-radius:8px;padding:0 26px 0 10px;
+  color:var(--ink-4);font:inherit;font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));width:100%;min-width:0;border-radius:8px;padding:0 26px 0 10px;
   display:flex;align-items:center;gap:7px;text-align:left;cursor:pointer}
 .ncw-tabwrap.fixed>button:first-child{padding-right:10px}.ncw-tabwrap>button:first-child:hover{background:var(--bg-2);color:var(--ink-2)}
 .ncw-tabwrap>button[aria-selected="true"]{background:color-mix(in srgb,var(--bg-2) 88%,var(--bg-0));color:var(--ink)}
 .ncw-tabwrap svg{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;
   stroke-linecap:round;stroke-linejoin:round}.ncw-tabwrap>button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ncw-tabclose{position:absolute;right:4px;top:5px;width:24px;height:24px;border:0;border-radius:6px;background:transparent;
-  color:transparent;font:inherit;font-size:16px;line-height:1;cursor:pointer}.ncw-tabwrap:hover .ncw-tabclose,
+  color:transparent;font:inherit;font-size:var(--ui-font-16, 16px);line-height:1;cursor:pointer}.ncw-tabwrap:hover .ncw-tabclose,
 .ncw-tabwrap:has(>button[aria-selected="true"]) .ncw-tabclose{color:var(--ink-5)}
 .ncw-tabclose:hover{background:color-mix(in srgb,var(--line) 50%,transparent)!important;color:var(--ink-2)!important}
 .ncw-newtab,.ncw-maximize,.ncw-collapse{appearance:none;border:0;background:transparent;width:30px;height:30px;border-radius:7px;
-  display:grid;place-items:center;color:var(--ink-4);font:inherit;font-size:18px;line-height:1;cursor:pointer;flex:none}
+  display:grid;place-items:center;color:var(--ink-4);font:inherit;font-size:var(--ui-font-18, 18px);line-height:1;cursor:pointer;flex:none}
 .ncw-newtab:hover,.ncw-maximize:hover,.ncw-collapse:hover{background:var(--bg-2);color:var(--ink-2)}
 .ncw-annotation-send{appearance:none;border:1px solid #c8d9ff;background:#f1f6ff;color:#2667d8;border-radius:999px;height:30px;padding:0 10px;display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:max(var(--font-min-readable, 14.5px), 11.5px);cursor:pointer;white-space:nowrap}
 .ncw-annotation-send:hover{background:#e4eeff;border-color:#9fbeff}.ncw-annotation-send i{min-width:16px;height:16px;border-radius:50%;display:grid;place-items:center;background:#2f74ff;color:#fff;font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 10px)}

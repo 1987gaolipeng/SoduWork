@@ -55,8 +55,13 @@
      */
     ['modelProviders'].forEach(k => { delete incoming[k]; });
     const prevSkinId = Store._cfg._lastSkinId;
+    const prevShortcuts = JSON.stringify(Store._cfg.shortcutBindings);
+    const prevShortcutVersion = Store._cfg.shortcutBindingsVersion;
     Object.assign(Store._cfg, incoming);
     const c = Store._cfg;
+    if (prevShortcuts !== JSON.stringify(c.shortcutBindings) || prevShortcutVersion !== c.shortcutBindingsVersion) {
+      global.ShortcutSettings?.reloadBindings?.();
+    }
     if (c.locale) global.SoduWorkI18n?.setLocale(c.locale, { persist: false, broadcast: false });
 
     /* Remove old skin variables and apply new ones; built-in skins without overrides require no changes. */
@@ -228,7 +233,7 @@
 
 
 
-    if (!standalone && global.__deskPanel === 'workspace' && global.WorkspaceHost) {
+    if (!standalone && (global.__deskPanel === 'workspace' || global.__deskPanel === 'preferences') && global.WorkspaceHost) {
       global.WorkspaceHost.open(panel, extra || {});
       return true;
     }

@@ -103,6 +103,6 @@ test('every active task card opens the shared AI work details', () => {
 
 test('shared task journey keeps a readable text floor', () => {
   const css = read('components', 'panels', 'task-trace-view.css');
-  assert.match(css, /\.tfd-shell\{[^}]*font-size:max\(var\(--font-min-readable,\s*14\.5px\),\s*max\(var\(--text-base,14px\),14px\)\)/);
-  assert.match(css, /\.tfd-confirm input\{height:36px;font-size:max\(var\(--font-min-readable,\s*14\.5px\),\s*13px\)\}/);
+  assert.match(css, /\.tfd-shell\{[^}]*font-size:max\(var\(--font-min-readable,\s*14\.5px\),\s*calc\(max\(var\(--text-base,14px\),14px\) \* var\(--font-scale,1\)\)\)/);
+  assert.match(css, /\.tfd-confirm input\{height:36px;font-size:max\(var\(--font-min-readable,\s*14\.5px\),\s*var\(--ui-font-13,\s*13px\)\)\}/);
 });

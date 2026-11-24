@@ -25,7 +25,7 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .wc-placeholder-item{display:flex;align-items:center;gap:0;width:100%;height:var(--wc-placeholder-step);flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink-4);font-weight:400;line-height:var(--wc-placeholder-step)}
 .wc-placeholder-item kbd{display:inline;font:inherit;color:inherit;background:none;border:0;padding:0;margin:0}
 .wc-placeholder-item b{overflow:hidden;text-overflow:ellipsis;font-weight:450;color:inherit}.wc-placeholder-item i{font-style:normal;color:var(--ink-4);padding:0 6px}
-.wc-placeholder-item.wc-placeholder-title{font-family:var(--font-ui);font-size:13.5px;font-weight:400;letter-spacing:normal;color:var(--ux-muted)}
+.wc-placeholder-item.wc-placeholder-title{font-family:var(--font-ui);font-size:var(--ui-font-13-5, 13.5px);font-weight:400;letter-spacing:normal;color:var(--ux-muted)}
 .wc-has-placeholder .wc-input::placeholder{color:transparent}
 .wc-has-value .wc-placeholder-rail{opacity:0;visibility:hidden;transform:translateY(-3px)}
 /* Focus preserves the scrolling hint; fade it only when wc-has-value indicates text input. */
@@ -52,7 +52,7 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 }
 @keyframes wc-placeholder-scroll{0%,14%{transform:translateY(0)}20%,39%{transform:translateY(calc(var(--wc-placeholder-step) * -1))}45%,64%{transform:translateY(calc(var(--wc-placeholder-step) * -2))}70%,89%{transform:translateY(calc(var(--wc-placeholder-step) * -3))}95%,100%{transform:translateY(calc(var(--wc-placeholder-step) * -4))}}
 @media(max-width:620px){
-  .wc-placeholder-rail{left:18px;right:16px;font-size:15px}
+  .wc-placeholder-rail{left:18px;right:16px;font-size:var(--ui-font-15, 15px)}
   .wc-placeholder-item{gap:0}.wc-placeholder-item i{padding-inline:4px}
 }
 @media(prefers-reduced-motion:reduce){
@@ -148,7 +148,7 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
   justify-content:flex-start;border-radius:9px;color:var(--ink-3)}
 .cp-more-pop>.wc-context-button .wc-context-copy{align-items:flex-start}
 .cp-more-pop>.wc-context-button .wc-context-copy i{display:block;font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.5;color:var(--ink-4)}
-.cp-more-pop>.wc-context-button .wc-context-copy b{font-size:max(var(--font-min-readable, 14.5px), 14px);font-weight:500}
+.cp-more-pop>.wc-context-button .wc-context-copy b{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px));font-weight:500}
 .cp-more-pop>.wc-context-button .wc-chevron{margin-left:auto}
 .cp-more-pop .cp-modelbtn svg,.cp-more-pop>.wc-context-button>svg{width:16px;height:16px}
 .cp-more-pop .cp-modelpop{left:calc(100% + 8px);bottom:0}
@@ -160,10 +160,10 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .cp-more-pop>.wc-popover .wc-pop-row{min-height:40px}
 .cp-more-pop>.wc-cap-pop .cp-caplist{max-height:190px;overflow-y:auto}
 .cp-more-pop>.wi-tools{display:block;width:100%;grid-column:1/-1}
-.cp-more-pop .wi-tools>.wi-tool{width:100%;height:44px;justify-content:flex-start;gap:10px;padding:8px 10px;font-size:max(var(--font-min-readable, 14.5px), 14px)}
+.cp-more-pop .wi-tools>.wi-tool{width:100%;height:44px;justify-content:flex-start;gap:10px;padding:8px 10px;font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px))}
 .cp-more-pop .wi-tools .wi-tool-label{max-width:none}
 .cp-more-pop .wi-tool>svg{width:20px;height:20px}
-.cp-more-pop .wi-tool.on::after{content:'✓';margin-left:auto;font-size:max(var(--font-min-readable, 14.5px), 14px)}
+.cp-more-pop .wi-tool.on::after{content:'✓';margin-left:auto;font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px))}
 .compose-panel .wc-actions .wc-voice{margin-right:8px}
 
 .wc-popover{display:none;position:absolute;left:0;bottom:calc(100% + 8px);z-index:27;
@@ -177,7 +177,7 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
   display:flex;align-items:center;gap:9px;color:var(--ink-3);font:inherit;text-align:left;cursor:pointer}
 .wc-pop-row:hover,.wc-pop-row.on{background:var(--bg-2);color:var(--ink)}
 .wc-pop-row>svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-.wc-pop-row span{display:flex;flex-direction:column;min-width:0}.wc-pop-row b{font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:500}
+.wc-pop-row span{display:flex;flex-direction:column;min-width:0}.wc-pop-row b{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));font-weight:500}
 .wc-pop-row i{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 10.5px);color:var(--ink-5);line-height:1.45}
 .wc-pop-row .wc-check{margin-left:auto;color:var(--accent)}
 .wc-cap-pop{width:min(480px,calc(100vw - 48px))}
@@ -190,7 +190,7 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .wc-cap-pop .cp-cap>svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;
   stroke-linecap:round;stroke-linejoin:round}
 .wc-cap-pop .cp-cap-copy{display:flex;min-width:0;flex-direction:column;gap:2px}
-.wc-cap-pop .cp-cap-copy b{overflow:hidden;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:520;text-overflow:ellipsis;white-space:nowrap}
+.wc-cap-pop .cp-cap-copy b{overflow:hidden;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));font-weight:520;text-overflow:ellipsis;white-space:nowrap}
 .wc-cap-pop .cp-cap-copy small{overflow:hidden;color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 10.5px);font-weight:400;text-overflow:ellipsis;white-space:nowrap}
 .wc-cap-pop .cp-cap-state{max-width:150px;overflow:hidden;color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 10.5px);font-style:normal;text-overflow:ellipsis;white-space:nowrap}
 .wc-cap-pop .cp-cap-switch{width:28px;height:17px;box-sizing:border-box;padding:2px;border-radius:999px;
@@ -204,7 +204,7 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .wc-cap-pop .cp-cap.blocked:hover{background:var(--bg-1);color:var(--ink-3)}
 .wc-cap-pop .cp-cap.blocked .cp-cap-switch{opacity:.55}
 .cp-cap-retry{appearance:none;width:100%;min-height:42px;border:0;border-radius:9px;background:transparent;
-  color:var(--accent);font:500 14.5px/1.4 var(--font-ui);cursor:pointer}
+  color:var(--accent);font:500 var(--ui-font-14-5, 14.5px)/1.4 var(--font-ui);cursor:pointer}
 .cp-cap-retry:hover{background:var(--bg-2)}
 .wc-cap-note{display:block;padding:5px 9px 4px;font-size:max(var(--font-min-readable, 14.5px), 10.5px);color:var(--s-doing);line-height:1.45}
 @keyframes wc-pop-in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
@@ -268,9 +268,9 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .compose-panel[data-stage='compose'] .work-composer.cp-box:focus-within{
   box-shadow:0 1px 2px rgba(16,24,40,.04),0 0 28px -20px rgba(16,24,40,.3)}
 .compose-panel[data-stage='compose'] .work-composer.cp-box>.wc-input{height:auto;min-height:98px;padding:16px 24px 7px;
-  font-size:16px;line-height:28px}
-.compose-panel[data-stage='compose'] .work-composer.cp-box>.wc-placeholder-rail{top:16px;left:26px;right:24px;--wc-placeholder-step:28px;font-size:13.5px}
-.compose-panel[data-stage='compose'] .work-composer.cp-box>.wc-placeholder-rail .wc-placeholder-title{font-size:13.5px;font-weight:400;line-height:28px;color:var(--ux-muted)}
+  font-size:var(--ui-font-16, 16px);line-height:28px}
+.compose-panel[data-stage='compose'] .work-composer.cp-box>.wc-placeholder-rail{top:16px;left:26px;right:24px;--wc-placeholder-step:28px;font-size:var(--ui-font-13-5, 13.5px)}
+.compose-panel[data-stage='compose'] .work-composer.cp-box>.wc-placeholder-rail .wc-placeholder-title{font-size:var(--ui-font-13-5, 13.5px);font-weight:400;line-height:28px;color:var(--ux-muted)}
 .compose-panel[data-stage='compose'] .work-composer.cp-box>.wc-toolbar{min-height:43px;padding:5px 14px 7px}
 .compose-panel .work-composer.cp-box{container:start-composer / inline-size}
 .compose-panel .cp-box>.wc-toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:5px}
@@ -333,10 +333,10 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 @media(max-width:560px){
   .compose-panel[data-stage='compose'] .cp-mid{padding:18px 10px 32px}
   .compose-panel[data-stage='compose'] .work-composer.cp-box{width:100%;min-width:0;max-width:none}
-  .compose-panel[data-stage='compose'] .work-composer.cp-box>.wc-input{padding-inline:16px;font-size:15px;line-height:26px}
-  .compose-panel[data-stage='compose'] .work-composer.cp-box>.wc-placeholder-rail{left:18px;right:16px;--wc-placeholder-step:26px;font-size:12px}
-  .compose-panel[data-stage='compose'] .work-composer.cp-box>.wc-placeholder-rail .wc-placeholder-title{font-size:12px;font-weight:400;line-height:26px}
-  .compose-panel[data-stage='compose'] .cp-hero{font-size:28px}
+  .compose-panel[data-stage='compose'] .work-composer.cp-box>.wc-input{padding-inline:16px;font-size:var(--ui-font-15, 15px);line-height:26px}
+  .compose-panel[data-stage='compose'] .work-composer.cp-box>.wc-placeholder-rail{left:18px;right:16px;--wc-placeholder-step:26px;font-size:var(--ui-font-12, 12px)}
+  .compose-panel[data-stage='compose'] .work-composer.cp-box>.wc-placeholder-rail .wc-placeholder-title{font-size:var(--ui-font-12, 12px);font-weight:400;line-height:26px}
+  .compose-panel[data-stage='compose'] .cp-hero{font-size:var(--ui-font-28, 28px)}
   .compose-panel[data-stage='compose'] .cp-hero-note{font-size:max(var(--font-min-readable, 14.5px), 12px);text-align:center}
 }
 .compose-panel[data-stage='compose'] #cpMorePop{top:calc(100% + 9px);bottom:auto;left:0;
@@ -357,14 +357,14 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .wc-more-row>svg{width:17px;height:17px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;
   stroke-linecap:round;stroke-linejoin:round}
 .wc-more-row>span{display:flex;min-width:0;flex-wrap:wrap;align-items:baseline;gap:2px 10px}
-.wc-more-row b{font-size:max(var(--font-min-readable, 14.5px), 14px);font-weight:500}.wc-more-row i{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--ink-4)}
+.wc-more-row b{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px));font-weight:500}.wc-more-row i{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));color:var(--ink-4)}
 .wc-more-section{margin:2px 1px 0;padding-top:7px;border-top:1px solid color-mix(in srgb,var(--line) 62%,transparent)}
 .wc-more-section-head{min-height:32px;padding:0 10px;display:flex;align-items:center;justify-content:space-between;gap:12px}
 .wc-more-section-head b{font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:500;color:var(--ink-4)}
 .wc-more-section-head button{appearance:none;border:0;border-radius:6px;padding:5px 0;background:transparent;color:var(--ink-3);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 12px);cursor:pointer}
 .wc-more-section-head button:hover{color:var(--accent)}
 .wc-more-plugins{display:grid;grid-template-columns:minmax(0,1fr);gap:2px;padding-bottom:2px;height:min(180px,26vh);overflow-y:auto;overscroll-behavior:contain;align-content:start}
-.wc-more-plugins>span{padding:12px 10px;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.5}
+.wc-more-plugins>span{padding:12px 10px;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));line-height:1.5}
 .wc-more-plugin{appearance:none;min-width:0;min-height:46px;padding:8px 10px;border:0;border-radius:10px;background:transparent;
   display:flex;align-items:center;gap:10px;text-align:left;color:var(--ink-2);font:inherit;cursor:pointer;
   transition:background-color .12s ease,color .12s ease}
@@ -379,12 +379,12 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .wc-more-plugin:disabled>.wc-plugin-icon{background:var(--bg-2);color:var(--ink-4)}
 .wc-more-plugin>span{display:flex;min-width:0;flex:1;align-items:baseline;gap:10px}
 .wc-more-plugin b,.wc-more-plugin small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.wc-more-plugin b{font-size:max(var(--font-min-readable, 14.5px), 14px);font-weight:500;max-width:52%;flex-shrink:0;line-height:22px}
-.wc-more-plugin small{font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--ink-3);line-height:20px}
+.wc-more-plugin b{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px));font-weight:500;max-width:52%;flex-shrink:0;line-height:22px}
+.wc-more-plugin small{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));color:var(--ink-3);line-height:20px}
 .wc-more-plugin em{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 12px);flex:none;color:var(--ink-4)}
-.wc-more-plugin .wc-plugin-selected{color:var(--accent);font-size:max(var(--font-min-readable, 14.5px), 14px)}
+.wc-more-plugin .wc-plugin-selected{color:var(--accent);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px))}
 .wc-more-retry{justify-self:start;appearance:none;margin:0 10px 8px;padding:6px 10px;border:1px solid var(--line);
-  border-radius:8px;background:var(--bg-0);color:var(--accent);font:500 14.5px var(--font-ui);cursor:pointer}
+  border-radius:8px;background:var(--bg-0);color:var(--accent);font:500 var(--ui-font-14-5, 14.5px) var(--font-ui);cursor:pointer}
 .cp-more-pop button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .cp-more-pop .wc-chevron,.cp-more-pop .cp-capwait,.cp-more-pop .wc-cap-note{font-size:max(var(--font-min-readable, 14.5px), 12px)}
 .cp-more-pop .wc-pop-row i{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.5}
@@ -404,9 +404,9 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 #cpMorePop>#cpPermission .wc-context-copy,#cpMorePop>#cpAbility .wc-context-copy{
   display:flex;flex:1;min-width:0;flex-direction:row;align-items:baseline;gap:10px}
 #cpMorePop>#cpPermission .wc-context-copy i,#cpMorePop>#cpAbility .wc-context-copy i{
-  font:500 14.5px/22px var(--font-ui);color:var(--ink-2)}
+  font:500 var(--ui-font-14-5, 14.5px)/22px var(--font-ui);color:var(--ink-2)}
 #cpMorePop>#cpPermission .wc-context-copy b,#cpMorePop>#cpAbility .wc-context-copy b{
-  font:400 14.5px/20px var(--font-ui);color:var(--ink-4)}
+  font:400 var(--ui-font-14-5, 14.5px)/20px var(--font-ui);color:var(--ink-4)}
 #cpMorePop>#cpPermission .wc-chevron,#cpMorePop>#cpAbility .wc-chevron{margin-left:auto;font-size:max(var(--font-min-readable, 14.5px), 12px)}
 #cpMorePop>.wc-popover,#cpMorePop>.wc-more-section{grid-column:1/-1}
 #cpMorePop .cp-modelpop,#cpMorePop>.wc-popover{margin:4px 0 0;padding:5px;
@@ -416,7 +416,7 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .wc-chat-more-pop{left:0;bottom:calc(100% + 9px);top:auto;width:560px;max-height:min(480px,70vh)}
 .wc-chat-more-pop>.wc-more-row:disabled{cursor:default;color:var(--ink-3);background:transparent;opacity:1}
 .wc-chat-more-pop>.ntask{width:100%;min-height:44px;padding:7px 10px;border-radius:10px;justify-content:flex-start;
-  font-size:max(var(--font-min-readable, 14.5px), 12.5px);color:var(--ink-3)}
+  font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));color:var(--ink-3)}
 .wc-chat-more-pop>.ntask:hover{background:var(--bg-2);color:var(--ink)}
 .wc-chat-more-pop>.wc-context-button{width:100%;height:40px;max-width:none;padding:6px 10px;justify-content:flex-start}
 .nbox.work-composer .wc-tools{flex:0 0 auto}.nbox.work-composer .wc-context{border-left:0;margin-left:0;padding-left:2px}
@@ -439,11 +439,11 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .cp-runtime-heading{flex:none;min-height:38px;box-sizing:border-box;padding:7px 14px;display:flex;align-items:center;
   justify-content:space-between;gap:18px;border-bottom:1px solid color-mix(in srgb,var(--line) 62%,transparent)}
 .cp-runtime-heading>span{display:flex;min-width:0;flex-direction:column;gap:2px}
-.cp-runtime-heading b{color:var(--ink-1);font-size:max(var(--font-min-readable, 14.5px), 13.5px);font-weight:570;line-height:1.35}
+.cp-runtime-heading b{color:var(--ink-1);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13-5, 13.5px));font-weight:570;line-height:1.35}
 .cp-runtime-heading small{display:none}
 .cp-runtime-pop.is-cloud .cp-runtime-heading small{display:block;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 10.5px);line-height:1.35}
 .cp-runtime-heading>em{flex:none;padding:2px 7px;border-radius:999px;background:var(--bg-2);
-  color:var(--ink-5);font:400 12px/1.5 var(--font-ui);font-style:normal}
+  color:var(--ink-5);font:400 var(--ui-font-12, 12px)/1.5 var(--font-ui);font-style:normal}
 .cp-runtime-rows{min-height:0;padding:4px 10px 6px;display:flex;flex-direction:column;gap:1px;
   overflow-y:auto;overscroll-behavior:contain}
 .cp-runtime-rows::-webkit-scrollbar{width:4px}.cp-runtime-rows::-webkit-scrollbar-track{background:transparent}
@@ -464,16 +464,16 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .cp-runtime-pop .cp-runtime-row>.runtime-brand>img{width:19px;height:19px;object-fit:contain}
 .cp-runtime-pop .cp-runtime-row>.cp-runtime-copy{display:flex!important;min-width:0;flex-direction:column;gap:0}
 .cp-runtime-pop .cp-runtime-head{display:flex!important;min-width:0;flex-direction:row!important;flex-wrap:wrap;align-items:center;gap:1px 6px}
-.cp-runtime-pop .cp-runtime-head>b{flex:0 0 100%;min-width:0;overflow:hidden;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:560;
+.cp-runtime-pop .cp-runtime-head>b{flex:0 0 100%;min-width:0;overflow:hidden;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));font-weight:560;
   line-height:1.35;text-overflow:ellipsis;white-space:nowrap}
-.cp-runtime-version{flex:0 1 auto;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent);font:500 12px/1.25 var(--font-ui)}
+.cp-runtime-version{flex:0 1 auto;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent);font:500 var(--ui-font-12, 12px)/1.25 var(--font-ui)}
 .cp-runtime-version[hidden]{display:none}
 .cp-runtime-mode{flex:0 1 auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;
-  color:var(--ink-4);font:400 12px/1.25 var(--font-ui)}
+  color:var(--ink-4);font:400 var(--ui-font-12, 12px)/1.25 var(--font-ui)}
 .cp-runtime-pop .cp-runtime-copy>i{display:none}
 .cp-runtime-meta{min-width:22px;max-width:100px;display:grid!important;place-items:center end}
 .cp-runtime-state{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;color:var(--ink-5);
-  font:400 12px/1.5 var(--font-ui);font-style:normal;white-space:nowrap}
+  font:400 var(--ui-font-12, 12px)/1.5 var(--font-ui);font-style:normal;white-space:nowrap}
 .cp-runtime-state::before{content:"";display:inline-block;vertical-align:middle;margin-right:4px;width:5px;height:5px;box-sizing:border-box;border-radius:50%;
   background:color-mix(in srgb,var(--ink-5) 48%,transparent)}
 .cp-runtime-state[data-state='ready']{color:var(--s-done)}
@@ -516,12 +516,12 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .wc-execution-mode button:disabled{opacity:.5;cursor:default}
 .wc-execution-pop{position:absolute;left:0;bottom:calc(100% + 9px);z-index:40;display:grid;gap:2px;width:128px;padding:5px;box-sizing:border-box;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--bg-1);box-shadow:0 8px 28px -8px color-mix(in srgb,var(--ink-1) 22%,transparent)}
 .wc-execution-pop[hidden]{display:none}
-.wc-execution-pop button{display:flex;align-items:center;gap:9px;width:100%;min-height:36px;padding:8px 9px;text-align:left;white-space:nowrap;font-size:13px;line-height:20px}
+.wc-execution-pop button{display:flex;align-items:center;gap:9px;width:100%;min-height:36px;padding:8px 9px;text-align:left;white-space:nowrap;font-size:var(--ui-font-13, 13px);line-height:20px}
 .wc-execution-pop button[aria-checked="true"]{color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
 .wc-execution-pop .wc-execution-check{width:14px;height:14px;margin-left:auto;visibility:hidden}
 .wc-execution-pop [aria-checked="true"] .wc-execution-check{visibility:visible}
 
-.wc-execution-notice:not([hidden]){display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 20px 10px;color:var(--ink-3);font-size:12px;line-height:1.5}.wc-execution-notice span{flex:1;min-width:100px}.wc-execution-notice button{border:0;background:transparent;color:var(--accent);font:inherit;padding:2px 0;cursor:pointer}
+.wc-execution-notice:not([hidden]){display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 20px 10px;color:var(--ink-3);font-size:var(--ui-font-12, 12px);line-height:1.5}.wc-execution-notice span{flex:1;min-width:100px}.wc-execution-notice button{border:0;background:transparent;color:var(--accent);font:inherit;padding:2px 0;cursor:pointer}
 
 /* ── Composer-page starter recommendations: a dedicated "Recommended" module — a borderless
    light container + module head (recommendation marker and source note). Row cards reuse the
@@ -534,7 +534,7 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
    misalignment illusion caused by three coexisting origins ("title 2px, content 14px, hover
    block 0px"). The vertical bar is gone; hierarchy is now carried by size/weight/color. */
 .compose-panel .cp-recs-head{display:flex;align-items:center;gap:6px;margin:0;padding:0 14px 8px}
-.compose-panel .cp-recs-head b{display:inline-flex;align-items:center;font-size:13px;font-weight:600;color:var(--ink-3);letter-spacing:.02em}
+.compose-panel .cp-recs-head b{display:inline-flex;align-items:center;font-size:var(--ui-font-13, 13px);font-weight:600;color:var(--ink-3);letter-spacing:.02em}
 .compose-panel .cp-recs-list{display:flex;flex-direction:column;gap:2px}
 /* Row cards: the recommendation area no longer has its own skin — zero overrides beyond
    layout (padding/radius), fully inheriting the apps page row-card shape; the neutral
@@ -544,7 +544,7 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .compose-panel .cp-recs .appsx-card:hover{background:var(--bg-2)}
 /* Black pill "open app" action: always visible at the row's right edge; bubbles to the
    card's open chain (sync-install first, then a standalone window). */
-.cp-recs-open{flex:none;display:inline-flex;align-items:center;justify-content:center;padding:7px 16px;border-radius:999px;background:var(--ink);color:#fff;font-size:12.5px;font-weight:600;line-height:1;letter-spacing:.02em}
+.cp-recs-open{flex:none;display:inline-flex;align-items:center;justify-content:center;padding:7px 16px;border-radius:999px;background:var(--ink);color:#fff;font-size:var(--ui-font-12-5, 12.5px);font-weight:600;line-height:1;letter-spacing:.02em}
 @media (max-width:640px){
   .compose-panel .cp-recs{width:calc(100% - 32px)}
 }

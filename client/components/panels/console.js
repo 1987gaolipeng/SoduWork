@@ -437,6 +437,15 @@ function _termTheme() {
  * Compute rows and columns from measured character size, with conservative fallback
  * metrics; FitAddon is not bundled.
  */
+function terminalFontSize() {
+  const scale = Number(document.documentElement.style.getPropertyValue('--font-scale')) || 1;
+  return Math.max(12, 14.5 * scale);
+}
+window.addEventListener('soduwork-font-scale', () => {
+  if (!_term.t) return;
+  _term.t.options.fontSize = terminalFontSize();
+  requestAnimationFrame(_termFit);
+});
 function _termFit() {
   const box = document.getElementById('conTerm');
   const t = _term.t;
@@ -480,7 +489,7 @@ function _termStart() {
     return;
   }
   const t = new Terminal({
-    fontSize: 14.5, lineHeight: 1.15, cursorBlink: true, scrollback: 8000,
+    fontSize: terminalFontSize(), lineHeight: 1.15, cursorBlink: true, scrollback: 8000,
     fontFamily: '"Alibaba Sans Code", "Cascadia Code", "Cascadia Mono", Consolas, monospace',
     theme: _termTheme(), allowProposedApi: true,
   });

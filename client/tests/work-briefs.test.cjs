@@ -47,7 +47,7 @@ test('brief screen exposes period and scope without fictional data', () => {
 
 test('brief typography keeps a readable selectable floor', () => {
   const css = read('components', 'reports', 'work-briefs.css');
-  assert.match(css, /\.br-narrative pre\{[^}]*14\.5px\/1\.82/);
+  assert.match(css, /\.br-narrative pre\{[^}]*var\(--ui-font-14-5,\s*14\.5px\)\/1\.82/);
   assert.match(css, /user-select:text/);
   assert.match(css, /prefers-reduced-motion:reduce/);
   const declarations = [...css.matchAll(/font(?:-size)?:([^;}]+)/g)].map(([, value]) => value.trim());

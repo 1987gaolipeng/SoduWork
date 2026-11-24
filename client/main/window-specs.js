@@ -12,6 +12,7 @@ function role(name, overrides) { return Object.freeze({ ...ROLES[name], ...overr
 
 module.exports = Object.freeze({
   workspace: role('workspace', { title: '工作区', w: 1460, h: 900, minW: 1040, minH: 680 }),
+  preferences: role('form', { title: '设置', w: 960, h: 720, minW: 560, minH: 400, placement: 'preferences' }),
   aidesk:    role('workspace', { title: 'AI 团队', w: 1440, h: 900 }),
   settings:  role('utility',   { title: '设置', w: 760, h: 760, minW: 560 }),
   skin:      role('utility',   { title: '外观', w: 900, h: 760 }),

@@ -38,6 +38,7 @@ function normalize(raw) {
     const v = supplied[key];
     if (typeof v === 'string' && v.length <= 220 && /^[\p{L}\p{N}\s_'",.-]+$/u.test(v)) tokens[key] = v.trim();
   }
+  if (['0.88', '1', '1.15'].includes(supplied['--font-scale'])) tokens['--font-scale'] = supplied['--font-scale'];
   // A malformed skin must not make trusted authorization text disappear.
   const bg = color(tokens['--bg-0']) || [255, 255, 255, 1], light = luminance(bg), dark = light < .18;
   for (const key of ['--ink', '--ink-2', '--ink-3', '--ink-4']) {

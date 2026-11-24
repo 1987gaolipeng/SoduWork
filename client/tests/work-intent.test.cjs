@@ -420,7 +420,7 @@ test('资料库与插件共用工作区边界，打开后保留可点击的左�
 test('历史对话和最近任务使用易读字号与清晰滚动条', () => {
   const shellCss = fs.readFileSync(
     path.join(__dirname, '../components/workspace/workspace-shell.css'), 'utf8');
-  assert.match(shellCss, /\.ws-task\{[^}]*font-size:max\(var\(--font-min-readable,\s*14\.5px\),\s*13px\)/);
+  assert.match(shellCss, /\.ws-task\{[^}]*font-size:max\(var\(--font-min-readable,\s*14\.5px\),\s*var\(--ui-font-13,\s*13px\)\)/);
   assert.match(shellCss, /:is\(\.ws-side-scroll,#wsRecent\)::\-webkit-scrollbar\{width:6px;height:6px\}/);
   assert.match(shellCss, /:is\(\.ws-side-scroll,#wsRecent\)::\-webkit-scrollbar-button\{display:none;width:0;height:0\}/);
   assert.match(shellCss, /:is\(\.ws-side-scroll,#wsRecent\)::\-webkit-scrollbar-thumb\{[^}]*border-radius:99px/);
@@ -465,7 +465,7 @@ test('聊天支持按 Hub 隔离的置顶与取消置顶', () => {
   assert.match(shell, /soduwork_work_chat_pins_v1:/);
   assert.match(shell, /取消置顶/);
   assert.match(shellCss, /\.ws-chat-pin/);
-  assert.match(shellCss, /font-size:14\.5px/);
+  assert.match(shellCss, /font-size:var\(--ui-font-14-5,\s*14\.5px\)/);
   assert.ok(shellCss.includes('color:color-mix(in srgb,var(--ink-3) 94%,var(--ink-4))'));
 });
 

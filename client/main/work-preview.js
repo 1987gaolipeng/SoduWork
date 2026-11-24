@@ -249,11 +249,12 @@ function snapshot(owner, item, patch) {
 const INSPECTOR_PREFIX = '__soduwork_workbench_element__:';
 
 const annotationPage = require('./work-preview-annotations');
+const nativeAppearance = require('./native-theme.cjs');
 const { randomBytes } = require('node:crypto');
 const ANNOTATION_WORLD = 1004;
-function inspectorScript(enabled, annotations, nonce) {
+function inspectorScript(enabled, annotations, nonce, fontScale = '1', fontScaleOnly = false) {
   return annotationPage.script({ enabled: Boolean(enabled), annotations: annotations || [],
-    prefix: INSPECTOR_PREFIX, nonce: nonce || '' });
+    prefix: INSPECTOR_PREFIX, nonce: nonce || '', fontScale, fontScaleOnly });
 }
 async function injectInspector(owner, item, enabled, options) {
   if (!liveContents(owner, item)) return;
@@ -273,7 +274,7 @@ async function injectInspector(owner, item, enabled, options) {
   item.annotationNonce = item.annotationNonce || randomBytes(24).toString('hex');
   try {
     await wc.executeJavaScriptInIsolatedWorld(ANNOTATION_WORLD, [{
-      code: inspectorScript(item.inspectEnabled, item.annotations, item.annotationNonce),
+      code: inspectorScript(item.inspectEnabled, item.annotations, item.annotationNonce, owner.fontScale, options?.fontScaleOnly),
     }], true);
   } catch (error) { if (liveContents(owner, item)) throw error; }
 }
@@ -376,6 +377,7 @@ function destroyOwner(id) {
   const owner = OWNERS.get(id);
   if (!owner) return;
   owner.closed = true;
+  owner.stopAppearance?.();
   owner.sender.removeListener('destroyed', owner.onDestroyed);
   [...owner.views.keys()].forEach((tabId) => destroyTab(owner, tabId));
   OWNERS.delete(id);
@@ -430,6 +432,21 @@ function ownerFor(event) {
       pendingShows: new Map(), pendingAppRequests: new Map(), liveContents: new Set(),
       closed: false, lease: null, pendingLease: null, showOrder: 0, resumeActive: '' };
     OWNERS.set(sender.id, owner);
+    owner.fontScale = nativeAppearance.snapshot(host).tokens['--font-scale'] || '1';
+    owner.stopAppearance = nativeAppearance.subscribe(host, appearance => {
+      const scale = appearance.tokens['--font-scale'] || '1';
+      if (scale === owner.fontScale) return;
+      owner.fontScale = scale;
+      for (const item of owner.views.values()) {
+        item.appTabs?.publish();
+        if (item.composer && !item.composer.loaded && !item.composer.view.webContents.isDestroyed()) {
+          item.composer.view.webContents.send('app-composer-mode', {fontScale: scale});
+        }
+        if (item.inspectEnabled || item.annotations?.length) {
+          injectInspector(owner, item, item.inspectEnabled, {fontScaleOnly: true}).catch(() => {});
+        }
+      }
+    });
     owner.onDestroyed = () => destroyOwner(sender.id);
     sender.once('destroyed', owner.onDestroyed);
   }

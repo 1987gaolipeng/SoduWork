@@ -5,7 +5,7 @@
   --shortcut-line: var(--line, #e2e8f0);
   --shortcut-muted: var(--ink-3, #667085);
   --shortcut-faint: var(--ink-4, #8b95a7);
-  --shortcut-text: max(var(--font-min-readable, 14.5px), 14px);
+  --shortcut-text: max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px));
   --shortcut-gutter: clamp(20px, 3vw, 36px);
   position: fixed;
   inset: calc(var(--window-menu-height, 0px) + 10px) 10px 10px var(--ws-main-left, 220px);
@@ -36,7 +36,7 @@ html[data-desk-panel="workspace"] #shortcutsPanel { overflow: hidden !important;
   padding: 22px var(--shortcut-gutter) 18px;
 }
 #shortcutsPanel .shortcuts-page-heading { min-width: 0; }
-#shortcutsPanel h1 { margin: 0; color: var(--ink, #1e293b); font: 700 23px/1.3 var(--font-display, sans-serif); }
+#shortcutsPanel h1 { margin: 0; color: var(--ink, #1e293b); font: 700 var(--ui-font-23, 23px)/1.3 var(--font-display, sans-serif); }
 #shortcutsPanel .shortcuts-page-heading p { margin: 5px 0 0; color: var(--shortcut-muted); font-size: var(--shortcut-text); line-height: 1.5; }
 #shortcutsPanel .shortcuts-page-actions { display: flex; align-items: center; flex: 0 0 auto; }
 #shortcutsPanel .shortcut-btn {
@@ -102,7 +102,7 @@ html[data-desk-panel="workspace"] #shortcutsPanel { overflow: hidden !important;
   border-radius: 6px;
   background: color-mix(in srgb, var(--shortcut-accent) 8%, var(--shortcut-paper));
   color: var(--ink, #1e293b);
-  font-size: max(var(--shortcut-text), 16px);
+  font-size: max(var(--shortcut-text), var(--ui-font-16, 16px));
   font-weight: 700;
   line-height: 1.5;
 }
@@ -168,7 +168,7 @@ html[data-desk-panel="workspace"] #shortcutsPanel { overflow: hidden !important;
 @media (max-width: 680px) {
   #shortcutsPanel { --shortcut-gutter: 16px; inset: calc(var(--window-menu-height, 0px) + 4px) 4px 4px var(--ws-main-left, 0px) !important; border-radius: 12px; }
   #shortcutsPanel .shortcuts-page-head { align-items: flex-start; padding-top: 16px; padding-bottom: 14px; gap: 10px; }
-  #shortcutsPanel h1 { font-size: 21px; }
+  #shortcutsPanel h1 { font-size: var(--ui-font-21, 21px); }
   #shortcutsPanel .shortcuts-page-heading p { max-width: 230px; }
   #shortcutsPanel .shortcuts-page-actions .shortcut-btn { padding-inline: 9px; white-space: nowrap; }
   #shortcutsPanel .shortcuts-toolbar { padding-bottom: 14px; }

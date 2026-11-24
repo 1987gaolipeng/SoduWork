@@ -7,7 +7,7 @@
   background: var(--bg-1);
   border: 1px solid var(--line);
   border-radius: 14px;
-  font-size: max(var(--font-min-readable, 14.5px), 13px);
+  font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));
   line-height: 1.55;
 }
 .soduwork-quota-card[hidden] { display: none; }

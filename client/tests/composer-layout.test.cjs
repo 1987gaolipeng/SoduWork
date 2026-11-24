@@ -28,7 +28,7 @@ test('new composer groups add/access/workspace separately from compact model and
 
 test('active model trigger is compact without shrinking its label or model list', () => {
   assert.match(chatCss, /\.nmodel\{[^}]*max-width:136px/);
-  assert.match(chatCss, /\.nmodel-button\{[^}]*max-width:100%[^}]*gap:4px[^}]*font-size:max\(var\(--font-min-readable,\s*14\.5px\),\s*13px\)/);
+  assert.match(chatCss, /\.nmodel-button\{[^}]*max-width:100%[^}]*gap:4px[^}]*font-size:max\(var\(--font-min-readable,\s*14\.5px\),\s*var\(--ui-font-13,\s*13px\)\)/);
   assert.match(chatCss, /\.nmodel-button>span\{[^}]*min-width:0[^}]*text-overflow:ellipsis/);
   assert.match(chatCss, /\.nmodel-button>svg\{[^}]*width:12px;height:12px;flex:none/);
   assert.match(chatCss, /@media\(max-width:480px\)\{\.nmodel\{max-width:96px/);
@@ -85,8 +85,8 @@ test('rotating placeholder yields to composer overlays', () => {
   assert.match(shell, /<kbd>#<\/kbd>/);
   assert.match(shell, /<kbd>@<\/kbd>/);
   assert.match(shell, /\\u544a\\u8bc9 SoduWork \\u4f60\\u60f3\\u5b8c\\u6210\\u4ec0\\u4e48\\u2026/);
-  assert.match(css, /wc-placeholder-item\.wc-placeholder-title\{[^}]*font-family:var\(--font-ui\);font-size:13\.5px;font-weight:400/);
-  assert.match(css, /cp-box>\.wc-placeholder-rail\{[^}]*--wc-placeholder-step:28px;font-size:13\.5px/);
+  assert.match(css, /wc-placeholder-item\.wc-placeholder-title\{[^}]*font-family:var\(--font-ui\);font-size:var\(--ui-font-13-5,\s*13\.5px\);font-weight:400/);
+  assert.match(css, /cp-box>\.wc-placeholder-rail\{[^}]*--wc-placeholder-step:28px;font-size:var\(--ui-font-13-5,\s*13\.5px\)/);
   assert.match(css, /wc-placeholder-item\{[^}]*font-weight:400/);
   assert.match(css, /\.work-composer:has\(\.nplugin-strip:not\(\[hidden\]\)\) \.wc-placeholder-rail/);
   assert.match(css, /\.work-composer:has\(\.cp-skill-tags\.show\) \.wc-placeholder-rail/);

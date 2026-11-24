@@ -982,18 +982,22 @@ const applyTheme=()=>{
     }
   }catch(e){}
   el.setAttribute('data-skin', mat || (cfg.character==='box'?'box':'glass'));
+  reportNativeAppearance();
+};
+function reportNativeAppearance() {
+  const el = document.documentElement;
   /* Native consent has its own isolated renderer. Report only presentation
      tokens after the application theme is applied; main validates this window
      and never executes code in it or receives an authorization decision here. */
   if(window.soduWorkAPI?.reportTheme){
     const styles=getComputedStyle(el),tokens={};
     for(const key of ['--bg-0','--bg-1','--bg-2','--bg-3','--ink','--ink-2','--ink-3','--ink-4',
-      '--line','--line-2','--line-3','--accent','--accent-hover','--accent-soft','--accent-soft-2','--font-ui','--font-display']){
+      '--line','--line-2','--line-3','--accent','--accent-hover','--accent-soft','--accent-soft-2','--font-ui','--font-display','--font-scale']){
       tokens[key]=styles.getPropertyValue(key).trim();
     }
     window.soduWorkAPI.reportTheme({theme:el.dataset.theme,skin:el.dataset.skin,character:el.dataset.character,tokens});
   }
-};
+}
 /* Apply reminder glows to unfinished task markers and the pet according to cfg.remind. */
 const applyRemind=()=>{
   const level=cfg.remind||'light';
