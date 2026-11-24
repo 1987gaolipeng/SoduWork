@@ -105,11 +105,12 @@ function harness(t, { readyDuringLoad = false, synchronousBlur = false } = {}) {
     focus() { this.focusCount++; }
     loadFile(file) {
       this.file = file;
+      this.webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
       this.webContents.emit('did-start-loading');
       if (readyDuringLoad) ready(this);
       return Promise.resolve();
     }
-    reload() { this.reloads++; this.webContents.emit('did-start-loading'); }
+    reload() { this.reloads++; this.loadFile(this.file); }
     close() { this.destroyed = true; this.emit('closed'); }
   }
   const controller = create({ app, screen, ipcMain, BrowserWindow, globalShortcut, Notification,
@@ -243,7 +244,7 @@ test('controller owns one overlay and preserves renderer/preload paths', (t) => 
   assert.equal(win.options.backgroundColor, '#00000000');
   assert.equal(win.options.thickFrame, false);
   assert.equal(win.visible, false, 'startup waits for paint and clipped geometry');
-  if (process.platform === 'win32') assert.equal(win.options.type, 'toolbar');
+  if (process.platform === 'win32' || process.platform === 'linux') assert.equal(win.options.type, 'toolbar');
   assert.equal(win.ignored, true, 'startup never intercepts the desktop');
   if (process.platform === 'win32' || process.platform === 'linux') {
     assert.equal(h.query('window-get-overlay-shape', win).applied[0].width, 1);
@@ -641,6 +642,21 @@ test('display changes follow primary monitor bounds and dispose releases every r
   assert.throws(() => h.controller.createWindow(), /disposed/);
 });
 
+test('subframes and same-document navigation do not hide ready desktop content', t => {
+  const h = harness(t), win = h.controller.createWindow();
+  h.ready(win);
+  const before = h.query('window-get-overlay-shape', win);
+  for (const details of [{ isMainFrame: false, isSameDocument: false },
+    { isMainFrame: true, isSameDocument: true }]) {
+    win.webContents.emit('did-start-navigation', details);
+    win.webContents.emit('did-start-loading');
+    assert.equal(win.visible, true);
+    assert.deepEqual(h.query('window-get-overlay-shape', win), before);
+  }
+  h.timers.tick(15000);
+  assert.equal(h.controller.emergency, false, 'only replacing the main document requires readiness again');
+});
+
 test('workspace maximize hides overlay and restore brings it back without stealing focus', (t) => {
   const h = harness(t);
   h.controller.start();
@@ -678,7 +694,76 @@ test('emergency passthrough keeps overlay ownership over workspace sync', (t) =>
   assert.equal(win.visible, false);
 
   h.controller.recoverFromEmergency();
+  assert.equal(win.visible, false, 'recovery waits for the replacement renderer and content');
+  h.ready(win);
   assert.equal(win.visible, true);
+});
+
+test('empty content remains unmapped at startup and after widgets are disabled', t => {
+  const h = harness(t), win = h.controller.createWindow();
+  win.emit('ready-to-show');
+  h.send('renderer-ready', win);
+  const report = rects => h.send('window-set-overlay-shape', win, rects, h.query('window-get-overlay-shape', win).revision);
+  report([]);
+  assert.equal(win.visible, false, 'GNOME must not receive an empty mapped window');
+  h.controller.show();
+  h.timers.tick(3000);
+  assert.equal(win.visible, false, 'tray restore and display checks cannot expose an empty surface');
+  h.ready(win);
+  assert.equal(win.visible, true);
+  report([]);
+  assert.equal(win.visible, false);
+  assert.equal(win.ignored, true);
+  assert.equal(win.focusable, false);
+  assert.equal(win.focusCount, 0);
+  h.controller.setWorkspaceMaximized(true);
+  h.controller.setWorkspaceMaximized(false);
+  assert.equal(win.visible, false, 'restoring the workspace does not resurrect an empty preview');
+  h.ready(win);
+  assert.equal(win.visible, true, 'enabling a widget restores its surface');
+});
+
+test('content reports respect explicit hide and workspace suppression even when already empty', t => {
+  const h = harness(t), win = h.controller.createWindow();
+  win.emit('ready-to-show'); h.send('renderer-ready', win);
+  h.send('window-set-overlay-shape', win, []);
+  h.controller.setWorkspaceMaximized(true);
+  h.ready(win);
+  assert.equal(win.visible, false, 'new content must not appear above a maximized workspace');
+  h.controller.setWorkspaceMaximized(false);
+  assert.equal(win.visible, true);
+  h.controller.hide(); h.ready(win);
+  h.controller.setWorkspaceMaximized(true); h.controller.setWorkspaceMaximized(false);
+  assert.equal(win.visible, false, 'fresh reports and workspace restore preserve explicit hiding');
+  h.controller.show();
+  assert.equal(win.visible, true);
+  h.controller.reload();
+  assert.equal(win.visible, false, 'navigation hides the old native surface');
+  h.send('renderer-ready', win);
+  h.send('window-set-overlay-shape', win, [], h.query('window-get-overlay-shape', win).revision);
+  assert.equal(win.visible, false, 'reload with disabled widgets stays hidden');
+});
+
+test('visual feedback stays visible without becoming an input target', t => {
+  const h = harness(t), win = h.controller.createWindow();
+  win.emit('ready-to-show'); h.send('renderer-ready', win);
+  const bubble = [{ x: 100, y: 100, width: 180, height: 60 }];
+  const report = (input, visual) => h.send('window-set-overlay-shape', win, input,
+    h.query('window-get-overlay-shape', win).revision, visual);
+  report([], bubble);
+  assert.equal(win.visible, true);
+  h.screen.cursor = { x: 110, y: 110 }; h.timers.tick(40);
+  assert.equal(win.ignored, true, 'non-interactive feedback passes clicks through');
+  assert.equal(win.focusable, false);
+  h.controller.setWorkspaceMaximized(true); h.controller.setWorkspaceMaximized(false);
+  h.timers.tick(3000);
+  assert.deepEqual(h.query('window-get-overlay-shape', win).visual, bubble);
+  if (process.platform !== 'darwin') assert.deepEqual(h.query('window-get-overlay-shape', win).applied,
+    require('../main/overlay-shape').resolve(bubble, win.bounds));
+  report(bubble, bubble);
+  assert.equal(win.ignored, false, 'an undo action remains interactive');
+  report([], []);
+  assert.equal(win.visible, false);
 });
 
 // Pet + shortcut dock must be as passive as a single widget over the chat editor.
@@ -708,4 +793,48 @@ test('multiple widgets release mouse and keyboard focus in every gap, including 
   h.screen.getCursorScreenPoint = () => { throw Error('display unavailable'); };
   report();
   assert.equal(win.ignored, true, 'missing cursor information fails open for underlying windows');
+});
+
+test('recreating the overlay preserves suppression by an unchanged maximized workspace', t => {
+  const h = harness(t), original = h.controller.createWindow();
+  h.ready(original);
+  h.controller.setWorkspaceMaximized(true);
+  assert.equal(original.visible, false);
+  original.close();
+  const replacement = h.controller.createWindow();
+  h.ready(replacement);
+  assert.equal(replacement.visible, false, 'Replacing the auxiliary window must not obscure the workspace');
+  h.controller.show();
+  assert.equal(replacement.visible, false, 'An explicit reveal still respects the maximized workspace');
+  h.controller.setWorkspaceMaximized(false);
+  assert.equal(replacement.visible, true);
+});
+
+for (const maximized of [true, false]) {
+  test(`workspace changes to maximized=${maximized} are retained while the overlay is absent`, t => {
+    const h = harness(t), original = h.controller.createWindow();
+    h.ready(original);
+    h.controller.setWorkspaceMaximized(!maximized);
+    original.close();
+    h.controller.setWorkspaceMaximized(maximized);
+    const replacement = h.controller.createWindow();
+    h.ready(replacement);
+    assert.equal(replacement.visible, !maximized, 'The latest workspace state governs the replacement');
+  });
+}
+
+test('recreating the overlay retains explicit hiding until the user requests a reveal', t => {
+  const h = harness(t), original = h.controller.createWindow();
+  h.ready(original);
+  h.controller.hide();
+  original.close();
+  const replacement = h.controller.createWindow();
+  h.ready(replacement);
+  assert.equal(replacement.visible, false);
+  h.controller.setWorkspaceMaximized(true);
+  h.controller.setWorkspaceMaximized(false);
+  assert.equal(replacement.visible, false, 'Workspace changes do not undo an explicit hide');
+  h.controller.show();
+  assert.equal(replacement.visible, true);
+  assert.equal(replacement.focusCount, 0);
 });

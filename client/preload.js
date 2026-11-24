@@ -257,6 +257,7 @@ const workPreviewAppHost = {
  */
 let overlayShapeRevision = 0;
 let lastOverlayShapeRects = null;
+let lastOverlayVisualRects;
 let pendingOverlayBlur = false;
 let deliveredOverlayBlurRevision = -1;
 const overlayBlurConsumers = new Set();
@@ -294,16 +295,19 @@ function observeOverlayShapeState(info) {
      * revision query returns. Main correctly rejects that revision-zero packet;
      * replay the cached geometry once the current main-process revision is known.
      */
-    ipcRenderer.send('window-set-overlay-shape', lastOverlayShapeRects, overlayShapeRevision);
+    ipcRenderer.send('window-set-overlay-shape', lastOverlayShapeRects, overlayShapeRevision, lastOverlayVisualRects);
   }
   return info;
 }
 
-function sendOverlayShape(rects) {
+function sendOverlayShape(rects, visualRects) {
   lastOverlayShapeRects = Array.isArray(rects)
     ? rects.map(rect => rect && typeof rect === 'object' ? { ...rect } : rect)
     : rects;
-  ipcRenderer.send('window-set-overlay-shape', lastOverlayShapeRects, overlayShapeRevision);
+  lastOverlayVisualRects = Array.isArray(visualRects)
+    ? visualRects.map(rect => rect && typeof rect === 'object' ? { ...rect } : rect)
+    : undefined;
+  ipcRenderer.send('window-set-overlay-shape', lastOverlayShapeRects, overlayShapeRevision, lastOverlayVisualRects);
 }
 
 ipcRenderer.on('overlay-window-blur', (_event, revision) => {

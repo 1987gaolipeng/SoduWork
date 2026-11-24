@@ -58,6 +58,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     if (_emergencyMode) { recoverFromEmergency(); return; }
     _setOverlayInputIgnored(true);
     _rendererReady = false;
+    syncOverlayVisibility();
     resetRendererHealth();
     mainWindow.reload();
     startHeartbeatWatchdog();
@@ -117,6 +118,8 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     _ipcDisposers.push(() => ipcMain.removeHandler(channel));
   }
   let _lastOverlayRects = [];
+  let _lastVisualRects = [];
+  let _overlayHiddenByUser = false;
   let _appliedOverlayShape = [];
   let _overlayShapeEnabled = false;
   let _overlayShapeReported = false;
@@ -127,7 +130,6 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
   let _overlayDragging = false;
   let _overlayInputGuardTimer = null;
   let _initialPaintReady = false;
-  let _initialRevealPending = true;
 
   /*
    * Clip unused compositor regions at the native window boundary to prevent stale
@@ -239,24 +241,25 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     if (typeof _overlayInputGuardTimer.unref === 'function') _overlayInputGuardTimer.unref();
   }
 
-  function applyOverlayShape(rects, remember = true) {
+  function applyOverlayShape(rects, remember = true, visualRects = rects) {
     if (!mainWindow || mainWindow.isDestroyed()) return false;
     const bounds = _overlayContentSize();
     const normalized = _overlayShape.normalize(rects, bounds);
+    const visual = _overlayShape.normalize(visualRects, bounds);
     if (!NATIVE_SHAPE) {
       /*
        * Dynamic passthrough stores component rectangles without applying a native shape. Report
        * successful region activation while keeping _appliedOverlayShape empty.
        */
       _overlayShapeEnabled = true;
-      if (remember) _lastOverlayRects = normalized;
+      if (remember) { _lastOverlayRects = normalized; _lastVisualRects = visual; }
       _overlayInputRects = normalized;
       _startOverlayInputGuard();
       _syncOverlayInputNow();
       return true;
     }
     if (typeof mainWindow.setShape !== 'function') return false;
-    const applied = _overlayShape.resolve(normalized, bounds);
+    const applied = _overlayShape.resolve(visual, bounds);
     try {
       // Lifecycle restores (remember=false) must reapply after show. Normal
       // renderer notifications need no native repaint when the region is unchanged.
@@ -264,7 +267,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
         mainWindow.setShape(applied);
       }
       _overlayShapeEnabled = true;
-      if (remember) _lastOverlayRects = normalized;
+      if (remember) { _lastOverlayRects = normalized; _lastVisualRects = visual; }
       _appliedOverlayShape = applied;
       _overlayInputRects = normalized;
       _startOverlayInputGuard();
@@ -284,6 +287,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     if (invalidate) _overlayShapeRevision++;
     _overlayAwaitingShape = false;
     _lastOverlayRects = [];
+    _lastVisualRects = [];
     _overlayShapeReported = false;
     applyOverlayShape([], false);
   }
@@ -331,25 +335,8 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     }
   }
   function setWorkspaceMaximized(maximized) {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (maximized) {
-      if (mainWindow.isVisible() || _initialRevealPending) {
-        _overlayHiddenByWorkspace = true;
-        mainWindow.hide();
-      }
-      return;
-    }
-    if (!_overlayHiddenByWorkspace) return;
-    _overlayHiddenByWorkspace = false;
-    if (_emergencyMode) return;   // Emergency passthrough takes precedence; tray recovery owns restoration.
-    if (_initialRevealPending) { revealInitialOverlay(); return; }
-    mainWindow.showInactive();
-    /* Reapply stacking and passthrough state after hide/show cycles. */
-    _setOverlayTopmost(true);
-    if (_overlayShapeEnabled && NATIVE_SHAPE && typeof mainWindow.setShape === 'function') {
-      try { mainWindow.setShape(_appliedOverlayShape); } catch (_e) { /* The next renderer report can retry synchronization. */ }
-    }
-    if (_overlayShapeEnabled) _syncOverlayInputNow();
+    _overlayHiddenByWorkspace = !!maximized;
+    syncOverlayVisibility();
   }
 
   let _crashCount = 0;
@@ -388,6 +375,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
         _overlayAwaitingShape = true;
         _overlayShapeRevision++;
         _lastOverlayRects = [];
+        _lastVisualRects = [];
         _overlayInputRects = [];
         _overlayShapeReported = false;
         // Force passthrough immediately.
@@ -416,22 +404,20 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
   }
 
   /*
-   * Restore from emergency mode by showing and reloading the window, resetting state, and
-   * restarting health checks.
+   * Reload during recovery, then wait for readiness and visible content before restoring.
    */
-  function recoverFromEmergency(focus = true) {
+  function recoverFromEmergency() {
     if (!isCurrent(mainWindow)) return;
     _emergencyMode = false;
     _rendererReady = false;
     resetRendererHealth();
     /*
      * Start a real navigation during recovery because an already-initialized page will not
-     * send renderer-ready again. did-start-loading rearms the watchdog.
+     * send renderer-ready again. Main-document navigation rearms the watchdog.
      */
     _setOverlayInputIgnored(true);
+    mainWindow.hide();
     mainWindow.reload();
-    mainWindow.show();
-    if (focus) mainWindow.focus();
     _setOverlayTopmost(true);
     startHeartbeatWatchdog();
   }
@@ -527,17 +513,39 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     if (!mainWindow.isVisible()) return;             // Preserve explicit user hiding.
     // Repaint the existing surface. Repeated hide/show and topmost changes
     // can invalidate desktop watermark layers on managed Windows computers.
-    applyOverlayShape(_lastOverlayRects);
+    applyOverlayShape(_lastOverlayRects, true, _lastVisualRects);
     mainWindow.webContents.invalidate?.();
     setOverlayIdleInput();
   }
 
-  function revealInitialOverlay() {
-    if (!isCurrent(mainWindow) || !_initialRevealPending || !_initialPaintReady ||
-        !_rendererReady || !_overlayShapeReported || _overlayHiddenByWorkspace || _emergencyMode) return;
-    _initialRevealPending = false;
-    mainWindow.showInactive();
+  function syncOverlayVisibility() {
+    if (!isCurrent(mainWindow)) return;
+    // A mapped transparent window is still a window to GNOME, even with a 1px shape.
+    // Keep it unmapped until actual content is ready; transient non-interactive
+    // feedback counts as content, but must not become a mouse target.
+    if (!_initialPaintReady || !_rendererReady || !_overlayShapeReported ||
+        !_lastVisualRects.length || _overlayHiddenByUser || _overlayHiddenByWorkspace || _emergencyMode) {
+      _overlayDragging = false;
+      _setOverlayInputIgnored(true);
+      if (mainWindow.isVisible()) mainWindow.hide();
+      return;
+    }
+    if (!mainWindow.isVisible()) {
+      mainWindow.showInactive();
+      _setOverlayTopmost(true);
+    }
     setOverlayIdleInput();
+  }
+
+  function show() {
+    _overlayHiddenByUser = false;
+    if (_emergencyMode) { recoverFromEmergency(); return; }
+    syncOverlayVisibility();
+  }
+
+  function hide() {
+    _overlayHiddenByUser = true;
+    syncOverlayVisibility();
   }
 
 
@@ -580,7 +588,6 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     if (_disposed) throw new Error('Desktop overlay controller is disposed');
     if (isCurrent(mainWindow)) return mainWindow;
     _initialPaintReady = false;
-    _initialRevealPending = true;
     /*
      * Use the bounding box of all displays, including the taskbar, so edge-aligned
      * components reach the physical display edge and the pet can cross monitors.
@@ -608,9 +615,9 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
       maximizable: false,
       fullscreenable: false,
       skipTaskbar: true,
-      // Taskbar exclusion alone does not hide an unowned HWND from Alt-Tab
-      // or grouped previews. Windows' toolbar type gives it WS_EX_TOOLWINDOW.
-      ...(process.platform === 'win32' ? { type: 'toolbar' } : {}),
+      // Windows uses WS_EX_TOOLWINDOW; X11 uses an auxiliary window type.
+      // Native Wayland ignores these hints, so empty surfaces must stay hidden.
+      ...(['win32', 'linux'].includes(process.platform) ? { type: 'toolbar' } : {}),
       alwaysOnTop: true,
       hasShadow: false,
       // Do not expose an unclipped full-screen surface during startup.
@@ -633,26 +640,21 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
      */
     const owner = mainWindow;
     _initialPaintReady = false;
-    _initialRevealPending = true;
     parkOverlayShape();
     _overlayAwaitingShape = true;
     let navigationStarted = false;
-    mainWindow.webContents.on('did-start-loading', () => {
-      if (isCurrent(owner)) {
-        _navigationId++;
-        if (_navigationId > 1) _overlayShapeRevision++;
-        resetRendererHealth();
-        /*
-         * Arm the readiness watchdog when navigation starts so a fast renderer-ready event cannot
-         * be reset afterward.
-         */
-        _rendererReady = false;
-        startReadyWatchdog('启动就绪超时（渲染进程可能启动失败）');
-        parkOverlayShape(navigationStarted);
-        _overlayAwaitingShape = true;
-        _initialRevealPending = true;
-        navigationStarted = true;
-      }
+    mainWindow.webContents.on('did-start-navigation', (event) => {
+      // Each main document sends renderer-ready once. Its frames and fragment share that state.
+      if (!isCurrent(owner) || !event.isMainFrame || event.isSameDocument) return;
+      _navigationId++;
+      if (_navigationId > 1) _overlayShapeRevision++;
+      resetRendererHealth();
+      _rendererReady = false;
+      if (mainWindow.isVisible()) mainWindow.hide();
+      startReadyWatchdog('启动就绪超时（渲染进程可能启动失败）');
+      parkOverlayShape(navigationStarted);
+      _overlayAwaitingShape = true;
+      navigationStarted = true;
     });
     loadRenderer();
 
@@ -669,7 +671,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
       if (!isCurrent(owner)) return;
       _initialPaintReady = true;
       fixOverlayZoom('首帧');
-      revealInitialOverlay();
+      syncOverlayVisibility();
     });
     mainWindow.webContents.on('dom-ready', () => { if (isCurrent(owner)) fixOverlayZoom('dom-ready'); });
 
@@ -680,7 +682,8 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     mainWindow.on('show', () => {
       later(() => {
         if (!isCurrent(owner) || _emergencyMode) return;
-        if (!applyOverlayShape(_lastOverlayRects, false)) setOverlayIdleInput();
+        if (!applyOverlayShape(_lastOverlayRects, false, _lastVisualRects)) setOverlayIdleInput();
+        syncOverlayVisibility();
       }, 0, owner);
     });
 
@@ -725,7 +728,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     mainWindow.on('minimize', (e) => {
       e.preventDefault();
       if (isCurrent(owner)) {
-        mainWindow.hide();
+        hide();
       }
     });
 
@@ -739,6 +742,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
       _emergencyMode = false;
       mainWindow = null;
       _lastOverlayRects = [];
+      _lastVisualRects = [];
       _appliedOverlayShape = [];
       _overlayInputRects = [];
       _overlayInputIgnored = null;
@@ -771,7 +775,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
       }
       const navigation = _navigationId;
       later(() => {
-        if (_emergencyMode && navigation === _navigationId) recoverFromEmergency(false);
+        if (_emergencyMode && navigation === _navigationId) recoverFromEmergency();
       }, 800 * _crashCount, owner); // Skip automatic reload if manual recovery already started navigation.
     });
 
@@ -805,7 +809,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
       mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
 
-    /* did-start-loading owns watchdog initialization; do not reset readiness after loadFile. */
+    /* Main-document navigation owns readiness; do not reset it after loadFile. */
     startHeartbeatWatchdog();
     return mainWindow;
   }
@@ -814,11 +818,11 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
   // Window-control IPC.
   onIpc('window-close', () => {
     // Hide to the tray instead of closing.
-    if (mainWindow) mainWindow.hide();
+    hide();
   });
 
   onIpc('window-minimize', () => {
-    if (mainWindow) mainWindow.hide();
+    hide();
   });
 
   onIpc('window-set-always-on-top', (event, flag) => {
@@ -864,18 +868,18 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
    * Validate visible interactive rectangles from the trusted overlay sender before applying
    * native regions; workspace windows cannot change the overlay shape.
    */
-  onIpc('window-set-overlay-shape', (event, rects, revision) => {
+  onIpc('window-set-overlay-shape', (event, rects, revision, visualRects = rects) => {
     if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
     if (_emergencyMode) return;
     // Only the first navigation accepts legacy reports without a revision.
     if (revision === undefined && _overlayShapeRevision === 0) revision = 0;
     if (revision !== _overlayShapeRevision) return;
-    if (applyOverlayShape(rects, true)) {
+    if (applyOverlayShape(rects, true, visualRects)) {
       _overlayShapeReported = true;
       if (_rendererReady) clearReadyWatchdog();
       if (revision === _overlayShapeRevision) _overlayAwaitingShape = false;
       _syncOverlayInputNow();
-      revealInitialOverlay();
+      syncOverlayVisibility();
     }
     else emergencyPassthrough('桌面组件的原生区域初始化失败');
   });
@@ -889,6 +893,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
       revision: _overlayShapeRevision,
       awaitingShape: _overlayAwaitingShape,
       requested: _lastOverlayRects,
+      visual: _lastVisualRects,
       applied: _appliedOverlayShape,
       bounds: _overlayContentSize(),
       displays: _overlayGeometry.localDisplays(screen, mainWindow),
@@ -915,7 +920,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     if (_overlayShapeReported) clearReadyWatchdog();
     else startReadyWatchdog('桌面组件区域未完成初始化');
     resetRendererHealth();
-    revealInitialOverlay();
+    syncOverlayVisibility();
     console.log('[SAFETY] 渲染进程已就绪');
   });
 
@@ -929,7 +934,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
   return Object.freeze({
     get window() { return mainWindow; },
     get emergency() { return _emergencyMode; },
-    start, createWindow, reload, emergencyPassthrough, recoverFromEmergency,
+    start, createWindow, reload, show, hide, emergencyPassthrough, recoverFromEmergency,
     notifyBlur: notifyOverlayBlur, setWorkspaceMaximized, setWorkWindowFocused, dispose,
   });
 }

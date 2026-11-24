@@ -38,7 +38,7 @@ if(HAS_NATIVE_SHAPE&&typeof window.soduWorkAPI.getOverlayShape==='function'){
 }
 let overlayDepth=0;
 let _interactiveCache=null,_interactiveCacheDirty=true;
-let _shapeFrame=null,_shapeTrackUntil=0,_lastShapeKey=null,_lastShapeRects=[];
+let _shapeFrame=null,_shapeTimer=null,_shapeTrackUntil=0,_lastShapeKey=null,_lastShapeRects=[];
 let _shapeEnvelopes=new WeakMap();
 
 /* Only the pet and dock remain topmost. Drop overlay topmost state while a panel matched by
@@ -199,11 +199,19 @@ function _syncOverlayShape(settled){
     if(!r)continue;
     rects.push(_dragMode?_dragTile(els[i],r):_shapeEnvelope(els[i],r,settled));
   }
-  const key=rects.map(r=>r.x+','+r.y+','+r.width+','+r.height).join('|');
+  // Ordinary feedback bubbles stay visible without becoming mouse targets. They
+  // can outlive the pet or dock, so native visibility cannot use hit regions alone.
+  const visualRects=rects.slice(),bubble=document.querySelector('.pet-bubble.show');
+  if(bubble&&!els.includes(bubble)){
+    const r=_shapeRect(bubble);
+    if(r)visualRects.push(_shapeEnvelope(bubble,r,settled));
+  }
+  const shapeKey=items=>items.map(r=>r.x+','+r.y+','+r.width+','+r.height).join('|');
+  const key=shapeKey(rects)+';'+shapeKey(visualRects);
   if(key===_lastShapeKey)return;
   _lastShapeKey=key;
   _lastShapeRects=rects;
-  soduWorkAPI.setOverlayShape(rects);
+  soduWorkAPI.setOverlayShape(rects,visualRects);
 }
 /* Pet and dock drag implementations explicitly share this start and stop notification. */
 if(typeof window!=='undefined')window.beginOverlayDrag=function(){
@@ -230,14 +238,25 @@ if(typeof window!=='undefined')window.endOverlayDrag=function(){
 function _queueOverlayShape(trackMs){
   if(!IS_ELECTRON||!window.soduWorkAPI||!soduWorkAPI.setOverlayShape)return;
   _shapeTrackUntil=Math.max(_shapeTrackUntil,Date.now()+Math.max(0,Number(trackMs)||0));
-  if(_shapeFrame)return;
-  const tick=()=>{
-    _shapeFrame=null;
-    const tracking=Date.now()<_shapeTrackUntil;
-    _syncOverlayShape(!tracking);
-    if(tracking)_shapeFrame=requestAnimationFrame(tick);
+  if(_shapeFrame!==null||_shapeTimer!==null)return;
+  const schedule=()=>{
+    let pending=true;
+    const tick=()=>{
+      if(!pending)return;
+      pending=false;
+      if(_shapeFrame!==null)cancelAnimationFrame(_shapeFrame);
+      if(_shapeTimer!==null)clearTimeout(_shapeTimer);
+      _shapeFrame=null;_shapeTimer=null;
+      const tracking=Date.now()<_shapeTrackUntil;
+      _syncOverlayShape(!tracking);
+      if(tracking)schedule();
+    };
+    _shapeFrame=requestAnimationFrame(tick);
+    // A hidden native window may stop animation frames after reload even with
+    // background throttling disabled. Geometry must still wake it when needed.
+    _shapeTimer=setTimeout(tick,100);
   };
-  _shapeFrame=requestAnimationFrame(tick);
+  schedule();
 }
 /* Expose explicit refresh for dragging and dynamic positioning; observers handle ordinary class, style, and size changes. */
 if(typeof window!=='undefined')window.requestOverlayShapeSync=(trackMs,force)=>{

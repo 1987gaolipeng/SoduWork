@@ -28,13 +28,16 @@ function makeEl(id, x, y, w, h) {
 
 function boot(bridge = {}) {
   const shapeCalls = [];               // Record each applied region snapshot.
-  let rafQ = [];
+  const visualCalls = [];
+  let clock = 0, sequence = 0;
+  const frames = new Map(), timers = new Map();
   const sandbox = {
     console,
-    Date, Math, Number, Array, Set, Map, JSON, String, Object, Promise,
-    setTimeout, clearTimeout,
-    requestAnimationFrame: (cb) => { rafQ.push(cb); return rafQ.length; },
-    cancelAnimationFrame: () => {},
+    Date: class extends Date { static now() { return clock; } }, Math, Number, Array, Set, Map, JSON, String, Object, Promise,
+    setTimeout: (cb, delay) => { const id = ++sequence; timers.set(id, { cb, due: clock + delay }); return id; },
+    clearTimeout: id => timers.delete(id),
+    requestAnimationFrame: cb => { const id = ++sequence; frames.set(id, cb); return id; },
+    cancelAnimationFrame: id => frames.delete(id),
     MutationObserver: class { observe() {} disconnect() {} },
     CustomEvent: class {},
   };
@@ -49,7 +52,10 @@ function boot(bridge = {}) {
     addEventListener: () => {},
   };
   sandbox.soduWorkAPI = {
-    setOverlayShape: (rects) => shapeCalls.push(rects.map((r) => ({ ...r }))),
+    setOverlayShape: (rects, visualRects) => {
+      shapeCalls.push(rects.map((r) => ({ ...r })));
+      visualCalls.push(visualRects?.map((r) => ({ ...r })));
+    },
     setIgnoreMouseEvents: () => {},
     setAlwaysOnTop: () => {},
     ...bridge,
@@ -62,14 +68,84 @@ function boot(bridge = {}) {
   vm.createContext(sandbox);
   const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'electron.js'), 'utf8');
   vm.runInContext(src, sandbox, { filename: 'core/electron.js' });
-  const frame = () => { const q = rafQ; rafQ = []; for (const cb of q) cb(); };
-  return { sandbox, shapeCalls, frame, dock, pet };
+  const frame = () => { const q = [...frames.values()]; frames.clear(); for (const cb of q) cb(); };
+  const advance = ms => {
+    clock += ms;
+    for (const [id, timer] of [...timers]) {
+      if (timer.due <= clock) { timers.delete(id); timer.cb(); }
+    }
+  };
+  return { sandbox, shapeCalls, visualCalls, frame, advance, frames, timers, dock, pet };
 }
 
 const contains = (rects, el) => rects.some((r) =>
   el._x >= r.x && el._y >= r.y &&
   el._x + el._w <= r.x + r.width && el._y + el._h <= r.y + r.height);
 const fullWindow = (r) => r.width >= VIEW_W && r.height >= VIEW_H;
+
+test('a hidden renderer reports geometry when animation frames stop, then stops idle scheduling', () => {
+  const { sandbox, shapeCalls, frame, advance, frames, timers, pet, dock } = boot();
+  pet._w = pet._h = dock._w = dock._h = 0;
+  sandbox.document.visibilityState = 'visible'; // backgroundThrottling:false does not prove frames are running.
+  const stalledFrame = [...frames.values()][0];
+  advance(100);
+  assert.equal(shapeCalls.length, 1, 'the timer reports the empty initial shape without a paint frame');
+  assert.equal(shapeCalls[0].length, 0);
+  stalledFrame();
+  assert.equal(shapeCalls.length, 1, 'a late frame from the same race cannot report twice');
+  for (let i = 0; i < 6; i++) advance(100);
+  assert.equal(timers.size, 0, 'settled geometry does not leave a background polling timer');
+  assert.equal(frames.size, 0, 'the unused frame is canceled after the tracking interval');
+
+  pet._w = pet._h = 72;
+  sandbox.requestOverlayShapeSync(0, true);
+  advance(100);
+  assert.equal(shapeCalls.length, 2);
+  assert.ok(contains(shapeCalls.at(-1), pet), 'new visible content wakes the native window without rAF');
+  assert.equal(timers.size, 0);
+  assert.equal(frames.size, 0);
+
+  sandbox.requestOverlayShapeSync(0, true);
+  frame();
+  assert.equal(shapeCalls.length, 3, 'normal frames still report immediately');
+  assert.equal(timers.size, 0, 'a delivered frame cancels its fallback timer');
+  advance(100);
+  assert.equal(shapeCalls.length, 3);
+});
+
+test('feedback without a pet or dock remains visible and does not capture pointer input', () => {
+  const { sandbox, shapeCalls, visualCalls, frame, dock, pet } = boot();
+  pet._w = pet._h = dock._w = dock._h = 0;
+  const bubble = makeEl('petBubble', 8, 12, 200, 60);
+  let shown = false, clickable = false;
+  const original = sandbox.document.querySelector;
+  sandbox.document.querySelector = selector => {
+    if (selector === '.pet-bubble.show') return shown ? bubble : null;
+    if (selector === '.pet-bubble.show.undoable') return shown && clickable ? bubble : null;
+    return original(selector);
+  };
+  frame();
+  assert.equal(shapeCalls.at(-1).length, 0);
+  assert.equal(visualCalls.at(-1).length, 0, 'an idle overlay has no visual region');
+
+  shown = true;
+  sandbox.requestOverlayShapeSync(0); frame();
+  assert.equal(shapeCalls.at(-1).length, 0, 'ordinary feedback must remain pointer-transparent');
+  assert.ok(contains(visualCalls.at(-1), bubble), 'the bubble can wake an otherwise empty overlay');
+  const count = visualCalls.length;
+  sandbox.requestOverlayShapeSync(0); frame();
+  assert.equal(visualCalls.length, count, 'unchanged visual geometry is deduplicated');
+
+  clickable = true;
+  sandbox.requestOverlayShapeSync(0); frame();
+  assert.ok(contains(shapeCalls.at(-1), bubble), 'an undo action still receives input');
+  assert.equal(visualCalls.at(-1).length, 1, 'clickable bubbles are not duplicated in the native shape');
+
+  shown = false;
+  sandbox.requestOverlayShapeSync(0); frame();
+  assert.equal(shapeCalls.at(-1).length, 0);
+  assert.equal(visualCalls.at(-1).length, 0, 'expiry removes the last visual region');
+});
 
 test('capture starts on press and preserves the original button target through fast moves', () => {
   const transitions = [], listeners = new Map();

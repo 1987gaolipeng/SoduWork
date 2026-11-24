@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('./renderer-source.cjs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { EventEmitter } = require('node:events');
 const { create: createWorkspaceState } = require('../main/workspace-state.cjs');
 
 const read = (...parts) => fs.readFileSync(path.join(__dirname, '..', ...parts), 'utf8');
@@ -41,6 +42,79 @@ test('tray double click: settings take effect permanently, no transient reveal',
   assert.doesNotMatch(main, /_deskTransient/, '主进程不得残留临时唤回状态');
   assert.match(main, /openDeskWindow\(\{ panel: 'workspace' \}, null\)/,
     '双击仍要能找回主窗口');
+});
+
+function trayRecoveryFixture(overlayState) {
+  const source = read('main.js'), calls = [], errors = [], targets = [];
+  const preferences = { dock: false, pet: false, tray: true };
+  const auxiliary = {
+    isDestroyed: () => false, isVisible: () => false,
+    show: () => assert.fail('Tray actions must use the content-aware overlay controller'),
+    showInactive: () => assert.fail('An empty overlay must not be revealed directly'),
+    focus: () => assert.fail('An empty overlay must not receive focus'),
+  };
+  const overlay = {
+    window: overlayState === 'missing' ? null : auxiliary,
+    emergency: overlayState === 'emergency',
+    createWindow() { calls.push('overlay.create'); this.window = auxiliary; },
+    show() {
+      calls.push('overlay.show');
+      if (this.emergency) this.recoverFromEmergency();
+      // Empty geometry stays hidden, including while recovery waits for a renderer.
+    },
+    hide() { calls.push('overlay.hide'); },
+    recoverFromEmergency() { calls.push('overlay.recover'); this.emergency = false; },
+  };
+  class Tray extends EventEmitter {
+    setToolTip() {}
+    setContextMenu(menu) { this.menu = menu; }
+  }
+  const context = {
+    _desktopOverlay: overlay, Tray, Menu: { buildFromTemplate: value => value },
+    _flags: { all: () => ({ ...preferences }), merge: () => assert.fail('Reopening must preserve widget preferences') },
+    _nativeText: value => value, isAutostartOn: () => false,
+    openDeskWindow: (payload, owner) => targets.push({ ...payload, owner }),
+    nativeImage: {}, __dirname: path.resolve(__dirname, '..'), path,
+    console: { error: (...args) => errors.push(args) },
+    require(name) {
+      assert.equal(name, './main/tray-icon.cjs');
+      return { createTrayIcon: () => ({}) };
+    },
+  };
+  const revealStart = source.indexOf('function revealSoduWorkSuite(');
+  const menuEnd = source.indexOf('const _quitRelaunch', revealStart);
+  const trayStart = source.indexOf('function createTray(');
+  const trayEnd = source.indexOf('// Use the single-instance lock', trayStart);
+  assert.ok(revealStart >= 0 && menuEnd > revealStart && trayStart >= 0 && trayEnd > trayStart);
+  vm.runInNewContext(source.slice(revealStart, menuEnd) + source.slice(trayStart, trayEnd), context);
+  context.createTray();
+  return { tray: context.tray, overlay, calls, errors, targets, preferences,
+    menu(label) { context.tray.menu.find(item => item.label === label).click(); } };
+}
+
+for (const action of ['click', 'double-click', 'show-menu']) {
+  test(`tray ${action} opens the workspace independently of an empty or recovering overlay`, () => {
+    for (const state of ['empty', 'emergency', 'missing']) {
+      const f = trayRecoveryFixture(state);
+      if (action === 'show-menu') f.menu('显示 SoduWork');
+      else f.tray.emit(action);
+      assert.deepEqual(f.errors, [], state);
+      assert.deepEqual(f.targets, [{ panel: 'workspace', owner: null }], state);
+      assert.deepEqual(f.preferences, { dock: false, pet: false, tray: true });
+      assert.equal(f.overlay.window?.isVisible() || false, false, 'Empty content remains hidden');
+      assert.equal(f.calls.filter(call => call === 'overlay.recover').length, state === 'emergency' ? 1 : 0);
+      assert.equal(f.calls.includes('overlay.show'), action !== 'click');
+      assert.equal(f.calls.includes('overlay.create'), action !== 'click' && state === 'missing');
+    }
+  });
+}
+
+test('tray hide delegates explicit hiding to the overlay controller', () => {
+  const f = trayRecoveryFixture('empty');
+  f.menu('隐藏 SoduWork');
+  assert.deepEqual(f.calls, ['overlay.hide']);
+  assert.deepEqual(f.targets, []);
+  assert.deepEqual(f.errors, []);
 });
 
 test('renderer desk-flags receiver writes cfg directly, no transient channel', () => {
