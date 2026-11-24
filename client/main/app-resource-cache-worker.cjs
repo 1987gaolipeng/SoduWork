@@ -24,6 +24,14 @@ function select(row, request, action = request.action) {
   return { row: contribution, definition: row.definition, revision: row.revision };
 }
 function run(request) {
+  if (request.action === 'history-package-cards' || request.action === 'read-history-package') {
+    const plugins = require('./conversation/device-history-plugins.cjs'), receipts = new Map(request.receipts);
+    if (request.action === 'read-history-package')
+      return plugins.load(request.root, request.relative, receipts, request.skillRuntimeEntry);
+    const nativeSkills = request.files.filter(file => !plugins.candidate(file.relative));
+    return [...require('./conversation/device-history-skills.cjs').inspect(request.root, nativeSkills, request.skillRuntimeEntry),
+      ...plugins.inspect(request.root, request.files.filter(file => plugins.candidate(file.relative)), receipts, request.skillRuntimeEntry)];
+  }
   if (request.action === 'draft-candidates')
     return require('./pi-session/plugin-draft-candidates').collect(request.cwd, request.snapshot);
   if (request.action === 'draft-check') {

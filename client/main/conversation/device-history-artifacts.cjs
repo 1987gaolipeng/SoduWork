@@ -8,16 +8,21 @@ const contract = require('./delivery-contract');
 const versions = require('./runtime-artifacts.cjs');
 const { assertNoLinks } = require('../plugin-resources');
 const { excludedName, portablePath } = require('./portable-workspace');
+const packages = require('./device-history-plugins.cjs');
+const drafts = require('../pi-session/plugin-draft-candidates');
 const realpath = fs.realpathSync.native || fs.realpathSync;
 const webResource = /\.(?:css|m?js|woff2?|ttf|ico|wasm|mp3|wav|ogg|svg)$/i;
 const epoch = value => Number.isFinite(value) && value > 0 ? (value < 1e11 ? value * 1000 : value) : 0;
 
-function eligible(relative) {
+function eligible(relative, includePackageResources = false) {
   try { portablePath(relative); } catch (_) { return false; }
   if (/^\.soduwork\/evidence\/[^/.][^/]*\.(?:png|jpe?g|gif|webp)$/i.test(relative)) return true;
   return !relative.split('/').some(part => part.startsWith('.') || excludedName(part)) &&
-    Boolean(contract._kindOf(relative) || webResource.test(relative));
+    Boolean(contract._kindOf(relative) || webResource.test(relative) || drafts.ARCHIVE.test(relative) ||
+      includePackageResources && packages.resource(relative));
 }
+
+const deliverable = name => contract._kindOf(name) || (drafts.ARCHIVE.test(name) ? 'archive' : '');
 
 function allocation(row, workRoot, workspace) {
   if (!workRoot || workspace?.id !== row.id || !workspace.cwd || row.cwd !== workspace.cwd) return null;
@@ -31,7 +36,7 @@ function allocation(row, workRoot, workspace) {
 }
 
 function stable(root, relative) {
-  if (!eligible(relative)) return null;
+  if (!eligible(relative, true)) return null;
   const target = path.join(root, relative);
   try {
     assertNoLinks(root, target);
@@ -67,7 +72,7 @@ function classify(root, files, window) {
   } catch (_) { /* Legacy workspaces may have no manifest. */ }
   primary ||= new Map(contract.infer(files, root).items.map(file => [file.relative, file]));
   return files.map(file => {
-    const declared = primary.get(file.relative), kind = contract._kindOf(file.relative) || 'file';
+    const declared = primary.get(file.relative), kind = deliverable(file.relative) || 'file';
     return { ...file, ...declared, kind, artifactId: contract._artifactId(kind, file.relative),
       title: declared?.title || file.name, primary: Boolean(declared),
       preview: ['website', 'image', 'video', 'pdf'].includes(kind),
@@ -93,7 +98,7 @@ async function journalFiles(root, journal) {
   for (const change of journal.files) {
     const receipt = change.after, relative = change.path;
     if (!['created', 'modified', 'renamed'].includes(change.action) || !receipt?.exists || receipt.path !== relative ||
-        !/^[a-f0-9]{64}$/.test(receipt.hash) || !eligible(relative)) continue;
+        !/^[a-f0-9]{64}$/.test(receipt.hash) || !eligible(relative, true)) continue;
     const stat = stable(root, relative);
     if (!stat || Number(stat.size) !== receipt.size || stat.size > 32n * 1024n * 1024n) continue;
     const file = path.join(root, relative), stamp = versions.stamp(stat);
@@ -119,12 +124,12 @@ async function capture({ row, workRoot, workspace, previous, retained, journal }
   try { root = realpath(row.cwd); } catch (_) { return previous || null; }
   const prior = previous?.root === root ? previous : null;
   const records = new Map([...(prior?.items || []), ...(prior?.resources || [])]
-    .filter(entry => eligible(entry.metadata?.relative)).map(entry => [entry.metadata.relative, entry]));
+    .filter(entry => eligible(entry.metadata?.relative, true)).map(entry => [entry.metadata.relative, entry]));
   // A later segment may have produced a new version under the same relative
   // name. Keep its receipt only when it authenticates the file that exists now.
   if (retained?.root === root) for (const entry of [...(retained.items || []), ...(retained.resources || [])]) {
     const relative = entry.metadata?.relative;
-    if (!eligible(relative)) continue;
+    if (!eligible(relative, true)) continue;
     const older = records.get(relative);
     if (older && versions.same(older.stamp, entry.stamp)) continue;
     const stat = stable(root, relative);
@@ -133,18 +138,23 @@ async function capture({ row, workRoot, workspace, previous, retained, journal }
   let window;
   try { window = allocation(row, workRoot, workspace); } catch (_) { /* A removed or relinked directory is unavailable. */ }
   const files = [];
-  if (window && window.end > (prior?.recordedUntil || 0)) {
-    const inventory = await require('../pi-session/outputs').inventoryAsync(root, Math.max(window.start, prior?.recordedUntil || 0));
+  const packageUntil = prior?.packageRecordedUntil || 0;
+  if (window && window.end > Math.min(prior?.recordedUntil || 0, packageUntil)) {
+    const since = Math.min(prior?.recordedUntil || 0, packageUntil);
+    const inventory = await require('../pi-session/outputs').inventoryAsync(root, Math.max(window.start, since));
     const evidence = require('./screenshot-evidence').collect(root, { since: window.start, until: window.end });
     for (const candidate of [...inventory, ...evidence]) {
       const relative = path.relative(root, candidate.path).split(path.sep).join('/');
       const stat = stable(root, relative);
       if (!stat) continue;
-      if (!during(stat, window) || prior?.recordedUntil && Number(stat.mtimeNs) / 1e6 <= prior.recordedUntil) continue;
+      const until = drafts.ARCHIVE.test(relative) || !eligible(relative) ? packageUntil : prior?.recordedUntil;
+      if (!during(stat, window) || until && Number(stat.mtimeNs) / 1e6 <= until) continue;
       files.push({ ...candidate, relative, verifiedStamp: versions.stamp(stat) });
     }
   }
-  if (journal?.turnId && journal.turnId !== prior?.turnId) files.push(...await journalFiles(root, journal));
+  const completeJournal = journal?.turnId && !journal.truncated && Array.isArray(journal.files) && matchesJournalRoot(root, journal.cwd);
+  if (completeJournal && (journal.turnId !== prior?.turnId || journal.turnId !== prior?.packageTurnId))
+    files.push(...await journalFiles(root, journal));
   if (files.length) {
     const expected = new Map(files.map(file => [file.relative, file.verifiedStamp]));
     const indexed = versions.capture(root, { items: classify(root, files, window) }, { sessionId: row.id, adapterId: row.adapterId });
@@ -153,14 +163,17 @@ async function capture({ row, workRoot, workspace, previous, retained, journal }
   }
   if (!records.size && !window) return null;
   const all = [...records.values()];
-  return { version: 1, root, items: all.filter(entry => contract._kindOf(entry.metadata.relative)),
-    resources: all.filter(entry => !contract._kindOf(entry.metadata.relative)),
+  return { version: 1, packageRecordedUntil: Math.max(window?.end || 0, packageUntil),
+    packageTurnId: (completeJournal && journal.turnId) || prior?.packageTurnId || '', root, items: all.filter(entry => deliverable(entry.metadata.relative)),
+    resources: all.filter(entry => !deliverable(entry.metadata.relative)),
     recordedUntil: Math.max(window?.end || 0, prior?.recordedUntil || 0), turnId: journal?.turnId || prior?.turnId || '' };
 }
 
 function view(cwd, history, guard, authorize = guard) {
   const byPath = new Map();
+  const cards = new Map(), receipts = new Map();
   for (const row of [...(history?.items || []), ...(history?.resources || [])]) {
+    if (eligible(row.metadata?.relative, true)) receipts.set(row.metadata.relative, row.stamp);
     if (!eligible(row.metadata?.relative)) continue;
     byPath.set(path.resolve(cwd, row.metadata.relative), row);
     byPath.set(path.resolve(history.root, row.metadata.relative), row);
@@ -177,10 +190,79 @@ function view(cwd, history, guard, authorize = guard) {
     guard();
     const items = versions.restore(cwd, history).filter(item => matches(item.path))
       .map(item => ({ ...item, primary: item.historicalPrimary, pluginDraft: false }));
+    const candidates = items.filter(item => cards.get(item.relative)).map(item => {
+      const card = cards.get(item.relative);
+      Object.assign(item, card, { pluginRevisionAt: card.pluginRevisionAt || item.at, pluginSuperseded: false });
+      if (card.pluginValidation.state === 'ready' && !verifyPlugin(item))
+        item.pluginValidation = { ...card.pluginValidation, state: 'invalid', diagnostic: { message: '随包文件已改变，请重新生成' } };
+      return item;
+    });
+    const selected = new Set(drafts.mergePluginCandidates(candidates));
+    for (const item of candidates) {
+      if (!selected.has(item)) item.pluginDraft = false;
+      else if (!item.pluginKey && item.pluginIdentity?.includes(item.path.toLowerCase()))
+        item.pluginIdentity = 'draft-file:' + item.artifactId;
+    }
     const delivery = { schemaVersion: 1, source: 'history', items: items.filter(item => item.primary && !item.processEvidence) };
     return { got: { files: [], delivery }, items, delivery };
   }
-  return { verify(target, stat) { guard(); return matches(target, stat); }, snapshot, authorize, async snapshotAsync() { await authorize(); return snapshot(); } };
+  async function snapshotAsync() {
+    await authorize();
+    const initial = snapshot();
+    const files = initial.items.filter(item => (drafts.SKILL_ARCHIVE.test(item.relative) || packages.candidate(item.relative)) && !cards.has(item.relative))
+      .map(item => ({ relative: item.relative, stamp: item.historicalVersion }));
+    if (!files.length) return initial;
+    const skillRuntimeEntry = require('./skill-frontmatter').runtimeEntry(undefined, true);
+    const checked = new Map();
+    // Limit each worker request to a few packages and their recorded resources.
+    // A busy worker must not hide unrelated files when the chat is reopened.
+    for (let i = 0; i < files.length; i += 8) {
+      const batch = files.slice(i, i + 8);
+      let inspected;
+      try {
+        inspected = await require('../app-resource-cache.cjs').request({ action: 'history-package-cards', root: history.root,
+          files: batch, receipts: packageReceipts(batch), skillRuntimeEntry });
+      } catch (_) { continue; }
+      guard();
+      for (const file of batch) checked.set(file.relative, null);
+      for (const card of inspected) checked.set(card.relative, card);
+    }
+    await authorize();
+    for (const [name, card] of checked) cards.set(name, card);
+    return snapshot();
+  }
+  function readSkill(item) {
+    guard();
+    const record = byPath.get(item.path);
+    if (!record || record.metadata.artifactId !== item.artifactId || !matches(item.path)) throw Error('技能包已改变');
+    return require('./device-history-skills.cjs').read(history.root, record.metadata.relative, record.stamp);
+  }
+  function packageReceipts(files) {
+    const manifests = files.map(file => file.relative).filter(packages.candidate);
+    if (!manifests.length) return [];
+    const dirs = manifests.filter(name => !drafts.ARCHIVE.test(name)).map(name => path.posix.dirname(name));
+    return [...receipts].filter(([name]) => manifests.includes(name) || packages.BASELINE.test(name) ||
+      dirs.some(dir => {
+        const relative = path.posix.relative(dir, name);
+        return !relative.startsWith('../') && packages.resource(relative);
+      }));
+  }
+  function verifyPlugin(item) {
+    guard();
+    if (!matches(item.path)) return false;
+    return (cards.get(item.relative)?.dependencies || []).every(name => {
+      const stat = stable(history.root, name);
+      return stat && versions.same(receipts.get(name), versions.stamp(stat));
+    });
+  }
+  async function readPlugin(item) {
+    guard();
+    if (!packages.candidate(item.relative) || !verifyPlugin(item) || byPath.get(item.path)?.metadata.artifactId !== item.artifactId)
+      throw Error('插件成果已改变');
+    return require('../app-resource-cache.cjs').request({ action: 'read-history-package', root: history.root,
+      relative: item.relative, receipts: packageReceipts([item]), skillRuntimeEntry: require('./skill-frontmatter').runtimeEntry(undefined, true) });
+  }
+  return { verify(target, stat) { guard(); return matches(target, stat); }, snapshot, snapshotAsync, readSkill, readPlugin, verifyPlugin, authorize };
 }
 
 module.exports = { capture, view };

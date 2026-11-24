@@ -104,6 +104,50 @@ test('invalid archives cannot become importable skills', () => {
     zip({ '../outside': 'x', 'SKILL.md': source['SKILL.md'] }, ''),
     zip({ 'story/SKILL.md': source['SKILL.md'], 'outside.txt': 'x' }, '')]) assert.throws(() => packages.read(bytes));
 });
+test('the draft IPC reads only the checked native skill in the current passive history view', async t => {
+  const f = fixture(t), bytes = zip(), digest = hash(bytes);
+  const file = { artifactId: 'archive:one', path: f.write('output.skill', bytes), relative: 'output.skill',
+    pluginDraft: true, skillPackage: true, pluginManifestDigest: digest, pluginValidation: { state: 'ready' }, at: 42 };
+  let permitted = true, revision = digest, reads = 0;
+  const history = {
+    async snapshotAsync() { return { items: [file], got: { files: [] } }; },
+    readSkill(item) { assert.equal(item, file); reads++; return { bytes, revision }; },
+    verify(target) { return target === file.path; },
+    async authorize() { if (!permitted) throw Error('History owner changed'); },
+  };
+  const handle = { sessionId: 'history', historyPreview: true, historyArtifacts: history };
+  const channels = new Map();
+  drafts.installIpc({ handle: (key, fn) => channels.set(key, fn) }, { get: ref => ref === 'view' ? handle : null });
+  const ipc = channels.get('pi-session-plugin-draft');
+  const senderFrame = { url: require('node:url').pathToFileURL(path.join(__dirname, '..', 'index.html')).href };
+  const open = target => ipc({ senderFrame }, 'view', target);
+  assert.equal((await ipc({ senderFrame: { url: 'https://example.org/' } }, 'view', file.artifactId)).ok, false);
+  assert.equal((await open(file.path)).ok, false);
+  assert.equal((await open('archive:foreign')).ok, false);
+  file.pluginSuperseded = true;
+  assert.equal((await open(file.artifactId)).ok, false);
+  file.pluginSuperseded = false;
+  file.pluginValidation.state = 'invalid';
+  assert.equal((await open(file.artifactId)).ok, false);
+  file.pluginValidation.state = 'ready';
+  file.relative = 'soduwork-plugin-draft.json';
+  assert.equal((await open(file.artifactId)).ok, false);
+  file.relative = 'output.skill';
+  assert.equal(reads, 0);
+  const restored = await open(file.artifactId);
+  assert.equal(restored.kind, 'skill', restored.reason);
+  assert.deepEqual(Buffer.from(restored.skillPackage.base64, 'base64'), bytes);
+  assert.deepEqual(restored.source, { sessionId: 'history', relative: 'output.skill', at: 42 });
+  revision = 'different';
+  assert.equal((await open(file.artifactId)).ok, false);
+  revision = digest;
+  permitted = false;
+  assert.equal((await open(file.artifactId)).ok, false);
+  delete handle.historyArtifacts;
+  handle.cwd = f.cwd;
+  handle.outputSnapshot = f.session.outputSnapshot;
+  assert.equal((await open(shown(f.session)[0].artifactId)).ok, false);
+});
 test('new skill revisions supersede old wrappers without conflating unrelated plugins', t => {
   const f = fixture(t), oldFile = f.write('v1/' + candidates.DRAFT_NAME, JSON.stringify(legacyBody()));
   fs.utimesSync(oldFile, new Date(1000000000000), new Date(1000000000000));

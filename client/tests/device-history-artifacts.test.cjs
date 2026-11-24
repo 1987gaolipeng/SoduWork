@@ -107,6 +107,41 @@ test('explicit workspaces require a matching local change receipt or a retained 
   assert.equal(project.view(f.cwd, updated, () => {}).snapshot().items.length, 1);
 });
 
+test('legacy receipts restore only the current verified skill revision as an installable card', async t => {
+  const f = fixture(t);
+  const bytes = require('../main/conversation/zip-archive').createEntriesSync([{ name: 'SKILL.md',
+    bytes: Buffer.from('---\nname: history-example\ndescription: Local test skill\n---\n# Example\n') }]);
+  const files = [];
+  for (const [relative, content] of [['v1/demo.skill', bytes], ['v2/demo.skill', bytes],
+    ['delivery/portable.zip', bytes], ['delivery/invalid.skill', Buffer.from('invalid')]]) {
+    const target = f.write(relative, content);
+    fs.utimesSync(target, 1000 + files.length, 1000 + files.length);
+    files.push({ path: relative, action: 'created', after: { path: relative, exists: true, size: content.length,
+      hash: crypto.createHash('sha256').update(content).digest('hex') } });
+  }
+  f.write('unrelated.skill', bytes);
+  const saved = await project.capture({ ...f, journal: { cwd: f.cwd, turnId: 'finished', files } });
+  assert.ok(saved.items.every(record => !record.metadata.pluginDraft));
+  const view = project.view(f.cwd, saved, () => {});
+  const results = runtime.decorate('preview', await view.snapshotAsync());
+  const current = results.find(item => item.relative === 'v2/demo.skill');
+  assert.equal(current.pluginName, 'history-example');
+  assert.equal(current.pluginInstallable, true);
+  assert.equal(current.pluginIdentity, 'skill:history-example');
+  assert.equal(results.find(item => item.relative === 'v1/demo.skill').pluginSuperseded, true);
+  assert.equal(results.find(item => item.relative.endsWith('.zip')).pluginDraft, undefined);
+  assert.equal(results.find(item => item.relative.endsWith('invalid.skill')).pluginValidation.state, 'invalid');
+  assert.equal(results.some(item => item.relative === 'unrelated.skill'), false);
+  const resumed = { cwd: f.cwd, sessionId: 'resumed', outputSnapshot: () => ({ files: [] }),
+    artifactHistory: require('../main/conversation/runtime-artifacts.cjs').forContinuation(f.cwd, saved) };
+  const active = (await runtime.snapshotAsync(resumed)).items.filter(item => item.path === path.join(f.cwd, current.relative));
+  assert.equal(active.length, 1);
+  assert.equal(active[0].artifactId, current.artifactId);
+  assert.equal(active[0].pluginValidation?.state, 'ready');
+  f.write('v2/demo.skill', bytes);
+  assert.ok(!(await view.snapshotAsync()).items.some(item => item.relative === 'v2/demo.skill'));
+});
+
 test('SQLite history opened by a second local account keeps verified outputs after native cleanup', async t => {
   let history;
   const f = fixture(t, () => history?.close()), app = { getPath: () => f.workRoot }, { identity } = require('./helpers/platform-session-fixture.cjs');
@@ -147,4 +182,27 @@ test('SQLite history opened by a second local account keeps verified outputs aft
   await store.saveDeviceHistory(row.id, { snapshot: saved.snapshot, coverage: saved.coverage, historyProtection: 'account' },
     { expectedRevision: latest.replicaRevision });
   await assert.rejects(runtime.snapshotAsync(next), /版本|归属/);
+});
+
+test('an older file inventory can add a package and its private resource receipts from the original journal', async t => {
+  const f = fixture(t);
+  const archive = 'export/example.soduwork-plugin', script = 'author/scripts/check.py';
+  const files = [archive, script, 'report.md'].map(relative => {
+    const bytes = Buffer.from('Synthetic fixture');
+    f.write(relative, bytes);
+    return { path: relative, action: 'created', after: { exists: true, path: relative, size: bytes.length,
+      hash: crypto.createHash('sha256').update(bytes).digest('hex') } };
+  });
+  const journal = { cwd: f.cwd, turnId: 'done', files };
+  const old = await project.capture({ ...f, journal: { ...journal, files: files.slice(2) } });
+  delete old.packageRecordedUntil;
+  delete old.packageTurnId;
+  const unchanged = await project.capture({ ...f, previous: old });
+  assert.deepEqual(unchanged.items.map(row => row.metadata.relative), ['report.md']);
+  const updated = await project.capture({ ...f, previous: unchanged, journal });
+  assert.ok(updated.items.some(row => row.metadata.relative === archive));
+  assert.ok(updated.resources.some(row => row.metadata.relative === script));
+  const reader = project.view(f.cwd, updated, () => {});
+  assert.equal(reader.verify(path.join(f.cwd, script)), false);
+  assert.equal(reader.snapshot().items.some(item => item.relative === script), false);
 });

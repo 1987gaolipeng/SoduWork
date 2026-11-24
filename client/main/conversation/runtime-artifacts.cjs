@@ -21,7 +21,7 @@ function target(root, relative) {
   return path.relative(candidate, realpath(candidate)) === '' ? candidate : '';
 }
 
-function capture(cwd, snapshot, source) {
+function capture(cwd, snapshot, source, recordedPackages) {
   const root = realpath(cwd);
   const items = [];
   for (const file of snapshot?.items || []) {
@@ -43,7 +43,7 @@ function capture(cwd, snapshot, source) {
       // Deleted or replaced results remain missing; switching never recreates them.
     }
   }
-  return { version: 1, root, items };
+  return { version: 1, root, items, ...(recordedPackages?.root === root ? { recordedPackages } : {}) };
 }
 
 function restore(cwd, history, current = []) {
@@ -74,13 +74,83 @@ function forContinuation(cwd, recovered, previous) {
   if (!recovered && !previous) return undefined;
   const files = restore(cwd, recovered);
   files.push(...restore(cwd, previous, files));
-  if (!files.length) return undefined;
   try {
-    return capture(cwd, { items: files });
+    const root = realpath(cwd);
+    const packages = require('./device-history-plugins.cjs');
+    const entries = new Map();
+    for (const input of [previous?.recordedPackages, recovered]) {
+      if (input?.root !== root || !Array.isArray(input.resources)) continue;
+      for (const row of [...input.items, ...input.resources]) {
+        const name = row.metadata?.relative;
+        if (!name || !(packages.candidate(name) || packages.resource(name) || packages.BASELINE.test(name))) continue;
+        const older = entries.get(name);
+        if (!older || same(older.stamp, row.stamp) || restore(cwd, { version: 1, root, items: [row] }).length)
+          entries.set(name, row);
+      }
+    }
+    const items = [...entries.values()].filter(row => packages.candidate(row.metadata.relative));
+    if (!files.length && !items.length) return undefined;
+    const turnId = recovered?.packageTurnId || previous?.recordedPackages?.packageTurnId;
+    const recordedPackages = items.length ? { version: 1, root, items, packageTurnId: turnId, turnId,
+      resources: [...entries.values()].filter(row => !packages.candidate(row.metadata.relative)) } : undefined;
+    return capture(cwd, { items: files }, undefined, recordedPackages);
   } catch (error) {
     if (['ENOENT', 'ENOTDIR', 'ELOOP'].includes(error.code)) return undefined;
     throw error;
   }
 }
 
-module.exports = { capture, restore, forContinuation, stamp, same };
+// A continued device chat keeps its original package authority even if the
+// native segment sees the same paths in a later filesystem inventory.
+const continued = new WeakMap();
+
+function continuedPlugins(handle) {
+  const base = handle?.artifactHistory?.recordedPackages;
+  if (!base) return null;
+  const cwd = handle.cwd, owner = handle.deliveryOwner, id = handle.sessionId;
+  const cached = continued.get(handle);
+  if (cached?.current()) return cached;
+  const current = () => handle.cwd === cwd && handle.sessionId === id &&
+    handle.deliveryOwner === owner && handle.artifactHistory?.recordedPackages === base;
+  const guard = () => {
+    if (!current()) throw Error('会话成果来源已变化，请刷新后重试');
+  };
+  const history = require('./device-history-artifacts.cjs');
+  const packages = require('./device-history-plugins.cjs');
+  const names = new Set(base.items.map(row => row.metadata.relative).filter(packages.candidate));
+  const paths = [...names].map(name => path.resolve(cwd, name));
+  const folders = [...new Set([...names].map(name => path.posix.dirname(name)))];
+  const processed = new Set([base.packageTurnId].filter(Boolean));
+  let pending = Promise.resolve();
+  const state = { current, paths, receipt: base, view: history.view(cwd, base, guard),
+    refresh(journal) {
+      if (!journal?.turnId || journal.truncated || !Array.isArray(journal.files) || processed.has(journal.turnId)) return pending;
+      // A completed, content-matching turn can update the draft or a resource
+      // in place. Filesystem timestamps alone cannot authorize a replacement.
+      const files = journal.files.filter(row => {
+        const name = row.path;
+        if (typeof name !== 'string') return false;
+        if (packages.candidate(name)) return names.has(name);
+        return packages.BASELINE.test(name) || packages.resource(name) &&
+          folders.some(folder => folder === '.' || name.startsWith(folder + '/'));
+      });
+      if (!files.length) return pending;
+      processed.add(journal.turnId);
+      const update = pending.then(async () => {
+        guard();
+        const receipt = await history.capture({ row: { id, adapterId: handle.adapterId, cwd },
+          previous: state.receipt, journal: { ...journal, files } });
+        guard();
+        if (receipt) {
+          state.receipt = receipt;
+          state.view = history.view(cwd, receipt, guard);
+        }
+      });
+      pending = update.catch(() => { processed.delete(journal.turnId); });
+      return update;
+    } };
+  continued.set(handle, state);
+  return state;
+}
+
+module.exports = { capture, restore, forContinuation, continuedPlugins, stamp, same };
