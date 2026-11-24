@@ -345,20 +345,21 @@ async def delete(session: AsyncSession, client, rid: str, revision: int | None =
 
 async def archive(session: AsyncSession, client, rid: str, archived: bool = True) -> dict:
     row = await get(session, client, rid)
-    expected = row.revision
-    # CAS update: a concurrent archive/restore bumps revision, so the stale write
-    # matches zero rows and returns 409 instead of silently overwriting it.
-    result = await session.execute(
+    updated = await session.scalar(
         update(MemoryRecord)
-        .where(MemoryRecord.id == rid, MemoryRecord.revision == expected)
+        .where(MemoryRecord.id == row.id, MemoryRecord.owner_user_id == row.owner_user_id,
+               MemoryRecord.org_id == row.org_id, MemoryRecord.scope == row.scope,
+               MemoryRecord.revision == row.revision)
         .values(archived=bool(archived), revision=MemoryRecord.revision + 1,
-                updated_at=datetime.now(timezone.utc)))
-    if result.rowcount == 0:
+                updated_at=datetime.now(timezone.utc))
+        .returning(MemoryRecord).execution_options(populate_existing=True))
+    if updated is None:
         await session.rollback()
-        raise HTTPException(409, "这条记忆刚被其他请求修改，请刷新后重试")
+        raise HTTPException(409, "请刷新后重试")
+    # A later restore can commit before this request sends its response.
+    item = view(updated, True)
     await session.commit()
-    await session.refresh(row)
-    return {"ok": True, "item": view(row, True)}
+    return {"ok": True, "item": item}
 
 
 async def context(session: AsyncSession, client, scopes: list[dict] | None = None, ids: list[str] | None = None) -> dict:
