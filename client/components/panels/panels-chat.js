@@ -759,6 +759,7 @@
       _sessionInputs = _sessionOptions.attachments || [];
     }
     _pendingAttachmentNames = _sessionInputs.map((item) => item && (item.name || item.filename)).filter(Boolean);
+    if (cachedSnapshot && !_ref) _snap = cachedSnapshot;
     if (first) _clearConversationDraft(_draftKey);
     _mount();
     if (!first) _restoreConversationDraft(_draftKey);
@@ -766,7 +767,6 @@
     if (global.WorkIntent) WorkIntent.showGoal(_mount(), _sessionOptions, 'nchat');
     _mount();
     if (cachedSnapshot) {
-      _snap = cachedSnapshot;
       if (launchOptions.chatTitle && global.ChatChrome) ChatChrome.resume(launchOptions.chatTitle);
       _render();
     } else if (_snap) _render();                 // Render restored messages immediately instead of flashing an empty conversation.

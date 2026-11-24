@@ -30,6 +30,10 @@ async function mapLimit(items, visit) {
 async function readSummary(file, stat, project, wanted = '') {
   let header, firstMessage = '', name, count = 0, activity, workOwner, initialized = false, movedCwd = '';
   const bindings = [];
+  // Pi appends branches to one file. Track only the choice inherited by each
+  // entry so a model selected on an abandoned branch cannot win on reopen.
+  const branchModels = new Map();
+  let model;
   const turn = require('./history-state').archiveTurn();
   const usedHarnesses = new Set();
   const input = fs.createReadStream(file, { encoding: 'utf8', ...(wanted ? { highWaterMark: 8192 } : {}) });
@@ -46,6 +50,15 @@ async function readSummary(file, stat, project, wanted = '') {
         continue;
       }
       turn.observe(entry);
+      if (Object.hasOwn(entry, 'parentId')) model = branchModels.get(entry.parentId);
+      if (entry.type === 'custom' && entry.customType === 'soduwork.model.selection')
+        model = { ...model, choice: typeof entry.data?.name === 'string' ? entry.data.name : '' };
+      if (entry.type === 'model_change' && typeof entry.modelId === 'string' && entry.modelId)
+        model = { ...model, observed: entry.localOnly && !entry.modelId.startsWith('local:') ? '' : entry.modelId };
+      if (entry.type === 'message' && entry.message?.role === 'assistant' &&
+          typeof entry.message.model === 'string' && entry.message.model && entry.message.model !== 'task-executor')
+        model = { ...model, observed: entry.message.usageLocalOnly && !entry.message.model.startsWith('local:') ? '' : entry.message.model };
+      if (entry.id && model) branchModels.set(entry.id, model);
       if (entry.type === 'session_info') name = typeof entry.name === 'string' ? entry.name.trim() : '';
       if (entry.type === 'custom' && entry.customType === 'soduwork.work-entry' && entry.data?.version === 1 &&
           typeof entry.data.owner === 'string') workOwner = entry.data.owner;
@@ -80,7 +93,7 @@ async function readSummary(file, stat, project, wanted = '') {
   if (!header) return null;
   const headerTime = Date.parse(header.timestamp);
   return project({
-    id: header.id, path: file,
+    id: header.id, path: file, modelName: model?.choice || model?.observed || '',
     cwd: movedCwd || (typeof header.cwd === 'string' ? header.cwd : ''),
     name, firstMessage: firstMessage || '(no messages)', messageCount: count, usedHarnesses: [...usedHarnesses],
     archivedTurnState: turn.state(),
