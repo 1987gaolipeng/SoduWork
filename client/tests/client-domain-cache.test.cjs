@@ -119,6 +119,49 @@ test('model metadata is shared only under its confirmed topic and invalidation r
   model = 'second'; await f.cache.invalidate('models', f.scope());
   assert.equal((await read()).usable[0].name, 'second');
 });
+test('model broadcasts supersede an in-flight HTTP read and serve every window until the connection changes', async t => {
+  const discovery = require('../main/native-discovery.cjs').create();
+  let current = identity(), reads = 0, release;
+  const directory = name => ({ providers: [], usable: name ? [{ name }] : [] });
+  const cache = create({ identityOf: async () => current, discovery,
+    fetch: async () => {
+      if (++reads === 1) await new Promise(resolve => { release = resolve; });
+      return Response.json(directory('HTTP fallback'));
+    } });
+  const frames = [];
+  const connect = () => discovery.attach({ readyState: 1, send: raw => frames.push(JSON.parse(raw)) }, current, async () => current);
+  const ready = async socket => {
+    socket.message({ type: 'ready' }); await settle();
+    assert.equal(frames.at(-1).modelCatalog, 'snapshot-v1');
+    socket.message({ type: 'native-discovery-ready', protocol: 2, topics: ['models'], modelCatalog: 'snapshot-v1' }); await settle();
+  };
+  const read = () => cache.read('models', actor(current));
+  const old = connect();
+  t.after(() => { old.close(); cache.close(); });
+  const pending = read(); await settle();
+  await ready(old);
+  old.message({ type: 'model-catalog', catalog: directory('Pushed') }); await settle();
+  release();
+  assert.deepEqual(await pending, directory('Pushed'));
+  const copies = await Promise.all(Array.from({ length: 20 }, read));
+  copies[0].usable.length = 0;
+  assert.deepEqual(await read(), directory('Pushed'));
+  old.message({ type: 'model-catalog', catalog: directory('') }); await settle();
+  assert.deepEqual(await read(), directory(''));
+  assert.equal(reads, 1);
+
+  old.close(); current = identity('bob');
+  const next = connect(); t.after(() => next.close());
+  old.message({ type: 'model-catalog', catalog: directory('Old owner') });
+  assert.deepEqual(await read(), directory('HTTP fallback'));
+  await ready(next);
+  const connecting = read(); await settle();
+  assert.equal(reads, 2);
+  next.message({ type: 'model-catalog', catalog: directory('Reconnected') }); await settle();
+  assert.deepEqual(await connecting, directory('Reconnected'));
+  assert.equal(reads, 2);
+});
+
 test('configuration keeps its exact shape and personal caches cannot cross devices', async t => {
   const f = fixture(t, async () => ({theme: 'dark', dockVisible: false}));
   f.confirm(true);

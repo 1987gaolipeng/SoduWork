@@ -51,10 +51,13 @@ function payload(model, params) {
 }
 async function soleModel(identity, fetchImpl, signal) {
   const local = require('./local-model-store.cjs').get();
-  const response = await require('./device-auth-request').fetchWithDeviceAuthRetry(identity,
-    String(identity.hub).replace(/\/+$/, '') + '/api/v1/my-models', { signal, redirect: 'error' }, fetchImpl);
-  if (!response.ok) { await response.body?.cancel(); return ''; }
-  const managed = await boundedJSON(response);
+  let managed = require('./native-discovery.cjs').modelCatalog(identity);
+  if (!managed) {
+    const response = await require('./device-auth-request').fetchWithDeviceAuthRetry(identity,
+      String(identity.hub).replace(/\/+$/, '') + '/api/v1/my-models', { signal, redirect: 'error' }, fetchImpl);
+    if (!response.ok) { await response.body?.cancel(); return ''; }
+    managed = await boundedJSON(response);
+  }
   const usable = row => row && row.available !== false && row.unavailable !== true &&
     !['image', 'video'].includes(row.modality) && String(row.name || '').trim() &&
     !/^(?:unavailable:|local:unavailable$)/.test(String(row.name));

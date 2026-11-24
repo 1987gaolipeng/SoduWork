@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from app import models
-from app.api import personal_schedules, ws as websocket_api
+from app.api import personal_models, personal_schedules, ws as websocket_api
 from app.db import Base, get_session
 from app.realtime import Hub
 from app.services import automation_inbox_events, device_auth, native_discovery
@@ -109,6 +109,7 @@ class ClientPushCompatibilityTests(unittest.TestCase):
             async with self.engine.begin() as connection:
                 await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=[
                     models.User.__table__, models.Client.__table__, models.AppSetting.__table__,
+                    models.ModelProvider.__table__, models.ModelDef.__table__,
                     models.ClientRelease.__table__, models.AiSchedule.__table__, models.AiScheduleRun.__table__]))
             automation_inbox_events.start()
             try:
@@ -133,6 +134,7 @@ class ClientPushCompatibilityTests(unittest.TestCase):
 
         self.app = FastAPI(lifespan=lifespan)
         self.app.include_router(personal_schedules.router, prefix="/api/v1")
+        self.app.include_router(personal_models.router, prefix="/api/v1")
         self.app.include_router(websocket_api.router)
 
         async def isolated_session():
@@ -194,6 +196,62 @@ class ClientPushCompatibilityTests(unittest.TestCase):
         # Exercise the scheduler's real transaction path on the same ASGI loop;
         # no execution substrate or model call is needed to prepare an inbox row.
         self.http.portal.call(transaction)
+
+    def test_model_catalog_subscription_delivers_scoped_snapshots_and_repairs_reconnects(self):
+        from app.services import client_domain_events
+
+        def subscribe(device):
+            socket = self.socket(device)
+            socket.send_json({"t": "native-discovery", "protocol": 2, "topics": ["models"],
+                              "modelCatalog": "snapshot-v1"})
+            self.assertEqual(self.receive(socket)["topics"], ["models"])
+            return socket
+
+        def catalog(socket):
+            frame = self.receive(socket)
+            self.assertEqual(frame["type"], "model-catalog")
+            self.assertNotIn("fixture-private-key", json.dumps(frame))
+            return frame["catalog"]
+
+        pc, bob, legacy = subscribe("compat-pc"), subscribe("compat-bob"), self.socket("compat-phone")
+        self.assertEqual(catalog(pc)["usable"], [])
+        self.assertEqual(catalog(bob)["usable"], [])
+
+        async def shared_edit(enabled):
+            async with self.sessions() as db:
+                row = await db.get(models.ModelDef, "shared")
+                if row is None:
+                    db.add(models.ModelProvider(id="shared", name="Shared", base_url="https://fixture.invalid",
+                                                api_key="fixture-private-key"))
+                    db.add(models.ModelDef(id="shared", provider_id="shared", name="Shared"))
+                else:
+                    row.enabled = enabled
+                await db.commit()
+                await client_domain_events.models_changed(db)
+            await client_domain_events.flush_for_test(self.sessions)
+
+        self.http.portal.call(shared_edit, True)
+        shared = catalog(pc)
+        for snapshot in (shared, catalog(bob)):
+            self.assertEqual([m["name"] for m in snapshot["usable"]], ["Shared"])
+        self.assertEqual(self.receive(legacy), {"type": "native-discovery", "topic": "models"})
+
+        changed = self.http.put("/api/v1/my-models", headers=self.headers(), json={
+            "expectedRevision": shared["revision"],
+            "providers": [{"id": "custom-private", "name": "Personal", "baseUrl": "https://private.invalid"}],
+            "models": [{"providerId": "custom-private", "name": "Only on this device"}],
+            "keys": {"custom-private": "fixture-private-key"}})
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.http.portal.call(client_domain_events.flush_for_test, self.sessions)
+        private = catalog(pc)
+        self.assertIn("Only on this device", [m["name"] for m in private["usable"]])
+        self.assertEqual(private, self.http.get("/api/v1/my-models", headers=self.headers()).json())
+        self.quiet(bob)
+        self.quiet(legacy)
+        pc.close()
+        self.http.portal.call(shared_edit, False)
+        self.assertEqual(catalog(bob)["usable"], [])
+        self.assertEqual([m["name"] for m in catalog(subscribe("compat-pc"))["usable"]], ["Only on this device"])
 
     def test_legacy_v1_ack_and_inbox_http_shape_are_unchanged(self):
         socket = self.socket()

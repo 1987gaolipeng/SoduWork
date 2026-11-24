@@ -12,7 +12,8 @@ function scopeOf(identity) {
 }
 
 // Uses the authenticated account-sync socket, never a renderer event or another
-// connection. Messages only wake discovery; HTTP admission remains authoritative.
+// connection. Model metadata can be delivered on this socket. Execution
+// authorization and short-lived tickets still come from the Hub at admission.
 function create({ now = Date.now, setTimeout: later = setTimeout, clearTimeout: cancel = clearTimeout } = {}) {
   const consumers = new Map();
   let connection = null;
@@ -23,6 +24,7 @@ function create({ now = Date.now, setTimeout: later = setTimeout, clearTimeout: 
     return () => { consumers.delete(entry); };
   }
   function detach(entry) {
+    entry?.finishCatalogWait?.();
     if (entry?.timer) cancel(entry.timer);
     if (entry?.ackTimer) cancel(entry.ackTimer);
     if (entry?.extendedAckTimer) cancel(entry.extendedAckTimer);
@@ -64,13 +66,15 @@ function create({ now = Date.now, setTimeout: later = setTimeout, clearTimeout: 
       if (extended.length) {
         // Keep the original v1 frame intact: old Hubs reject unknown topics.
         entry.requestedTopics = new Set(extended);
-        entry.socket.send(JSON.stringify({ t: 'native-discovery', protocol: 2, topics: extended }));
+        entry.socket.send(JSON.stringify({ t: 'native-discovery', protocol: 2, topics: extended,
+          ...(extended.includes('models') ? { modelCatalog: 'snapshot-v1', needsModelCatalog: !entry.catalog } : {}) }));
         if (entry.extendedAckTimer) cancel(entry.extendedAckTimer);
         entry.extendedAckTimer = later(() => {
           entry.extendedAckTimer = null;
           if (entry !== connection) return;
           const previous = entry.extendedConfirmed;
           entry.extendedConfirmed = new Map();
+          entry.catalog = null;
           for (const item of consumers.values()) if (previous.has(item.topic)) item.wake();
         }, 5000);
         entry.extendedAckTimer?.unref?.();
@@ -79,6 +83,7 @@ function create({ now = Date.now, setTimeout: later = setTimeout, clearTimeout: 
       entry.confirmedAt = 0;
       const previous = entry.extendedConfirmed;
       entry.extendedConfirmed = new Map();
+      entry.catalog = null;
       for (const item of consumers.values()) if (previous.has(item.topic)) item.wake();
     }
     finally {
@@ -94,13 +99,15 @@ function create({ now = Date.now, setTimeout: later = setTimeout, clearTimeout: 
     detach(connection);
     const entry = { socket, scope: scopeOf(identity), identityOf, ready: false, confirmedAt: 0,
       timer: null, ackTimer: null, extendedAckTimer: null, busy: false,
-      requestedTopics: new Set(), extendedConfirmed: new Map() };
+      requestedTopics: new Set(), extendedConfirmed: new Map(), catalog: null, catalogGeneration: 0,
+      supportsCatalog: null, catalogWaitUntil: 0, catalogWait: null, finishCatalogWait: null };
     connection = entry;
     return {
       message(value) {
         if (entry !== connection) return;
         if (value?.type === 'ready') {
           entry.ready = true;
+          entry.catalogWaitUntil = now() + 1500;
           // Reconcile the gap before this authenticated connection was ready.
           for (const item of consumers.values()) if (EXTENDED_TOPICS.has(item.topic)) item.wake();
           // Old Hubs ignore this frame, so a confirmation is required before
@@ -121,9 +128,22 @@ function create({ now = Date.now, setTimeout: later = setTimeout, clearTimeout: 
             const previous = entry.extendedConfirmed;
             entry.extendedConfirmed = new Map(value.topics.filter(topic => entry.requestedTopics.has(topic))
               .map(topic => [topic, now()]));
+            entry.supportsCatalog = entry.extendedConfirmed.has('models') && value.modelCatalog === 'snapshot-v1';
+            if (!entry.supportsCatalog) { entry.catalog = null; entry.finishCatalogWait?.(); }
             for (const item of consumers.values()) {
               if (previous.has(item.topic) !== entry.extendedConfirmed.has(item.topic)) item.wake();
             }
+          });
+        } else if (value?.type === 'model-catalog' ||
+            value?.type === 'native-discovery' && value.topic === 'models') {
+          if (!entry.ready || !entry.requestedTopics.has('models')) return;
+          const generation = ++entry.catalogGeneration;
+          void current(entry).then(ok => {
+            if (!ok || generation !== entry.catalogGeneration) return;
+            const catalog = value.type === 'model-catalog' ? value.catalog : null;
+            entry.catalog = entry.supportsCatalog && Array.isArray(catalog?.providers) && Array.isArray(catalog?.usable) ? catalog : null;
+            entry.finishCatalogWait?.();
+            for (const item of consumers.values()) if (item.topic === 'models') item.wake(value);
           });
         } else if (value?.type === 'native-discovery' &&
             (LEGACY_TOPICS.has(value.topic) || EXTENDED_TOPICS.has(value.topic))) {
@@ -139,6 +159,30 @@ function create({ now = Date.now, setTimeout: later = setTimeout, clearTimeout: 
   }
   return {
     register, attach,
+    async waitForModelCatalog(identity) {
+      const entry = connection;
+      if (!entry?.ready || entry.catalog || entry.supportsCatalog === false ||
+          entry.catalogWaitUntil <= now() || entry.scope !== scopeOf(identity)) return;
+      if (!entry.catalogWait) entry.catalogWait = new Promise(resolve => {
+        const timer = later(() => entry.finishCatalogWait?.(), entry.catalogWaitUntil - now());
+        entry.finishCatalogWait = () => {
+          cancel(timer); entry.finishCatalogWait = null; entry.catalogWaitUntil = 0;
+          entry.catalogWait = null; resolve();
+        };
+      });
+      await entry.catalogWait;
+    },
+    modelCatalog(identity) {
+      return connection?.catalog && connection.scope === scopeOf(identity) && connection.socket.readyState === 1 &&
+        connection.extendedConfirmed.has('models') && now() - connection.extendedConfirmed.get('models') < 25000
+        ? connection.catalog : null;
+    },
+    invalidateModelCatalog(identity) {
+      if (connection?.scope === scopeOf(identity)) {
+        connection.catalog = null;
+        connection.catalogGeneration++;
+      }
+    },
     confirmed(identity, topic) {
       if (EXTENDED_TOPICS.has(topic)) {
         const at = connection?.extendedConfirmed.get(topic);

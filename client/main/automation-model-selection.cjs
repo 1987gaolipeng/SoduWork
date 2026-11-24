@@ -27,7 +27,7 @@ function createSelector({ localCatalog, request }) {
 
     // A successful, account-scoped catalog read is required before treating a
     // named Hub selection as deleted. Offline/auth failures must not switch it.
-    const managed = await request(identity, '/my-models');
+    const managed = require('./native-discovery.cjs').modelCatalog(identity) || await request(identity, '/my-models');
     if (managed?.ok === false || !Array.isArray(managed?.usable)) throw Error('模型目录暂时无法读取，请刷新后重试');
     const publicRow = row => available(row) && row.localOnly !== true &&
       !String(row.providerId || '').startsWith('device:') &&
