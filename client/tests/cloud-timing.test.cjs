@@ -22,3 +22,12 @@ test('remote turn boundaries distinguish resumed rounds on the same execution', 
   assert.notEqual(project({ref:'run',round:1,started:start/1000}).timingTurn,
     project({ref:'run',round:2,started:(start+1000)/1000}).timingTurn);
 });
+test('queued cloud turns do not reuse a previous start or completion as execution time', () => {
+  const page = { ref: 'run', round: 2, status: 'queued',
+    startedAt: new Date(start).toISOString(), finishedAt: new Date(start + 85000).toISOString() };
+  const queued = project(page, start + 86400000);
+  assert.equal(queued.elapsedMs, null);
+  assert.equal(queued.startedAt, 0);
+  assert.equal(queued.completedAt, 0);
+  assert.notEqual(queued.timingTurn, project({ ...page, status: 'running' }, start + 86400000).timingTurn);
+});
