@@ -133,7 +133,8 @@ function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.
         let selection = await resolveModel(identity, requestedModel, 8000, fetchImpl,
           false, 'pi', { app, allowLocal: true });
         await current();
-        if (!explicitModel && !selection?.ok && selection?.code !== 'LOCAL_AGENT_DEFAULT_UNAVAILABLE' && !controller.signal.aborted) {
+        if (!explicitModel && !selection?.ok && !selection?.providerPinned &&
+            selection?.code !== 'LOCAL_AGENT_DEFAULT_UNAVAILABLE' && !controller.signal.aborted) {
           const single = await soleModel(identity, fetchImpl, controller.signal);
           await current();
           if (single) {

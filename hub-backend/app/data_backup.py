@@ -23,6 +23,20 @@ class BackupError(RuntimeError):
     """Raised when a backup cannot be proven usable."""
 
 
+def manifest_byte_count(value: object, error_type: type[RuntimeError]) -> int:
+    """Read a whole, non-negative byte count, including legacy integer strings."""
+    if isinstance(value, str):
+        try:
+            value = int(value)
+        except ValueError as exc:
+            raise error_type("Invalid backup manifest size") from exc
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if type(value) is not int or value < 0:
+        raise error_type("Invalid backup manifest size")
+    return value
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -190,11 +204,11 @@ def verify_backup(backup_path: str | Path, *, allow_missing_manifest: bool = Fal
     if manifest_path.is_file():
         try:
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, ValueError) as exc:
             raise BackupError(f"Backup manifest cannot be read: {exc}") from exc
         if payload.get("filename") != backup.name:
             raise BackupError("Manifest filename does not match backup")
-        if int(payload.get("size") or -1) != backup.stat().st_size:
+        if manifest_byte_count(payload.get("size"), BackupError) != backup.stat().st_size:
             raise BackupError("Backup size does not match manifest")
         if payload.get("sha256") != _sha256(backup):
             raise BackupError("Backup checksum does not match manifest")

@@ -300,7 +300,7 @@ async def decorate(session, client, task, api, *, context=None, prepared=None, e
     # Formal reviews may wait while the execution Task still has status=doing.
     # Carry the personal decision capability in the same snapshot as its stage.
     pending_review = False
-    if execution and api.get("requirementStage") == "reviewing":
+    if api.get("requirementStage") == "reviewing":
         from . import requirement_review_access
         reviewable = prepared.reviewable if prepared is not None else None
         if reviewable is None:
@@ -535,8 +535,7 @@ async def prepare_notifications(session, task, clients):
         for tid, data in repository_facts.items()
     }
     from . import requirement_review_access
-    creator = str(getattr(task, "created_by", "") or "")
-    reviewable = await requirement_review_access.pending_task_ids(session, creator, [task.id])
+    reviewable = await requirement_review_access.pending_assignments(session, [task.id])
     scopes, prepared = {}, {}
     for client in clients:
         user = users.get(client.user_ref)
@@ -550,5 +549,5 @@ async def prepare_notifications(session, task, clients):
         }
         prepared[client.id] = _ListRead(
             user, scopes[key], {task.id: list(grants.get(principal, []))}, repository_issues,
-            reviewable if client.user_ref == creator else set())
+            {task.id} if (task.id, client.user_ref) in reviewable else set())
     return prepared

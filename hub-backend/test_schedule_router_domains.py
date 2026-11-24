@@ -9,6 +9,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 import httpx
 from fastapi import FastAPI, HTTPException
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import models
@@ -127,6 +128,51 @@ class ScheduleRouterDomainTests(unittest.IsolatedAsyncioTestCase):
             result = await self.request("GET", "/ai-schedules/own/runs")
         self.assertEqual(result.status_code, 404, result.text)
         denied.assert_awaited_once()
+
+    async def test_run_history_reads_preserve_receipts_without_committing(self):
+        async with self.sessions() as session:
+            client = await session.get(models.Client, "device")
+            session.add(models.AiSchedule(id="personal", title="Personal", owner_client_id="device"))
+            await session.flush()
+            for sid in ("own", "personal"):
+                session.add(models.AiScheduleRun(id=sid, schedule_id=sid, owner_client_id="device",
+                                                 task_id="legacy-task", state="running"))
+            await session.commit()
+        self.app.dependency_overrides[current_client] = lambda: client
+        headers = {"Authorization": "Bearer " + sign_token("manager", 1)}
+        commits = []
+        event.listen(self.engine.sync_engine, "commit", commits.append)
+        for path, sid in (("/api/v1/admin/ai-schedules/own/runs", "own"),
+                          ("/api/v1/schedules/personal/runs", "personal")):
+            with self.subTest(path=path):
+                commits.clear()
+                for _ in range(2):
+                    response = await self.http.get(path, headers=headers)
+                    self.assertEqual(response.status_code, 200, response.text)
+                    self.assertEqual([(row["id"], row["state"]) for row in response.json()["items"]],
+                                     [(sid, "running")])
+                async with self.sessions() as session:
+                    run = await session.get(models.AiScheduleRun, sid)
+                    self.assertEqual((run.state, run.task_id), ("running", "legacy-task"))
+                self.assertEqual(commits, [])
+
+    async def test_admin_history_limit_matches_the_number_of_returned_runs(self):
+        async with self.sessions() as session:
+            session.add_all([
+                models.AiScheduleRun(id=f"run-{i}", schedule_id="own", state="succeeded")
+                for i in range(201)
+            ])
+            await session.commit()
+        path = "/ai-schedules/own/runs"
+        for params, count in (({}, 20), ({"limit": 1}, 1), ({"limit": 200}, 200)):
+            with self.subTest(params=params):
+                response = await self.request("GET", path, params=params)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(len(response.json()["items"]), count)
+        for limit in (0, 201):
+            with self.subTest(limit=limit):
+                response = await self.request("GET", path, params={"limit": limit})
+                self.assertEqual(response.status_code, 422, response.text)
 
     async def test_personal_router_order_aliases_and_auth(self):
         names = list(route_names(tasks.router.routes))

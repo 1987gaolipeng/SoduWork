@@ -213,6 +213,9 @@ async def _exchange(conf, body, budget, working, *, stream=False, tools=False,
                         raw.extend(chunk)
                     data = parse_json(raw)
                     choice = response_choice(data, allow_truncated=retry_reasoning_budget)
+                    if tools:
+                        # Only the stream parser can supply internal stream evidence.
+                        data = {"choices": [choice]}
                 # A transport may translate cancellation/socket closure into
                 # EOF. Terminal text does not make an expired request succeed.
                 if deadline.expired() or time.monotonic() >= request_deadline:
@@ -227,13 +230,23 @@ async def _exchange(conf, body, budget, working, *, stream=False, tools=False,
                         raise ProbeIssue("response_truncated")
                     retry_reasoning_budget = False
                     continue
-                working["maxTokensField"] = "max_completion_tokens" if "max_completion_tokens" in body else "max_tokens"
+                if "max_completion_tokens" in body:
+                    working["maxTokensField"] = "max_completion_tokens"
+                elif "max_tokens" in body:
+                    working["maxTokensField"] = "max_tokens"
                 if stream:
                     working["streamOptions"] = "stream_options" in body
                 return data
         except UpstreamError as error:
-            if not budget.negotiate(error, body):
+            if budget.negotiate(error, body):
+                continue
+            if not (tools and stream and failure(error, "toolCalling")[0] == "unsupported"):
                 raise
+            # Confirm the refusal without optional controls. The caller reuses
+            # this request shape when it sends back the synthetic tool result.
+            for key in body.keys() - {"model", "messages", "tools"}:
+                del body[key]
+            stream = False
         finally:
             if response is not None:
                 await response.aclose()
@@ -278,13 +291,15 @@ async def _check(conf, check, budget, working, phase):
             raise ProbeIssue("expected_output_missing", detail_code="expected_output_mismatch")
         return True, False
     calls = value.get("tool_calls") or []
-    if not isinstance(calls, list) or len(calls) != 1 or data.get("_toolCallIndices") != [0]:
+    if (not isinstance(calls, list) or len(calls) != 1
+            or body.get("stream") and data.get("_toolCallIndices") != [0]):
         raise ProbeIssue("expected_output_missing", detail_code="tool_call_count_mismatch")
     if data["choices"][0].get("finish_reason") != "tool_calls":
         raise ProbeIssue("expected_output_missing", detail_code="tool_finish_reason_mismatch")
     call = calls[0]
     function = call.get("function") or {}
-    if (call.get("type") != "function" or not meaningful(call.get("id")) or len(call["id"]) > 200
+    if (call.get("index", 0) != 0 or value.get("function_call") is not None
+            or call.get("type") != "function" or not meaningful(call.get("id")) or len(call["id"]) > 200
             or function.get("name") != "soduwork_capability_echo"):
         raise ProbeIssue("expected_output_missing", detail_code="tool_call_invalid")
     try:
@@ -294,16 +309,18 @@ async def _check(conf, check, budget, working, phase):
     if not isinstance(arguments, dict) or arguments != {"value": expected}:
         raise ProbeIssue("expected_output_missing", detail_code="tool_arguments_invalid")
     receipt = secrets.token_hex(8)
-    assistant = {"role": "assistant", "content": content, "tool_calls": calls}
+    assistant = {"role": "assistant", "content": content, "tool_calls": [{
+        "type": "function", "id": call["id"], "function": {
+            "name": function["name"], "arguments": function["arguments"]}}]}
     if isinstance(value.get("reasoning_content"), str):
         assistant["reasoning_content"] = value["reasoning_content"]
-    followup, _ = _payload({**conf, "compatibility": {**working, **budget.candidate}}, "toolCalling")
+    followup = dict(body)
     followup.pop("tool_choice", None)
     followup["messages"] = [*body["messages"], assistant, {"role": "tool", "tool_call_id": call["id"],
         "content": receipt}]
     # This result is fabricated locally. No model-suggested function is executed.
     phase["stage"] = "tool_result"
-    final = await _exchange(conf, followup, budget, working, stream=True, tools=True)
+    final = await _exchange(conf, followup, budget, working, stream=bool(followup.get("stream")), tools=True)
     final_choice = final["choices"][0]
     answer = final_choice["message"].get("content")
     if final_choice.get("finish_reason") != "stop":
@@ -312,7 +329,8 @@ async def _check(conf, check, budget, working, phase):
             or final.get("_legacyCallObserved") or final_choice["message"].get("tool_calls")
             or final_choice["message"].get("function_call")):
         raise ProbeIssue("expected_output_missing", detail_code="tool_receipt_mismatch")
-    working["toolChoice"] = "named" if isinstance(body["tool_choice"], dict) else "auto"
+    if "tool_choice" in body:
+        working["toolChoice"] = "named" if isinstance(body["tool_choice"], dict) else "auto"
     return True, reported or bool(final.get("_reasoningStreamReported"))
 
 

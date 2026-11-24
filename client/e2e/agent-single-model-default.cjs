@@ -136,7 +136,9 @@ app.whenReady().then(async () => {
         ...runner,env:{ok:true,node:'fixture',npm:'fixture'},agents:[...managedKeys,'codex'].map(key=>({
           key,name:key==='dsh'?'DeepSeek Harness':key,installed:true,present:true,state:'ready',setupState:'ready',
           modelPick:managedKeys.includes(key),model:'',modelEffective:hubModels[0]?.name||'',...hubOverrides[key]}))}]};
-      else if(route.endsWith('/agent-setup/probe')){
+      else if(route.endsWith('/agent-setup/model') && options.method==='PUT'){
+        hubOverrides[body.key]={model:body.model,modelEffective:body.model,modelProviderId:body.providerId};value={ok:true};
+      }else if(route.endsWith('/agent-setup/probe')){
         if(!allowHubProbe)throw Error('Local probe leaked into Hub');
         if(JSON.stringify(body).includes('local:'))throw Error('Local model reference leaked into Hub');
         value={jobId:'fixture-hub-probe',model:hubModels[0]?.name||'',keyFrom:'company'};
@@ -250,7 +252,15 @@ app.whenReady().then(async () => {
   assert.equal(await js('hubCalls.filter(call=>call.route.endsWith("/agent-setup/probe")).length'), 1);
   await screenshot('single-hub-probe');
   mark('A sole Hub model remains selected and uses the server probe without private IPC');
-  await js('hubModels=[];allowHubProbe=false;void 0;'); await reload(); await drawer('dsh');
+  await js('hubModels=["alpha","beta"].map(providerId=>({name:"shared-model",provider:providerId,providerId}));void 0;');
+  await reload(); await drawer('dsh');
+  await js(`{const select=document.querySelector('.ag-drawer [data-amodel]');
+    select.selectedIndex=2;select.dispatchEvent(new Event('change',{bubbles:true}));}void 0;`);
+  await until("hubOverrides.dsh?.modelProviderId==='beta' && !document.querySelector('.ag-drawer [data-amodel]').disabled");
+  await reload(); await drawer('dsh');
+  assert.equal(await js("document.querySelector('.ag-drawer [data-amodel]').selectedOptions[0].textContent.includes('beta')"), true);
+  mark('Selecting the second provider of a same-name Hub model survives reopening the drawer');
+  await js('hubOverrides={};hubModels=[];allowHubProbe=false;void 0;'); await reload(); await drawer('dsh');
   assert.equal(await js('document.querySelectorAll(".ag-drawer [data-amodel]").length'), 0);
   assert.match(await js('document.querySelector(".ag-drawer .ag-model").textContent'), /还没有能用的模型/);
   mark('An empty catalog reports model unavailability instead of inventing a default');

@@ -25,6 +25,17 @@ from test_model_runtime import IsolatedDatabase
 
 
 class RequestCorrelationTests(unittest.TestCase):
+    def test_generic_refusals_require_recognized_evidence(self):
+        from app.services.model_errors import forbidden_category
+        for raw in ("", " ", ".", "!", "。", "{}", '{"requestId":"fixture"}', '{"error":{}}',
+                    '{"error":{"message":null}}', '{"error":""}', '{"error":{"message":" "}}',
+                    "null", "[]", '{"error":'):
+            with self.subTest(raw=raw):
+                self.assertEqual(forbidden_category(raw), "unclassified")
+        for raw in ("HTTP 403", "HTTP 403: Forbidden", '{"error":{"status":403}}'):
+            with self.subTest(raw=raw):
+                self.assertEqual(forbidden_category(raw), "generic")
+
     def test_only_bounded_opaque_noncredential_request_ids_are_accepted(self):
         from app.services.model_transport import _upstream_request_id
         secret = "synthetic-api-credential"
@@ -60,6 +71,8 @@ class GatewayDiagnosticsTests(IsolatedDatabase):
         @upstream.api_route("/{path:path}", methods=["GET", "POST"])
         async def provider(path: str, request: Request):
             self.calls.append((request.method, path))
+            if self.mode == "forbidden-category":
+                return JSONResponse(status_code=403, content=self.denial)
             if self.mode in ("trace-denial", "unsafe-trace-denial"):
                 request_id = "fixture-request-183" if self.mode == "trace-denial" else self.secret
                 return JSONResponse(status_code=403, headers={"x-request-id": request_id}, content={
@@ -215,13 +228,13 @@ class GatewayDiagnosticsTests(IsolatedDatabase):
             self.assertEqual(client.model_keys["custom-anthropic"], self.secret)
             self.assertEqual(client.config["modelProviders"][0]["kind"], "anthropic")
 
-    async def test_native_sdk_stops_billing_retries(self):
+    async def sdk_receipt(self, category=""):
         if os.environ.get("SODUWORK_MODEL_SDK_CHECK") != "1":
             self.skipTest("Opt-in Node SDK receipt; HTTP behavior is tested independently")
         script = Path(__file__).resolve().parents[1] / "client/e2e/model-billing.cjs"
         process = await asyncio.create_subprocess_exec("node", str(script),
             env={**os.environ, "SODUWORK_FIXTURE_HUB": self.hub_url,
-                 "SODUWORK_FIXTURE_TICKET": self.ticket},
+                 "SODUWORK_FIXTURE_TICKET": self.ticket, "SODUWORK_FIXTURE_REFUSAL": category},
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
         try:
             output, _ = await asyncio.wait_for(process.communicate(), 45)
@@ -231,7 +244,44 @@ class GatewayDiagnosticsTests(IsolatedDatabase):
                 await process.wait()
         self.assertEqual(process.returncode, 0, output.decode("utf-8", "replace"))
         self.assertIn(b'"retryAttempts":0', output)
+
+    async def test_native_sdk_stops_billing_retries(self):
+        await self.sdk_receipt()
         self.assertEqual(self.calls, [("POST", "v1/chat/completions")])
+
+    async def test_sdk_summary_action_requires_a_neutral_provider_refusal(self):
+        self.mode = "forbidden-category"
+        for category, body in [("restricted", {"code": "permission_denied", "message": self.secret}),
+                               ("unclassified", {}),
+                               ("generic", {"message": "Forbidden"})]:
+            self.denial = {"error": body}
+            await self.sdk_receipt(category)
+        self.assertEqual(self.calls, [("POST", "v1/chat/completions")] * 3)
+
+    async def test_summary_denial_category_survives_json_and_sse_without_provider_details(self):
+        self.mode = "forbidden-category"
+        for denial, category in [
+            ({"error": {"code": "forbidden", "message": "Forbidden"}}, "generic"),
+            ({"error": {"requestId": "fixture"}}, "unclassified"),
+            ("!", "unclassified"),
+            ({"error": {"message": f"Access denied by policy: {self.secret}"}}, "restricted"),
+            ({"error": {"code": "insufficient_permissions", "message": self.secret}}, "restricted"),
+            ({"error": {"code": "private-code", "message": self.secret}}, "unclassified"),
+            ({"error": "Forbidden", "detail": {"reason": self.secret}}, "unclassified"),
+            ({"error": {"message": " " * 4000 + "Forbidden"}}, "unclassified"),
+        ]:
+            self.denial = denial
+            for stream in (False, True):
+                response = await self.http.post("/api/v1/ai-proxy/v1/chat/completions",
+                    headers={"Authorization": "Bearer " + self.ticket},
+                    json={"model": "fixture-model", "messages": [{"role": "user", "content": "hi"}], "stream": stream})
+                self.assertEqual(response.status_code, 200 if stream else 403)
+                error = (json.loads(next(line[6:] for line in response.text.splitlines() if line.startswith("data: ")))
+                         if stream else response.json())["error"]
+                self.assertEqual(error["refusalCategory"], category)
+                self.assertIn(f"[soduwork-refusal:{category}]", error["message"])
+                self.assertNotIn(self.secret, response.text)
+                self.assertNotIn("private-code", response.text)
 
     async def test_denial_keeps_safe_correlation_without_guessing_permission(self):
         self.mode = "trace-denial"

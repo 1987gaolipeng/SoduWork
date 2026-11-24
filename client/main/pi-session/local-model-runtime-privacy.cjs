@@ -24,6 +24,7 @@ function safeError(value) {
   }
   if (info.authExpired) return prefix + 'Local model credential expired';
   if (info.code === 'upstream_billing_error') return prefix + 'Local model insufficient_quota';
+  if (info.status === 403) return prefix + (info.genericForbidden ? 'Forbidden' : 'Local model access restricted');
   if (info.transient) return prefix + 'Local model service temporarily unavailable';
   return prefix + 'Local model request failed';
 }

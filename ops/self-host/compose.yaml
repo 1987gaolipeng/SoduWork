@@ -33,6 +33,7 @@ services:
       AUTH_SECRET: ${SODUWORK_AUTH_SECRET:?Run python deploy.py up}
       CONNECTOR_OAUTH_KEY: ${SODUWORK_OAUTH_KEY:?Run python deploy.py up}
       HUB_PUBLIC_URL: ${SODUWORK_PUBLIC_URL:?Run python deploy.py up}
+      IM_ENABLED: "${SODUWORK_IM_ENABLED:-false}"
       CORS_ORIGINS: "${SODUWORK_PUBLIC_URL:?Run python deploy.py up},null"
       SODUWORK_ENV: production
       DEVICE_AUTH_COMPAT: "false"

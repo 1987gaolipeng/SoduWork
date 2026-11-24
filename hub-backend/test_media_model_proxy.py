@@ -158,7 +158,7 @@ class MediaModelProxyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             model_catalog.clean_model_config({"thinkingMode": "unsupported"}, "chat")
 
-    async def test_image_and_byte_video_routes_use_configured_paths(self):
+    async def test_media_routes_forward_allowed_fields_and_preserve_catalog_settings(self):
         client = SimpleNamespace(id="media-client")
         app = FastAPI()
         app.include_router(ai_proxy.router)
@@ -190,7 +190,7 @@ class MediaModelProxyTests(unittest.IsolatedAsyncioTestCase):
                     "endpointPath": "/contents/generations/tasks",
                     "statusPath": "/contents/generations/tasks/{id}",
                     "resultPath": "/contents/generations/tasks/{id}/content",
-                    "defaults": {"resolution": "1080p"},
+                    "defaults": {"resolution": "1080p", "generate_audio": False, "watermark": True},
                 }
             else:
                 config = {}
@@ -231,12 +231,17 @@ class MediaModelProxyTests(unittest.IsolatedAsyncioTestCase):
                     "/api/v1/ai-proxy/v1/images/generations",
                     json={
                         "model": "image-model", "prompt": "a red kite",
-                        "size": "512x512", "stream": True,
+                        "size": "512x512", "n": 1, "stream": True,
+                        "fps": 24, "client_note": "image fixture",
                     },
                 )
                 video_reply = await http.post(
                     "/api/v1/ai-proxy/v1/videos/generations",
-                    json={"model": "video-model", "prompt": "a red kite moving"},
+                    json={
+                        "model": "video-model", "content": [{"type": "text", "text": "a moving kite"}],
+                        "ratio": "16:9", "resolution": "720p", "generateAudio": True,
+                        "n": 1, "client_note": "video fixture",
+                    },
                 )
                 status_reply = await http.get(
                     "/api/v1/ai-proxy/v1/videos/generations/task%20123",
@@ -255,16 +260,18 @@ class MediaModelProxyTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(upstream.call_args_list[0].args[1], "/vendor/images")
         image_payload = json.loads(upstream.call_args_list[0].args[2])
-        self.assertEqual(image_payload["size"], "512x512")
-        self.assertEqual(image_payload["quality"], "standard")
-        self.assertEqual(image_payload["model"], "image-model")
-        self.assertNotIn("stream", image_payload)
+        self.assertEqual(image_payload, {
+            "model": "image-model", "prompt": "a red kite", "n": 1,
+            "size": "1024x1024", "quality": "standard",
+        })
 
         self.assertEqual(
             upstream.call_args_list[1].args[1], "/contents/generations/tasks")
         video_payload = json.loads(upstream.call_args_list[1].args[2])
-        self.assertEqual(video_payload["model"], "video-model")
-        self.assertEqual(video_payload["resolution"], "1080p")
+        self.assertEqual(video_payload, {
+            "model": "video-model", "content": [{"type": "text", "text": "a moving kite"}],
+            "ratio": "16:9", "resolution": "1080p", "generate_audio": False, "watermark": True,
+        })
         self.assertEqual(
             upstream.call_args_list[2].args[1],
             "/contents/generations/tasks/task%20123",

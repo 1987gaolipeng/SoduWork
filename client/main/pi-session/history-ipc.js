@@ -123,14 +123,14 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
       const title = conversationTitles.normalize(rawTitle);
       const live = session.findBySessionId(rawId);
       const row = live ? live.historyRow() : await session.archivedConversation(app, rawId);
-      if (!row) return { ok: false, reason: '找不到这条会话，请刷新列表后重试' };
+      if (!live && !row) return { ok: false, reason: '找不到这条会话，请刷新列表后重试' };
       guard();
       const saved = conversationTitles.save(app, rawId, title);
-      const presence = { ...row, ...saved };
+      const update = row ? { presence: { ...row, ...saved } } : { presence: null, draftTitle: saved };
       BrowserWindow.getAllWindows().forEach(win => {
         try {
           if (!win.isDestroyed()) win.webContents.send('pi-session-event', {
-            kind: 'renamed', sessionId: rawId, ref: live?.ref || '', presence,
+            kind: 'renamed', sessionId: rawId, ref: live?.ref || '', ...update,
           });
         } catch (_) { /* A closing window must not turn a saved rename into a failure. */ }
       });

@@ -15,6 +15,25 @@ test('cloud handoff keeps a structured website service address for the result ca
   assert.equal(_serviceUrlFromPage([{ text: 'localhost:4173' }]), '');
 });
 
+test('cloud result cards retain valid IPv6 addresses from structured listener metadata', () => {
+  const { _serviceUrlFromPage } = require('../main/conversation/cloud-handoff');
+  for (const host of ['2001:db8::20', '[2001:db8::20]', '::ffff:192.0.2.20']) {
+    const url = _serviceUrlFromPage([{ host, port: 4173 }]);
+    const expected = 'http://' + (host.startsWith('[') ? host : '[' + host + ']') + ':4173/';
+    assert.equal(url, expected, host);
+    assert.equal(new URL(url).port, '4173');
+  }
+  assert.equal(_serviceUrlFromPage([{ host: 'runner-fixture', port: 80 }]), 'http://runner-fixture:80/');
+});
+
+test('invalid IPv6 listener metadata does not replace an earlier usable service address', () => {
+  const { _serviceUrlFromPage } = require('../main/conversation/cloud-handoff');
+  const earlier = { services: [{ url: 'https://preview.example.test/review?view=1#result' }] };
+  for (const host of ['2001:db8::invalid', '[2001:db8::20', 'runner-fixture:8080']) {
+    assert.equal(_serviceUrlFromPage([earlier, { host, port: 4173 }]), earlier.services[0].url, host);
+  }
+});
+
 test('local model ownership blocks cloud handoff before target discovery or workspace inspection', async t => {
   const f = await fixture(t);
   const cloud = f.controller({ request: () => assert.fail('local model metadata must not reach Hub'),
@@ -359,4 +378,22 @@ test('cloud handoff replaces stale local duration with remote turn timestamps', 
   assert.equal(execution.cloud, true);
   assert.equal(execution.stopKind, undefined);
   assert.equal(execution.turnQueue, undefined);
+});
+
+test('an owned queued handoff stays cancellable without claiming the remote Agent has started', async t => {
+  const f = await fixture(t);
+  f.remotePage = { ok: true, ref: 'run-1', status: 'queued', queuePosition: 2, queueClass: 'task',
+    round: 1, last: 0, items: [] };
+  await f.cloud.confirm(f.handle, await f.input());
+  for (let attempt = 0; attempt < 30 && !f.observations; attempt++)
+    await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(f.observations, 'The original handoff must have received its Runner snapshot');
+  const snapshot = f.handle.snapshot();
+  assert.equal(snapshot.status, 'queued');
+  assert.equal(snapshot.execution.running, false);
+  assert.equal(snapshot.execution.queuePosition, 2);
+  assert.equal(snapshot.execution.elapsedMs, null);
+  assert.equal((await f.handle.cancel()).ok, true);
+  assert.equal(f.stops, 1, 'Stop targets the existing remote execution');
+  assert.equal(f.starts, 1, 'Reading queue status does not dispatch another task');
 });

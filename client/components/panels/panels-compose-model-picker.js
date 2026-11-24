@@ -22,6 +22,7 @@
   let activeOwner = '';
   let loading = null;
   let enterpriseLoaded = false;
+  let discovery = 'checking';
   let nativeLoaded = '';
   let loadSeq = 0;
   let options = {};
@@ -81,6 +82,7 @@
   }
 
   function currentLabel(row, selected) {
+    if (modelReadiness() === 'empty' && !selected.modelName) return tx('选择模型');
     if (selected.catalogUnavailable) return selected.modelName;
     if (selected.unavailable) return tx(deviceLocal({ name: selected.modelName }) ||
       global.SoduWorkModelChoice?.imageChoice(selected.modelName)?.name.startsWith('local:')
@@ -398,9 +400,11 @@
     if (cloud() && row.modelMode === 'account') return render();
     if (row.modelMode === 'managed') {
       if (enterpriseLoaded && !force) { render(); notify(); return; }
+      discovery = 'checking';
+      global.FirstChatReadiness?.paint();
       try {
         const response = global.SoduWorkAPI && SoduWorkAPI.myModels
-          ? await SoduWorkAPI.myModels({ localDefaults: !cloud() }) : null;
+          ? await SoduWorkAPI.myModels({ localDefaults: !cloud(), fresh: true }) : null;
         if (!current()) return;
         if (!response || response.ok === false || !Array.isArray(response.usable)) throw Error('模型目录暂时不可用');
         // Device-owned connections can be paired with any local managed
@@ -415,16 +419,21 @@
           ? response.mediaUsable.image.filter(model => usable(model) && (!deviceLocal(model) || !cloud())) : [];
         clearStaleManagedSelection(row);
         enterpriseLoaded = true;
+        discovery = 'loaded';
       } catch (error) {
         if (!current()) return;
+        discovery = 'unknown';
         // A temporary lookup failure must not discard the known selection.
       }
+      global.FirstChatReadiness?.checked();
       render();
       notify();
       return;
     }
     if (row.id === 'codex') {
       if (nativeLoaded === row.id && !force) return render();
+      discovery = 'checking';
+      global.FirstChatReadiness?.paint();
       try {
         const bridge = api();
         const response = bridge && typeof bridge.runtimeModels === 'function'
@@ -440,10 +449,13 @@
         reconcileEffort(state(row.id));
         nativeReason = String(response && response.reason || '');
         nativeLoaded = row.id;
+        discovery = 'loaded';
       } catch (error) {
         if (!current()) return;
+        discovery = 'unknown';
         nativeReason = tx('本机 Codex 模型目录暂时无法读取，可继续使用默认模型');
       }
+      global.FirstChatReadiness?.checked();
       render();
       notify();
     }
@@ -639,6 +651,7 @@
       if (activeOwner && activeOwner !== context.owner) states.clear();
       activeOwner = context.owner;
       activeScope = context.key;
+      discovery = 'checking';
       enterpriseModels = [];
       enterpriseDefaultErrors = {}; managedCatalogUnavailable = false; imageModels = []; enterpriseLoaded = false;
       nativeModels = []; nativeReason = ''; nativeLoaded = '';
@@ -732,7 +745,23 @@
     for (const selected of states.values()) delete selected.directoryPreference;
   }
 
-  global.ComposeModelPicker = { bind, close, refresh, ready, value, resetNewDraft, resetDirectory, restoreSelection, releasePreference,
+  function modelReadiness() {
+    const row = runtime();
+    if (activeScope !== loadContext(row).key) return 'checking';
+    const selected = state(row.id);
+    if (row.modelMode === 'account') {
+      if (cloud() || row.id !== 'codex') return 'native';
+      if (discovery === 'loaded' && selected.unavailable) return 'choose';
+      return discovery === 'loaded' && modelById(selected.modelName) ? 'ready' : 'native';
+    }
+    if (discovery !== 'loaded') return discovery;
+    if (selected.catalogUnavailable) return 'unknown';
+    if (!selected.unavailable && selected.modelName) return 'ready';
+    if (managedCatalogUnavailable) return 'unknown';
+    return enterpriseModels.length || (!cloud() && row.id === 'pi' && imageModels.length) ? 'choose' : 'empty';
+  }
+
+  global.ComposeModelPicker = { bind, close, refresh, ready, value, modelReadiness, resetNewDraft, resetDirectory, restoreSelection, releasePreference,
     nativeEffort: { html: effortCard, paint: paintEffortCard, levels: effortChoices, defaultLevel: defaultEffort },
     label: () => currentLabel(runtime(), state(runtime().id)) };
   const scopeChanged = () => {
@@ -743,7 +772,11 @@
   // Hubs without model-change push still converge while the composer is visible.
   const refreshVisibleModels = () => {
     const button = document.getElementById('cpModelBtn');
-    if (button?.isConnected && button.getClientRects().length && document.visibilityState !== 'hidden' && !loading) void refresh(true);
+    const visible = button?.getClientRects?.().length || document.getElementById('cpInput')?.getClientRects?.().length;
+    if (visible && document.visibilityState !== 'hidden' && !loading) {
+      void global.ComposeRuntime?.refreshAccess?.();
+      void refresh(true);
+    }
   };
   global.addEventListener?.('focus', refreshVisibleModels);
   global.setInterval?.(refreshVisibleModels, 60000);

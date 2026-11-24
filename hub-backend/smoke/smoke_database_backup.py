@@ -101,6 +101,17 @@ with tempfile.TemporaryDirectory(prefix="soduwork-backup-") as directory:
         expect_sidecar_refusal(backup, missing)
         ok(not missing.exists() and sidecar.read_bytes() == b"keep", "restore changed an orphan sidecar")
 
+    for invalid_size in ("abc", float("inf"), True, backup.stat().st_size + 0.5):
+        manifest.write_text(json.dumps({**payload, "size": invalid_size}), encoding="utf-8")
+        try:
+            verify_backup(backup)
+        except BackupError:
+            ok(True, "invalid database manifest size reported as a backup error")
+        else:
+            raise AssertionError("invalid database manifest size passed verification")
+    manifest.write_text(json.dumps({**payload, "size": str(payload["size"])}), encoding="utf-8")
+    ok(verify_backup(backup)["size"] == str(payload["size"]), "legacy integer strings still verify")
+
     tampered = json.loads(manifest.read_text(encoding="utf-8"))
     tampered["sha256"] = "0" * 64
     manifest.write_text(json.dumps(tampered), encoding="utf-8")

@@ -81,15 +81,20 @@ assert.equal(batch.state, 'running');
 assert.equal(batch.title, '正在运行命令');
 assert.equal(batch.detail, '正在运行命令');
 const batchMarkup = tools.batchHtml(batchItems, 'round-1', true,
-  () => { throw Error('Command summaries must not render child rows'); });
-assert.match(batchMarkup, /data-tool-node="batch:commands:round-1"/);
-assert.doesNotMatch(batchMarkup, /data-tool-group|aria-expanded|ntool-batch-caret|ntool-batch-body|<button/);
+  item => '<span data-id="' + item.id + '"></span>');
+assert.match(batchMarkup, /data-tool-group="round-1"/);
+assert.match(batchMarkup, /aria-expanded="true"/);
+assert.match(batchMarkup, /data-id="cmd-1"/);
 assert.match(batchMarkup, /1 项异常/, '其他命令运行时仍保留异常提示');
 assert.doesNotMatch(batchMarkup, /npm test|npm run lint|npm run build/);
 assert.doesNotMatch(batchMarkup, /title=/);
 assert.match(batchMarkup, />3 项</);
 assert.doesNotMatch(batchMarkup, /ntool-batch-bar/);
 assert.doesNotMatch(batchMarkup, /2\/3/);
+const runningMarkup = tools.batchHtml(batchItems.map(item => ({ ...item, state: 'running' })), 'round-1', true,
+  () => { throw Error('An all-running command group must not render child rows'); });
+assert.match(runningMarkup, /data-tool-node="batch:commands:round-1"/);
+assert.doesNotMatch(runningMarkup, /data-tool-group|aria-expanded|ntool-batch-caret|ntool-batch-body|<button/);
 
 const commandOne = running('bash', { command: 'npm run build' }, { id: 'command-one', after: 1, state: 'done' });
 const commandTwo = running('bash', { command: 'npm test' }, { id: 'command-two', after: 2, state: 'running' });

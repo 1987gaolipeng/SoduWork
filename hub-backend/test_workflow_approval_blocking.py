@@ -10,7 +10,7 @@ class HumanGateTests(unittest.IsolatedAsyncioTestCase):
     async def poll(self, status, node_type='spec', deployment=None):
         task = SimpleNamespace(id='isolated-task')
         req = None if status is None else SimpleNamespace(
-            id='isolated-approval', status=status, environment_id='test-environment')
+            id='isolated-approval', status=status, context={}, environment_id='test-environment')
         session = SimpleNamespace(get=AsyncMock(side_effect=[task, req]), add=Mock())
         run = SimpleNamespace(id='isolated-run', task_id=task.id)
         node = SimpleNamespace(id='isolated-node', node_key='confirm', node_type=node_type,

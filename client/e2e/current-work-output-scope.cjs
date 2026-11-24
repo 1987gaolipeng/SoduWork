@@ -101,6 +101,61 @@ if (typeof electron === 'string') {
     await sleep(180);
     assert.equal(await js('document.querySelectorAll("[data-chat-summary-body] button").length'), 0, 'opening history must not relabel it as current work');
     fs.writeFileSync(path.join(out, 'historical-preview.png'), (await win.webContents.capturePage()).toPNG());
+    const reads = [
+      { id: 'first-attempt', name: 'read', args: { path: 'docs/image.png' }, state: 'error', isError: true, result: 'ENOENT: file missing' },
+      { id: 'different-file', name: 'read', args: { path: 'other/image.png' }, state: 'done' },
+      { id: 'second-attempt', name: 'read_file', args: { file_path: 'docs/image.png' }, state: 'done' },
+      { id: 'write-only', name: 'write', args: { path: 'docs/image.png' }, state: 'done' },
+    ];
+    await js('fixtureContext.snapshot={tools:' + JSON.stringify(reads) + '};ChatChrome.setWorkspace({dir:' + JSON.stringify(cwd) + '});ChatChrome.openSummary()');
+    await click('[data-chat-read-log] summary');
+    await click('[data-chat-read-filter]');
+    await win.webContents.insertText('docs/image.png');
+    const readRows = () => js('Array.from(document.querySelectorAll("[data-chat-read-results] li"), row => row.textContent)');
+    assert.deepEqual(await readRows(), ['docs/image.png读取成功 second-attempt', 'docs/image.png读取失败 ENOENT first-attempt']);
+    assert.equal(await js('document.querySelector("[data-chat-read-cwd]").textContent'), cwd);
+    await win.webContents.insertText('.absent');
+    assert.deepEqual(await readRows(), []);
+    assert.equal(await js('document.querySelector("[data-chat-read-empty]").hidden'), false);
+    await js('ChatChrome.identify("next-chat");fixtureContext.snapshot={tools:[]};ChatChrome.openSummary()');
+    assert.equal(await js('document.querySelector("[data-chat-read-filter]").value'), '');
+    assert.deepEqual(await readRows(), []);
+    report.cases.push('Path filtering shows separate failed and successful read receipts and clears evidence on a chat switch.');
+    const modifications = Array.from({length: 10}, (_, index) => ({
+      id: 'change-' + index, after: 0, name: index ? 'edit' : 'write',
+      args: { path: index + '/notes.txt' }, state: index === 3 ? 'cancelled' : index === 7 ? 'error' : 'done',
+    }));
+    const changeTurn = {messages: [{role: 'user', text: 'Update the project'}], tools: modifications};
+    await js(`ChatWorkbench.reset();ChatWorkbench.bind(fixtureRoot,contextValue);
+      const transcript = fixtureRoot.querySelector('.nchat-content-area');
+      for(const tool of ${JSON.stringify(modifications)}) {
+        const row=document.createElement('div'), button=document.createElement('button');
+        row.dataset.toolNode=tool.id;button.dataset.tool=tool.id;button.textContent=tool.args.path;
+        button.onclick=()=>window.selectedTool=tool.id;row.append(button);transcript.append(row);
+      }
+      ChatWorkbench.render(fixtureRoot,${JSON.stringify(changeTurn)},[]);ChatChrome.openSummary();void 0`);
+    assert.equal(await js('ChatWorkbench.state().has'), false);
+    const disclosure = '[data-chat-changes]';
+    await click(disclosure + ' summary');
+    const changeRows = selector => js('Array.from(document.querySelectorAll(' + JSON.stringify(selector + ' [data-wb-tool]') +
+      '), node => [node.dataset.wbTool, node.textContent])');
+    const rows = await changeRows(disclosure);
+    assert.deepEqual(rows.map(row => row[0]), modifications.map(tool => tool.id));
+    assert.match(rows[0][1], /新建0\/notes\.txt已完成/);
+    assert.match(rows[3][1], /修改3\/notes\.txt已取消/);
+    assert.match(rows[7][1], /修改7\/notes\.txt失败/);
+    await click(disclosure + ' [data-wb-tool="change-0"]');
+    assert.equal(await js('selectedTool'), 'change-0');
+    await click('[data-chat-summary]');
+    await click('[data-chat-summary-pop] [data-wb-files]');
+    assert.equal(await js('ChatWorkbench.state().open'), true);
+    assert.deepEqual(await changeRows('.ncw-files'), rows);
+    await click('.ncw-files [data-wb-tool="change-3"]');
+    assert.equal(await js('selectedTool'), 'change-3');
+    await js('ChatWorkbench.render(fixtureRoot,{messages:[{role:"user"}],tools:[]},[]);ChatChrome.openSummary();void 0');
+    assert.equal(await js('document.querySelector("[data-chat-summary-pop] [data-wb-files]").hidden'), true);
+    assert.equal(await js('document.querySelector("[data-chat-changes]").hidden'), true);
+    report.cases.push('A change-only turn with no tabs opens its file panel from the summary. All ten receipts retain their paths and states, and both lists target the selected tool.');
     assert.deepEqual(report.errors, []);
     report.ok = true;
   }).catch(error => { report.error = String(error.stack || error); }).finally(() => {

@@ -5,6 +5,19 @@ const store = require('../main/local-model-store.cjs'), image = require('../main
 const turn = require('../main/pi-session/image-turn'), media = require('../main/pi-session/local-image-turn.cjs');
 const quota = require('../main/conversation/quota-admission.cjs');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mPw01oLAAHvASadyK5SAAAAAElFTkSuQmCC', 'base64');
+function verifyInstallCommand(command, manifests) {
+  const parts = command.trim().split(/\s+/);
+  assert.deepEqual(parts, ['python', '-m', 'pip', 'install',
+    ...manifests.flatMap(name => ['-r', '../hub-backend/' + name])]);
+  const venv = path.resolve(__dirname, '../../hub-backend/.venv');
+  const python = path.join(venv, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+  // The client test setup installs these declared dependencies. Check the real
+  // pip parser offline without changing that environment or resolving upgrades.
+  const result = require('node:child_process').spawnSync(python,
+    ['-I', '-m', 'pip', '--isolated', ...parts.slice(3), '--dry-run', '--no-index', '--no-deps', '--disable-pip-version-check'],
+    { cwd: path.resolve(__dirname, '..'), encoding: 'utf8', timeout: 20000, windowsHide: true });
+  assert.equal(result.status, 0, result.error?.message || result.stderr || result.stdout);
+}
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-local-images-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -157,8 +170,22 @@ test('an unavailable decoder blocks a local billable POST and explains how to re
   assert.equal(calls, 0);
   assert.equal(result.ok, false);
   assert.match(result.reason, /校验组件不可用/);
-  if (process.env.SODUWORK_RUNTIME_MANAGED !== '1' && process.env.SODUWORK_SOURCE_SESSION !== '1')
-    assert.match(result.reason, /pip install.*Pillow/);
+  if (process.env.SODUWORK_RUNTIME_MANAGED !== '1' && process.env.SODUWORK_SOURCE_SESSION !== '1') {
+    const command = result.reason.match(/(python -m pip install [^。]+?) 并重新启动/);
+    assert.ok(command, 'the recovery hint must contain a runnable command');
+    verifyInstallCommand(command[1], ['requirements-image.txt']);
+  }
+});
+
+test('both desktop setup instructions are accepted by pip with the declared backend dependencies', () => {
+  for (const file of ['README.md', 'README.zh-CN.md']) {
+    const markdown = fs.readFileSync(path.resolve(__dirname, '..', file), 'utf8');
+    const commands = [...markdown.matchAll(/`(python -m pip install [^`]+)`/g)];
+    assert.ok(commands.length, file + ' must document the independent development environment');
+    for (const [, command] of commands) {
+      verifyInstallCommand(command, ['requirements-runner.txt', 'requirements-image.txt']);
+    }
+  }
 });
 
 test('provider refusals report only the status and the relevant configuration hint', async t => {

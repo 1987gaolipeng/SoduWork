@@ -271,6 +271,11 @@ function create({ app, session, identityOf = () => require('./requirement-contex
     // A cache has its own identity so deleting it cannot delete or hide the
     // account-authorized cloud original in the cloud directory.
     const remote = original.cloud || original.accountProjection;
+    if (!remote && original.nativeSessionStarted === false && !String(original.title || '').trim() &&
+        !(Number(original.count) > 0) && !(snapshot?.messages || []).length &&
+        (!handle.inFlight?.() || (snapshot.runtimeSwitching && original.state === 'idle')) &&
+        !original.workOnly && !original.taskId && !(original.taskIds || []).length &&
+        !original.runtimeUnavailable) return;
     const id = remote ? capturedCopyId(identity?.hub, accountId(identity), original.id) : original.id;
     let displayed = remote ? original : require('./acceptance-session').projectHistory(app, original);
     if (!remote) {
