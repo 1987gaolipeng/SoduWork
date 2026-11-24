@@ -51,6 +51,24 @@ function fixture(runtime = 'opencode') {
   return { ctx, opened, reset, api, applicationChecks };
 }
 
+test('returning to a sent chat mounts its cached Agent and model before work cards finish restoring', async () => {
+  const { ctx } = fixture();
+  vm.runInContext(section('  const _conversationSnapshots', '  /* Associate attachments'), ctx);
+  const first = { adapterId: 'pi', modelSelection: { name: 'glm' } };
+  ctx._rememberConversationSnapshot('first', first);
+  await ctx.enter('', 'other');
+  const frames = [];
+  ctx._mount = () => frames.push([ctx._sessionId, ctx._snap?.adapterId, ctx._snap?.modelSelection?.name]);
+  let resume;
+  ctx._workCards = { restore: () => new Promise(resolve => { resume = resolve; }) };
+  const returning = ctx.enter('', 'first');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(frames[0], ['first', 'pi', 'glm']);
+  assert.equal(ctx._ref, '');
+  resume(null);
+  assert.equal(await returning, true);
+});
+
 test('handled or denied application navigation preserves the current renderer session', async () => {
   for (const response of [{ ok: true, handled: true }, { ok: false, reason: 'Application unavailable' }, Error('Navigation disconnected')]) {
     const { ctx, opened, reset, api, applicationChecks } = fixture();

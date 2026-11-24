@@ -6,7 +6,7 @@
   function createDraftControls(ctx) {
     let destroyed = false, loaded = false, loading = null, loadGeneration = 0, catalog = [], missing = [], defaultMode = 'standard', error = '';
     let choiceScope = null, preferenceVersion = 0;
-    const devicePreview = () => ctx._snap?.execution?.canContinueOnDevice === true;
+    const devicePreview = () => Boolean(ctx._ref && ctx._snap?.execution?.canContinueOnDevice);
     const active = () => !destroyed && (devicePreview() || !ctx._ref && (!ctx._sessionId || ctx._snap?.workOnly === true));
     const owner = () => ctx._draftOwnerScope?.() || '';
     const scope = () => ({epoch:ctx._viewEpoch, sessionId:ctx._sessionId, owner:owner()});
@@ -437,7 +437,8 @@ function _bind(el) {
     const draftControls = createDraftControls(ctx);
     if (global.ChatComposerControls) ctx._composerControls = ChatComposerControls.create(el, {
       draft: draftControls,
-      state: () => ({ ref: ctx._ref, readOnlyHistory: !!ctx._snap?.localReplica && !ctx._snap.execution?.canContinueOnDevice,
+      state: () => ({ ref: ctx._ref, restoringHistory: Boolean(ctx._sessionId && !ctx._ref && !ctx._snap?.workOnly && !ctx._snap?.openBlocked),
+        readOnlyHistory: !!ctx._snap?.localReplica && !ctx._snap.execution?.canContinueOnDevice,
         adapterId: ctx._snap?.adapterId || ctx._sessionOptions.adapterId || 'pi', displayName: ctx._snap?.displayName || ctx._sessionOptions.displayName, model: ctx._model,
         mode: ctx._mode, accessPolicy: ctx._snap?.accessPolicy, nextAccessPolicy: ctx._snap?.nextAccessPolicy, accessControl: ctx._snap?.accessControl || ctx._sessionOptions.accessControl,
         selection: ctx._snap && ctx._snap.modelSelection, thinking: ctx._snap && ctx._snap.thinking,
@@ -469,7 +470,10 @@ function _bind(el) {
         if (draft && ctx._sessionOptions.modelName !== selection.name) {
           ctx._sessionOptions.reasoningEffort = ''; ctx._sessionOptions.thinkingLevel = '';
         }
-        if (ctx._snap) ctx._snap.modelSelection = selection;
+        if (ctx._snap) {
+          ctx._snap = { ...ctx._snap, modelSelection: selection };
+          if (ctx._ref) ctx._rememberConversationSnapshot(ctx._sessionId, ctx._snap);
+        }
         ctx._sessionOptions.modelName = selection.name;
         ctx._sessionOptions.modelLabel = selection.model?.label || selection.name;
         if (draft && ctx._snap?.workOnly) void ctx._workCards?.saveDraftSelection?.(); ctx._render(); },

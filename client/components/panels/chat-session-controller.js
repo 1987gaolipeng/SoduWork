@@ -270,8 +270,10 @@ async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() 
       ctx._sessionOptions = { ...ctx._sessionOptions, adapterId: got.adapterId || openedSnapshot.adapterId || ctx._sessionOptions.adapterId || 'pi',
         displayName: got.displayName || openedSnapshot.displayName || '', accessControl: got.accessControl || openedSnapshot.accessControl };
       if (openedSnapshot.execution?.canContinueOnDevice === true) {
-        // A preview carries no executable model, elevated permissions or account-specific draft choices.
-        ctx._sessionOptions = { adapterId: ctx._sessionOptions.adapterId };
+        // A preview restores the model choice. Continuation resolves its own permissions.
+        ctx._sessionOptions = { adapterId: ctx._sessionOptions.adapterId,
+          modelName: openedSnapshot.modelSelection?.name || '',
+          modelLabel: openedSnapshot.modelSelection?.model?.label || '' };
       }
       if (resumeAsOrdinary) {
         // The marker is renderer-only and must never leak into the persisted

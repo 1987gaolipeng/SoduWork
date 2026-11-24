@@ -134,8 +134,9 @@
       lastAdapter = state.adapterId;
       const selectedName = selection.name || selection.model?.id || state.model?.id || '';
       const updated = catalogScope === modelScope() && rows.find(row => row.name === selectedName);
-      const selectedModel = selection.model || state.model;
-      const label = (selectedModel?.unavailable ? selectedModel.label : updated?.label) || selectedModel?.label || selectedModel?.id || '选择模型';
+      const selectedModel = selection.model || (!selection.name || selection.name === state.model?.id ? state.model : null);
+      const label = (selectedModel?.unavailable ? selectedModel.label : updated?.label) || selectedModel?.label ||
+        selectedName || (state.restoringHistory ? '正在加载…' : '选择模型');
       button.querySelector('span').textContent = label;
       button.title = '模型：' + label + ' · 用于之后发送的消息';
       button.setAttribute('aria-label', button.title);
