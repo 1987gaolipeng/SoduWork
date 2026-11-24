@@ -142,6 +142,16 @@ if (typeof electron === 'string') {
     win.webContents.debugger.attach('1.3'); await viewport(1100);
     assert.deepEqual(await js('window.errors'), []);
 
+    const runtimes = ['opencode', 'codex-harness', 'qwen', 'opencode'];
+    const parts = runtimes.map((adapterId, i) => ({ id: 'journal-' + i, adapterId }));
+    const archived = snapshot(parts.flatMap(part => [user('Write a poem'), {
+      role: 'assistant', id: part.id + ':1:1:say:2', blocks: [prose('A short poem', 0)], done: true,
+    }]));
+    const recovered = require('../main/conversation/native-agent-source.cjs').restoreRunnerSources(archived, parts);
+    await publish(recovered, true); await headers(4);
+    assert.deepEqual(await js("Array.from(document.querySelectorAll('#nchatList .nchat-agent-source'), e => e.dataset.outputAgent)"), runtimes);
+    report.results.push('Replayed Runner turns display OpenCode and Codex Harness before later and repeated runtimes');
+
     const first = assistant([thinking('先确认材料范围。', 0, false)], source(), false);
     let state = snapshot([user('核对材料并给出结论'), first], [], true);
     await publish(state, true); await headers(1);

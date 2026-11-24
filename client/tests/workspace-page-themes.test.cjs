@@ -12,7 +12,7 @@ test('workspace business pages opt into the same compact single-title layout',()
   assert.match(css,/\.dk-title-name/);
   assert.match(css,/--ws-head-height:60px/);
   assert.match(css,/display:none!important/);
-  assert.match(css,/font:650 var\(--ui-font-18,\s*18px\)\/1\.4 var\(--font-display\)/);
+  assert.match(css,/font:\s*650\s+var\(--ui-font-18,\s*18px\)\/1\.4\s+var\(--font-display\)/);
   assert.match(css,/prefers-reduced-motion/);
   assert.match(css,/:focus-visible/);
 });

@@ -44,6 +44,8 @@ function snapshot(app, file) {
     if (row.version !== 1 || typeof row.id !== 'string' || !row.id ||
         location(app, row.id) !== file || !row.active?.adapterId || !row.active?.sessionId ||
         !Array.isArray(row.segments) || row.segments.length > MAX_SEGMENTS) throw Error('invalid');
+    if (row.prefix) row.prefix = require('./native-agent-source.cjs').restoreRunnerSources(row.prefix,
+      [{ id: row.id, adapterId: row.originAdapter }, ...row.segments]);
     cache.set(file, row); cacheStamps.set(file, revision); return { revision, record: row };
   } catch (error) {
     cache.delete(file); cacheStamps.delete(file);

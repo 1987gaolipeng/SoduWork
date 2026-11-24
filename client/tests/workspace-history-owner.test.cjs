@@ -927,6 +927,19 @@ test('late history and trailing durable snapshots cannot shrink observed runtime
   }
 });
 
+test('a directory refresh restores earlier runtimes before a shared live runtime', async () => {
+  const f = fixture('user-a', { realHistory: true });
+  const row = { id: 'mixed', title: 'Mixed conversation', usedHarnesses: ['qwen', 'kimi'] };
+  f.api.setChats([row]);
+  const loading = f.api.refreshConversationHistory(); await tick();
+  f.pending[0].resolve({ ok: true, chats: [{ ...row, usedHarnesses: ['opencode', 'codex-harness', 'qwen'] }] });
+  await loading;
+  const expected = ['opencode', 'codex-harness', 'qwen', 'kimi'];
+  assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), expected);
+  f.api.updateChatState({ kind: 'opened', presence: row });
+  assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), expected);
+});
+
 test('retained runtime provenance never crosses conversations or account epochs', async () => {
   const f = fixture('user-a', { realHistory: true });
   f.api.setChats([{ id: 'multi-runtime', title: 'Shared title', usedHarnesses: ['pi', 'qwen'] }]);

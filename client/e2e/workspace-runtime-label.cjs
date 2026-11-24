@@ -66,7 +66,7 @@ if (typeof electron === 'string') {
         presence:{...ctx.chatItems.find(c=>c.id==='automation-draft'),draftAdapterId:${JSON.stringify(id)}}});void 0;`);
       const row = (await labels()).find(row=>row.id==='automation-draft');
       assert.deepEqual(row.icons, [id]);
-      assert.match(row.title, /已选底座/);
+      assert.equal(row.title, '');
       assert.match(await js(`document.querySelector('[data-chat-id="automation-draft"]').getAttribute('aria-label')`), /已选底座/);
       assert.deepEqual(await js(`ctx.chatItems.find(c=>c.id==='automation-draft').usedHarnesses`), []);
     }
@@ -78,7 +78,7 @@ if (typeof electron === 'string') {
     await js(`list.updateChatState({sessionId:'automation-draft',presence:{id:'automation-draft',
       title:'8分钟后提醒我',live:true,state:'running',usedHarnesses:['qwen']}});void 0;`);
     assert.deepEqual((await labels()).find(row=>row.id==='automation-draft').icons, ['qwen']);
-    assert.equal((await labels()).find(row=>row.id==='automation-draft').title, 'Qwen Code');
+    assert.match(await js(`document.querySelector('[data-chat-id="automation-draft"]').getAttribute('aria-label')`), /Qwen Code$/);
     report.cases.push('Execution replaces draft selection with actual runtime provenance and clears the draft marker');
     for (const width of [220, 180, 320]) {
       await js(`document.documentElement.style.setProperty('--ws-side-w','${width}px');void 0;`);
