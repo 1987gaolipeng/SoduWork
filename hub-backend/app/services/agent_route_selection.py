@@ -34,7 +34,7 @@ def model_readiness(ctx: dict, kind: str, model: str) -> dict:
 def resolve_sync(ctx: dict, kind: str, client_id: str = "",
                  prefer_runner: str = "", required_capabilities=None,
                  runner_tags=None, fallback_mode: str = "best-effort",
-                 model: str = "") -> dict:
+                 model: str = "", *, gateway_model: bool = False) -> dict:
     """Resolve one portable route with the same fallback rules everywhere.
 
     The result is serializable and explains model incompatibilities separately from
@@ -48,6 +48,9 @@ def resolve_sync(ctx: dict, kind: str, client_id: str = "",
     if fallback_mode != "strict":
         candidates.extend(item for item in ai_exec.LOCAL_AGENT_KINDS
                           if item != requested)
+    if gateway_model:
+        from .agent_execution_options import GATEWAY_MODEL_KINDS
+        candidates = [item for item in candidates if item in GATEWAY_MODEL_KINDS]
     # Runner tags are strict requirements under strict policy and preferences under best-effort policy.
     # Prefer matching tags, then consider other Runners that satisfy the required capabilities.
     # A docker tag may describe a preferred environment rather than a mandatory runtime capability.

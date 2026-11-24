@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, event, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import models, automation_models  # Register actual lifecycle tables.
@@ -89,6 +89,96 @@ class AutomaticOrgMemoryTests(unittest.IsolatedAsyncioTestCase):
     async def current(self, session):
         return await session.scalar(select(MemoryRecord).where(
             MemoryRecord.scope == "org", MemoryRecord.org_id == "a", MemoryRecord.archived.is_(False)))
+
+    async def read_context(self):
+        writes = []
+
+        def observe(conn, clause, multiparams, params, execution_options):
+            # The generic dialect retains FOR UPDATE, which SQLite compiles away.
+            sql = str(clause).lstrip().upper()
+            verb = sql.split()[0]
+            if verb != "SELECT" or "FOR UPDATE" in sql:
+                writes.append(verb if verb != "SELECT" else "SELECT FOR UPDATE")
+
+        def commit(conn):
+            writes.append("COMMIT")
+
+        engine = self.engine.sync_engine
+        event.listen(engine, "before_execute", observe)
+        event.listen(engine, "commit", commit)
+        try:
+            async with AsyncClient(transport=ASGITransport(app=self.app), base_url="http://fixture.test") as http:
+                response = await http.get("/api/v1/memories/organization-context",
+                                          headers={"Authorization": "Device " + self.device_token})
+        finally:
+            event.remove(engine, "before_execute", observe)
+            event.remove(engine, "commit", commit)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(writes, [], "the entire GET, including device authentication, must be read-only")
+        return response.json()
+
+    async def test_cold_and_repeated_context_reads_never_materialize_a_snapshot(self):
+        async with self.sessions() as session:
+            session.add(self.source())
+            await session.commit()
+        with patch.dict(device_auth._LAST_SEEN_WRITES, {}, clear=True):
+            first = await self.read_context()
+            self.assertEqual(await self.read_context(), first)
+            # The next ordinary request must still be able to record device presence.
+            async with AsyncClient(transport=ASGITransport(app=self.app), base_url="http://fixture.test") as http:
+                listing = await http.get("/api/v1/memories", headers={"Authorization": "Device " + self.device_token})
+                self.assertEqual(listing.status_code, 200, listing.text)
+        self.assertIn("Shared work background one", first["prompt"])
+        self.assertIsNone(first["item"])
+        self.assertEqual(first["revision"], 0)
+        async with self.sessions() as session:
+            self.assertIsNone(await self.current(session))
+            self.assertIsNotNone((await session.get(models.Client, "device-a")).last_seen_at)
+
+    async def test_context_returns_a_record_only_when_its_saved_sources_match(self):
+        async with self.sessions() as session:
+            session.add(MemoryRecord(id="legacy", scope="org", org_id="a", owner_user_id="",
+                                     memory_key="default", title="Team notes", summary="Manual correction",
+                                     fields={"summary": "Manual correction"}, revision=3))
+            await session.commit()
+
+        legacy = await self.read_context()
+        self.assertEqual(legacy["item"], {"id": "legacy", "title": "Team notes",
+                                         "summary": "Manual correction", "sourceCount": 0})
+        self.assertEqual(legacy["revision"], 3)
+        self.assertIn("Manual correction", legacy["prompt"])
+        async with self.sessions() as session:
+            session.add(self.source())
+            await session.commit()
+
+        preview = await self.read_context()
+        self.assertIsNone(preview["item"])
+        self.assertEqual(preview["revision"], 0)
+        self.assertIn("Manual correction", preview["prompt"])
+        self.assertIn("Shared work background one", preview["prompt"])
+        async with self.sessions() as session:
+            row = await self.current(session)
+            self.assertEqual((row.revision, row.summary), (3, "Manual correction"))
+
+        await org_memory.sweep_once(self.sessions)
+        saved = await self.read_context()
+        async with self.sessions() as session:
+            row = await self.current(session)
+            self.assertEqual((saved["item"]["id"], saved["revision"], saved["item"]["summary"]),
+                             (row.id, row.revision, row.summary))
+            self.assertEqual((row.id, row.revision, saved["item"]["sourceCount"]), ("legacy", 4, 1))
+            await session.execute(delete(models.Task).where(models.Task.id == "one"))
+            await session.commit()
+
+        withdrawn = await self.read_context()
+        self.assertIsNone(withdrawn["item"])
+        self.assertEqual(withdrawn["revision"], 0)
+        self.assertIn("Manual correction", withdrawn["prompt"])
+        self.assertNotIn("Shared work background one", withdrawn["prompt"])
+        async with self.sessions() as session:
+            row = await self.current(session)
+            self.assertEqual(row.revision, 4)
+            self.assertIn("Shared work background one", row.summary)
 
     async def test_background_backfill_combines_team_shared_facts_once_and_excludes_private_sources(self):
         async with self.sessions() as session:

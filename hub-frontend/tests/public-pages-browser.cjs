@@ -17,7 +17,7 @@ if (typeof electron === 'string') {
   const { app, BrowserWindow, session } = electron
   app.setPath('userData', fs.mkdtempSync(path.join(out, 'browser-profile-')))
   app.disableHardwareAcceleration()
-  let win, server, mode = 'available', loginStatus = 401, loginCalls = 0
+  let win, server, packageInfoGate, mode = 'available', loginStatus = 401, loginCalls = 0
   const results = [], errors = [], requests = [], blocked = []
   const user = { id: 'local-public-test', username: 'test-admin', displayName: 'Local fixture', isSuper: false, permissions: [] }
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -48,11 +48,38 @@ if (typeof electron === 'string') {
   async function input(selector, value) {
     await js(`(()=>{const input=document.querySelector(${JSON.stringify(selector)});input.focus();Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}));})()`)
   }
+  const primary = 'document.querySelector(".public-hero-actions > :first-child")'
+  async function followPlatformLink(label) {
+    await until(`${primary}?.tagName === "A"`, 'primary download action')
+    assert.equal(await js(`${primary}.textContent.trim()`), label)
+    assert.equal(await js(`${primary}.getAttribute("href")`), '#downloads')
+    await js(`${primary}.click()`)
+    await until(`(() => {
+      const { top, bottom } = document.querySelector("#downloads h2").getBoundingClientRect()
+      return location.hash === "#downloads" && top < innerHeight && bottom > 0
+    })()`, 'download section in view')
+    assert.deepEqual(await js('[...document.querySelectorAll("#downloads .public-download-platform h3")].map(el => el.textContent)'),
+      ['Windows', 'macOS', 'Linux', 'Android', 'iPhone / iPad'])
+  }
+  async function checkIosDownloads(origin) {
+    mode = 'available'; await win.loadURL(origin)
+    await until('document.querySelector(".w-meta")?.textContent === "此服务尚未提供 iOS 客户端或网页版入口。"', 'iOS without a web client')
+    await followPlatformLink('查看其他平台')
+    const iosLink = 'document.querySelector("#downloads .public-download-platform:last-child a")'
+    assert.equal(await js(`${iosLink} === null`), true)
+    mode = 'ios-web'; await win.loadURL(origin)
+    await until('document.querySelector(".w-meta")?.textContent === "此设备可使用网页版。"', 'iOS web client available')
+    assert.equal(await js(`${primary}.textContent.trim()`), '打开网页版')
+    assert.equal(await js(`${primary}.href`), origin + '/local-mobile')
+    assert.equal(await js(`${iosLink}.href`), origin + '/local-mobile')
+    await js(`${primary}.click()`)
+    await until('location.pathname === "/local-mobile" && document.body.textContent.includes("Local mobile client")', 'iOS web client navigation')
+  }
   function report(extra = {}) {
     fs.writeFileSync(path.join(out, 'browser-report.json'), JSON.stringify({ scope: 'Local source build and synthetic API only', results, errors, requests, blocked, loginCalls, ...extra }, null, 2))
   }
   app.whenReady().then(async () => {
-    server = http.createServer((req, res) => {
+    server = http.createServer(async (req, res) => {
       const url = new URL(req.url, 'http://127.0.0.1')
       const json = (data, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)) }
       if (url.pathname.startsWith('/api/') || url.pathname === '/healthz') {
@@ -65,6 +92,8 @@ if (typeof electron === 'string') {
         }
         if (url.pathname === '/api/v1/admin/me') return json(user)
         if (/\/download\/(?:client(?:\/mac|\/linux)?|mobile)\/info$/.test(url.pathname)) {
+          if (packageInfoGate) await packageInfoGate
+          if (mode === 'ios-web' && url.pathname.endsWith('/mobile/info')) return json({ available: false, webUrl: '/local-mobile' })
           if (mode === 'error') return json({ detail: 'Local test unavailable' }, 503)
           if (mode === 'none' || (mode === 'windows-only' && /\/(mac|linux|mobile)\//.test(url.pathname))) return json({ available: false })
           const meta = { available: true, version: '1.12.73', sizeText: '128 MB', filename: 'local-fixture', updatedAt: '2026-10-13T00:00:00Z' }
@@ -75,12 +104,14 @@ if (typeof electron === 'string') {
         return json([])
       }
       if (url.pathname === '/local-sso') { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<h1>Local SSO fixture</h1>'); return }
+      if (url.pathname === '/local-mobile') { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<h1>Local mobile client</h1>'); return }
       const relative = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1))
       const base = path.join(root, 'dist'), file = path.resolve(base, relative)
       if (!file.startsWith(base + path.sep) || !fs.existsSync(file)) { res.writeHead(404); res.end(); return }
       let body = fs.readFileSync(file)
       if (relative === 'index.html') {
-        const locale = url.searchParams.get('locale') === 'en-US' ? 'en-US' : 'zh-CN'
+        const requestedLocale = url.searchParams.get('locale')
+        const locale = ['en-US', 'ja-JP', 'ko-KR'].includes(requestedLocale) ? requestedLocale : 'zh-CN'
         const theme = url.searchParams.get('theme') === 'dark' ? 'dark' : 'light'
         body = Buffer.from(body.toString().replace('<head>', `<head><script>localStorage.clear();localStorage.setItem('soduwork.locale',${JSON.stringify(locale)});localStorage.setItem('soduwork-hub-theme',${JSON.stringify(theme)})</script>`))
       }
@@ -144,10 +175,24 @@ if (typeof electron === 'string') {
     await js('document.querySelector(".login-sso-button").click()')
     await until('document.body.textContent.includes("Local SSO fixture")', 'SSO navigation')
     results.push({ name: 'SSO uses server-provided local start URL', ok: true })
+    let releaseInfo
+    packageInfoGate = new Promise(resolve => { releaseInfo = resolve })
     mode = 'none'; await win.loadURL(origin)
+    await until(`${primary}?.matches('button:disabled[aria-busy="true"]')`, 'loading primary action')
+    assert.equal(await js(`${primary}.textContent.trim()`), '正在确认安装包…')
+    releaseInfo(); packageInfoGate = null
     await until('document.querySelector(".w-meta")?.textContent.includes("尚未发布")', 'unpublished downloads')
-    assert.equal(await js('document.querySelector(".public-hero-actions button").disabled'), true)
+    await followPlatformLink('查看各平台发布状态')
     assert.equal(await js('document.querySelectorAll(".public-platform-packages a").length'), 0)
+    for (const [locale, label] of [
+      ['en-US', 'View release status by platform'],
+      ['ja-JP', 'プラットフォーム別の配信状況を見る'],
+      ['ko-KR', '플랫폼별 배포 현황 보기'],
+    ]) {
+      await win.loadURL(origin + '/?locale=' + locale)
+      await followPlatformLink(label)
+    }
+    results.push({ name: 'loading action and four-language release status navigation', ok: true })
     mode = 'error'; await win.loadURL(origin)
     await until('!!document.querySelector(".w-meta .public-text-button")', 'retry state')
     mode = 'available'; await js('document.querySelector(".w-meta .public-text-button").click()')
@@ -156,8 +201,8 @@ if (typeof electron === 'string') {
     win.webContents.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36')
     await win.loadURL(origin)
     await until('document.querySelector(".w-meta")?.textContent.includes("尚未发布")', 'unpublished Mac state')
-    assert.equal(await js('document.querySelector(".public-hero-actions button").disabled'), true, 'Mac must not receive a Windows installer')
-    assert.equal(await js('document.querySelectorAll(".public-platform-packages a").length'), 1)
+    await followPlatformLink('查看各平台发布状态')
+    assert.deepEqual(await js('[...document.querySelectorAll(".public-platform-packages a")].map(el => el.getAttribute("href"))'), ['/api/v1/download/client'])
     mode = 'available'
     win.webContents.setUserAgent('Mozilla/5.0 (Linux; Android 14; Pixel) AppleWebKit/537.36 Mobile')
     await win.loadURL(origin)
@@ -165,19 +210,15 @@ if (typeof electron === 'string') {
     await geometry('landing-android-390', 390, 844)
     mode = 'none'; await win.loadURL(origin)
     await until('document.querySelector(".w-meta")?.textContent.includes("尚未发布")', 'Android unpublished')
-    assert.equal(await js('document.querySelector(".public-hero-actions button").disabled'), true)
-    mode = 'available'
+    await followPlatformLink('查看各平台发布状态')
     for (const ua of ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)', 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X)']) {
-      win.webContents.setUserAgent(ua); await win.loadURL(origin)
-      await until('document.querySelector(".w-meta")?.textContent.includes("尚未发布")', 'iOS unpublished')
-      assert.equal(await js('document.querySelector(".public-hero-actions button").disabled'), true)
+      win.webContents.setUserAgent(ua)
+      await checkIosDownloads(origin)
     }
     win.webContents.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36')
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
-    await win.loadURL(origin)
-    await until('document.querySelector(".w-meta")?.textContent.includes("尚未发布")', 'iPad desktop UA must not select macOS')
-    assert.equal(await js('document.querySelector(".public-hero-actions button").disabled'), true)
+    await checkIosDownloads(origin)
     await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false })
     win.webContents.debugger.detach()
     results.push({ name: 'unpublished platform, retry and OS-specific download safety', ok: true })

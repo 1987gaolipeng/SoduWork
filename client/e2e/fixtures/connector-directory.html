@@ -17,6 +17,7 @@ window.SoduWorkAPI={capabilityCatalog:async()=>structuredClone(catalog),myMcpSer
  setMySkills:async()=>{writes++},refreshMySkills:async()=>{refreshCalls++;if(window.holdRefresh)await new Promise(resolve=>window.finishRefresh=()=>{window.holdRefresh=false;resolve()});if(window.failRefresh)throw Error('模拟本机目录暂不可用');return structuredClone(catalog)}};
 const renderStub=(content,title)=>{content.innerHTML='<section class="cap-section"><div class="cap-section-head"><b>'+title+'</b><span>隔离页面 · 不连接真实服务</span></div><div class="cap-empty">工具栏交互验证</div></section>'};
 window.SoduWorkCapabilityPlugins={load:async()=>({items:[],submissions:[]}),snapshot:()=>({items:[],submissions:[]}),managedCount:()=>33,marketCount:()=>26,hasPendingReview:()=>false,revision:()=> 'fixture',render:content=>renderStub(content,'我的插件')};
+window.SoduWorkCapabilityPlugins.hasCompleteCatalog=()=>true;
 window.SoduWorkCapabilityDirectory={appCount:()=>3,renderApps:content=>renderStub(content,'连接外部系统'),renderMarket:content=>renderStub(content,'企业能力市场')};
 </script>
 <script src="components/panels/skill-catalog-sync.js"></script>
@@ -25,6 +26,7 @@ window.SoduWorkCapabilityDirectory={appCount:()=>3,renderApps:content=>renderStu
 <script src="components/panels/plugin-presentation.js"></script>
 <script src="core/connector-brand.js"></script>
 <script src="components/panels/platform-connection-directory.js"></script>
+<script src="components/panels/im-remote.js"></script>
 <script src="components/panels/connector-directory.js"></script>
 <script src="components/panels/connector-selection.js"></script>
 <script src="components/panels/connector-config.js"></script>
@@ -37,6 +39,8 @@ window.requests=[];window.failProbe=false;window.saved=[];
 catalog.mcpTemplates=[{key:'connector-figma',name:'Figma',configurable:true,description:'读取设计文件、查看项目与评论',connectionFields:[{key:'FIGMA_TOKEN',label:'访问令牌',required:true,secret:true},{key:'ALLOW_WRITES',label:'允许写入',type:'boolean'}]}];
 Object.assign(SoduWorkAPI,{
  taskStorageKey:()=> 'fixture-owner',
+ im:{catalog:async()=>({available:window.imAvailable===true,connections:[],
+   providers:[{id:'wecom',name:'企业微信自建应用',fields:[{key:'corp_id',label:'Corp ID',secret:false}]}]})},
  preflightMyMcpServer:async spec=>{requests.push({action:'preflight',spec});return{ok:true}},
  probeMyMcpServer:async spec=>{requests.push({action:'probe',spec});if(window.holdProbe)await new Promise(resolve=>window.finishProbe=resolve);return failProbe?{ok:false,error:'授权已失效'}:{ok:true,authenticationTested:true,tools:['read']}},
  saveMyMcpServer:async spec=>{requests.push({action:'save',spec});saved.push(spec);const index=connectionData.personal.findIndex(row=>row.id===spec.id);const row={...spec,canEdit:true,canDelete:true};if(index<0)connectionData.personal.push(row);else connectionData.personal[index]=row;return structuredClone(connectionData)},

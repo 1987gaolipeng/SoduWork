@@ -58,6 +58,7 @@
     "afterPack": "scripts/prepare-installer.cjs",
     "afterSign": "scripts/prepare-installer.cjs",
     "productName": "SoduWork",
+    "protocols": [{ "name": "SoduWork first chat", "schemes": ["soduwork"] }],
     "directories": {
       "output": "dist"
     },

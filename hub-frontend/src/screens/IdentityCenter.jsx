@@ -1,5 +1,5 @@
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
-import React, { useState } from 'react'
+import React, { useId, useState } from 'react'
 import { api } from '../api.js'
 import { Icon, Loading, Modal, Confirm, toast, useAsync, SelectMenu } from '../ui.jsx'
 import { useViewportHeight } from '../viewport-height.js'
@@ -17,7 +17,7 @@ export default function IdentityCenter() {
   const listRef = useViewportHeight(180)
   const uiLocale = useLocale();
   const query = useAsync(async () => {
-    const [providers, orgs, roles] = await Promise.all([api.identityProviders(), api.orgs(), api.roles()])
+    const [providers, orgs, roles] = await Promise.all([api.identityProviders(), api.orgs(), api.roleOptions()])
     return { providers: providers.items || [], orgs: orgs || [], roles: roles || [] }
   }, [])
   const [editing, setEditing] = useState(null)
@@ -103,6 +103,7 @@ export default function IdentityCenter() {
 
 function ProviderEditor({ value, orgs, roles, onClose, onDone }) {
   const uiLocale = useLocale();
+  const formId = useId()
   const original = value.id ? value : null
   const [form, setForm] = useState({ ...defaults(), ...value,
     claimMapping: { ...defaults().claimMapping, ...(value.claimMapping || {}) } })
@@ -121,11 +122,31 @@ function ProviderEditor({ value, orgs, roles, onClose, onDone }) {
         username: key === 'google' ? 'email' : 'preferred_username' } }))
   }
 
-  async function submit() {
+  async function submit(event) {
+    event.preventDefault()
+    if (busy) return
+    const editor = event.currentTarget
+    const { issuer, clientId, scopes } = editor.elements
+    const issuerValue = issuer.value.trim()
+    let validIssuer = false
+    try {
+      const url = new URL(issuerValue)
+      validIssuer = /^https?:\/\/[^/?#]/i.test(issuerValue) && !/[\s\\]/.test(issuerValue)
+        && !!url.hostname && !url.username && !url.password && !url.search && !url.hash
+    } catch { /* A missing or malformed URL is reported on the Issuer field. */ }
+    issuer.setCustomValidity(issuerValue && !validIssuer
+      ? tx("请输入完整的 HTTP 或 HTTPS Issuer 地址，不含账号、查询参数或片段。") : '')
+    clientId.setCustomValidity(clientId.value && !clientId.value.trim() ? tx("Client ID 不能为空。") : '')
+    const tokens = [...new Set(scopes.value.split(/[\s,]+/).filter(Boolean))]
+    // The Hub adds openid automatically and stores up to twelve configured scopes.
+    const configured = tokens.length > 12 ? tokens.filter(token => token !== 'openid') : tokens
+    const validScopes = configured.length <= 12 && tokens.every(token => /^[\x21\x23-\x5B\x5D-\x7E]{1,80}$/.test(token))
+    scopes.setCustomValidity(validScopes ? '' : tx("权限范围用空格或逗号分隔，最多 12 个自定义项；每项最多 80 个可打印 ASCII 字符，不能包含双引号或反斜杠。"))
+    if (!editor.reportValidity()) return
     setBusy(true)
     try {
       const body = { ...form, enabled: false, redirectUri: form.redirectUri.trim() || callbackHint,
-        scopes: Array.isArray(form.scopes) ? form.scopes : String(form.scopes).split(/[\s,]+/).filter(Boolean),
+        issuer: issuerValue, clientId: clientId.value.trim(), scopes: configured,
         allowedDomains: Array.isArray(form.allowedDomains) ? form.allowedDomains : String(form.allowedDomains).split(/[\s,]+/).filter(Boolean) }
       const saved = original ? await api.updateIdentityProvider(original.id, body) : await api.createIdentityProvider(body)
       const checked = await api.probeIdentityProvider(saved.id)
@@ -135,9 +156,9 @@ function ProviderEditor({ value, orgs, roles, onClose, onDone }) {
     setBusy(false)
   }
 
-  return <Modal title={original ? tx("配置企业身份源") : tx("接入企业身份源")} icon="key" wide onClose={onClose}
-    foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={submit}>{busy ? tx("正在保存并测试…") : tx("保存并测试")}</button></>}>
-    <div className="idp-form">
+  return <Modal draft={form} title={original ? tx("配置企业身份源") : tx("接入企业身份源")} icon="key" wide onClose={onClose}
+    foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" type="submit" form={formId} disabled={busy}>{busy ? tx("正在保存并测试…") : tx("保存并测试")}</button></>}>
+    <form id={formId} className="idp-form" noValidate onSubmit={submit}>
       <div className="idp-form-note"><Icon name="shield" /><p><b>{tx("这里不填写密钥明文。")}</b>{tx("机密客户端只填 Hub 上的环境变量名；SoduWork 测试时会验证变量是否存在。")}</p></div>
       <ol>
         <li>{tx("在身份平台创建 Web 应用，登记下方回调地址。")}</li>
@@ -151,12 +172,12 @@ function ProviderEditor({ value, orgs, roles, onClose, onDone }) {
           </SelectMenu></label>}
         <label><span>{tx("显示名称")}</span><input className="f-in" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder={tx("公司统一登录")} /></label>
         <label><span>{tx("稳定标识")}</span><input className="f-in" value={form.key} disabled={!!original} onChange={(e) => set('key', e.target.value.toLowerCase())} placeholder="company-oidc" /></label>
-        <label className="wide"><span>Issuer</span><input className="f-in" value={form.issuer} onChange={(e) => set('issuer', e.target.value)} placeholder={issuerExamples[preset]} /></label>
-        <label><span>Client ID</span><input className="f-in" value={form.clientId} onChange={(e) => set('clientId', e.target.value)} placeholder="soduwork-console" /></label>
+        <label className="wide"><span>Issuer</span><input className="f-in" name="issuer" required type="url" value={form.issuer} onChange={(e) => set('issuer', e.target.value)} placeholder={issuerExamples[preset]} /></label>
+        <label><span>Client ID</span><input className="f-in" name="clientId" required maxLength={300} value={form.clientId} onChange={(e) => set('clientId', e.target.value)} placeholder="soduwork-console" /></label>
         <label><span>{tx("Client Secret 环境变量 ")}<small>{tx("公开客户端可留空")}</small></span><input className="f-in" value={form.clientSecretEnv} onChange={(e) => set('clientSecretEnv', e.target.value)} placeholder="SODUWORK_OIDC_CLIENT_SECRET" /></label>
         <label className="wide"><span>{tx("回调地址")}</span><input className="f-in" value={form.redirectUri} onChange={(e) => set('redirectUri', e.target.value)} placeholder={callbackHint} /><small className="idp-field-help">{tx("身份平台中登记的地址必须与这里完全一致。建议：")}{form.redirectUri || callbackHint}</small></label>
-        <label><span>{tx("允许的邮箱域 ")}<small>{tx("逗号分隔；空为不限制")}</small></span><input className="f-in" value={(form.allowedDomains || []).join ? form.allowedDomains.join(', ') : form.allowedDomains} onChange={(e) => set('allowedDomains', e.target.value)} placeholder="company.com" /></label>
-        <label><span>Scopes</span><input className="f-in" value={(form.scopes || []).join ? form.scopes.join(' ') : form.scopes} onChange={(e) => set('scopes', e.target.value)} /></label>
+        <label><span>{tx("允许的邮箱域 ")}<small>{tx("逗号分隔；空为不限制")}</small></span><input className="f-in" value={Array.isArray(form.allowedDomains) ? form.allowedDomains.join(', ') : form.allowedDomains} onChange={(e) => set('allowedDomains', e.target.value)} placeholder="company.com" /></label>
+        <label><span>Scopes</span><input className="f-in" name="scopes" value={Array.isArray(form.scopes) ? form.scopes.join(' ') : form.scopes} onChange={(e) => set('scopes', e.target.value)} /></label>
       </div>
       <div className="idp-jit"><label><input type="checkbox" checked={form.jitEnabled} onChange={(e) => set('jitEnabled', e.target.checked)} /><span><b>{tx("首次登录自动开户")}</b><small>{tx("关闭时，只允许已经建立 subject 绑定的账号登录。")}</small></span></label>
         {form.jitEnabled && <div className="idp-jit-route"><label><span>{tx("默认部门")}</span><SelectMenu className="f-sel" value={form.defaultOrgId || ''} onChange={(e) => set('defaultOrgId', e.target.value)}><option value="">{tx("不分配")}</option>{orgs.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</SelectMenu></label>
@@ -164,6 +185,6 @@ function ProviderEditor({ value, orgs, roles, onClose, onDone }) {
       </div>
       <details className="idp-claims"><summary>{tx("高级：身份声明映射")}</summary><div>
         {[['username', tx("用户名 claim")], ['displayName', tx("姓名 claim")], ['email', tx("邮箱 claim")]].map(([key, label]) => <label key={key}><span>{label}</span><input className="f-in" value={form.claimMapping[key] || ''} onChange={(e) => set('claimMapping', { ...form.claimMapping, [key]: e.target.value })} /></label>)}</div></details>
-    </div>
+    </form>
   </Modal>
 }

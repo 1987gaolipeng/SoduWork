@@ -135,11 +135,11 @@ export default function PluginRecommendButton({ plugin, version, onChanged, onOp
         onClick={() => { void openDialog() }}>
         {hasSaved ? t('plugin.recommend.edit') : actionLabel}</button>
     </div>
-    {open && <Modal title={tx('推荐设置')} icon="sparkle" className="rec-modal" onClose={() => { if (!busy) setOpen(false) }}
-      foot={<>
+    {open && <Modal draft={{ cover, compose, featured, sidebar }} title={tx('推荐设置')} icon="sparkle" className="rec-modal" onClose={busy ? undefined : () => setOpen(false)}
+      foot={dismiss => <>
         {hasSaved && <button className="btn btn-ghost rec-foot-danger" disabled={busy} onClick={cancelAll}>{tx('取消推荐')}</button>}
         <span className="rec-foot-space" />
-        <button className="btn btn-ghost" disabled={busy} onClick={() => setOpen(false)}>{tx('关闭')}</button>
+        <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx('关闭')}</button>
         {/* Removal goes through the explicit "cancel recommendation" action; saving requires
             at least one selected placement, matching the pre-existing save contract. */}
         <button className="btn btn-primary" disabled={busy || !active} onClick={save}>{saving}</button>

@@ -335,12 +335,12 @@ function EvaluationLaunchModal({ version, caseItem, busy, onClose, onStart }) {
     })
   }
 
-  return <Modal scope="plugin-page"
+  return <Modal draft={{ agentKind, runnerId, model, runnerTags, secretRefs, confirmExternal }} scope="plugin-page"
     title={tx("验证设置 · ") + caseItem.name}
     icon="shield"
     onClose={onClose}
-    foot={<>
-      <button className="btn btn-ghost" onClick={onClose} disabled={busy}>{tx("返回")}</button>
+    foot={dismiss => <>
+      <button className="btn btn-ghost" onClick={dismiss} disabled={busy}>{tx("返回")}</button>
       <button className="btn btn-primary" onClick={submit}
         disabled={busy || loading || Boolean(loadError) ||
           (!machines.length && agentKind !== 'hosted')}>

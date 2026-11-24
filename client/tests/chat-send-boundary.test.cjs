@@ -229,6 +229,43 @@ test('an explicit programmatic task send remains independent of a pending compos
   assert.ok(f.requests.some(row => row[1] === 'Keep composer draft'));
 });
 
+test('requirement dispatch returns the current send refusal and leaves a later attempt independent', async () => {
+  const reason = '所选模型已停用，请重新选择';
+  const detail = '本次执行配置已变化，请重新打开需求';
+  const publicError = Object.assign(new Error('internal dispatch failure'), {detail});
+  const responses = [{ok: false, reason}, publicError, new Error('private transport details'), {ok: false}, {ok: true}];
+  const {ctx, requests} = fixture({send() {
+    const response = responses.shift();
+    if (response instanceof Error) throw response;
+    return response;
+  }});
+  const task = {id: 'task-a', title: 'Generate a report', status: 'todo'};
+  ctx.global.SoduWorkAPI = {getTask: async () => task};
+  Object.assign(ctx, {_collabTasks: new Map(), _collabStarts: new Set(), _send: ctx._sendCore,
+    sessionInfo: () => ({adapterId: 'pi'}), _workModel: () => '', refreshHistory() {}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../components/panels/chat-task-start.js'), 'utf8'), ctx);
+  const {enqueueTask} = ctx.global.ChatTaskStart.create(ctx, {
+    _viewGuard: () => () => true, _openTask: async () => true, _persistTaskBinding: async () => true,
+    _bindCollaborationTask: id => ctx._collabTasks.set(id, {}), _collabEntryStatus: () => '',
+    _setCollabEntryStatus() {},
+  });
+  const dispatch = () => enqueueTask(task.id, {source: 'task-dispatch', agentId: 'local:pi'});
+  ctx._model = {unavailable: true};
+  assert.equal((await dispatch()).reason, '原本地模型已删除或不可用，请主动选择可用模型后继续发送');
+  ctx._model = null;
+  const rejected = await dispatch();
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.reason, reason);
+  assert.equal((await dispatch()).reason, detail);
+  for (let i = 0; i < 2; i++) {
+    const unconfirmed = await dispatch();
+    assert.equal(unconfirmed.ok, false);
+    assert.equal(unconfirmed.reason, '需求未能进入会话队列，请查看会话提示');
+  }
+  assert.equal((await dispatch()).ok, true);
+  assert.equal(requests.length, 5);
+});
+
 for (const hook of ['capture', 'render']) {
   test(`a synchronous ${hook} failure releases its submission reservation and retains the unsent draft`, async () => {
     const f = fixture();

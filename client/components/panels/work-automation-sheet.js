@@ -546,6 +546,7 @@
       ? (state.proposal && state.proposal.modelName) : submittedModel;
     return {
       timingIssue: state.proposal?.timingIssue || '',
+      midnightCalendar: state.proposal?.midnightCalendar || null,
       relativeTiming: every === 'once' && sameMinute
         ? state.proposal?.relativeTiming || null : null,
       needsTask: state.proposal?.needsTask === true,
@@ -914,6 +915,8 @@
     if (['every','runAt','clock','clockHour','clockMinute','minute','customRule'].includes(event.target.name)) {
       state.proposal.timingIssue = ''; state.proposal.relativeTiming = null;
     }
+    if (['every','runAt','clock','clockHour','clockMinute','minute','weekdays','monthDays','monthDayPolicy',
+      'startDate','endDate','customRule'].includes(event.target.name)) state.proposal.midnightCalendar = null;
     if (event.target.name === 'note') state.proposal.needsTask = global.WorkAutomationBindings.taskNeedsDetail(event.target.value);
     if (!state.card?.snapshot.uncertain) updateCard({ phase: 'draft', error: '' });
     if (event.type === 'change' && ['personalPluginKey', 'repoId', 'assigneeId', 'every'].includes(event.target.name)) {

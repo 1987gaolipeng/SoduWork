@@ -36,6 +36,12 @@ async function checkOrgTreeSearch({ win, js, waitFor, sleep, screenshot, changeL
   try {
     await win.loadURL(origin + '/?screen=orgs')
     await waitFor('document.querySelectorAll(".og-tree-name").length === 7', 'nested organization fixtures')
+    record('only branches have disclosure buttons', await js(`[...document.querySelectorAll('.og-tree-row')].every(row => {
+      const toggle = row.querySelector('.og-tree-toggle')
+      return row.hasAttribute('aria-expanded')
+        ? toggle.matches('button') && toggle.getAttribute('aria-expanded') === row.getAttribute('aria-expanded')
+        : toggle.matches('span[aria-hidden="true"]')
+    })`))
     await changeLocale('zh-CN')
     for (const size of [[1366,768], [1920,1080], [1280,720], [760,900], [390,844], [320,640]]) {
       win.setSize(...size); await sleep(180)

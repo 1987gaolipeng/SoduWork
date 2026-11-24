@@ -1,12 +1,43 @@
 """Bounded, read-only installation locations and executable-owned metadata."""
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
-from pathlib import Path
+import plistlib
 import re
 import sys
+from pathlib import Path
+from xml.parsers.expat import ExpatError
+
+_SYSTEM_APPLICATIONS = Path('/Applications')
+
+
+def dsh_desktop_detected() -> bool:
+    """Identify the official GUI independently of the ACP adapter used for execution."""
+    if sys.platform != 'darwin':
+        return False
+    home = Path(os.path.expanduser('~'))
+    directories = [home / 'Applications', _SYSTEM_APPLICATIONS] if home.is_absolute() else [_SYSTEM_APPLICATIONS]
+    for directory in directories:
+        contents = directory / 'DeepSeek Harness.app' / 'Contents'
+        try:
+            with (contents / 'Info.plist').open('rb') as stream:
+                data = stream.read(256 * 1024 + 1)
+            if len(data) > 256 * 1024:
+                continue
+            info = plistlib.loads(data)
+            if not isinstance(info, dict) or info.get('CFBundleIdentifier') != 'com.deepseek.dsh':
+                continue
+            name = info.get('CFBundleExecutable')
+            if not isinstance(name, str) or not name or Path(name).name != name:
+                continue
+            binary = contents / 'MacOS' / name
+            if binary.is_file() and os.access(binary, os.X_OK):
+                return True
+        except (OSError, ValueError, plistlib.InvalidFileException, ExpatError):
+            continue
+    return False
 
 
 def path_directories(*, windows: bool = False) -> list[str]:

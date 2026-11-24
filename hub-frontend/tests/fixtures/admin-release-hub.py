@@ -4,7 +4,10 @@ Production login, permission dependencies and release routers run against a fres
 SQLite database. No production lifespan, Runner, installer or remote service runs.
 """
 import argparse
+import base64
+import hashlib
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -12,6 +15,8 @@ import secrets
 import socket
 import sys
 import tempfile
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--root", required=True)
@@ -24,7 +29,11 @@ if (root / ".smoke-admin-release.db").exists():
 repo = Path(__file__).resolve().parents[3]
 os.chdir(root)
 sys.path.insert(0, str(repo / "hub-backend"))
+signing_key = Ed25519PrivateKey.generate()
+public_key = base64.b64encode(signing_key.public_key().public_bytes_raw()).decode()
 env = {
+    "CLIENT_UPDATE_DIR": str(root / "releases"),
+    "CLIENT_UPDATE_PUBLIC_KEYS": json.dumps({"fixture": public_key}),
     "DATABASE_URL": "sqlite+aiosqlite:///" + (root / ".smoke-admin-release.db").as_posix(),
     "AUTH_SECRET": secrets.token_urlsafe(40), "ADMIN_PASS": secrets.token_urlsafe(32),
     "SODUWORK_ENV": "development", "CLUSTER_REDIS_URL": "", "HUB_LOCAL_EXECUTION_ENABLED": "false",
@@ -43,6 +52,7 @@ from app.models import User, ClientRelease
 from app.release_note_models import ClientReleaseNote
 from app.auth import hash_password
 from app.api import admin, client_updates, client_release_notes
+from app.services import client_updates as contract
 import uvicorn
 
 requests = []
@@ -56,9 +66,22 @@ async def lifespan(app):
         for name, privileged in (("fixture-publisher", True), ("fixture-reader", False)):
             db.add(User(id=name, username=name, display_name=name, is_super=privileged,
                         password_hash=hash_password("fixture-password-only")))
-        db.add(ClientRelease(id="fixture-release", version="2.0.0", channel="stable", platform="win32", arch="x64",
-                             artifact_name="Fixture.exe", artifact_path="fixture-never-installed", artifact_size=1,
-                             sha256="a" * 64, signature="fixture", key_id="fixture", enabled=True, notes="Legacy release notes"))
+        for identity, platform, filename in (("fixture-release", "win32", "Fixture.exe"),
+                                             ("fixture-deb", "linux", "Fixture.deb"),
+                                             ("fixture-dmg", "darwin", "Fixture.dmg")):
+            data = ("测试安装包 " + identity).encode()
+            release = ClientRelease(
+                id=identity, version="2.0.0", channel="stable", platform=platform, arch="x64",
+                artifact_name=filename, artifact_path=f"{identity}/{filename}", artifact_size=len(data),
+                sha256=hashlib.sha256(data).hexdigest(), enabled=True, key_id="fixture",
+                mandatory=False, min_version="", notes="Legacy notes", created_by="fixture-publisher",
+                created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+            release.signature = contract.sign(contract.manifest_payload(release),
+                                              base64.b64encode(signing_key.private_bytes_raw()).decode())
+            artifact = contract.release_root() / release.artifact_path
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact.write_bytes(data)
+            db.add(release)
         summaries = {"zh-CN": "中文发布说明", "en-US": "English release notes", "ja-JP": "日本語の更新内容", "ko-KR": "한국어 업데이트"}
         db.add(ClientReleaseNote(version="2.0.0", channel="stable", revision=1, status="published", locales={
             locale: {"summary": summary, "sections": [{"id": "fix", "title": "Fixes", "items": [{"id": "one", "text": "<img src=x onerror=alert(1)> literal text"}]}]}

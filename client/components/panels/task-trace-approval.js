@@ -52,10 +52,11 @@
   // Show review entry points from actual pending work and creator fallback, regardless of the execution device.
   function canAcceptTask(task, context) {
     const R = global.Requirements;
-    if (!task || !R || R.stage(task) !== 'reviewing' || task.reviewedAt || task.canViewExecution === false) return false;
+    if (!task || !R || R.stage(task) !== 'reviewing' || task.reviewedAt) return false;
     const creator = R.canReview(task) ||
       (Boolean(global.__teamCap?.meId) && String(task.createdBy || '') === String(global.__teamCap.meId));
     const item = R.approval(task, context);
+    if (task.canViewExecution === false && !(task.canReview === true && item)) return false;
     if (item) return item.action === 'review' && creator &&
       (!item.status || item.status === 'pending') && !item.myDecision;
     return task.status === 'done' && creator && !R.waitingOn(task, context).length;
@@ -109,7 +110,8 @@
       if (!id || typeof global.openTaskConversation !== 'function') throw new Error('验收会话暂时无法打开，请重试');
       const latest = global.SoduWorkAPI?.getTask ? await global.SoduWorkAPI.getTask(id) : task;
       assertCurrent();
-      if (global.Requirements && (!latest || global.Requirements.stage(latest) !== 'reviewing' || latest.reviewedAt || latest.canViewExecution === false))
+      if (global.Requirements && (!latest || global.Requirements.stage(latest) !== 'reviewing' || latest.reviewedAt ||
+          (latest.canViewExecution === false && !(latest.canReview === true && approvalId))))
         throw new Error('需求状态或验收权限已变化，请刷新后重试');
       let context = null;
       if (typeof global.SoduWorkAPI?.getAcceptanceContext === 'function') {
@@ -135,7 +137,7 @@
       assertCurrent();
       if (global.Requirements?.canReview && !global.Requirements.canReview(latest) &&
           String(latest?.createdBy || '') !== String(capability?.meId || ''))
-        throw new Error('只有需求创建人可以验收交付成果');
+        throw new Error('当前验收已处理或不由你确认，请刷新后重试');
       let assignment = null;
       if (approvalId && global.SoduWorkAPI?.approvalDetail) {
         const response = await global.SoduWorkAPI.approvalDetail(approvalId), item = response?.item;
@@ -145,7 +147,7 @@
         assignment = item.assignment;
       }
       const direct = !approvalId;
-      const samePerson = sameExecutorReviewer(latest, assignment, direct, capability);
+      const samePerson = latest.canViewExecution !== false && sameExecutorReviewer(latest, assignment, direct, capability);
       const preferred = samePerson && global.TaskConversationNavigation?.preferredConversation
         ? await global.TaskConversationNavigation.preferredConversation(latest) : '';
       assertCurrent();
@@ -201,6 +203,7 @@
     if (typeof global.petSay === 'function') global.petSay(message);
   }
   function humanError(error, fallback) {
+    if (error?.code === 'hub.input.release_environment') return error.message;
     return typeof global._humanErr === 'function'
       ? global._humanErr(error, fallback) : fallback;
   }

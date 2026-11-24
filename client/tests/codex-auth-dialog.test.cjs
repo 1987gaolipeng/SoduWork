@@ -129,7 +129,7 @@ test('cancellation transport retains the original qualified job and cannot leak 
 test('authorization inventory reads only the selected machine while ordinary inventory remains compatible', async () => {
   const api = fs.readFileSync(path.join(__dirname, '../api.js'), 'utf8');
   const start = api.indexOf('    async agentSetup('), end = api.indexOf('    async agentInstall(', start);
-  const calls = [], context = {jfetch: async url => {calls.push(url); return {machines:[{runnerId:'selected'}]};}, taskStorageKey:()=> 'fixture-account', mark(){}};
+  const calls = [], context = {jfetch: async url => {calls.push(url); return {machines:[{runnerId:'selected'}]};}, taskStorageKey:()=> 'fixture-account', mark(){}, _abortSignal: () => undefined};
   const method = vm.runInNewContext('({' + api.slice(start, end) + '})', context).agentSetup;
   await method('machine & one'); await method(''); await method();
   assert.deepEqual(calls, ['/agent-setup?runnerId=machine%20%26%20one', '/agent-setup?runnerId=', '/agent-setup']);

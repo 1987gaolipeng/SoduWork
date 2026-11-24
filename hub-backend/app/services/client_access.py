@@ -15,8 +15,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..auth import ACCOUNT_PASSWORD_MAX, ACCOUNT_PASSWORD_MIN
 from ..models import AIUsageDaily, AIUsageEvent, AppSetting, OrgUnit, Role, User
-
 
 POLICY_KEY = "client_auth_policy_v1"
 USER_QUOTA_PREFIX = "client_token_quota:"
@@ -65,19 +65,19 @@ def normalize_account(value: str) -> str:
 
 def validate_password(value: str, *, new_account: bool = False) -> str:
     password = str(value or "")
-    if not password:
+    if not password or password.isspace():
         raise ClientAccessError(
             "\u8bf7\u8f93\u5165\u5bc6\u7801",
             code="PASSWORD_REQUIRED",
             status=422,
         )
-    if new_account and not 8 <= len(password) <= 128:
+    if new_account and len(password) < ACCOUNT_PASSWORD_MIN:
         raise ClientAccessError(
             "\u9996\u6b21\u6ce8\u518c\u5bc6\u7801\u81f3\u5c11 8 \u4f4d",
             code="PASSWORD_TOO_SHORT",
             status=422,
         )
-    if len(password) > 128:
+    if len(password) > ACCOUNT_PASSWORD_MAX:
         raise ClientAccessError(
             "\u5bc6\u7801\u957f\u5ea6\u4e0d\u80fd\u8d85\u8fc7 128 \u4f4d",
             code="PASSWORD_INVALID",
@@ -304,6 +304,43 @@ async def save_user_quota(session: AsyncSession, user_id: str, value: dict) -> d
         session.add(AppSetting(key=key, value=json.dumps(result)))
     else:
         row.value = json.dumps(result)
+    return result
+
+
+async def effective_quotas(session: AsyncSession, user_ids) -> dict:
+    """Merged allowance view: an effective assignment wins; accounts without one
+    fall back to the legacy personal override. Entries carry quotaSource so user
+    lists show the same effective numbers as quota management and admission
+    (issue #935). Loads both keys in batches, without one query per user.
+    """
+    from . import quota_plans
+    ids = [str(uid) for uid in user_ids if uid]
+    if not ids:
+        return {}
+    keys = [quota_plans.CATALOG_KEY]
+    for uid in ids:
+        keys.extend([USER_QUOTA_PREFIX + uid, quota_plans.GRANT_PREFIX + uid])
+    rows = {}
+    for offset in range(0, len(keys), 500):
+        batch = (await session.execute(select(AppSetting.key, AppSetting.value).where(
+            AppSetting.key.in_(keys[offset:offset + 500])))).all()
+        rows.update(dict(batch))
+    plans = quota_plans.catalog_from(rows.get(quota_plans.CATALOG_KEY))
+    result = {}
+    for uid in ids:
+        grant = quota_plans.parse(rows.get(quota_plans.GRANT_PREFIX + uid))
+        policy = None
+        if grant and grant.get("mode") != "inherit":
+            # Named plans need the catalog; trial and custom grants carry their policy.
+            policy = quota_plans.effective(grant, plans)
+        if policy is not None:
+            result[uid] = {"mode": grant.get("mode"), "limit": int(policy.get("totalLimit") or 0),
+                           "quotaSource": "assignment", "planId": policy.get("id", ""),
+                           "planName": policy.get("name", "")}
+        else:
+            # Missing plan references fall back exactly like the quota page does.
+            result[uid] = {**user_quota(_stored_json(rows.get(USER_QUOTA_PREFIX + uid))),
+                           "quotaSource": "legacy"}
     return result
 
 

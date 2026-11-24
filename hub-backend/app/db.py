@@ -150,6 +150,7 @@ _WANT_COLUMNS = {
         ("created_by", "VARCHAR(36)"),
         ("created_by_name", "VARCHAR(64) DEFAULT ''"),
         ("assignee_user_id", "VARCHAR(36)"),
+        ("review_recipient_user_id", "VARCHAR(36)"),
         ("recur", "VARCHAR(16)"),
         ("recur_at", "{ts}"),
         ("progress", "{json}"),
@@ -260,6 +261,7 @@ _WANT_COLUMNS = {
         ("competencies", "{json}"),
     ],
     "app_user": [
+        ("is_test_account", "BOOLEAN"),
         ("auth_version", "INTEGER DEFAULT 1"),
         ("positions", "{json}"),
         ("domains", "{json}"),
@@ -293,6 +295,13 @@ _LEGACY_DROP = {
 }
 
 
+for _table in ("project", "repo", "org_unit", "position"):
+    _WANT_COLUMNS.setdefault(_table, []).extend([
+        ("data_source", "VARCHAR(12) NOT NULL DEFAULT 'legacy'"),
+        ("is_archived", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ])
+
+
 def _ensure_columns(conn) -> None:
     from importlib import import_module
     from sqlalchemy import inspect, text
@@ -314,6 +323,7 @@ def _ensure_columns(conn) -> None:
                 continue
             typ = ddl.format(ts=ts, json=json_t, now=now)
             conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {typ}'))
+    conn.execute(text("UPDATE position SET data_source = 'business' WHERE is_system IS TRUE AND data_source = 'legacy'"))
     conn.execute(text(
         "CREATE INDEX IF NOT EXISTS ix_client_auth_state ON client (auth_state)"))
     conn.execute(text(
