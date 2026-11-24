@@ -42,6 +42,7 @@ if (typeof electron === 'string') {
     const submitted = await handle.submit(prompt, [], { skills: [item.name], submissionId: 'csv-report-turn' });
     assert.ok(submitted.accepted);
     await submitted.completion;
+    const calls = fixture.requests.length;
     const snapshot = handle.snapshot();
     assert.ok(fs.existsSync(path.join(fixture.cwd, 'executed.txt')), 'local script must have run: ' + JSON.stringify(snapshot.tools));
     const failure = context.summary(handle, snapshot);
@@ -66,7 +67,11 @@ if (typeof electron === 'string') {
     assert.match(report, /code 3/);
     assert.doesNotMatch(report, /fixture-private/);
     assert.match(report, /(?:Windows_NT|Linux|Darwin)/);
-    const calls = fixture.requests.length;
+    const savedFiles = fs.readdirSync(path.join(root, 'skill-failure-context'));
+    assert.equal(savedFiles.length, 1);
+    const saved = fs.readFileSync(path.join(root, 'skill-failure-context', savedFiles[0]), 'utf8');
+    assert.equal(JSON.parse(saved).saved.id, failure.id);
+    assert.doesNotMatch(saved, /fixture-private/);
     // On an interactive test desktop, restore existing clipboard formats atomically.
     expected = report;
     if (process.env.SODUWORK_E2E_CLIPBOARD === '1') {
@@ -88,7 +93,7 @@ if (typeof electron === 'string') {
     fs.writeFileSync(path.join(output, 'skill-failure-report.png'), (await win.webContents.capturePage()).toPNG());
     assert.deepEqual(await js('window.errors'), []);
     const result = { passed: true, actualLocalScript: true, scriptExitCode: 3, model: 'loopback fixture',
-      noAdditionalModelRequests: true, maskedValueAbsent: true, copyTextMatchesReport: true, systemClipboard: usedClipboard };
+      reportSavedLocally: true, noAdditionalModelRequests: true, maskedValueAbsent: true, copyTextMatchesReport: true, systemClipboard: usedClipboard };
     fs.writeFileSync(path.join(output, 'skill-failure-results.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result)); verdict = 0;
   }).catch(error => { console.error(error.stack || error); }).finally(async () => {
