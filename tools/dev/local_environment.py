@@ -518,7 +518,7 @@ def prepare_desktop(state: Path, log: Path) -> Path:
         # npm versions differ in install-script policy. Download the locked Electron
         # runtime explicitly without enabling unrelated dependencies' lifecycle scripts.
         if not electron_binary(client).is_file():
-            print("桌面运行环境下载最多等待 10 分钟 / Electron download allows up to 10 minutes. "
+            print(f"桌面运行环境下载最多等待 {electron_download_timeout():.0f} 秒 / Electron download allows up to {electron_download_timeout():.0f} seconds. "
                   "If GitHub is unreachable, configure ELECTRON_MIRROR or your proxy and retry.", flush=True)
             try:
                 run([node, str(client / 'scripts/install-electron.cjs')], cwd=client, log=log,
