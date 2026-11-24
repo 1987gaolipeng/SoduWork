@@ -9,6 +9,17 @@ from app.automation_models import RunnerNode
 from app.services import desktop_login_policy as policy
 
 
+class DesktopPlatformTests(unittest.TestCase):
+    def test_platform_classification_without_a_database(self):
+        for os_name in ("win32", "windows", "linux", "darwin", "macos"):
+            for platform in (os_name, f" {os_name.upper()} /x64"):
+                with self.subTest(platform=platform):
+                    self.assertTrue(policy.is_desktop_platform(platform))
+        for platform in (None, "", "android/arm64", "ios", "linuxlike/x64"):
+            with self.subTest(platform=platform):
+                self.assertFalse(policy.is_desktop_platform(platform))
+
+
 class DesktopLoginTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
