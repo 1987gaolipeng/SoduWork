@@ -40,7 +40,7 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
        @openai/codex@0.147.0
 COPY --from=node-runtime /usr/local/LICENSE /usr/local/LICENSE.nodejs
 WORKDIR /srv/app/hub-backend
-COPY hub-backend/requirements.txt ./requirements.txt
+COPY hub-backend/requirements.txt hub-backend/requirements-image.txt ./
 RUN python -m pip install -r requirements.txt
 
 FROM ${HUB_BASE_IMAGE} AS runtime
@@ -48,7 +48,7 @@ FROM ${HUB_BASE_IMAGE} AS runtime
 USER root
 ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /srv/app/hub-backend
-COPY hub-backend/requirements.txt ./requirements.txt
+COPY hub-backend/requirements.txt hub-backend/requirements-image.txt ./
 RUN python -m pip install --no-cache-dir -r requirements.txt
 COPY hub-backend/app ./app
 COPY hub-backend/migrations ./migrations

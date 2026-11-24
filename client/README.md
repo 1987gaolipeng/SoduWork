@@ -165,7 +165,7 @@ npm start
 
 Use Node.js 22.19+. A separately started client retains its own profile and Hub connection settings. See the [developer guide](../docs/development.en.md) for service addresses and profile isolation.
 
-The root source launcher prepares both Hub and Runner dependencies in its private `venv/` and explicitly binds the generated desktop to that Python interpreter. For independent `npm start` development, activate `../hub-backend/.venv` and run `python -m pip install -r ../hub-backend/requirements-runner.txt -c ../hub-backend/requirements.txt Pillow` from `client/`. Pillow validates generated images before the desktop publishes them. Both paths execute the current backend source; do not substitute a Runner copied from an old release.
+The root source launcher prepares both Hub and Runner dependencies in its private `venv/` and explicitly binds the generated desktop to that Python interpreter. For independent `npm start` development, activate `../hub-backend/.venv` and run `python -m pip install -r ../hub-backend/requirements-runner.txt -r ../hub-backend/requirements-image.txt` from `client/`. Pillow validates generated images before the desktop publishes them. Both paths execute the current backend source; do not substitute a Runner copied from an old release.
 
 Run `npm test` for unit/contract tests and `npm run check:layout` for source boundaries. Inspect the requirements of each `e2e/` script before using it. Fixture success does not establish real-model or production acceptance.
 

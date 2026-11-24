@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "outputs", "work"}
 SKIP_SUFFIXES = {".pyc", ".pyo", ".log", ".db", ".db-shm", ".db-wal"}
 BACKEND_FILES = (
-    "requirements.txt", "requirements-runner.txt", "alembic.ini", "runner_main.py", "db_admin.py",
+    "requirements.txt", "requirements-runner.txt", "requirements-image.txt", "alembic.ini", "runner_main.py", "db_admin.py",
     "full_backup.py", "pack_plugin.py", "client-update-trust.json",
 )
 ELECTRON_DOWNLOAD_TIMEOUT = 600
@@ -428,7 +428,7 @@ def prepare(state: Path, log: Path) -> tuple[Path, Path]:
             raise venv_interpreter_error(python, venv, log)
     requirements = [ROOT / "hub-backend" / name for name in ("requirements.txt", "requirements-runner.txt")]
     py_stamp = state / "python-dependencies.sha256"
-    wanted = digest_files(requirements, ROOT)
+    wanted = digest_files([*requirements, ROOT / "hub-backend" / "requirements-image.txt"], ROOT)
     install = read_stamp(py_stamp) != wanted
     if not install:
         try:
