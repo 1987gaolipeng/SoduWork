@@ -97,8 +97,12 @@ test('explicit workspaces require a matching local change receipt or a retained 
   assert.equal(await project.capture({ ...f, journal: { ...journal, cwd: path.join(alias, f.taskId) } }), null);
   assert.equal(await project.capture({ ...f, journal: { ...journal, cwd: f.workRoot } }), null);
   assert.equal(await project.capture({ ...f, journal: { ...journal, truncated: true } }), null);
+  const previousStat = fs.statSync(target);
   f.write(name, 'different result');
   assert.equal(await project.capture({ ...f, journal }), null);
+  // Equal-length writes can share a timestamp on Windows. Explicitly change
+  // the version stamp for the retained-file check after rejecting the old hash.
+  fs.utimesSync(target, previousStat.atime, new Date(previousStat.mtimeMs + 2000));
   assert.deepEqual(project.view(f.cwd, kept, () => {}).snapshot().items, []);
   const nextBytes = fs.readFileSync(target);
   const next = await project.capture({ ...f, journal: { ...journal, turnId: 'two', files: [{ ...journal.files[0],
