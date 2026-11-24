@@ -64,6 +64,23 @@ const authenticatedOperations = {
   download: api => api.downloadClientRelease('synthetic-release', 'fixture.bin'),
 }
 
+test('promotion policy validation identifies the requires field in every admin locale', async t => {
+  const f = await fixture(t)
+  const previous = getLocale()
+  t.after(() => setLocale(previous))
+  const code = 'hub.input.promotion_requires'
+  f.respond(400, { detail: 'requires 必须是环境标识数组' }, { 'X-Error-Code': code })
+  for (const [locale, message] of [
+    ['zh-CN', 'requires 必须是环境标识数组'],
+    ['en-US', 'requires must be an array of environment keys.'],
+    ['ja-JP', 'requires には環境キーの配列を指定してください。'],
+    ['ko-KR', 'requires에는 환경 키 배열을 지정해야 합니다.'],
+  ]) {
+    setLocale(locale)
+    await assert.rejects(f.api.me(), { status: 400, code, message })
+  }
+})
+
 test('release environment conflict is displayed in each selected language', async t => {
   const f = await fixture(t)
   const previous = getLocale()
