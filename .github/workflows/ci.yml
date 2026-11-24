@@ -64,6 +64,12 @@ jobs:
       - name: Verify isolated HTTP startup, persistence, and shutdown
         if: runner.os != 'Windows'
         run: python tools/dev/verify_local_start.py
+      - name: Verify workspace titlebar palettes on macOS
+        if: runner.os == 'macOS'
+        working-directory: client
+        run: |
+          npm ci
+          ./node_modules/.bin/electron e2e/titlebar-modal-theme.cjs "$RUNNER_TEMP/titlebar-palettes"
       - name: Verify Windows desktop startup and install caches on another volume
         if: runner.os == 'Windows'
         shell: pwsh
