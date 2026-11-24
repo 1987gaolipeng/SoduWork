@@ -345,9 +345,17 @@ async def delete(session: AsyncSession, client, rid: str, revision: int | None =
 
 async def archive(session: AsyncSession, client, rid: str, archived: bool = True) -> dict:
     row = await get(session, client, rid)
-    row.archived = bool(archived)
-    row.revision += 1
-    row.updated_at = datetime.now(timezone.utc)
+    expected = row.revision
+    # CAS update: a concurrent archive/restore bumps revision, so the stale write
+    # matches zero rows and returns 409 instead of silently overwriting it.
+    result = await session.execute(
+        update(MemoryRecord)
+        .where(MemoryRecord.id == rid, MemoryRecord.revision == expected)
+        .values(archived=bool(archived), revision=MemoryRecord.revision + 1,
+                updated_at=datetime.now(timezone.utc)))
+    if result.rowcount == 0:
+        await session.rollback()
+        raise HTTPException(409, "这条记忆刚被其他请求修改，请刷新后重试")
     await session.commit()
     await session.refresh(row)
     return {"ok": True, "item": view(row, True)}
