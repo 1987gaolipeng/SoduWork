@@ -179,14 +179,17 @@ _workPreview.install({ ipcMain, BrowserWindow, WebContentsView, screen, shell, a
 require('./main/app-settings-ipc.cjs').install({ app, ipcMain, safeStorage,
   identityOf: _deviceAuth.authenticatedIdentity,
   ownerOf: () => { const id = _deviceAuth.identity(app), owner = _deviceAuth.localOwner(app); return id && owner ? id.hub + ':' + owner : ''; } });
-require('./main/local-model-ipc.cjs').install({ app, ipcMain, safeStorage, changed: _catalogChanges.changed });
-require('./main/local-agent-model-ipc.cjs').install({ app, ipcMain, safeStorage, changed: _catalogChanges.changed,
+const _linuxModelStorage = process.platform === 'linux'
+  ? require('./main/linux-model-safe-storage.cjs').create(safeStorage) : null;
+const _modelSafeStorage = _linuxModelStorage || safeStorage;
+require('./main/local-model-ipc.cjs').install({ app, ipcMain, safeStorage: _modelSafeStorage, changed: _catalogChanges.changed });
+require('./main/local-agent-model-ipc.cjs').install({ app, ipcMain, safeStorage: _modelSafeStorage, changed: _catalogChanges.changed,
   probeAgent: options => require('./main/local-agent-probe.cjs').run({ ...options, runner: _runnerRuntime }),
   scopeOf: () => {
     const id = _deviceAuth.identity(app), owner = _deviceAuth.localOwner(app);
     return id && owner ? { hub: id.hub, clientId: id.clientId, owner } : null;
   } });
-require('./main/local-automation-model-ipc.cjs').install({ app, ipcMain, safeStorage, identityOf: _sessionIdentity });
+require('./main/local-automation-model-ipc.cjs').install({ app, ipcMain, safeStorage: _modelSafeStorage, identityOf: _sessionIdentity });
 _attachmentFiles.install({ app, ipcMain, BrowserWindow, dialog, net, shell, identityOf: _deviceAuth.identity,
   authenticatedIdentityOf: _deviceAuth.authenticatedIdentity });
 require('./main/acceptance-summary-export.cjs').install({ app, ipcMain, BrowserWindow, dialog,
@@ -200,7 +203,7 @@ _personalPlugins.install({ app, ipcMain, dialog: require('electron').dialog, saf
 _runnerRuntime.setMobileCapabilities(require('./main/mobile-capabilities.cjs').create({
   app, identityOf: _deviceAuth.authenticatedIdentity, conversation: _ordinaryConversations }));
 const _platformConnections = require('./main/platform-connections/index.cjs').install({ app, ipcMain, identityOf: _sessionIdentity, safeStorage, shell });
-require('./main/automation-conversations').install({ app, ipcMain, identityOf: _sessionIdentity, conversation: _ordinaryConversations, platformConnections: _platformConnections });
+require('./main/automation-conversations').install({ app, ipcMain, identityOf: _sessionIdentity, conversation: _ordinaryConversations, platformConnections: _platformConnections, safeStorage: _modelSafeStorage });
 
 // Allow notification audio triggered by WebSocket events without a user gesture.
 // Set autoplay policy before app readiness so Web Audio can resume for application notifications.
@@ -679,9 +682,19 @@ if (!gotTheLock) {
   _fileOpen.fromCommand(process.argv, process.cwd());
   app.whenReady().then(() => {
     if (!_linuxStartup.showRecovery({ app, BrowserWindow, safeStorage, onUnlock: startDesktop })) startDesktop();
+    if (!app.isPackaged && process.env.SODUWORK_SOURCE_SESSION === '1' && process.env.SODUWORK_USER_DATA) {
+      require('./main/source-workspace-activation.cjs').listen(app, () => {
+        if (_quitRelaunch.quitting) return false;
+        if (_linuxStartup.focusRecovery(app)) return true;
+        if (!desktopStarted) return false;
+        openDeskWindow({ panel: 'workspace' }, null);
+        return true;
+      });
+    }
   });
 
   function startDesktop(credentials) {
+    if (_linuxModelStorage) _linuxModelStorage.bindVault(credentials);
     _deviceAuth.install({ app, ipcMain, safeStorage, credentials, onAuthUnavailable: _runnerRuntime.pauseForHubChange });
     _runnerRuntime.install({ app, ipcMain, identityOf: _deviceAuth.identity, sessionOf: _deviceAuth.session,
       canConnect: _deviceAuth.canConnect });

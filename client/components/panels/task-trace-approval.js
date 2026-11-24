@@ -203,6 +203,7 @@
     if (typeof global.petSay === 'function') global.petSay(message);
   }
   function humanError(error, fallback) {
+    if (error?.code === 'hub.input.release_environment') return error.message;
     return typeof global._humanErr === 'function'
       ? global._humanErr(error, fallback) : fallback;
   }

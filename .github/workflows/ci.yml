@@ -126,15 +126,25 @@ jobs:
           python -m venv hub-backend/.venv
           if [ "$RUNNER_OS" = Windows ]; then
             hub-backend/.venv/Scripts/python.exe -m pip install -r hub-backend/requirements-test.txt
-            choco install ripgrep --no-progress --yes
-            echo 'C:\\ProgramData\\chocolatey\\bin' >> "$GITHUB_PATH"
-            rg --version
           else
             hub-backend/.venv/bin/python -m pip install -r hub-backend/requirements-test.txt
             sudo apt-get update
             sudo apt-get install -y xvfb xauth libgtk-3-0 libnss3 libasound2 ripgrep
-            rg --version
           fi
+      - name: Install ripgrep for Windows client tests
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: |
+          version=15.2.0
+          package="ripgrep-$version-x86_64-pc-windows-msvc"
+          curl --fail --location --retry 3 --output "$package.zip" \
+            "https://github.com/BurntSushi/ripgrep/releases/download/$version/$package.zip"
+          echo "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5  $package.zip" | sha256sum --check
+          python -m zipfile -e "$package.zip" .
+          cygpath -aw "$package" >> "$GITHUB_PATH"
+      - name: Verify ripgrep is on the client test PATH
+        run: rg --version
       - name: Verify attachment storage names under native Windows rules
         if: runner.os == 'Windows'
         run: .venv/Scripts/python.exe -m unittest -v test_attachment_storage_names
@@ -222,9 +232,7 @@ jobs:
         working-directory: hub-backend
       - name: Check for new lint violations in the pull request
         if: github.event_name == 'pull_request'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python scripts/check_changed_lint.py "$BASE_SHA"
+        run: python scripts/check_changed_lint.py HEAD^1
         working-directory: hub-backend
       - name: Report Hub type errors
         continue-on-error: true

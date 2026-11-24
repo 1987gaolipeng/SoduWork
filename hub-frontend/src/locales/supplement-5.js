@@ -217,6 +217,8 @@ export default {
   "场景名称": "Scenario name",
   "例如：客户方案编制": "For example, Customer proposal",
   "场景类别": "Scenario category",
+  "所属组织": "Owning organization",
+  "默认负责人组织": "Default to owner's org",
   "这类工作解决什么问题、边界是什么": "What problems this work solves and its boundaries",
   "不选表示所有职业都可使用": "Leave unselected to allow all roles",
   "方案\n建议书\n路线图": "Proposal\nRecommendation\nRoadmap",

@@ -66,6 +66,12 @@ async function checkAdminLayout({ win, js, waitFor, sleep, screenshot, changeLoc
       return { viewport:[innerWidth,innerHeight], menu:box(p), select:box(s),
         topLanguage:!!document.querySelector('.top-actions .locale-settings') };
     })()`)
+    record('account settings opens a named disclosure with focus inside', await js(`(() => {
+      const trigger = document.querySelector('.side-foot')
+      const panel = document.getElementById(trigger.getAttribute('aria-controls'))
+      return trigger.getAttribute('aria-expanded') === 'true' && panel?.getAttribute('role') === 'region' &&
+        Boolean(panel.getAttribute('aria-label')) && panel.contains(document.activeElement)
+    })()`))
     record('user menu language fits ' + size.join('×'), !g.topLanguage &&
       [g.menu, g.select].every(r => r[0] >= 0 && r[1] >= 0 && r[2] <= g.viewport[0] && r[3] <= g.viewport[1]), g)
     await js(`document.querySelector('.profile-menu .locale-language-select .select-menu-trigger').focus()`)
@@ -93,6 +99,14 @@ async function checkAdminLayout({ win, js, waitFor, sleep, screenshot, changeLoc
     win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'ESC' })
     await waitFor('!document.querySelector(".profile-menu")', 'user menu Escape')
     record('user menu restores focus ' + size[0], await js('document.activeElement === document.querySelector(".side-foot")'))
+    await js(`document.querySelector('.side-foot').click()`)
+    await waitFor('document.querySelector(".profile-menu")?.contains(document.activeElement)', 'profile control focus')
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab', modifiers: ['shift'] })
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab', modifiers: ['shift'] })
+    await waitFor('document.activeElement === document.querySelector(".side-foot")', 'reverse Tab to profile trigger')
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'ESC' })
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'ESC' })
+    await waitFor('!document.querySelector(".profile-menu")', 'Escape on the profile trigger')
   }
   win.setSize(1440, 900)
   await navigate('usage', '.ugc-filterbar .select-menu-trigger')

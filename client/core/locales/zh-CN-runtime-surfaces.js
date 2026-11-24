@@ -12,6 +12,7 @@
     "hub.input.inbox": "团队收件箱任务不指定接收人；要交给个人，请使用成员指派",
     "hub.input.tier": "环境层级不受支持",
     "hub.input.host_type": "主机名必须是字符串",
+    "hub.input.release_environment": "当前任务在所选环境中没有可用的部署目标，请检查发布链配置",
     "hub.input.host_required": "请填写主机名，否则无法识别这台执行节点",
     "hub.input.comment_type": "评论正文必须是文本",
     "hub.input.comment_length": "评论正文不能超过 4000 字",

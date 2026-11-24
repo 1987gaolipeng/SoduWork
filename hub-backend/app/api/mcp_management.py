@@ -6,16 +6,24 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, File, Query, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, update
+from sqlalchemy import JSON, Text, case, cast, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..deps import current_client, require_perm
 from ..models import AppSetting, Client, User
-from ..services import capability_catalog, connector_catalog, mcp_export, mcp_import, mcp_servers, runner_hub
+from ..services import (
+    capability_catalog,
+    connector_catalog,
+    mcp_export,
+    mcp_import,
+    mcp_servers,
+    rbac,
+    runner_hub,
+)
 
 router = APIRouter()
 admin_router = APIRouter()
@@ -117,16 +125,22 @@ def public(record):
                                       "note", "requiredCredentials", "spec", "publishedId")}
 
 
-async def records(session):
-    rows = (await session.execute(select(AppSetting).where(
-        AppSetting.key.startswith(PREFIX)).order_by(AppSetting.key).limit(1000))).scalars()
-    return [(row, json.loads(row.value)) for row in rows]
+async def records(session, scope=None):
+    is_submission = AppSetting.key.startswith(PREFIX, autoescape=True)
+    query = select(AppSetting.value).where(is_submission)
+    if scope is not None:
+        # Other settings may contain plain text. SQLite reads JSON as text,
+        # while PostgreSQL needs a JSON cast to extract the organization.
+        record = cast(case((is_submission, AppSetting.value)), JSON().with_variant(Text(), "sqlite"))
+        query = query.where(record["submittedOrgId"].as_string().in_(scope))
+    values = await session.scalars(query.order_by(AppSetting.key).limit(1000))
+    return [json.loads(value) for value in values]
 
 
 @router.get("/mcp-servers/submissions")
 async def own_submissions(client: Client = Depends(current_client),
                           session: AsyncSession = Depends(get_session)):
-    return {"items": [public(r) for _, r in await records(session) if r["owner"] == client.id]}
+    return {"items": [public(r) for r in await records(session) if r["owner"] == client.id]}
 
 
 @router.post("/mcp-servers/{server_id}/share")
@@ -150,12 +164,14 @@ async def share(server_id: str, body: dict = Body(default_factory=dict),
         raise HTTPException(400, str(exc)) from exc
     signature = json.dumps(clean, sort_keys=True, ensure_ascii=False)
     key = PREFIX + hashlib.sha256((client.id + server_id + signature).encode()).hexdigest()[:50]
+    org_id = await session.scalar(select(User.org_id).where(User.id == client.user_ref))
     found = await session.get(AppSetting, key)
     if found:
         record = json.loads(found.value)
         if record["status"] == "rejected":
             previous = found.value
-            record.update(status="pending", note="", submittedAt=datetime.now(timezone.utc).isoformat())
+            record.update(status="pending", note="", submittedOrgId=org_id, submittedBy=client.name,
+                          submittedAt=datetime.now(timezone.utc).isoformat())
             changed = await session.execute(update(AppSetting).where(
                 AppSetting.key == key, AppSetting.value == previous).values(
                     value=json.dumps(record, ensure_ascii=False)).execution_options(synchronize_session=False))
@@ -166,9 +182,9 @@ async def share(server_id: str, body: dict = Body(default_factory=dict),
     if any(r["name"].casefold() == name.casefold() for r in await mcp_servers.load(session)):
         raise HTTPException(409, "公司已有同名连接，请使用其他名称，避免覆盖")
     existing = await records(session)
-    if sum(r["owner"] == client.id and r["status"] == "pending" for _, r in existing) >= 20:
+    if sum(r["owner"] == client.id and r["status"] == "pending" for r in existing) >= 20:
         raise HTTPException(409, "最多保留 20 个待审核连接")
-    record = {"id": key, "owner": client.id, "name": name, "submittedBy": client.name,
+    record = {"id": key, "owner": client.id, "name": name, "submittedBy": client.name, "submittedOrgId": org_id,
               "submittedAt": datetime.now(timezone.utc).isoformat(), "status": "pending",
               "note": "", "requiredCredentials": required, "spec": clean}
     session.add(AppSetting(key=key, value=json.dumps(record, ensure_ascii=False)))
@@ -186,7 +202,8 @@ async def share(server_id: str, body: dict = Body(default_factory=dict),
 @admin_router.get("/mcp/submissions")
 async def submissions(user: User = Depends(require_perm("integration.manage")),
                       session: AsyncSession = Depends(get_session)):
-    return {"items": [public(r) for _, r in await records(session)]}
+    scope = await rbac.scope_org_ids(session, user)
+    return {"items": [public(r) for r in await records(session, scope)]}
 
 
 @admin_router.post("/mcp/submissions/{submission_id}/review")
@@ -198,6 +215,11 @@ async def review(submission_id: str, body: dict = Body(default_factory=dict),
         raise HTTPException(404, "共享申请不存在")
     previous = row.value
     record = json.loads(previous)
+    scope = await rbac.scope_org_ids(session, user)
+    # Older records only identify a reassignable device, so only a global
+    # reviewer can handle them without guessing the submitting organization.
+    if scope is not None and record.get("submittedOrgId") not in scope:
+        raise HTTPException(403, "无权审核此组织的共享申请")
     if record["status"] != "pending":
         return {"ok": True, "item": public(record)}
     action = body.get("action")

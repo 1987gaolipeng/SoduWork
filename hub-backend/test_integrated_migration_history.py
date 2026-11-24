@@ -29,7 +29,7 @@ from app.schema_migrations import (
 
 OLD_MERGE = "0067_merge_release_account_ownership"
 CANONICAL_MERGE = "0067_merge_account_ownership"
-CURRENT_HEAD = "0094_review_recipient"
+CURRENT_HEAD = "0095_business_record_source"
 
 
 class IntegratedMigrationHistoryTests(unittest.TestCase):
@@ -108,6 +108,7 @@ class IntegratedMigrationHistoryTests(unittest.TestCase):
         script = ScriptDirectory.from_config(_config())
         self.assertEqual(script.get_heads(), [CURRENT_HEAD])
         expected = {
+            "0095_business_record_source": "0094_review_recipient",
             "0094_review_recipient": "0093_user_test_account",
             "0093_user_test_account": "0092_task_text_storage",
             "0092_task_text_storage": "0091_domain_sort_validation",

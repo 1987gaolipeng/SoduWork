@@ -10,11 +10,17 @@ Manage organizations, accounts, clients, execution networks, models, capabilitie
 
 Copy a management page's address to share it or open it in another tab. For example, `/#/identity` opens Identity for accounts with access. Use the browser's Back and Forward buttons to revisit pages. On the Users page, reloading restores the current administrator's search and department filters in that tab. Copied links open the page with fresh filters.
 
+Projects, registered repositories, departments and professional profiles open in the business view. New records inherit a test designation from the creating account or parent record. After an upgrade, review unclassified records by keyword, select up to 200 matching entries and confirm their names before changing the source or archiving them. Archived entries can be restored from the archived view. The user editor offers active business and unclassified profiles available to the selected department.
+
 The model catalog starts with a compact service/model and live-load summary. Expand the overview for configuration, hourly metrics and request distribution; service and concurrency actions stay available while it is collapsed. Enabled services stay ahead of disabled ones, with custom services first within each group. A newly created service is temporarily brought into view; reopening restores that stable group order.
 
 Before deleting a custom model service, review its model list and the visible members and open issues with matching shared-model selections. Model selections stored by name can match more than one service. Enter the exact service ID to delete it. A changed preview requires confirmation again.
 
 Service cards adapt from one to four columns according to the available content width. View opens model details in a dialog without resizing or rearranging the service grid. Add, discover and configure actions remain visible; enable/disable and deletion are in the More popover, with the existing deletion confirmation retained.
+
+## Interface language
+
+A saved language takes precedence over the first supported browser preference, with English as the final fallback. A Traditional Chinese preference currently uses Simplified Chinese and shows a notice only when that preference supplied the effective fallback. Choosing any supported language, including the displayed Simplified Chinese option, saves an explicit choice and clears the notice. Reloading respects that choice. Reading an existing profile does not rewrite its stored language tags or other settings.
 
 ## Handling approvals and failed runs
 

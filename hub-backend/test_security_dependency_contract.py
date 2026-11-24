@@ -44,7 +44,9 @@ class SecurityDependencyContractTests(unittest.TestCase):
         self.assertGreaterEqual(Version(pins[0].version), Version("50.0.0"))
 
     def test_hub_and_office_reject_affected_pillow_release(self):
-        for filename in ("hub-backend/requirements.txt",
+        hub = (ROOT / "hub-backend/requirements.txt").read_text(encoding="utf-8").splitlines()
+        self.assertIn("-r requirements-image.txt", hub)
+        for filename in ("hub-backend/requirements-image.txt",
                          "client/scripts/python-office-requirements.txt"):
             with self.subTest(entrypoint=filename):
                 dependency = requirement(filename, "Pillow")

@@ -205,6 +205,14 @@
     return pending ? tx('收到，正在接上工作区…') : tx('正在理解你的要求…');
   }
 
+  function serviceHostname(raw) {
+    const value = String(raw || '').trim();
+    const host = value.includes(':') && !value.startsWith('[') ? '[' + value + ']' : value;
+    if (!/^(?:[a-z0-9][a-z0-9._-]{0,252}|\[[a-f0-9:.]+\])$/i.test(host)) return '';
+    // URL validates IPv6 and retains the brackets needed by later URLs.
+    try { return new URL('http://' + host + '/').hostname; }
+    catch (_) { return ''; }
+  }
   function normalizeUrl(raw, options) {
     const opts = options || {};
     let value = String(raw || '').trim().replace(/[),.;]+$/, '');
@@ -229,9 +237,9 @@
       // A cloud runner's localhost is the runner, not the user's desktop. The
       // Hub exposes the runner host in the target snapshot, so rewrite only
       // loopback addresses and keep the reported port/path/query intact.
-      const cloudHost = String(opts.cloudHost || '').trim();
-      if (opts.cloud && loopback && !cloudHost) return '';
-      if (opts.cloud && loopback && cloudHost && /^[a-z0-9][a-z0-9._-]{0,252}$/i.test(cloudHost)) {
+      if (opts.cloud && loopback) {
+        const cloudHost = serviceHostname(opts.cloudHost);
+        if (!cloudHost) return '';
         parsed.hostname = cloudHost;
       } else if (loopback) {
         parsed.hostname = '127.0.0.1';
@@ -294,8 +302,9 @@
       const meta = toolMeta(tool);
       if (meta.kind !== 'command') return;
       const port = Number(tool.port);
-      const structuredPort = Number.isInteger(port) && port > 0 && port < 65536
-        ? String(tool.host || 'localhost') + ':' + String(port) : '';
+      const host = serviceHostname(tool.host || 'localhost');
+      const structuredPort = host && Number.isInteger(port) && port > 0 && port < 65536
+        ? 'http://' + host + ':' + String(port) : '';
       const explicitServiceUrls = [
         tool.serviceUrl, tool.previewUrl, tool.service?.url,
         ...(Array.isArray(tool.services) ? tool.services.map(item => item?.url || item?.previewUrl) : []),

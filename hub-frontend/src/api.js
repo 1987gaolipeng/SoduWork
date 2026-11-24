@@ -124,7 +124,7 @@ async function authenticatedData(path, options, timeout = REQUEST_TIMEOUT, consu
   // Old successes and errors must not update a different account's view.
   if (generation !== authGeneration) throw authenticationChanged()
   const { res, data } = response
-  if (res.status === 401) {
+  if (res.status === 401 && path !== '/admin/login') {
     setToken(''); setUser(null)
     window.dispatchEvent(new Event('soduwork-hub-unauth'))
     throw new Error(tx("登录已失效，请重新登录"))
@@ -191,12 +191,13 @@ export const api = {
   probeIdentityProvider: (id) => call('POST', '/admin/identity-providers/' + encodeURIComponent(id) + '/probe', {}),
   deleteIdentityProvider: (id) => call('DELETE', '/admin/identity-providers/' + encodeURIComponent(id)),
   // Organization hierarchy.
-  orgs: () => call('GET', '/admin/orgs'),
+  orgs: (includeManaged = false) => call('GET', '/admin/orgs' + (includeManaged === true ? '?includeManaged=true' : '')),
   createOrg: (b) => call('POST', '/admin/orgs', b),
   updateOrg: (id, b) => call('PATCH', '/admin/orgs/' + id, b),
   deleteOrg: (id) => call('DELETE', '/admin/orgs/' + id),
   // Roles and permission points.
   roles: () => call('GET', '/admin/roles'),
+  roleOptions: () => call('GET', '/admin/role-options'),
   permissions: () => call('GET', '/admin/permissions'),
   createRole: (b) => call('POST', '/admin/roles', b),
   updateRole: (id, b) => call('PATCH', '/admin/roles/' + id, b),
@@ -216,7 +217,8 @@ export const api = {
   updateWorkScenario: (id, b) => call('PATCH', '/admin/work-catalog/scenarios/' + encodeURIComponent(id), b),
   deleteWorkScenario: (id) => call('DELETE', '/admin/work-catalog/scenarios/' + encodeURIComponent(id)),
   // Compatibility occupation list for the user editor.
-  positions: () => call('GET', '/admin/positions'),
+  positions: (orgId = '') => call('GET', '/admin/positions' + (orgId ? '?orgId=' + encodeURIComponent(orgId) : '')),
+  manageRecords: (kind, body) => call('POST', '/admin/business-records/' + kind, body),
   // Responsibility domains, modules, and skills for task assignment.
   domains: () => call('GET', '/admin/domains'),
   createDomain: (b) => call('POST', '/admin/domains', b),
@@ -255,7 +257,7 @@ export const api = {
   setTeamModuleScope: (scope) => call('PUT', '/admin/team-module-scope', { scope }),
   // Retain legacy managed events only in server compatibility and audit history.
   // Project task dependencies and layered graph views.
-  projects: () => call('GET', '/admin/projects'),
+  projects: (includeManaged = false) => call('GET', '/admin/projects' + (includeManaged === true ? '?includeManaged=true' : '')),
   projectOwners: () => call('GET', '/admin/project-owner-options'),
   createProject: (b) => call('POST', '/admin/projects', b),
   projectDetail: (id) => call('GET', '/admin/projects/' + id),
@@ -263,7 +265,7 @@ export const api = {
   deleteProject: (id) => call('DELETE', '/admin/projects/' + id),
   updateProject: (id, b) => call('PUT', '/admin/projects/' + id, b),
   // Manage repositories within projects and associate them with execution-runtime projects.
-  repos: (pid) => call('GET', '/admin/projects/' + pid + '/repos'),
+  repos: (pid, includeManaged = false) => call('GET', '/admin/projects/' + pid + '/repos' + (includeManaged === true ? '?includeManaged=true' : '')),
   addRepo: (pid, b) => call('POST', '/admin/projects/' + pid + '/repos', b),
   updateRepo: (rid, b) => call('PUT', '/admin/repos/' + rid, b),
   deleteRepo: (rid) => call('DELETE', '/admin/repos/' + rid),

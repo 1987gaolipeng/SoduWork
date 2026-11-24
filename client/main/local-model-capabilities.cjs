@@ -33,21 +33,49 @@ function validateState(value) {
 }
 function secure() {
   if (!deps?.safeStorage?.isEncryptionAvailable?.() || process.platform === 'linux' && deps.safeStorage.getSelectedStorageBackend?.() === 'basic_text') {
-    throw Error('系统安全存储不可用，无法保存能力检测记录');
+    throw Object.assign(Error('系统安全存储不可用，无法保存能力检测记录'), { code: 'SAFE_STORAGE_UNAVAILABLE' });
   }
+}
+function isUnauthenticatedLinuxNativeCipher(bytes, safeStorage) {
+  if (safeStorage?.isUnauthenticatedNativeCipher?.(bytes) === true) return true;
+  return process.platform === 'linux' && bytes.length >= 3 &&
+    (bytes.subarray(0, 3).equals(Buffer.from('v10')) || bytes.subarray(0, 3).equals(Buffer.from('v11')));
 }
 function read() {
   if (!deps?.app) return empty();
   let encoded;
   try { encoded = fs.readFileSync(file(), 'utf8'); }
   catch (error) { if (error.code === 'ENOENT') return empty(); throw Error('能力检测记录无法读取'); }
+  secure();
+  let envelope;
   try {
-    secure(); const envelope = JSON.parse(encoded);
+    envelope = JSON.parse(encoded);
     if (envelope.schema !== 1 || typeof envelope.cipher !== 'string') throw Error();
-    const value = JSON.parse(deps.safeStorage.decryptString(Buffer.from(envelope.cipher, 'base64')));
+  } catch { throw Error('能力检测记录无法读取，请重新检测以重建记录'); }
+  const cipherBytes = Buffer.from(envelope.cipher, 'base64');
+  const unauthenticatedNative = isUnauthenticatedLinuxNativeCipher(cipherBytes, deps.safeStorage);
+  let plaintext;
+  try {
+    plaintext = deps.safeStorage.decryptString(cipherBytes);
+  } catch (error) {
+    if (error?.code === 'SAFE_STORAGE_UNAVAILABLE') {
+      throw Object.assign(Error('系统安全存储不可用，无法读取能力检测记录'), { code: 'SAFE_STORAGE_UNAVAILABLE' });
+    }
+    if (error?.code === 'SAFE_STORAGE_DECRYPT_FAILED' || unauthenticatedNative) {
+      throw Object.assign(Error('能力检测记录无法解密，当前密钥与历史记录不匹配，请恢复匹配的密钥或从备份恢复'), { code: 'SAFE_STORAGE_DECRYPT_FAILED' });
+    }
+    throw Error('能力检测记录无法读取，请重新检测以重建记录');
+  }
+  try {
+    const value = JSON.parse(plaintext);
     validateState(value);
     seed = value.secret; return value;
-  } catch { throw Error('能力检测记录无法读取，请重新检测以重建记录'); }
+  } catch {
+    if (unauthenticatedNative) {
+      throw Object.assign(Error('能力检测记录无法读取，当前密钥可能不匹配，请恢复匹配的密钥或从备份恢复'), { code: 'SAFE_STORAGE_DECRYPT_FAILED' });
+    }
+    throw Error('能力检测记录无法读取，请重新检测以重建记录');
+  }
 }
 function write(value) {
   secure(); validateState(value); const target = file(), temp = target + '.' + crypto.randomUUID() + '.tmp';
@@ -139,7 +167,8 @@ async function check(input, options = {}) {
   if (!model || model.modality !== 'chat') throw Error('本地对话模型不存在');
   const selected = target(snapshot, model);
   let state;
-  try { state = read(); } catch {
+  try { state = read(); } catch (error) {
+    if (error?.code === 'SAFE_STORAGE_UNAVAILABLE' || error?.code === 'SAFE_STORAGE_DECRYPT_FAILED') throw error;
     // Preserve unreadable encrypted bytes before an explicit recheck rebuilds evidence.
     fs.copyFileSync(file(), file() + '.corrupt-' + crypto.randomUUID() + '.bak'); state = empty();
   }

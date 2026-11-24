@@ -9,7 +9,8 @@ from skill_test_support import fixture
 from mcp_test_support import protocol_server, runners, config
 from app import models
 from app.api import admin
-from app.services import mcp_servers, mcp_import, plugin_mcp_gateway as gateway
+from app.auth import sign_token
+from app.services import device_auth, mcp_servers, mcp_import, plugin_mcp_gateway as gateway
 
 class McpManagementTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -24,7 +25,7 @@ class McpManagementTests(unittest.IsolatedAsyncioTestCase):
         await self.http.aclose(); await self.cleanup(); self.temp.cleanup()
     async def req(self, method, path, who="alice", **kwargs):
         return await self.http.request(method, "/api/v1" + path, headers={
-            "Authorization": ("Bearer " if who in ("admin", "ordinaryUser") else "Device ") + self.tokens[who]}, **kwargs)
+            "Authorization": ("Device " if who in ("alice", "bob") else "Bearer ") + self.tokens[who]}, **kwargs)
     async def imported(self):
         r = await self.req("POST", "/mcp-servers/import?confirmed=true",
                           files={"file": ("connections.json", json.dumps(config(self.url)))})
@@ -36,6 +37,81 @@ class McpManagementTests(unittest.IsolatedAsyncioTestCase):
                           json={"name": "company-business", "confirmed": True})
         self.assertEqual(r.status_code, 200, r.text)
         return r.json()["item"]
+
+    async def setup_reviewers(self):
+        async with self.sessions() as session:
+            for org, parent in (("department", "skill-fixture-org"), ("team", "department"),
+                                ("sibling", "skill-fixture-org")):
+                session.add(models.OrgUnit(id=org, name=org, parent_id=parent))
+            session.add(models.Role(id="mcp-review", name="MCP reviewer", permissions=["integration.manage"]))
+            for reviewer, org in (("manager", "department"), ("peer", "sibling"), ("unbound", None)):
+                session.add(models.User(id=reviewer, username=reviewer, org_id=org, role_id="mcp-review"))
+                self.tokens[reviewer] = sign_token(reviewer)
+            alice = await session.get(models.User, "alice")
+            bob = await session.get(models.User, "bob")
+            alice.org_id, bob.org_id = "team", "sibling"
+            await session.commit()
+
+    async def test_review_uses_submitting_org_after_device_reassignment(self):
+        await self.setup_reviewers()
+        item = await self.shared()
+        listing = "/admin/capabilities/mcp/submissions"
+        review = f"{listing}/{item['id']}/review"
+        async with self.sessions() as session:
+            device = await session.get(models.Client, "device-alice")
+            device_auth.activate(device, await session.get(models.User, "bob"))
+            await session.commit()
+            self.tokens["alice"] = device_auth.issue_session(device)[0]
+
+        # Repeating a pending submission preserves the original department.
+        self.assertEqual((await self.shared())["id"], item["id"])
+        for reviewer in ("peer", "unbound"):
+            with self.subTest(reviewer=reviewer):
+                self.assertEqual((await self.req("GET", listing, reviewer)).json()["items"], [])
+                denied = await self.req("POST", review, reviewer, json={"action": "publish"})
+                self.assertEqual(denied.status_code, 403, denied.text)
+        visible = (await self.req("GET", listing, "manager")).json()["items"]
+        self.assertEqual([(r["id"], r["status"]) for r in visible], [(item["id"], "pending")])
+        self.assertEqual(self.seen, [])
+        async with self.sessions() as session:
+            self.assertEqual(await mcp_servers.load(session), [])
+
+        rejected = await self.req("POST", review, "manager", json={"action": "reject"})
+        self.assertEqual(rejected.json()["item"]["status"], "rejected")
+        self.assertEqual((await self.req("POST", review, "peer", json={})).status_code, 403)
+        # A genuine new submission after rejection belongs to the new submitter.
+        self.assertEqual((await self.shared())["status"], "pending")
+        self.assertEqual((await self.req("GET", listing, "manager")).json()["items"], [])
+        visible = (await self.req("GET", listing, "peer")).json()["items"]
+        self.assertEqual([r["id"] for r in visible], [item["id"]])
+
+    async def test_unattributed_history_and_scoped_list_limit(self):
+        await self.setup_reviewers()
+        item = await self.shared()
+        listing = "/admin/capabilities/mcp/submissions"
+        legacy_id = "mcp_share_legacy"
+        legacy = {**item, "id": legacy_id, "owner": "device-alice"}
+        async with self.sessions() as session:
+            session.add(models.AppSetting(key="mcpXshareYsetting", value="plain text"))
+            session.add(models.AppSetting(key=legacy_id, value=json.dumps(legacy)))
+            await session.commit()
+        visible = (await self.req("GET", listing, "admin")).json()["items"]
+        self.assertEqual({r["id"] for r in visible}, {legacy_id, item["id"]})
+        review = f"{listing}/{legacy_id}/review"
+        self.assertEqual((await self.req("POST", review, "manager", json={})).status_code, 403)
+        rejected = await self.req("POST", review, "admin", json={"action": "reject"})
+        self.assertEqual(rejected.json()["item"]["status"], "rejected")
+
+        # Earlier records from a sibling cannot consume this department's 1,000 slots.
+        async with self.sessions() as session:
+            for index in range(1000):
+                key = f"mcp_share_{index:050x}"
+                other = {**item, "id": key, "owner": "device-bob", "submittedOrgId": "sibling"}
+                session.add(models.AppSetting(key=key, value=json.dumps(other)))
+            await session.commit()
+        visible = (await self.req("GET", listing, "manager")).json()["items"]
+        self.assertEqual([r["id"] for r in visible], [item["id"]])
+
     async def test_import_roundtrip_private_probe_and_policy(self):
         preview = await self.req("POST", "/mcp-servers/import/preview", files={
             "file": ("connections.json", json.dumps(config(self.url)))})
