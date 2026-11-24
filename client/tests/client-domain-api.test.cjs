@@ -70,6 +70,29 @@ test('model and config reads use shared snapshots and successful writes invalida
   assert.deepEqual(invalidated, ['models', 'models', 'models', 'config']);
 });
 
+test('a history preview can verify a Hub choice even when the shared snapshot still lists it', async () => {
+  const f = await fixture({clientDomainRead: async () => ({ok: true, value: {
+    providers: [], usable: [{name: 'previous-model', label: 'Old label'}],
+  }})});
+  assert.equal((await f.api.myModels()).usable[0].name, 'previous-model');
+  const current = await f.api.myModels({refreshManaged: true});
+  assert.deepEqual(Array.from(current.usable), []);
+  assert.equal(current.managedCatalogUnavailable, false);
+  assert.equal(f.requests.length, 1);
+  assert.ok(f.requests[0].url.endsWith('/my-models'));
+  assert.equal(f.requests[0].options.cache, 'no-store');
+});
+test('a saved local alias is resolved by the desktop catalog and stays off Hub requests', async () => {
+  const legacy = 'local:private:sample', current = 'local:model-' + 'a'.repeat(32), lookups = [];
+  const f = await fixture({ localModels: { get: async reference => {
+    lookups.push(reference);
+    return { providers: [], usable: [{ name: current }], historyChoiceName: current };
+  } } });
+  const result = await f.api.myModels({ historyChoice: legacy, localDefaults: false });
+  assert.equal(result.historyChoiceName, current);
+  assert.deepEqual(lookups, [legacy]);
+  assert.ok(f.requests.every(request => !JSON.stringify(request).includes(legacy)));
+});
 test('offline local catalogs disclose unreadable Hub models without inventing their deletion', async () => {
   const localName = 'local:model-' + 'a'.repeat(32);
   for (const response of [

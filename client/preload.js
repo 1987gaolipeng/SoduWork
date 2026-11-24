@@ -455,7 +455,7 @@ const soduWorkBridge = {
     update: (id, options) => ipcRenderer.invoke('app-settings-update', id || '', options || {}),
   },
   localModels: {
-    get: () => ipcRenderer.invoke('local-models-get'),
+    get: historyChoice => ipcRenderer.invoke('local-models-get', historyChoice),
     save: input => ipcRenderer.invoke('local-models-save', input || {}),
     test: (providerId, modelName) => ipcRenderer.invoke('local-models-test', String(providerId || ''), String(modelName || '')),
     checkCapabilities: input => ipcRenderer.invoke('local-models-capabilities-check', input || {}),

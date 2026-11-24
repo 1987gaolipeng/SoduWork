@@ -309,11 +309,14 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
   async function previewChoice(row, actor, shared) {
     const record = require('./runtime-segments').read(app, row.id);
     if (record?.deviceShared ? record.executionOwner !== actor.owner : shared) return null;
+    const { historyModel } = require('../local-model-store.cjs');
     const live = session.findBySessionId?.(row.id);
     if (live && !live.localReplica && live.usageIdentity?.accountScope === actor.owner) {
       const selection = live.snapshot().modelSelection;
-      if (selection?.name) return { adapterId: live.adapterId, name: selection.name,
-        label: selection.model?.label || selection.name };
+      if (selection?.name) {
+        return { adapterId: live.adapterId, name: selection.name, label: selection.model?.label || selection.name,
+          ...(selection.model?.unavailable ? { unavailable: true } : historyModel(selection.name)) };
+      }
     }
     const active = record?.active;
     const adapterId = active?.adapterId || row.adapterId || 'pi';
@@ -321,7 +324,7 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     const name = active?.modelName || (adapterId === 'pi'
       ? await require('../pi-session/session').archivedModelName(app, nativeId)
       : require('./model-selection').preference(app, nativeId).read());
-    return { adapterId, name, label: name };
+    return { adapterId, name, label: name, ...historyModel(name) };
   }
   async function open(id, { historyPreview = false, allowContinuation = false, previewReason = '' } = {}) {
     const captured = scoped.actor(), row = await resolve(id, captured);

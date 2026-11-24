@@ -24,7 +24,7 @@ function fixture(runtime = 'opencode') {
     _wd: {}, _mode: 'full', _sessionCaps: [], _sessionInputs: [], _activeCollabTaskId: '', _workModel: () => 'selected-model',
     _collabEntries: () => [], _mount() {}, _render() {}, _paintOpening() {},
     _pending: '', _pendingPlugins: [], _pendingAttachmentNames: [], _restoreFailedDraft() {},
-    _rememberConversationDraft() {}, _clearConversationDraft() {}, _restoreConversationDraft() {},
+    _rememberConversationDraft() {}, _clearConversationDraft() {}, _restoreConversationDraft() {}, _draftOwnerScope: () => 'owner',
     _restoreRetainedConversationFailure() {},
     _api: () => api,
     async _ensureOnce(chatId) {
@@ -67,6 +67,32 @@ test('returning to a sent chat mounts its cached Agent and model before work car
   assert.equal(ctx._ref, '');
   resume(null);
   assert.equal(await returning, true);
+});
+
+test('only the same authorized archive, owner, Agent and model reuse a confirmed Hub label after navigation', () => {
+  const { ctx } = fixture();
+  vm.runInContext(section('  const _conversationSnapshots', '  /* Associate attachments'), ctx);
+  const make = (name = 'hub-id', label = name) => ({ adapterId: 'pi', execution: { canContinueOnDevice: true },
+    modelSelection: { name, model: { id: name, label } } });
+  const remember = (id, snap, confirmed = false) => { ctx._rememberConversationSnapshot(id, snap, confirmed); return snap.modelSelection.model.label; };
+  const prime = () => remember('a', make('hub-id', 'Hub display'), true);
+  prime();
+  remember('b', make());
+  assert.equal(ctx._cachedConversationSnapshot('a').modelSelection.model.label, 'Hub display');
+  assert.equal(remember('a', make()), 'Hub display');
+  assert.equal(remember('a', make('hub-id', 'Native display')), 'Native display');
+  for (const changed of [make('other'), { ...make(), adapterId: 'opencode' }, { ...make(), execution: {} }]) {
+    prime(); assert.equal(remember('a', changed), changed.modelSelection.name);
+  }
+  prime();
+  const unavailable = make(); unavailable.modelSelection.model.unavailable = true;
+  assert.equal(remember('a', unavailable), 'hub-id');
+  assert.equal(remember('a', make()), 'hub-id');
+  prime(); ctx._draftOwnerScope = () => 'bob';
+  assert.equal(ctx._cachedConversationSnapshot('a'), null);
+  assert.equal(remember('a', make()), 'hub-id');
+  remember('a', make('other', 'Unconfirmed'), false);
+  assert.equal(remember('a', make('other')), 'other');
 });
 
 test('handled or denied application navigation preserves the current renderer session', async () => {

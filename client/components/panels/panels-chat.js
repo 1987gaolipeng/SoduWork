@@ -218,22 +218,33 @@
      and replaces it as soon as open() completes. */
   const _conversationSnapshots = new Map();
   const MAX_CONVERSATION_SNAPSHOTS = 12;
-  function _rememberConversationSnapshot(id, snapshot) {
+  function _rememberConversationSnapshot(id, snapshot, confirmedHubLabel = false) {
     const key = String(id || '').trim();
     if (!key || !snapshot || typeof snapshot !== 'object') return;
+    const owner = _draftOwnerScope(), previous = _conversationSnapshots.get(key), selection = snapshot.modelSelection;
+    let hubLabel = '';
+    if (owner && snapshot.execution?.canContinueOnDevice === true && selection?.name && !selection.model?.unavailable && !selection.model?.localOnly) {
+      if (confirmedHubLabel) hubLabel = selection.model?.label || '';
+      else if (previous?.owner === owner && previous.snapshot.adapterId === snapshot.adapterId &&
+          previous.snapshot.modelSelection?.name === selection.name) hubLabel = previous.hubLabel;
+      // Native history can return only the saved ID. Reuse its verified display
+      // name on this renderer snapshot until a successful directory read updates it.
+      if (hubLabel && (!selection.model?.label || selection.model.label === selection.name))
+        snapshot.modelSelection = { ...selection, model: { ...selection.model, label: hubLabel } };
+    }
     _conversationSnapshots.delete(key);
-    _conversationSnapshots.set(key, snapshot);
+    _conversationSnapshots.set(key, { owner, snapshot, hubLabel });
     while (_conversationSnapshots.size > MAX_CONVERSATION_SNAPSHOTS) {
       _conversationSnapshots.delete(_conversationSnapshots.keys().next().value);
     }
   }
   function _cachedConversationSnapshot(id) {
     const key = String(id || '').trim();
-    if (!key || !_conversationSnapshots.has(key)) return null;
-    const snapshot = _conversationSnapshots.get(key);
+    const entry = _conversationSnapshots.get(key);
+    if (!entry || entry.owner !== _draftOwnerScope()) return null;
     _conversationSnapshots.delete(key);
-    _conversationSnapshots.set(key, snapshot);
-    return snapshot;
+    _conversationSnapshots.set(key, entry);
+    return entry.snapshot;
   }
   /* Associate attachments saved before a new native session existed with the
      session once its durable id is available. Failures remain non-blocking. */

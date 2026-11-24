@@ -52,6 +52,35 @@ function fixture(t, { seed = true } = {}) {
 const json = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 const rows = file => fs.readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
 
+test('history labels read a legacy vault without migrating it and respect local model identities', t => {
+  const f = fixture(t), file = path.join(f.root, 'local-models.secure.json');
+  const original = fs.readFileSync(file);
+  assert.deepEqual(store.historyModel(legacy), { label: model.label });
+  assert.deepEqual(fs.readFileSync(file), original);
+  const firstCatalog = store.get(legacy), opaque = firstCatalog.usable[0].name;
+  assert.match(opaque, OPAQUE);
+  assert.equal(firstCatalog.historyChoiceName, opaque, 'The first catalog read can migrate and resolve the same alias');
+  assert.equal(store.get().historyChoiceName, undefined);
+  assert.equal(firstCatalog.aliases, undefined);
+  const image = { providerId: provider.id, name: 'fixture-image', label: 'Canvas', modality: 'image' };
+  const ref = store.save({ models: [model, image] }).mediaUsable.image[0].name;
+  const oldImage = 'image::private::' + store.ref(provider.id, image.name);
+  assert.equal(store.get(oldImage).historyChoiceName, 'image::device:private::' + ref);
+  assert.equal(store.get('image::other::' + ref).historyChoiceName, '');
+  assert.deepEqual(store.historyModel('image::device:private::' + ref), { label: '生成图片 · Canvas' });
+  const missingImage = { label: '原本地图片模型已删除或不可用', unavailable: true };
+  assert.deepEqual(store.historyModel('image::other::' + ref), missingImage);
+  store.save({ models: [] });
+  store.save({ models: [model, image] });
+  assert.equal(store.get(legacy).historyChoiceName, '');
+  assert.equal(store.get(oldImage).historyChoiceName, '');
+  assert.deepEqual(store.historyModel(legacy), { label: '原本地模型已删除或不可用', unavailable: true });
+  assert.deepEqual(store.historyModel('image::device:private::' + ref), missingImage);
+  f.safeStorage.decryptString = () => { throw Error('locked'); };
+  assert.deepEqual(store.historyModel(legacy), { label: '本地模型配置无法读取' });
+  assert.equal(store.historyModel(model.name), null);
+});
+
 test('legacy catalogs and owned metadata migrate to one opaque identity without rewriting user content or usage', t => {
   const f = fixture(t), managedProvider = { baseUrl: 'https://managed.invalid/v1', models: [{ id: model.name }] };
   const runtime = f.write('pi-agent/models.json', { providers: {
