@@ -327,6 +327,10 @@ class InvalidEnvironmentTier(ValueError):
     """The requested deployment tier is outside the catalog."""
 
 
+class InvalidPromotionDependencies(ValueError):
+    """A submitted promotion policy has malformed environment prerequisites."""
+
+
 class BusinessConflict(ValueError):
     """The operation conflicts with existing data or rules (e.g., circular dependency)."""
 
@@ -420,7 +424,12 @@ async def save_environment(session: AsyncSession, body: dict, row: am.Environmen
     row.approval_policy_id = approval_id
     row.acceptance_policy_id = acceptance_id
     if "promotionPolicy" in body or creating:
-        row.promotion_policy = promotion_policy(body.get("promotionPolicy"))
+        policy = body.get("promotionPolicy")
+        if isinstance(policy, dict):
+            prerequisites = policy.get("requires", [])
+            if not isinstance(prerequisites, list) or not all(isinstance(key, str) for key in prerequisites):
+                raise InvalidPromotionDependencies("requires 必须是环境标识数组")
+        row.promotion_policy = promotion_policy(policy)
     if "enabled" in body:
         row.enabled = bool(body.get("enabled"))
     if "sort" in body:
