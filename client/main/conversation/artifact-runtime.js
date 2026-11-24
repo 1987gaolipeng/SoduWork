@@ -11,6 +11,7 @@ const outputs = require('../pi-session/outputs');
 const deliveryContract = require('./delivery-contract');
 const shareArchive = require('./zip-archive');
 const pluginDrafts = require('../pi-session/plugin-draft-candidates');
+const versions = require('./runtime-artifacts.cjs');
 const screenshotEvidence = require('./screenshot-evidence');
 const artifactTitle = require('./artifact-title');
 const selection = require('./delivery-selection');
@@ -75,9 +76,12 @@ async function snapshotAsync(session) {
     ? await asynchronous.call(session)
     : typeof synchronous === 'function' ? await synchronous.call(session)
       : { files: typeof list === 'function' ? await list.call(session) : [] };
-  const candidates = cwd ? await pluginDrafts.collectAsync(cwd, scanned || {}) : [];
-  const retained = require('./runtime-artifacts.cjs').restore(cwd, history)
-    .filter(file => file.pluginDraft || pluginDrafts.SKILL_ARCHIVE.test(file.relative));
+  const continued = versions.continuedPlugins(session);
+  if (continued) await continued.refresh(scanned?.fileChanges);
+  const discovery = continued ? { ...scanned, excludedDrafts: continued.paths } : scanned || {};
+  const candidates = cwd ? await pluginDrafts.collectAsync(cwd, discovery) : [];
+  const retained = versions.restore(cwd, history).filter(file =>
+    !continued?.paths.includes(file.path) && (file.pluginDraft || pluginDrafts.SKILL_ARCHIVE.test(file.relative)));
   if (retained.length) {
     // Recheck only exact retained package paths, including their current
     // resource revisions. A saved validation receipt is never authority.
@@ -92,8 +96,10 @@ async function snapshotAsync(session) {
   }
   // A retained draft and a new segment's revision share one identity. Merge
   // their full candidate set before validation and stale-card resolution.
-  const merged = pluginDrafts.mergePluginCandidates(candidates.map(file => ({ ...file, pluginSuperseded: false })));
-  const validation = await require('../pi-session/plugin-generation-gate.cjs').inspect({ handle: session, snapshot: scanned, files: merged });
+  const recorded = continued ? (await continued.view.snapshotAsync()).items.filter(file => file.pluginDraft) : [];
+  const merged = pluginDrafts.mergePluginCandidates([...candidates, ...recorded].map(file => ({ ...file, pluginSuperseded: false })));
+  const validation = await require('../pi-session/plugin-generation-gate.cjs').inspect({ handle: session, snapshot: scanned,
+    files: merged.filter(file => !continued?.paths.includes(file.path)) });
   scanned = { ...scanned, pluginValidation: validation };
   if (session.cwd !== cwd || session.sessionId !== sessionId || session.deliveryOwner !== owner || session.artifactHistory !== history ||
       session.outputSnapshotAsync !== asynchronous || session.outputSnapshot !== synchronous || session.outputs !== list)
@@ -104,7 +110,10 @@ async function snapshotAsync(session) {
 function sessionSnapshot(session, scanned, recovered, candidates) {
   if (!session) return null;
   if (session.historyArtifacts) return session.historyArtifacts.snapshot();
-  const historical = require('./runtime-artifacts.cjs').restore(session.cwd, session.artifactHistory);
+  const continued = versions.continuedPlugins(session);
+  const recorded = new Map((continued?.view.snapshot().items || [])
+    .filter(file => file.pluginDraft).map(file => [file.path, file]));
+  const historical = versions.restore(session.cwd, session.artifactHistory);
   const historicalPaths = new Set(historical.map(file => path.resolve(file.path)));
   const currentAnswer = selection.turn(session.artifactState || {}).answer;
   const reused = historical.filter(file => file.historicalPrimary && !file.processEvidence &&
@@ -142,7 +151,7 @@ function sessionSnapshot(session, scanned, recovered, candidates) {
   // revisit. Keep scanned documents/websites/media addressable across turns,
   // without promoting supporting files or changing delivery acceptance.
   const items = [...(delivery.items || [])].filter(file =>
-    pluginDrafts.withinSnapshot(file, got) || !pluginDrafts.describe(session.cwd, file));
+    continued?.paths.includes(file.path) || pluginDrafts.withinSnapshot(file, got) || !pluginDrafts.describe(session.cwd, file));
   const indexed = new Set(items.filter(item => item.path && item.artifactId).map(item => path.resolve(item.path)));
   const screenshots = screenshotEvidence.collect(session.cwd, {
     since: got.since ?? session.outputSince ?? session.startedAt, turnSince: got.turnSince,
@@ -160,8 +169,13 @@ function sessionSnapshot(session, scanned, recovered, candidates) {
     if (legacy >= 0) items[legacy] = item; else items.push(item);
     indexed.add(path.resolve(file.path));
   }
-  for (const file of candidates || pluginDrafts.collect(session.cwd, got)) {
-    if (file.historical && !historicalPaths.has(path.resolve(file.path))) continue;
+  const drafts = candidates || (continued ? pluginDrafts.mergePluginCandidates([
+    ...pluginDrafts.collect(session.cwd, { ...got, excludedDrafts: continued.paths }), ...recorded.values()])
+    : pluginDrafts.collect(session.cwd, got));
+  for (const file of drafts) {
+    const checked = recorded.get(file.path);
+    if (continued?.paths.includes(file.path) ? !checked || checked.pluginRevision !== file.pluginRevision
+      : file.historical && !historicalPaths.has(path.resolve(file.path))) continue;
     const existing = items.findIndex(row => row.path && path.resolve(row.path) === file.path);
     const previous = existing >= 0 ? items[existing] : null;
     const item = { ...file, ...previous, pluginDraft: true, pluginPackage: file.pluginPackage, skillPackage: file.skillPackage === true,
@@ -170,8 +184,8 @@ function sessionSnapshot(session, scanned, recovered, candidates) {
       // earlier snapshot cached here — a rename must move the identity forward.
       pluginIdentity: file.pluginIdentity || '', pluginSuperseded: file.pluginSuperseded === true,
       pluginRevision: file.pluginRevision, pluginRevisionAt: file.pluginRevisionAt,
-      pluginValidation: (got.pluginValidation || []).find(row => row.relative === file.relative && row.revision === file.pluginRevision) || { state: 'pending' },
-      artifactId: previous?.artifactId || (file.historical && file.artifactId) || deliveryContract._artifactId('file', file.relative),
+      pluginValidation: checked?.pluginValidation || (got.pluginValidation || []).find(row => row.relative === file.relative && row.revision === file.pluginRevision) || { state: 'pending' },
+      artifactId: checked?.artifactId || previous?.artifactId || (file.historical && file.artifactId) || deliveryContract._artifactId('file', file.relative),
       kind: 'file', primary: previous ? previous.primary !== false : false,
       preview: false, actions: ['open', 'reveal'] };
     if (existing >= 0) items[existing] = item; else items.push(item);
@@ -185,7 +199,7 @@ function sessionSnapshot(session, scanned, recovered, candidates) {
   // An archive folded into its manifest stays readable, but restoring its old
   // metadata must not resurrect a second install candidate.
   items.push(...historical.filter(file => !currentIds.has(file.artifactId))
-    .map(file => candidates && file.pluginDraft ? { ...file, pluginDraft: false } : file));
+    .map(file => (candidates || continued?.paths.includes(file.path)) && file.pluginDraft ? { ...file, pluginDraft: false } : file));
   return { got: got || {}, delivery, items };
 }
 

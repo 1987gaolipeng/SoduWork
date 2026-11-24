@@ -166,11 +166,12 @@ function collect(cwd, snapshot) {
   if (cwd && typeof got.since === 'number' && Number.isFinite(got.since)) {
     for (const name of [...DRAFT_NAMES, 'plugin.json']) files.push({ path: path.join(cwd, name) });
   }
+  const excluded = new Set(got.excludedDrafts);
   const found = new Map();
   if (cwd && got.truncated) collectOverflow(cwd, 0, files);
   for (const file of files) {
     const key = file && file.path ? path.resolve(file.path) : '';
-    if (!key || found.has(key)) continue;
+    if (!key || excluded.has(key) || found.has(key)) continue;
     const item = describe(cwd, file);
     if (item && withinSnapshot(item, got)) found.set(key, item);
   }
@@ -187,7 +188,7 @@ async function collectAsync(cwd, snapshot = {}) {
   if (!files.length && !snapshot.truncated && snapshot.pluginSince === undefined &&
       Array.isArray(snapshot.files) && Number.isFinite(snapshot.since)) return [];
   const candidates = await require('../app-resource-cache.cjs').request({ action: 'draft-candidates', cwd,
-    snapshot: { files, since: snapshot.since, pluginSince: snapshot.pluginSince, truncated: snapshot.truncated } })
+    snapshot: { files, since: snapshot.since, pluginSince: snapshot.pluginSince, truncated: snapshot.truncated, excludedDrafts: snapshot.excludedDrafts } })
     .catch(error => { throw Object.assign(error, { retryable: true }); });
   return candidates.map(file => ({ ...indexed.get(file.path), ...file }));
 }

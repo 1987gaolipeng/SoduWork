@@ -3,6 +3,8 @@
 // Authorization caches must observe bytes, not just file timestamps: Windows
 // can report identical timestamps for consecutive, same-sized overwrites.
 const fs = require('node:fs'), crypto = require('node:crypto');
+const path = require('node:path');
+const versions = require('./runtime-artifacts.cjs');
 const { assertNoLinks } = require('../plugin-resources');
 const MAX_BYTES = 2 * 1024 * 1024;
 const identity = stat => [stat.dev, stat.ino, stat.size].join(':');
@@ -34,6 +36,18 @@ function read(root, file, { maxBytes = MAX_BYTES, prefix = false, maxFileBytes =
     return { bytes, stat: after, revision: crypto.createHash('sha256').update(bytes).digest('hex') };
   } finally { fs.closeSync(fd); }
 }
+function readRecorded(root, relative, expected, maxBytes) {
+  require('./portable-workspace').portablePath(relative);
+  const file = path.join(root, relative);
+  const matches = stat => stat.isFile() && stat.nlink === 1n && versions.same(expected, versions.stamp(stat));
+  const stat = fs.lstatSync(file, { bigint: true });
+  if (!matches(stat)) throw Error('成果文件已改变');
+  if (stat.size > BigInt(maxBytes)) throw Object.assign(Error('成果文件超过大小限制'), { code: 'PACKAGE_TOO_LARGE' });
+  const verified = read(root, file, { maxBytes });
+  if (!matches(verified.stat)) throw Error('成果文件已改变');
+  return verified;
+}
+
 function digest(root, file) {
   assertNoLinks(root, file);
   const before = fs.lstatSync(file, { bigint: true });
@@ -57,4 +71,4 @@ function digest(root, file) {
     return { stat: after, revision: hash.digest('hex') };
   } finally { fs.closeSync(fd); }
 }
-module.exports = { read, digest, MAX_BYTES };
+module.exports = { read, readRecorded, digest, MAX_BYTES };

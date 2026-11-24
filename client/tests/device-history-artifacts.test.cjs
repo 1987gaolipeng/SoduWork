@@ -183,3 +183,26 @@ test('SQLite history opened by a second local account keeps verified outputs aft
     { expectedRevision: latest.replicaRevision });
   await assert.rejects(runtime.snapshotAsync(next), /版本|归属/);
 });
+
+test('an older file inventory can add a package and its private resource receipts from the original journal', async t => {
+  const f = fixture(t);
+  const archive = 'export/example.soduwork-plugin', script = 'author/scripts/check.py';
+  const files = [archive, script, 'report.md'].map(relative => {
+    const bytes = Buffer.from('Synthetic fixture');
+    f.write(relative, bytes);
+    return { path: relative, action: 'created', after: { exists: true, path: relative, size: bytes.length,
+      hash: crypto.createHash('sha256').update(bytes).digest('hex') } };
+  });
+  const journal = { cwd: f.cwd, turnId: 'done', files };
+  const old = await project.capture({ ...f, journal: { ...journal, files: files.slice(2) } });
+  delete old.packageRecordedUntil;
+  delete old.packageTurnId;
+  const unchanged = await project.capture({ ...f, previous: old });
+  assert.deepEqual(unchanged.items.map(row => row.metadata.relative), ['report.md']);
+  const updated = await project.capture({ ...f, previous: unchanged, journal });
+  assert.ok(updated.items.some(row => row.metadata.relative === archive));
+  assert.ok(updated.resources.some(row => row.metadata.relative === script));
+  const reader = project.view(f.cwd, updated, () => {});
+  assert.equal(reader.verify(path.join(f.cwd, script)), false);
+  assert.equal(reader.snapshot().items.some(item => item.relative === script), false);
+});

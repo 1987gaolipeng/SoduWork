@@ -1,22 +1,12 @@
 'use strict';
 
-const fs = require('node:fs');
-const path = require('node:path');
-const versions = require('./runtime-artifacts.cjs');
+const { readRecorded } = require('./metadata-snapshot.cjs');
 const candidates = require('../pi-session/plugin-draft-candidates');
 const skills = require('../pi-session/skill-package-candidate');
 
 function read(root, relative, expected) {
-  require('./portable-workspace').portablePath(relative);
   if (!candidates.SKILL_ARCHIVE.test(relative)) throw Error('这份成果不是技能包');
-  const file = path.join(root, relative);
-  const matches = stat => stat.isFile() && stat.nlink === 1n && versions.same(expected, versions.stamp(stat));
-  const stat = fs.lstatSync(file, { bigint: true });
-  if (!matches(stat)) throw Error('技能包已改变');
-  if (stat.size > BigInt(skills.MAX_BYTES)) throw Object.assign(Error('技能包超过 10MB'), { code: 'SKILL_TOO_LARGE' });
-  const verified = require('./metadata-snapshot.cjs').read(root, file, { maxBytes: skills.MAX_BYTES });
-  if (!matches(verified.stat)) throw Error('技能包已改变');
-  return verified;
+  return readRecorded(root, relative, expected, skills.MAX_BYTES);
 }
 
 // Parse only the exact file versions recorded on this device. Historical
@@ -28,7 +18,7 @@ function inspect(root, files, skillRuntimeEntry) {
     const issue = error => require('../pi-session/plugin-generation-gate.cjs').diagnostic({ relative }, error);
     try { verified = read(root, relative, stamp); }
     catch (error) {
-      if (error.code !== 'SKILL_TOO_LARGE') continue;
+      if (error.code !== 'PACKAGE_TOO_LARGE') continue;
       diagnostic = issue(error);
     }
     const pluginRevision = candidates.revisionOf(verified ? [verified.revision] : stamp);

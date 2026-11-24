@@ -403,10 +403,10 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     identityOf: sendIdentityOf || identityOf, accountHistory: _accountSync, sharedHistory: _sharedHistory,
     newCwd: options => _newSessionCwd(app, 'chat-' + require('node:crypto').randomUUID(), options) });
   /*
-   * Read fixed-name plugin drafts only from outputs of active registered sessions; never
-   * accept renderer-supplied file paths.
+   * Resolve installation actions against the registered conversation and its
+   * verified outputs. The renderer supplies only a reference and an artifact ID.
    */
-  pluginDraft.installIpc(ipcMain, session, app);
+  pluginDraft.installIpc(ipcMain, session, app, identityOf);
   const applicationEntries = require('../conversation/app-entry.cjs').create({ app, session,
     identityOf: sendIdentityOf || identityOf, preview: require('../work-preview'),
     history: _sharedHistory, accountHistory: _accountSync,

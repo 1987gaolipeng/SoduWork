@@ -58,15 +58,19 @@ if (typeof electron === 'string') {
     })()`), 'installation action: ' + label);
   }
   async function click(selector) {
-    const point = await js(`(() => {
-      const node = document.querySelector(${JSON.stringify(selector)});
-      if (!node || node.disabled) throw Error('Control unavailable');
-      node.scrollIntoView({ block: 'center' });
-      const bounds = node.getBoundingClientRect();
-      const x = Math.round(bounds.x + bounds.width / 2), y = Math.round(bounds.y + bounds.height / 2);
-      if (!node.contains(document.elementFromPoint(x, y))) throw Error('Control is occluded');
-      return { x, y };
-    })()`);
+    let point;
+    await until(async () => {
+      point = await js(`(() => {
+        const node = document.querySelector(${JSON.stringify(selector)});
+        if (!node || node.disabled) return null;
+        node.scrollIntoView({ block: 'center' });
+        const bounds = node.getBoundingClientRect();
+        const x = Math.round(bounds.x + bounds.width / 2), y = Math.round(bounds.y + bounds.height / 2);
+        if (!node.contains(document.elementFromPoint(x, y))) return null;
+        return { x, y };
+      })()`);
+      return point;
+    }, 'clickable control ' + selector, 5000);
     for (const type of ['mouseDown', 'mouseUp']) win.webContents.sendInputEvent({ type, ...point, button: 'left', clickCount: 1 });
   }
   app.whenReady().then(async () => {
@@ -122,10 +126,15 @@ if (typeof electron === 'string') {
       assert.equal(runner.ok, true, runner.reason); assert.deepEqual(runner.names, [name]);
       return { ok: true, names: prepared.names, pi: true, runner: true };
     });
+    require('../main/personal-plugins').install({ app, ipcMain, identityOf: async () => identity });
     const preload = path.join(root, 'preload.cjs');
     fs.writeFileSync(preload, `const { contextBridge, ipcRenderer } = require('electron');
       contextBridge.exposeInMainWorld('soduWorkAPI', {
         deviceAuthBootstrap: () => ipcRenderer.invoke('created-skill-auth'),
+        personalPlugins: {
+          preflight: body => ipcRenderer.invoke('personal-plugin-preflight', body),
+          create: body => ipcRenderer.invoke('personal-plugin-create', body)
+        },
         conversationSession: {
           capabilities: options => ipcRenderer.invoke('conversation-capabilities', options),
           outputs: ref => ipcRenderer.invoke('pi-session-outputs', ref),
@@ -259,6 +268,7 @@ if (typeof electron === 'string') {
     report.cases.push('Fresh account authorization and immutable synchronization prepare the current SKILL.md and replacement reference for Pi and Runner');
     assert.equal(await activate(skillChat), 0, 'Replacing the package must invalidate the original historical installation action');
     report.cases.push('The original history receipt refuses the changed package while its live replacement remains installable');
+    await require('./fixtures/created-plugin-history.cjs').verify({ app, root, activate, click, js, until, report });
     report.mutations = await mutations();
     assert.deepEqual(report.mutations, { imports: 2, selections: 2 });
     report.ok = true;

@@ -819,9 +819,9 @@ function service({ app, identityOf, fetchImpl, beforeWrite = async () => {}, val
       if(checked.ok===false)return {ok:false,installed:false,reason:checked.checks.filter(row=>row.ok===false).map(row=>row.label).join('\n'),checks:checked.checks};
       const current=await access.body(body);
       if(build(current).checksum!==build(authorized).checksum)throw Error('即用候选内容已变化，请重新检查后安装');
-      require('./jiyong-edit-source.cjs').assertInstallCurrent(app,current);
       await beforeWrite(current);
       validateWrite(current);
+      require('./jiyong-edit-source.cjs').assertInstallCurrent(app,current);
       const result=create(app,current);
       try{result.initialization=await require('./jiyong-initialization.cjs').initialize({app,identityOf,fetchImpl},result.plugin.pluginId,result.plugin);return result;}
       catch(error){return {ok:false,installed:true,plugin:result.plugin,reason:'即用已保存，但数据初始化未完成：'+error.message};}

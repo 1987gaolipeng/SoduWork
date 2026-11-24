@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
+const plugins = require('./created-plugin-history.cjs');
 const { identity } = require('../../tests/helpers/platform-session-fixture.cjs');
 const { scope } = require('../../main/platform-connections/runtime.cjs');
 const name = 'created-skill-fixture';
@@ -27,7 +28,7 @@ async function seed(app, root) {
   fs.writeFileSync(path.join(source, 'SKILL.md'), '---\nname: ' + name +
     '\ndescription: Preserve the meaning of a supplied sample.\n---\n\n# Created skill fixture\n\nRead [the rules](references/rules.md).\n');
   fs.writeFileSync(path.join(source, 'references/rules.md'), references);
-  const rows = [skillChat, otherChat].map(id => {
+  const rows = [skillChat, otherChat, ...plugins.chats].map(id => {
     const cwd = path.join(root, 'workspaces', id);
     fs.mkdirSync(cwd, { recursive: true });
     const archive = path.join(app.getPath('userData'), 'pi-agent', 'sessions', id + '.jsonl');
@@ -45,11 +46,16 @@ async function seed(app, root) {
     const cwd = rows[0].cwd, delivery = path.join(cwd, 'delivery');
     const built = require('../../../skills/skill-studio/scripts/skill-package.cjs').build({ source, out: delivery, targets: 'soduwork' });
     const relative = 'delivery/' + built.exports[0].file;
-    const bytes = fs.readFileSync(path.join(cwd, relative));
     await history.register(rows);
-    await history.backfill(skillChat, { journal: { cwd, turnId: 'skill-turn', files: [{ path: relative, action: 'created',
-      after: { path: relative, exists: true, size: bytes.length, hash: crypto.createHash('sha256').update(bytes).digest('hex') } }] } });
-    await history.backfill(otherChat);
+    for (const row of rows) {
+      const names = row.id === skillChat ? [relative] : row.id === otherChat ? [] : await plugins.write(root, row);
+      const files = names.map(name => {
+        const bytes = fs.readFileSync(path.join(row.cwd, name));
+        return { path: name, action: 'created', after: { path: name, exists: true, size: bytes.length,
+          hash: crypto.createHash('sha256').update(bytes).digest('hex') } };
+      });
+      await history.backfill(row.id, { journal: { cwd: row.cwd, turnId: 'author-turn', files } });
+    }
     fs.writeFileSync(path.join(root, 'package-location.json'), JSON.stringify(relative));
   } finally { await history.close(); }
   // Exercise the SQLite fallback without leaving a live provider transcript.

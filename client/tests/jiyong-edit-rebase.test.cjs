@@ -76,3 +76,82 @@ test('a change after checking but before installation cannot replace a newer uno
  await assert.rejects(handlers['personal-plugin-create']({},candidate),/安装前即用版本或账号已变化/);
  assert.equal(personal.get(f.app,f.installed.pluginId).version,'1.0.8');
 });
+
+test('reopening an app edit checks its receipted baseline without writing to the history workspace', async t => {
+  const f = await fixture(t);
+  const reader = require('../main/pi-session/plugin-draft');
+  const baselinePath = path.join(path.dirname(f.candidate.draft), 'baseline.json');
+  const original = fs.readFileSync(baselinePath, 'utf8');
+  const draft = f.collect();
+  const file = { artifactId: 'historical-app', relative: 'delivery/soduwork-plugin-draft.json',
+    pluginDraft: true, pluginRevision: 'checked-revision', pluginValidation: { state: 'ready' } };
+  const checked = { revision: file.pluginRevision, body: draft, editBaseline: JSON.parse(original) };
+  let verified = true;
+  const history = { async snapshotAsync() { return { items: [file] }; }, async authorize() {},
+    async readPlugin(item) { assert.equal(item, file); return checked; },
+    verifyPlugin(item) { assert.equal(item, file); return verified; } };
+  const session = { sessionId: 'history', historyPreview: true, historyArtifacts: history };
+  const open = () => reader.readSessionAsync(session, file.artifactId, f.app);
+  await f.meta({ author: 'Updated author' });
+  const result = await open();
+  assert.equal(result.ok, true);
+  assert.equal(result.body.author, 'Updated author');
+  assert.equal(result.body.version, '1.0.5');
+  assert.equal(fs.readFileSync(baselinePath, 'utf8'), original);
+  f.setOwner('another-account');
+  await assert.rejects(open, /账号已变化/);
+  assert.throws(() => edit.assertInstallCurrent(f.app, result.body), /账号已变化/);
+  f.setOwner('account-a');
+  verified = false;
+  assert.equal((await open()).ok, false, 'Changed resources invalidate a completed read');
+  verified = true;
+  checked.revision = 'different-revision';
+  assert.equal((await open()).ok, false);
+  checked.revision = file.pluginRevision;
+  checked.body = { ...draft, sourcePluginId: 'requires-current-access' };
+  await assert.rejects(open, /企业插件需要连接后台/);
+  assert.equal(fs.readFileSync(baselinePath, 'utf8'), original);
+});
+
+test('a relocated app draft in device history remains bound to its recorded editing account', async t => {
+  const f = await fixture(t);
+  const root = fs.realpathSync(f.root), read = require('../main/pi-session/plugin-draft').readSessionAsync;
+  const project = require('../main/conversation/device-history-artifacts.cjs');
+  const target = path.join(root, 'delivery', 'soduwork-plugin-draft.json');
+  fs.mkdirSync(path.dirname(target));
+  fs.writeFileSync(target, JSON.stringify(f.collect()));
+  const baseline = path.join(path.dirname(fs.realpathSync(f.candidate.draft)), 'baseline.json');
+  const files = [target, baseline].map(file => {
+    const relative = path.relative(root, file).split(path.sep).join('/');
+    const bytes = fs.readFileSync(file);
+    return { path: relative, action: 'created', after: { exists: true, path: relative, size: bytes.length,
+      hash: require('node:crypto').createHash('sha256').update(bytes).digest('hex') } };
+  });
+  const row = { id: 'app-edit-history', cwd: root };
+  const index = await project.capture({ row, journal: { turnId: 'edit', cwd: root, files } });
+  const history = project.view(root, index, () => {});
+  const session = { sessionId: row.id, historyPreview: true, historyArtifacts: history };
+  const draft = (await history.snapshotAsync()).items.find(item => item.path === target);
+  assert.equal(draft.pluginValidation?.state, 'ready');
+  f.setOwner('other-account');
+  await assert.rejects(read(session, draft.artifactId, f.app), /账号已变化/);
+  f.setOwner('account-a');
+  assert.equal((await read(session, draft.artifactId, f.app)).ok, true);
+  fs.appendFileSync(baseline, '\n');
+  assert.equal((await read(session, draft.artifactId, f.app)).ok, false);
+});
+
+test('unbased historical app manifests cannot supersede a different installed version', async t => {
+  const f = await fixture(t);
+  const candidate = f.collect();
+  assert.throws(() => edit.historicalBody(f.app, candidate, undefined, false), /缺少可核验的修改基线/);
+  assert.equal(edit.historicalBody(f.app, candidate, undefined, true), candidate, 'Standalone package import retains version checks');
+  const current = f.installed.localDraft;
+  assert.equal(edit.historicalBody(f.app, current, undefined, false), current);
+  edit.assertInstallCurrent(f.app, current);
+  const separate = { getPath: () => path.join(f.root, 'new-account-profile') };
+  assert.equal(edit.historicalBody(separate, candidate, undefined, false), candidate);
+  const service = personal.service({ app: separate, beforeWrite: async () => { personal.create(separate, current); } });
+  await assert.rejects(service.create(candidate), /缺少可核验的修改基线/,
+    'A competing installation after preview must not be overwritten');
+});

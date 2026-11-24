@@ -3,6 +3,13 @@
 // send/truncate base64 resources in the prompt or modify installed bytes in place.
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 const checkedCandidates = new Map();
+function rememberChecked(app, checksum, binding) {
+  const key = path.resolve(app.getPath('userData')) + '\0' + checksum;
+  if (binding.historicalManifest && checkedCandidates.get(key)?.owner) return;
+  checkedCandidates.delete(key);
+  checkedCandidates.set(key, binding);
+  if (checkedCandidates.size > 128) checkedCandidates.delete(checkedCandidates.keys().next().value);
+}
 async function prepare({app,identityOf,pluginId,cwd,readOnly}) {
   if (readOnly) throw Error('只读模式不能创建即用修改源码');
   if (typeof pluginId !== 'string' || !pluginId.startsWith('local:')) throw Error('请选择本机已安装的即用');
@@ -71,6 +78,14 @@ function reconcile({app,cwd,file,body}) {
     if(matches.length){baseline=matches[0].value;baselinePath=matches[0].target;}
   }
   if (!baseline || baseline.key !== body.key) return body;
+  return reconcileBaseline(app, body, baseline, baselinePath);
+}
+
+// History passes an authenticated baseline from its recorded file inventory.
+// Without a writable source path, keep the install-time check in memory only.
+function reconcileBaseline(app, body, baseline, baselinePath) {
+  if (!app || !baseline || baseline.key !== body.key || (!baselinePath && !baseline.owner))
+    throw Error('即用修改基线已变化，请从最新版本重新修改');
   const personal = require('./personal-plugins');
   const plugin = personal._read(app).plugins.find(row=>row.id === baseline.pluginId && row.key === body.key);
   const base = plugin?.versions.find(row=>row.checksum === baseline.checksum && row.version === baseline.version);
@@ -94,11 +109,8 @@ function reconcile({app,cwd,file,body}) {
   }
   const remember = candidate => {
     const checksum=personal.build(candidate).checksum;
-    const key=path.resolve(app.getPath('userData'))+'\0'+checksum;
-    checkedCandidates.delete(key);
-    checkedCandidates.set(key,{pluginId:plugin.id,owner,checksum:current.checksum});
-    if(checkedCandidates.size>128)checkedCandidates.delete(checkedCandidates.keys().next().value);
-    if(prepared[0]!==checksum || baseline.acceptedChecksum!==accepted.checksum){
+    rememberChecked(app, checksum, {pluginId:plugin.id,owner,checksum:current.checksum});
+    if(baselinePath && (prepared[0]!==checksum || baseline.acceptedChecksum!==accepted.checksum)){
       const temporary=baselinePath+'.tmp-'+crypto.randomUUID();
       try {
         fs.writeFileSync(temporary,JSON.stringify({...baseline,acceptedChecksum:accepted.checksum,prepared:[checksum,...prepared.filter(value=>value!==checksum)].slice(0,8)},null,2),{mode:0o600,flag:'wx'});
@@ -121,14 +133,37 @@ function reconcile({app,cwd,file,body}) {
   if (compare(parts(next.version),highest)<=0) next.version=highest[0]+'.'+highest[1]+'.'+(highest[2]+1n);
   return remember(next);
 }
+
+function assertHistoricalManifest(app, body, checksum) {
+  const personal = require('./personal-plugins');
+  const plugin = personal._read(app).plugins.find(row => row.key === body.key);
+  const current = plugin?.versions.find(row => row.version === plugin.currentVersion);
+  if (plugin && current?.checksum !== checksum)
+    throw Error('当前即用已有其他版本，这份历史草稿缺少可核验的修改基线，请从已安装版本重新修改');
+}
+
+function historicalBody(app, body, baseline, archive) {
+  if (body.template !== 'app') return body;
+  if (baseline) return reconcileBaseline(app, body, baseline);
+  // Standalone exported packages retain their normal explicit import flow.
+  // A loose historical manifest cannot replace an app without its edit baseline.
+  if (!archive) {
+    const checksum = require('./personal-plugins').build(body).checksum;
+    assertHistoricalManifest(app, body, checksum);
+    rememberChecked(app, checksum, { historicalManifest: true });
+  }
+  return body;
+}
+
 function assertInstallCurrent(app,body) {
   if(body.template!=='app')return;
   const personal=require('./personal-plugins'),checksum=personal.build(body).checksum;
   const checked=checkedCandidates.get(path.resolve(app.getPath('userData'))+'\0'+checksum);
   if(!checked)return;
+  if (checked.historicalManifest) return assertHistoricalManifest(app, body, checksum);
   const owner=require('./app-settings-store.cjs').scope({pluginId:checked.pluginId,origin:require('../core/plugin-package-page.cjs').origin(checked.pluginId)});
   const current=personal.get(app,checked.pluginId);
   if(owner!==checked.owner || (current.checksum!==checked.checksum && current.checksum!==checksum))
     throw Error('安装前即用版本或账号已变化，请重新检查后安装');
 }
-module.exports = {prepare,reconcile,assertInstallCurrent};
+module.exports = {prepare,reconcile,historicalBody,assertInstallCurrent};

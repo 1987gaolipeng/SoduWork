@@ -8,6 +8,7 @@ const path = require('path');
 const outputs = require('./outputs');
 const resources = require('../plugin-resources');
 const candidates = require('./plugin-draft-candidates');
+const { continuedPlugins } = require('../conversation/runtime-artifacts.cjs');
 
 const { DRAFT_NAME, MAX_BYTES } = candidates;
 
@@ -21,7 +22,8 @@ function _candidate(handle, snapshot) {
     if (typeof handle.outputSnapshot !== 'function') return null;
     try { snapshot = handle.outputSnapshot(); } catch (_) { return null; }
   }
-  return newest(handle, candidates.collect(handle.cwd, snapshot));
+  const recorded = continuedPlugins(handle);
+  return newest(handle, candidates.collect(handle.cwd, recorded ? { ...snapshot, excludedDrafts: recorded.paths } : snapshot));
 }
 
 function newest(handle, matches) {
@@ -48,7 +50,9 @@ async function readRecentAsync(handles, app) {
       if (passiveHistory(handle)) return null;
       const snapshot = typeof handle?.outputSnapshotAsync === 'function'
         ? await handle.outputSnapshotAsync() : handle?.outputSnapshot?.();
-      return snapshot && handle.cwd ? newest(handle, await candidates.collectAsync(handle.cwd, snapshot)) : null;
+      const recorded = continuedPlugins(handle);
+      return snapshot && handle.cwd ? newest(handle, await candidates.collectAsync(handle.cwd,
+        recorded ? { ...snapshot, excludedDrafts: recorded.paths } : snapshot)) : null;
     } catch (_) { return null; }
   }))).filter(Boolean).sort((a, b) => b.at - a.at);
   return rows.length ? readCandidate(rows[0], app)
@@ -65,6 +69,8 @@ function readSession(handle, target, indexed, app) {
   const snapshot = indexed || runtime.snapshot(handle);
   const files = [...snapshot.items, ...(snapshot.got.files || [])];
   let file = files.find(item => String(item.artifactId || item.path || '') === String(target || ''));
+  const recorded = continuedPlugins(handle);
+  if (recorded?.paths.includes(file?.path)) return { ok: false, reason: '请通过会话安装卡片核验历史插件' };
   const described = file && candidates.describe(handle.cwd, file);
   if (!file || !file.path || !described ||
       !outputs.inside(handle.cwd, file.path)) {
@@ -77,7 +83,7 @@ function readSession(handle, target, indexed, app) {
     item.pluginIdentity === identity && item.path !== file.path);
   // Do not use old delivery entries to recover packages whose merged manifest no longer marks them as plugin drafts.
   if (file.pluginSuperseded || (!file.pluginDraft && replacements.length)) {
-    const current = replacements.find(item => described.pluginKey &&
+    const current = replacements.find(item => !recorded?.paths.includes(item.path) && described.pluginKey &&
       candidates.describe(handle.cwd, item)?.pluginKey === described.pluginKey);
     if (!current || !outputs.inside(handle.cwd, current.path)) {
       return { ok: false, reason: '这份插件草稿已有新稿，请刷新后安装最新稿' };
@@ -87,17 +93,36 @@ function readSession(handle, target, indexed, app) {
   return readCandidate({ handle, file, at: Number(file.at || 0) }, app);
 }
 
-async function readSessionAsync(handle, target, app) {
+async function readHistoryPlugin(handle, history, file, app, identityOf) {
+  if (!file?.pluginDraft || file.pluginSuperseded || file.pluginValidation?.state !== 'ready')
+    return { ok: false, reason: '这份插件草稿不属于当前会话成果，请刷新后重试' };
+  const checked = await history.readPlugin(file);
+  if (!checked.revision || checked.revision !== file.pluginRevision) return { ok: false, reason: '成果文件已改变或无法读取' };
+  let body;
+  if (checked.kind !== 'skill') {
+    const access = require('../plugin-source-access').authorizer({ app, identityOf,
+      read: require('../personal-plugins')._read, normalizeBody: value => value });
+    body = await access.body(checked.body);
+  }
+  await history.authorize();
+  if (!await history.verifyPlugin(file)) return { ok: false, reason: '成果文件已改变或无法读取' };
+  const source = { sessionId: handle.sessionId, relative: file.relative, at: file.at };
+  if (checked.kind === 'skill') return { ok: true, kind: 'skill', skillPackage: checked.skillPackage, source };
+  body = require('../jiyong-edit-source.cjs').historicalBody(app, body, checked.editBaseline, candidates.ARCHIVE.test(file.relative));
+  return { ok: true, body, source };
+}
+
+async function readSessionAsync(handle, target, app, identityOf) {
   const history = handle?.historyArtifacts;
   if (history) {
-    // A passive view only grants access to complete, receipted skill archives.
-    // Never scan its workspace or resolve a manifest's sibling resources.
+    // Each passive reader is restricted to the exact recorded file versions.
     const { items } = await history.snapshotAsync();
     const file = items.find(item => item.artifactId === target);
-    if (!file?.pluginDraft || !file.skillPackage || file.pluginSuperseded || file.pluginValidation?.state !== 'ready' ||
-        !candidates.SKILL_ARCHIVE.test(file.relative)) {
+    if (!file?.pluginDraft || file.pluginSuperseded || file.pluginValidation?.state !== 'ready') {
       return { ok: false, reason: '这份插件草稿不属于当前会话成果，请刷新后重试' };
     }
+    if (!candidates.SKILL_ARCHIVE.test(file.relative)) return readHistoryPlugin(handle, history, file, app, identityOf);
+    if (!file.skillPackage) return { ok: false, reason: '这份插件草稿不属于当前会话成果，请刷新后重试' };
     const { bytes, revision } = await history.readSkill(file);
     if (!revision || revision !== file.pluginManifestDigest) return { ok: false, reason: '成果文件已改变或无法读取' };
     const skills = require('./skill-package-candidate');
@@ -107,7 +132,14 @@ async function readSessionAsync(handle, target, app) {
     return skills.result(skill, { sessionId: handle.sessionId, relative: file.relative, at: file.at });
   }
   if (!handle || passiveHistory(handle)) return readSession(handle, target);
-  return readSession(handle, target, await require('../conversation/artifact-runtime').snapshotAsync(handle), app);
+  const indexed = await require('../conversation/artifact-runtime').snapshotAsync(handle);
+  const recorded = continuedPlugins(handle);
+  const file = indexed.items.find(item => item.artifactId === target);
+  if (recorded?.paths.includes(file?.path)) {
+    if (handle.inFlight?.()) return { ok: false, reason: '插件还在制作中，请等本轮完成后安装' };
+    return readHistoryPlugin(handle, recorded.view, file, app, identityOf);
+  }
+  return readSession(handle, target, indexed, app);
 }
 
 function readCandidate(found, app, options = {}) {
@@ -169,13 +201,13 @@ function readCandidate(found, app, options = {}) {
   }
 }
 
-function installIpc(ipcMain, session, app) {
+function installIpc(ipcMain, session, app, identityOf) {
   ipcMain.handle('pi-session-recent-plugin-draft', () => readRecentAsync(session.list(), app));
   ipcMain.handle('pi-session-plugin-draft', async (event, ref, target) => {
     if (!require('../platform-connections/index.cjs').trustedSender(event)) {
       return { ok: false, reason: '只允许 SoduWork 客户端安装会话插件' };
     }
-    try { return await readSessionAsync(session.get(ref), target, app); }
+    try { return await readSessionAsync(session.get(ref), target, app, identityOf); }
     catch (error) { return { ok: false, reason: '插件草稿读取失败：' + error.message }; }
   });
 }
