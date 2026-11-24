@@ -1,19 +1,30 @@
-"""List upstream model identifiers through the provider's model endpoint.
-
-Discovery answers "which model names does this service actually accept" so an
-administrator can import them instead of typing identifiers from memory. It is
-read-only, returns names only, and fails soft: a gateway without a model
-endpoint is a normal outcome, not an error.
-"""
+"""List upstream model identifiers and their explicitly advertised output purposes."""
 from __future__ import annotations
 
 import json
 
 import httpx
 
+from .model_definition_contracts import MODEL_MODALITIES
+
 TIMEOUT_SECONDS = 15
 MAX_BYTES = 512 * 1024
 MAX_MODELS = 500
+
+_OUTPUT_PURPOSES = {
+    **{purpose: purpose for purpose in MODEL_MODALITIES}, "text": "chat",
+    **dict.fromkeys(("decision", "embedding", "embeddings", "rerank", "reranking",
+                     "classification", "moderation", "audio", "speech"), "unsupported"),
+}
+# Only explicit endpoint paths establish a purpose. A protocol such as "openai"
+# can carry several kinds of model and does not identify the output.
+_ENDPOINT_PURPOSES = {
+    "chat/completions": "chat", "responses": "chat", "messages": "chat",
+    "images/generations": "image", "videos/generations": "video",
+    "embeddings": "unsupported", "rerank": "unsupported", "moderations": "unsupported",
+    "audio/speech": "unsupported", "audio/transcriptions": "unsupported",
+    "systemone": "unsupported", "ocr": "unsupported",
+}
 
 
 def _headers(kind: str, key: str) -> dict:
@@ -32,8 +43,51 @@ def _paths(kind: str, base: str) -> tuple[str, ...]:
     return ("/models", "/v1/models")
 
 
-def _names(payload) -> list[str] | None:
-    """Extract model identifiers from an OpenAI-style or bare-list envelope."""
+def _declaration(value, *, endpoint=False) -> frozenset[str]:
+    values = value if isinstance(value, list) else [value]
+    purposes = set()
+    for item in values:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        token = item.strip().lower()
+        if endpoint:
+            path = token.strip("/").removeprefix("v1/")
+            if path in _ENDPOINT_PURPOSES:
+                purposes.add(_ENDPOINT_PURPOSES[path])
+        else:
+            purposes.add(_OUTPUT_PURPOSES.get(token, "unknown"))
+    return frozenset(purposes)
+
+
+def _candidate(name: str, rows: list[dict]) -> dict:
+    outputs = set()
+    endpoints = set()
+    for row in rows:
+        architecture = row.get("architecture")
+        for value in (row.get("output"), row.get("output_modalities"),
+                      architecture.get("output_modalities") if isinstance(architecture, dict) else None):
+            if declared := _declaration(value):
+                outputs.add(declared)
+        for key in ("endpoint", "endpoints", "supported_endpoints", "supported_endpoint_types"):
+            if declared := _declaration(row.get(key), endpoint=True):
+                endpoints.add(declared)
+    # A specialized endpoint can return text (e.g. OCR) without supporting chat.
+    if endpoints and all(paths == {"unsupported"} for paths in endpoints):
+        declared = {"unsupported"}
+    else:
+        declarations = outputs | endpoints
+        declared = frozenset.intersection(*declarations) if declarations else frozenset()
+    purposes = [purpose for purpose in MODEL_MODALITIES if purpose in declared]
+    status = "unknown"
+    if purposes:
+        status = "declared"
+    elif declared == {"unsupported"}:
+        status = "unsupported"
+    return {"id": name, "purposes": purposes, "status": status}
+
+
+def _candidates(payload) -> list[dict] | None:
+    """Keep the first bounded set of distinct IDs from supported list envelopes."""
     if isinstance(payload, dict):
         if payload.get("error") is not None:
             return None
@@ -48,19 +102,22 @@ def _names(payload) -> list[str] | None:
         rows = None
     if not isinstance(rows, list):
         return None
-    names: list[str] = []
+    by_name: dict[str, list[dict]] = {}
     for row in rows:
         name = row.get("id") if isinstance(row, dict) else row
         name = name.strip() if isinstance(name, str) else ""
-        if name and name not in names:
-            names.append(name)
-        if len(names) >= MAX_MODELS:
-            break
-    return names if names or not rows else None
+        if not name or (len(by_name) >= MAX_MODELS and name not in by_name):
+            continue
+        entries = by_name.setdefault(name, [])
+        if isinstance(row, dict):
+            entries.append(row)
+    if rows and not by_name:
+        return None
+    return [_candidate(name, entries) for name, entries in by_name.items()]
 
 
 async def discover(base: str, key: str, kind: str = "openai-compat", *, allow_empty=False) -> dict:
-    """Return {"ok", "models", "path", "detail"}; never raises for upstream shape."""
+    """Return legacy names and classified candidates without probing individual models."""
     base = str(base or "").strip().rstrip("/")
     if not base.startswith(("http://", "https://")):
         return {"ok": False, "models": [], "code": "model.discovery.invalid-url",
@@ -90,16 +147,20 @@ async def discover(base: str, key: str, kind: str = "openai-compat", *, allow_em
                 return {"ok": False, "models": [], "path": path,
                         "code": "model.discovery.invalid-payload",
                         "detail": "模型列表不是有效的 JSON 响应"}
-            names = _names(payload)
-            if names is None:
+            candidates = _candidates(payload)
+            if candidates is None:
                 return {"ok": False, "models": [], "path": path,
                         "code": "model.discovery.invalid-list",
                         "detail": "服务没有返回有效的模型列表"}
-            if not names and not allow_empty:
+            if not candidates and not allow_empty:
                 return {"ok": False, "models": [], "path": path,
                         "code": "model.discovery.empty",
                         "detail": "服务返回了空模型列表"}
-            return {"ok": True, "models": names, "path": path, "detail": ""}
+            counts = {"total": len(candidates),
+                      "chat": sum("chat" in row["purposes"] for row in candidates),
+                      "unknown": sum(row["status"] == "unknown" for row in candidates)}
+            return {"ok": True, "models": [row["id"] for row in candidates],
+                    "candidates": candidates, "counts": counts, "path": path, "detail": ""}
         if status in (404, 405):
             return {"ok": False, "models": [],
                     "code": "model.discovery.no-endpoint",
