@@ -503,7 +503,7 @@
         if (nativeModels.length && !modelById(selected.modelName) && !protectedChoice) {
           selected.modelName = (modelById(response.defaultModel) || nativeModels[0]).id;
         }
-        selected.unavailable = Boolean(protectedChoice && !modelById(selected.modelName));
+        selected.unavailable = Boolean(protectedChoice && selected.modelName && !modelById(selected.modelName));
         reconcileEffort(state(row.id));
         nativeReason = String(response && response.reason || '');
         nativeLoaded = row.id;
@@ -867,7 +867,7 @@
       if (!enterpriseLoaded) { selected.unavailable = true; render(); notify(); return false; }
       clearStaleManagedSelection(row);
     } else if (row.id === 'codex' && !cloud()) {
-      selected.unavailable = nativeLoaded !== row.id || !modelById(selected.modelName);
+      selected.unavailable = Boolean(selected.modelName && (nativeLoaded !== row.id || !modelById(selected.modelName)));
       if (!selected.unavailable) reconcileEffort(selected);
     } else selected.unavailable = Boolean(selected.modelName);
     render(); notify();

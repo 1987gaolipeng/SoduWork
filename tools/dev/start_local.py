@@ -403,6 +403,14 @@ def launch_desktop(state: Path, client: Path, env: dict, base: str, output) -> s
             json.dump({'workDir': str(work)}, stream)
     desktop_env = {key: value for key, value in env.items()
                    if key not in {'ADMIN_USER', 'ADMIN_PASS', 'AUTH_SECRET', 'DATABASE_URL'}}
+    codex_home = os.environ.get('CODEX_HOME', '').strip()
+    if codex_home:
+        desktop_env['CODEX_HOME'] = os.path.abspath(os.path.expanduser(codex_home))
+    elif sys.platform == 'win32':
+        # Electron and its Runner need the same native account while USERPROFILE
+        # stays isolated. Keep logins created by older Windows source launches.
+        legacy = state / 'home/.codex'
+        desktop_env['CODEX_HOME'] = str(legacy if (legacy / 'auth.json').is_file() else Path.home() / '.codex')
     # Explicit diagnostic output is desktop-only; do not broaden the Hub environment allowlist.
     if os.environ.get('SODUWORK_REQUIREMENT_DIAGNOSTICS_DIR'):
         desktop_env['SODUWORK_REQUIREMENT_DIAGNOSTICS_DIR'] = os.environ['SODUWORK_REQUIREMENT_DIAGNOSTICS_DIR']
