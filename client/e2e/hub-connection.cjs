@@ -63,7 +63,7 @@ async function assertConnectionLabel(hub) {
       role: el.getAttribute('role'), entries: document.querySelectorAll('.soduwork-auth-service-entry').length };
   })()`);
   assert.deepEqual(label, { tag: 'SPAN', text: '连接 ' + new URL(hub).host, tabIndex: -1, role: null, entries: 0 },
-    'the footer shows the current host as plain text without a connection button');
+    'the footer names the active service');
 }
 async function assertNarrowLayout() {
   const layout = await run(`(() => {
@@ -235,10 +235,13 @@ app.whenReady().then(async () => {
   assert.equal(await run('document.querySelector("[data-auth-code]").hidden'), true);
   assert.equal(await run('document.querySelector(".soduwork-auth-connection").open'), false);
   await assertConnectionLabel(a.url);
-  await click('.soduwork-auth-connection summary');
+  await click('[data-edit-hub]');
   assert.equal(await run('document.querySelector(".soduwork-auth-connection").open'), true);
+  await fill('#soduWorkAuthHub', '123'); await click('.soduwork-auth-connect');
+  await until('document.querySelector(".ac-hub-message").textContent.includes("主机名不能只包含数字")');
+  assert.equal(await run('SoduWorkAPI.hubBase()'), a.url);
   await fill('#soduWorkAuthHub', 'https://example.com/api'); await click('.soduwork-auth-connect');
-  await until('document.querySelector(".soduwork-auth-status").textContent.includes("后台地址")');
+  await until('document.querySelector(".ac-hub-message").textContent.includes("后台地址")');
   assert.equal(await run('SoduWorkAPI.hubBase()'), a.url);
   await fill('#soduWorkAuthHub', a.url); await click('.soduwork-auth-connect');
   await until('document.querySelector("#soduWorkAuthAccount") && !document.querySelector("#soduWorkAuthAccount").disabled');
@@ -250,7 +253,7 @@ app.whenReady().then(async () => {
   assert.equal(await run('document.querySelector(".ac-account-label").textContent'), '邮箱');
   assert.equal(await run('document.querySelector("[data-send-code]").disabled'), false);
   await assertConnectionLabel(a.url);
-  await click('.soduwork-auth-connection summary');
+  await click('[data-edit-hub]');
   assert.equal(await run('document.querySelector(".soduwork-auth-connection").open'), true,
     'local-code email registration retains the editable service panel');
   fs.writeFileSync(path.join(out, 'local-email-registration-connection.png'), (await win.webContents.capturePage()).toPNG());

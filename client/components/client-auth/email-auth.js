@@ -64,7 +64,7 @@
       '<button class="soduwork-auth-submit ac-primary" type="submit"><span>登录</span></button></form>' +
       '<nav class="ac-auth-links"><button type="button" class="ac-link" data-auth-mode="register">创建账号</button><button type="button" class="ac-link" data-auth-mode="resetPassword">忘记密码</button></nav>' +
       '<button type="button" class="ac-link ac-auth-back" data-auth-mode="password" hidden>返回登录</button>' +
-      '<footer class="ac-auth-footer"><div class="ac-auth-connection-note"><span class="soduwork-auth-secure"><i></i>密码和验证码不会保存在本机</span><span class="soduwork-auth-hub">连接 <b></b></span></div><div class="ac-auth-legal-links"><button type="button" class="ac-link" data-legal="terms">用户协议</button><i aria-hidden="true">·</i><button type="button" class="ac-link" data-legal="privacy">隐私政策</button></div>' +
+      '<footer class="ac-auth-footer"><div class="ac-auth-connection-note"><span class="soduwork-auth-secure"><i></i>密码和验证码不会保存在本机</span><span><span class="soduwork-auth-hub">连接 <b></b></span> <button type="button" class="ac-link" data-edit-hub aria-haspopup="dialog" hidden>更改地址</button></span></div><div class="ac-auth-legal-links"><button type="button" class="ac-link" data-legal="terms">用户协议</button><i aria-hidden="true">·</i><button type="button" class="ac-link" data-legal="privacy">隐私政策</button></div>' +
       '<label class="ac-auth-language" hidden><span>界面语言</span><select data-auth-language translate="no"></select></label></footer></main>';
     const form = gate.querySelector('form'), account = gate.querySelector('#soduWorkAuthAccount');
     const password = gate.querySelector('#soduWorkAuthPassword'), confirm = gate.querySelector('#acConfirmPassword');
@@ -168,6 +168,11 @@
       text('[data-auth-mode="register"]', '创建账号');
       text('[data-auth-mode="resetPassword"]', '忘记密码');
       text('.ac-auth-back', '返回登录');
+      text('[data-edit-hub]', '更改地址');
+      text('#acHubTitle', '服务连接');
+      text('.ac-hub-dialog label', 'SoduWork 服务地址');
+      text('.ac-hub-dialog .soduwork-auth-connect', '保存并连接');
+      text('.ac-hub-cancel', '取消');
       text('.ac-auth-language > span', '界面语言');
       language.setAttribute('aria-label', tx('界面语言'));
       language.value = global.SoduWorkI18n?.getLocale?.() || '';
@@ -256,6 +261,7 @@
       if (busy) stopDelivery();
       if (!busy && pendingPasswordMode) { pendingPasswordMode = false; changeMode('password'); return; }
       form.querySelectorAll('input,button').forEach(el => { el.disabled = busy; });
+      gate.querySelectorAll('[data-edit-hub], .ac-hub-dialog input, .ac-hub-dialog button').forEach(el => { el.disabled = busy; });
       gate.querySelectorAll('[data-auth-mode]').forEach(el => { el.disabled = busy || (el.dataset.authMode === 'register' && policy?.allowSelfRegistration === false); });
       submit.querySelector('span').textContent = tx(label || (busy ? '正在处理…' : actionLabel()));
       submit.classList.toggle('is-busy', busy); refreshCooldown();

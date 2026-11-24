@@ -138,3 +138,41 @@
 }
 .ac-legal-copy table{border-collapse:collapse;width:100%;font-size:inherit}.ac-legal-copy th,.ac-legal-copy td{border:1px solid var(--line);padding:8px;vertical-align:top}.ac-legal-copy pre{white-space:pre-wrap}.ac-legal-copy blockquote{margin:12px 0;padding-left:14px;border-left:3px solid var(--line)}
 .ac-legal-update-summary{padding:14px 16px;background:var(--bg-1);border:1px solid var(--line);border-radius:10px;margin-bottom:18px;font-size:13px;line-height:1.8}.ac-legal-update-summary p{white-space:pre-wrap;margin:6px 0 0}.ac-legal-accept{display:flex;align-items:flex-start;gap:8px;width:100%;font-size:13px;line-height:1.7}.ac-legal-accept input{accent-color:var(--accent);margin-top:5px}.ac-legal-update-actions{display:flex;justify-content:flex-end;gap:10px;width:100%}.ac-legal-footer:has(.ac-legal-update-actions){flex-wrap:wrap}.ac-legal-footer>.ac-status{width:100%;margin:0}
+
+/* Keep sign-in in one reading order. Only unusually short windows scroll the page. */
+.ac-auth.soduwork-auth-gate { align-items: safe center; }
+.ac-auth-footer [data-edit-hub].ac-link {
+  margin-inline-start: 4px;
+  color: var(--accent);
+}
+.ac-auth .ac-hub-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(380px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 24px;
+  color: var(--ink);
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg);
+  -webkit-app-region: no-drag;
+}
+.ac-hub-dialog::backdrop { background: rgb(0 0 0 / 24%); }
+.ac-hub-dialog h2 { margin: 0 0 20px; font-size: 18px; }
+.ac-hub-dialog label { display: block; margin-bottom: 6px; }
+.ac-hub-dialog input {
+  width: 100%; padding: 10px; border: 1px solid var(--line-3); border-radius: var(--r-md);
+  background: var(--bg-0); color: var(--ink); font: inherit;
+}
+.ac-hub-dialog .ac-hub-message { color: var(--ink-2); overflow-wrap: anywhere; }
+.ac-hub-message:empty { display: none; }
+.ac-hub-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+@media (max-height: 760px) {
+  .ac-auth.soduwork-auth-gate { padding: 12px; }
+  .ac-auth .ac-auth-card { padding: 18px 24px; }
+  .ac-auth .ac-brand, .ac-auth .ac-auth-intro, .ac-auth .ac-auth-tabs { margin-bottom: 10px; }
+  .ac-auth .ac-auth-form { gap: 8px; }
+  .ac-auth .ac-auth-footer { margin-top: 10px; padding-top: 8px; gap: 4px; }
+}

@@ -13,6 +13,29 @@ function fixture(seed = {}, bridge = {}, storage, internal = true, clock = { set
 }
 const legacy = 'http://192.0.2.10:8989';
 const unassigned = 'https://unassigned-legacy-hub.invalid';
+test('numeric-only Hub names cannot change the active endpoint', async t => {
+  const endpoint = require('../main/hub-endpoint.cjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-numeric-hub-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const app = { isPackaged: false, getPath: () => root };
+  const initial = endpoint.initialize(app, {});
+  const selected = [];
+  const { api } = fixture({}, { selectHubEnvironment: async hub => { selected.push(hub); return { ok: true }; } });
+  for (const address of ['123', 'https://123:18989/', ' 123:8080 ']) {
+    await assert.rejects(api.connectHub('production', address), /主机名/);
+    assert.equal(endpoint.prepare(app, address).ok, false);
+  }
+  assert.deepEqual(selected, []);
+  assert.equal(endpoint.current(app).hub, initial.hub);
+  assert.equal(fs.existsSync(path.join(root, 'hub-endpoint.json')), false);
+  for (const [address, expected] of [
+    ['127.0.0.1:18989', 'http://127.0.0.1:18989'], ['localhost', 'http://localhost'],
+    ['http://[::1]:18989', 'http://[::1]:18989'], ['https://hub123.example', 'https://hub123.example']
+  ]) {
+    assert.equal(api.normalizeHub(address), expected);
+    assert.equal(endpoint.prepare(app, address).hub, expected);
+  }
+});
 for (const isPackaged of [false, true]) test(`${isPackaged ? 'packaged' : 'source'} first requests follow the native default Hub`, async t => {
   const endpoint = require('../main/hub-endpoint.cjs');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-default-routing-'));

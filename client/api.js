@@ -90,6 +90,10 @@
   function normalizeHub(raw) {
     var value = String(raw || '').trim();
     if (!value) throw new Error('请填写 SoduWork 服务地址');
+    // URL interprets a single integer as IPv4. Reject it before the original host is lost.
+    if (/^(?:https?:\/\/)?\d+\.?(?=[:/?#]|$)/i.test(value)) {
+      throw new Error('主机名不能只包含数字，请填写完整 IP 地址或域名');
+    }
     if (!/^https?:\/\//i.test(value)) value = 'http://' + value;
     value = value.replace(/\/+$/, '');
     try {
