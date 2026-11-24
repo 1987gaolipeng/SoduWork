@@ -37,6 +37,16 @@ Direct development uses local configuration and data; keep it separate from real
 
 API documentation: **http://127.0.0.1:9080/docs**. Health check: `GET /healthz`.
 
+### Upgrading local attachment storage
+
+Stop every Hub process that can write to the uploads volume. Back up the database and the entire volume at the same point in time. On NTFS, use a backup that preserves named streams if the deployment predates #336. Start one upgraded Hub with this pair before starting any other writers.
+
+Before serving requests, Hub checks local attachment and conversation handoff references against the older flat and hashed layouts. Each uniquely owned file moves to `uploads/objects-v2/<SHA-256 of the logical key in UTF-8>`. Database keys and display names stay the same. Repeated references to one key are valid. Distinct keys that lead to the same physical file, conflicting sources, or missing active objects require inspection; the preflight leaves the original files in place. An interrupted move can resume on the next startup. Once the volume has its completion marker, reads and deletes use v2 exclusively. Include the marker when moving the volume.
+
+Older Hubs could keep a handoff receipt after deleting its task and archive. An absent archive for such a receipt allows startup when no active reference needs it. If the file still exists, migration preserves it. Attachments used for messages can have no task and still require their bytes.
+
+For a missing active object, use the reported key to locate its database record and a trusted backup from the same deployment. Early Windows installations may have stored bytes in an NTFS named stream. Check ownership and verify the recovered ordinary file against the recorded length and SHA-256 where available. With Hub stopped, place that verified copy at the v2 path for the exact key in the restore copy, preserving the original backup. If ownership or content cannot be established, keep the originals for review. A successful startup and a download matching the original bytes verify recovery. To roll back, stop Hub and restore the old database and uploads volume together before restarting the old version.
+
 ### Read-only automation
 
 Use the configured Hub address. The local development example below uses port 9080. The health check is public. To list the projects visible to an account, obtain its bearer token through `POST /api/v1/admin/login` and provide it in `HUB_TOKEN` through your environment or CI secret store. The account needs the `task.view` permission.
