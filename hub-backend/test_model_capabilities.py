@@ -75,6 +75,78 @@ class CapabilityTests(IsolatedDatabase):
         async with self.sessions() as session:
             self.assertEqual((await session.get(ModelDef, "p:model")).ctx_window, 128000)
 
+    async def test_admin_invalid_config_types_do_not_commit_other_changes(self):
+        from app.api import admin
+        self.app.include_router(admin.router)
+        original = {"imageRouting": "auto", "capabilities": {"toolCalling": "supported"}}
+        async with self.sessions() as session:
+            model = await session.get(ModelDef, "p:model")
+            model.config = original
+            model.label = "Original label"
+            await session.commit()
+            revision = model_config_guard.revision(model)
+        for value in ([], ["config"], "invalid", True, 123):
+            with self.subTest(value=value):
+                response = await self.http.put("/api/v1/admin/model-defs", headers=self.headers["admin"],
+                    json={"providerId": "p", "name": "model", "expectedRevision": revision,
+                          "label": "Should not be saved", "enabled": False, "config": value})
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertEqual(response.headers.get("X-Error-Code"), "model.config.invalid-object")
+                async with self.sessions() as session:
+                    model = await session.get(ModelDef, "p:model")
+                    self.assertEqual(model.config, original)
+                    self.assertEqual(model.label, "Original label")
+                    self.assertTrue(model.enabled)
+        response = await self.http.put("/api/v1/admin/model-defs", headers=self.headers["admin"],
+            json={"providerId": "p", "name": "invalid-new", "expectedRevision": "new", "config": []})
+        self.assertEqual(response.status_code, 400, response.text)
+        async with self.sessions() as session:
+            self.assertIsNone(await session.get(ModelDef, "p:invalid-new"))
+
+    async def test_admin_edit_after_legacy_read_preserves_manual_capabilities(self):
+        from app.api import admin
+        self.app.include_router(admin.router)
+        declared = {"imageInput": "unknown", "toolCalling": "supported", "streaming": "supported"}
+        for invalid in ({"thinkingFormat": "unrecognized-format"}, {"maxOutputTokens": 512}):
+            with self.subTest(invalid=invalid):
+                original = {"imageRouting": "auto", "capabilities": declared, **invalid}
+                async with self.sessions() as session:
+                    model = await session.get(ModelDef, "p:model")
+                    model.config = original
+                    await session.commit()
+                response = await self.http.get("/api/v1/admin/model-catalog", headers=self.headers["admin"])
+                self.assertEqual(response.status_code, 200, response.text)
+                view = next(row for row in response.json()["models"] if row["id"] == "p:model")
+                self.assertEqual(view["config"]["capabilities"], declared)
+                self.assertEqual(view["capabilityProfile"]["toolCalling"]["source"], "configured")
+                async with self.sessions() as session:
+                    # Reading a legacy row must never silently migrate the database.
+                    self.assertEqual((await session.get(ModelDef, "p:model")).config, original)
+                response = await self.http.put("/api/v1/admin/model-defs", headers=self.headers["admin"],
+                    json={"providerId": "p", "name": "model", "expectedRevision": view["revision"],
+                          "label": "Label-only edit", "modality": "chat", "config": view["config"]})
+                self.assertEqual(response.status_code, 200, response.text)
+                async with self.sessions() as session:
+                    model = await session.get(ModelDef, "p:model")
+                    self.assertEqual(model.config["capabilities"], declared)
+                    self.assertEqual(model.label, "Label-only edit")
+
+    async def test_admin_empty_and_null_config_keep_explicit_reset_compatibility(self):
+        from app.api import admin
+        self.app.include_router(admin.router)
+        for empty in ({}, None):
+            with self.subTest(empty=empty):
+                async with self.sessions() as session:
+                    model = await session.get(ModelDef, "p:model")
+                    model.config = {"capabilities": {"toolCalling": "supported"}}
+                    await session.commit()
+                    revision = model_config_guard.revision(model)
+                response = await self.http.put("/api/v1/admin/model-defs", headers=self.headers["admin"],
+                    json={"providerId": "p", "name": "model", "expectedRevision": revision, "config": empty})
+                self.assertEqual(response.status_code, 200, response.text)
+                async with self.sessions() as session:
+                    self.assertEqual((await session.get(ModelDef, "p:model")).config, {})
+
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.requests, self.mode, self.peers = [], "ok", []

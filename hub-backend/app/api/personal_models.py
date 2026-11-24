@@ -135,6 +135,7 @@ async def put_my_models(
     from ..models import ModelProvider
     from ..services import model_catalog
     from ..services import model_config_guard, model_runtime
+    from ..services.model_definition_contracts import ModelConfigTypeError
     # Serialize ownership decisions with organization provider creation/deletion.
     await model_runtime.lock_setting(session, "model_catalog_edit_lock_v1")
     await model_config_guard.personal(session, client, body.get("expectedRevision"),
@@ -229,7 +230,8 @@ async def put_my_models(
                     from ..services.model_capabilities import validate_limits
                     context_size = validate_limits(m.get("ctxWindow"), config)
                 except (ValueError, TypeError) as exc:
-                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                    headers = {"X-Error-Code": "model.config.invalid-object"} if isinstance(exc, ModelConfigTypeError) else None
+                    raise HTTPException(status_code=400, detail=str(exc), headers=headers) from exc
                 out.append({"providerId": pid, "name": nm,
                             "label": str(m.get("label") or nm)[:80],
                             "modality": modality, "config": config,
