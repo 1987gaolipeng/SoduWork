@@ -67,7 +67,7 @@ const NAV = localeMap(() => ([
   { id: 'automation-templates', label: '自动化模板', sub: '配置员工可直接套用的自动化工作模板', icon: 'sparkle', Comp: AutomationTemplates, group: 'AI 运行', perm: 'task.dispatch' },
   { id: 'operations', label: '运行监控', sub: 'Hub、Runner、请求与执行链路健康', icon: 'pulse', Comp: OperationsCenter, group: 'AI 运行', perm: 'operations.view' },
   { id: 'clients', label: '执行网络', sub: '集中管理员工终端、Runner 执行机与接单状态', icon: 'monitor', Comp: Clients, group: 'AI 运行', perm: 'client.view' },
-  { id: 'client-releases', label: '客户端发布', sub: '上传已签名安装包、启用或停用各平台版本', icon: 'send', Comp: ClientReleases, group: 'AI 运行', perm: 'client.update' },
+  { id: 'client-releases', label: '客户端发布', sub: '上传安装包、自动签名并管理各平台版本', icon: 'send', Comp: ClientReleases, group: 'AI 运行', perm: 'client.update' },
   { id: 'usage', label: '用量与成本', sub: '按成员、场景、Agent 与模型治理企业 AI 消耗', icon: 'chart', Comp: UsageCenter, group: 'AI 运行', perm: 'client.view' },
   { id: 'quotas', label: '额度管理', sub: '套餐、模型额度与成员分配', icon: 'chart', Comp: QuotaManagement, group: 'AI 运行', perm: 'quota.manage' },
   // Treat automation as a plugin execution mode rather than a separate capability catalog.

@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,8 @@ from ..realtime import hub
 from ..services import audit
 from ..services import client_updates as contract
 from ..services import client_release_files
+from ..services import client_release_signing
+from ..services.client_installer_metadata import InstallerInspectionUnavailable
 from ..services import rbac
 from ..services import update_safety
 from .input_validation import parse_integer
@@ -40,6 +43,7 @@ deployment_router = APIRouter(
 )
 admin_router = APIRouter(prefix="/api/v1/admin", tags=["admin-client-updates"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
 ACTIVE_ATTEMPT_STATES = {
     "queued", "available", "downloading", "downloaded", "waiting", "installing", "deferred",
 }
@@ -559,21 +563,27 @@ async def list_client_releases(
 
 @admin_router.post("/client-releases/upload")
 async def upload_manual_client_release(
-    bundle_file: UploadFile = File(..., alias="bundle"),
     installer: UploadFile = File(...),
+    bundle_file: UploadFile | None = File(None, alias="bundle"),
+    channel: str = Form("", max_length=16),
     user: User = Depends(require_perm("client.update")),
     session: AsyncSession = Depends(get_session),
 ):
-    """Stage a signed installer directly without a deployment run; manual release channels are
-    disabled by default.
-    """
-    bundle_raw = await bundle_file.read(256 * 1024 + 1)
-    if len(bundle_raw) > 256 * 1024:
-        raise HTTPException(status_code=413, detail="安装包签名清单过大")
-    try:
-        bundle = json.loads(bundle_raw.decode("utf-8"))
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="安装包签名清单不是有效 UTF-8 JSON") from exc
+    """Inspect and sign one installer; retain compatibility with offline-signed bundles."""
+    if channel not in {"", "stable", "beta"}:
+        raise HTTPException(status_code=400, detail="客户端发布通道必须是 stable 或 beta")
+    bundle = None
+    if bundle_file is not None:
+        bundle_raw = await bundle_file.read(256 * 1024 + 1)
+        if len(bundle_raw) > 256 * 1024:
+            raise HTTPException(status_code=413, detail="安装包签名清单过大")
+        try:
+            bundle = json.loads(bundle_raw.decode("utf-8"))
+        except Exception as exc:
+            logger.exception("Invalid client release bundle JSON")
+            raise HTTPException(status_code=400, detail="安装包签名清单不是有效 UTF-8 JSON") from exc
+        if not isinstance(bundle, dict) or (channel and bundle.get("channel") != channel):
+            raise HTTPException(status_code=400, detail="签名清单与发布通道不一致")
     filename = Path(str(installer.filename or "")).name
     if not filename or filename != str(installer.filename or ""):
         raise HTTPException(status_code=400, detail="安装包文件名无效")
@@ -587,9 +597,17 @@ async def upload_manual_client_release(
         except client_release_files.UploadTooLarge as exc:
             raise HTTPException(status_code=413, detail=str(exc)) from exc
         try:
-            release, created = await contract.import_signed_release(
-                session, bundle, incoming, enabled=False, created_by=user.id)
+            if bundle is None:
+                release, created = await client_release_signing.register_installer(
+                    session, incoming, channel=channel, created_by=user.id)
+            else:
+                release, created = await contract.import_signed_release(
+                    session, bundle, incoming, enabled=False, created_by=user.id)
+        except (client_release_signing.SigningUnavailable, InstallerInspectionUnavailable) as exc:
+            logger.exception("Client installer publication is not configured")
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except contract.UpdateContractError as exc:
+            logger.exception("Client installer publication rejected")
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         await audit.log(session, user, "client.release.upload", "client_release",
                         release.id, release.artifact_name,

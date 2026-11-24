@@ -18,6 +18,18 @@ Before deleting a custom model service, review its model list and the visible me
 
 Service cards adapt from one to four columns according to the available content width. View opens model details in a dialog without resizing or rearranging the service grid. Add, discover and configure actions remain visible; enable/disable and deletion are in the More popover, with the existing deletion confirmation retained.
 
+## Upload client installers
+
+In **Client releases**, choose one original installer and a release channel, or
+keep the current environment's default. Hub reads its version/platform, signs and
+registers it automatically; no manifest or private key is supplied by the publisher.
+Each upload finishes independently and new records stay disabled until enabled.
+A failed upload keeps the selected file for retry. An identical upload returns the
+existing record and preserves its enabled state. Beta selects a channel; it does
+not turn a plain package version into a `-beta.N` build. Such packages require manual
+installation. Environment administrators configure signing once as described in
+the [backend guide](../hub-backend/README.md#register-client-installers).
+
 ## Interface language
 
 A saved language takes precedence over the first supported browser preference, with English as the final fallback. A Traditional Chinese preference currently uses Simplified Chinese and shows a notice only when that preference supplied the effective fallback. Choosing any supported language, including the displayed Simplified Chinese option, saves an explicit choice and clears the notice. Reloading respects that choice. Reading an existing profile does not rewrite its stored language tags or other settings.

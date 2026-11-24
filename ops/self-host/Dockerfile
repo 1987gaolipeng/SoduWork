@@ -50,6 +50,10 @@ ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /srv/app/hub-backend
 COPY hub-backend/requirements.txt hub-backend/requirements-image.txt ./
 RUN python -m pip install --no-cache-dir -r requirements.txt
+# Installer-only publication reads archive metadata without running installers.
+# Install here as well when reusing a dependency image built before this feature.
+RUN apt-get update && apt-get install -y --no-install-recommends 7zip aapt \
+    && rm -rf /var/lib/apt/lists/*
 COPY hub-backend/app ./app
 COPY hub-backend/migrations ./migrations
 COPY hub-backend/jiyong-alembic.ini ./jiyong-alembic.ini

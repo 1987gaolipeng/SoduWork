@@ -89,8 +89,12 @@ class Settings(BaseSettings):
     # Full-client updates.
     # Store installers under hub-backend/client-releases by default, optionally on a separate persistent volume.
     client_update_dir: str = ""
-    # Base64-encoded 32-byte Ed25519 private key for local publication compatibility.
-    # Prefer a restricted CLIENT_UPDATE_SIGNING_KEY_FILE mount so the long-lived Hub need not hold signing authority.
+    # Optional environment-owned signing authority for installer-only admin uploads.
+    # Mount a restricted file containing a Base64 Ed25519 seed; never return it via APIs.
+    client_update_signing_key_file: str = Field(default="", repr=False)
+    client_update_signing_key_id: str = ""
+    # Empty discovers an installed 7zz/7z; this is an executable path, not a command.
+    client_update_archive_tool: str = ""
     # JSON object of trusted Ed25519 public keys. The checked-in trust file is
     # used when this is empty; an environment override supports controlled key rotation.
     client_update_public_keys: str = ""
