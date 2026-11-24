@@ -30,6 +30,7 @@ let _mdManagedDirty = false;
 let _mdLocalKeyIds = new Set();
 let _mdManagedNeedsReload = false;
 let _mdSaveFlight = null;
+let _mdLastSaveError = null;
 let _mdAddingModel = '';
 let _mdDeleteFlight = null;          /* Reopening waits for an admitted deletion to settle. */
 let _mdTest = {};                   /* providerId -> {state:'ing'|'ok'|'bad', detail} */
@@ -48,6 +49,12 @@ const _MD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" 
 const _MD_TYPES = { chat: '对话模型', image: '图片生成', video: '视频生成' };
 function _mdType(value) { return _MD_TYPES[value] ? value : 'chat'; }
 function _mdCanEdit(provider) { return provider?.personal === true; }
+function _mdStorageErrorMessage(error) {
+  const raw = error && typeof error.message === 'string' ? error.message.trim() : '';
+  const cleaned = raw.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/i, '').trim();
+  if (!cleaned || !/系统安全存储不可用|本地模型配置|本地 Agent 默认模型存储|自动化本地模型选择|能力检测记录/.test(cleaned)) return '';
+  return cleaned.slice(0, 240);
+}
 function _mdTypeOptions(value) {
   const current = _mdType(value);
   return Object.keys(_MD_TYPES).map((key) => '<option value="' + key + '"' +
@@ -107,6 +114,7 @@ function openModelsPanel(options) {
 function closeModelsPanel() {
   _mdStopModelChecks();
   ++_mdLoadId;
+  _mdLastSaveError = null;
   if (typeof _mdCloseDeleteDialog === 'function') _mdCloseDeleteDialog();
   _mdLoadState = 'idle';
   const p = document.getElementById('mdPanel');
@@ -183,14 +191,16 @@ async function _mdLoad(options) {
       return false;
     }
     _mdLoadState = 'error';
+    const storageMessage = !rendering ? _mdStorageErrorMessage(error) : '';
     const message = rendering ? '页面显示遇到问题，请重试。已有模型配置未被修改。' :
       error?.code === 'MODEL_CATALOG_INVALID' ? '模型清单格式异常，请重试。已有模型配置未被修改。' :
       error?.status === 401 ? '登录状态已失效，请重新登录后重试。' :
       error?.status === 403 ? '暂时无法访问模型清单，请检查账号权限后重试。' :
       ['MODEL_LOAD_TIMEOUT', 'DEVICE_AUTH_INIT_TIMEOUT'].includes(error?.code) || error?.name === 'TimeoutError' || error?.name === 'AbortError' ?
-        '加载超时，请检查服务连接后重试。' : '暂时无法获取模型清单，请检查服务连接后重试。';
+        '加载超时，请检查服务连接后重试。' :
+      storageMessage || '暂时无法获取模型清单，请检查服务连接后重试。';
     box.innerHTML = '<div class="md-blank" role="alert" data-md-load-error>' + _MD_ICON +
-      '<b>模型页面未能加载</b><span>' + message + '</span>' +
+      '<b>模型页面未能加载</b><span>' + esc(message) + '</span>' +
       '<button class="md-addbtn" id="mdRetry">重新加载</button></div>';
     document.getElementById('mdRetry')?.addEventListener('click', () => _mdLoad({ fresh: true }));
     return false;
@@ -744,7 +754,11 @@ async function _mdDoTest(el) {
   _mdRender();
   try {
     if (_mdNeedsSave(pid)) {
-      if (!await _mdSave(false)) throw Error('请先保存模型配置，再检测能力');
+      if (!await _mdSave(false)) {
+        const saveError = _mdLastSaveError;
+        if (saveError && !saveError.providerId && _mdStorageErrorMessage(saveError)) throw saveError;
+        throw Error('请先保存模型配置，再检测能力');
+      }
     }
     if (!current()) return;
     probeLoad = _mdLoadId;
@@ -867,6 +881,7 @@ function _mdSave(closeAfter) {
 async function _mdSaveChanges(closeAfter, loadId, scope) {
   const current = () => loadId === _mdLoadId && scope === SoduWorkAPI.taskStorageKey?.('ops');
   if (!current()) return false;
+  _mdLastSaveError = null;
   let localSaved = false, skippedDraft = false;
   try {
     const p = _mdProvider(_mdOpen || _mdEditor);
@@ -909,6 +924,7 @@ async function _mdSaveChanges(closeAfter, loadId, scope) {
     _mdDirty = _mdLocalDirty || _mdManagedDirty || Object.keys(_mdKeyEdits).length > 0;
   } catch (e) {
     if (!current()) return false;
+    _mdLastSaveError = localSaved ? new Error('本地模型配置已保存，Hub 模型配置未保存，请重试。') : e;
     if (e.providerId) { _mdValidation = e; _mdOpen = e.providerId; }
     _mdDirty = _mdLocalDirty || _mdManagedDirty || Object.keys(_mdKeyEdits).length > 0;
     if (typeof petSay === 'function' && (localSaved || !e.providerId)) petSay(localSaved
