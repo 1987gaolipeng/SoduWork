@@ -40,7 +40,7 @@ test('显式停放可选择使旧 revision 失效并清除待确认状态', () =
 
 test('桌宠和竖条单独或同时显示时，主进程按真实组件区域持续守住鼠标穿透', () => {
   const apply = block(main, 'function applyOverlayShape(', 'function parkOverlayShape(');
-  assert.match(apply, /_overlayShape\.resolve\(normalized, bounds\)/);
+  assert.match(apply, /_overlayShape\.resolve\(visual, bounds\)/);
   assert.match(apply, /_overlayInputRects = normalized/);
   const sync = block(main, 'function _syncOverlayInputNow()', 'function _startOverlayInputGuard()');
   assert.match(sync, /screen\.getCursorScreenPoint\(\)/);
@@ -72,12 +72,12 @@ test('窗口销毁会停止输入守卫，避免后台残留轮询', () => {
 });
 
 test('repainting preserves the layered window; explicit shows restore its shape', () => {
-  const redraw = block(main, 'function redrawOverlay()', 'function fixOverlayZoom(');
+  const redraw = block(main, 'function redrawOverlay()', 'function syncOverlayVisibility(');
   assert.match(redraw, /webContents\.invalidate/);
-  assert.doesNotMatch(redraw.slice(0, redraw.indexOf('function revealInitialOverlay')), /mainWindow\.(?:hide|showInactive|setAlwaysOnTop)\(/);
+  assert.doesNotMatch(redraw, /mainWindow\.(?:hide|showInactive|setAlwaysOnTop)\(/);
   const create = block(main, 'function createWindow()', '/* ----- Overlay IPC ----- */');
   const show = block(create, "mainWindow.on('show'", '_setOverlayTopmost(');
-  assert.match(show, /applyOverlayShape\(_lastOverlayRects, false\)/);
+  assert.match(show, /applyOverlayShape\(_lastOverlayRects, false, _lastVisualRects\)/);
 });
 
 test('渲染层收到失焦通知后总会重新上报剩余桌面组件', () => {

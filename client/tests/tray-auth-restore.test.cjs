@@ -63,7 +63,7 @@ test('tray reopening preserves cached authentication and renews expiry without l
   const source = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
   const context = {
     _desktopOverlay: {
-      notifyBlur() {}, setWorkspaceMaximized() {},
+      notifyBlur() {}, setWorkspaceMaximized() {}, show() {},
       window: { isDestroyed: () => false, isVisible: () => true, webContents: { isLoading: () => false } },
     },
     _WORK_SPEC: require('../main/window-specs'), _workspaceState: state, _workWindows: windows,

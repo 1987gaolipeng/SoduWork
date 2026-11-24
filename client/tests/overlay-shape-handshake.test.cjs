@@ -73,3 +73,28 @@ test('querying a pending revision does not swallow its subsequent blur event', a
   h.ipcRenderer.emit('overlay-window-blur', {}, 3);
   assert.equal(callbacks, 1, 'the current blur must dismiss panels exactly once even when its query arrived first');
 });
+
+test('visual-only regions survive revision replay without becoming input regions', async () => {
+  const h = bridgeHarness();
+  const input = [], visual = [{ x: 8, y: 12, width: 220, height: 72 }];
+  h.bridge.setOverlayShape(input, visual);
+  const first = h.sent.at(-1);
+  assert.equal(first[0], 'window-set-overlay-shape');
+  assert.equal(first[1].length, 0);
+  assert.equal(first[2], 0);
+  assert.deepEqual({ ...first[3][0] }, visual[0]);
+
+  visual[0].width = 900;
+  visual.push({ x: 0, y: 0, width: 10, height: 10 });
+  const query = h.bridge.getOverlayShape();
+  h.replies.shift()({ revision: 4, supported: true, awaitingShape: false });
+  await query;
+  const replay = h.sent.at(-1);
+  assert.equal(replay[1].length, 0, 'replay keeps visual and input regions separate');
+  assert.equal(replay[2], 4, 'the preload owns the new navigation revision');
+  assert.equal(replay[3].length, 1, 'renderer mutation does not change the cached report');
+  assert.equal(replay[3][0].width, 220);
+
+  h.bridge.setOverlayShape([]);
+  assert.equal(h.sent.at(-1)[3], undefined, 'a legacy report cannot reuse stale visual regions');
+});

@@ -486,25 +486,7 @@ function applyDeskFlags(pushToRenderer) {
  */
 function revealSoduWorkSuite() {
   if (!_desktopOverlay.window || _desktopOverlay.window.isDestroyed()) _desktopOverlay.createWindow();
-
-  const pushFlags = () => {
-    if (!_desktopOverlay.window || _desktopOverlay.window.isDestroyed()) return;
-    if (!_desktopOverlay.window.isVisible()) {
-      if (typeof _desktopOverlay.window.showInactive === 'function') _desktopOverlay.window.showInactive();
-      else _desktopOverlay.window.show();
-    }
-    /* Restore only the main workspace; preserve pet and dock visibility. */
-  };
-
-  if (_desktopOverlay.emergency) {
-    /* Emergency recovery reloads the page, so synchronize flags only after the replacement renderer is ready. */
-    _desktopOverlay.window.webContents.once('did-finish-load', pushFlags);
-    _desktopOverlay.recoverFromEmergency();
-  } else if (_desktopOverlay.window.webContents.isLoading()) {
-    _desktopOverlay.window.webContents.once('did-finish-load', pushFlags);
-  } else {
-    pushFlags();
-  }
+  _desktopOverlay.show();
   openDeskWindow({ panel: 'workspace' }, null);
 }
 
@@ -535,21 +517,12 @@ function _trayMenu() {
     { type: 'separator' },
     {
       label: _nativeText('显示 SoduWork'),
-      click: () => {
-        if (_desktopOverlay.window) {
-          if (_desktopOverlay.emergency) {
-            _desktopOverlay.recoverFromEmergency();
-          } else {
-            _desktopOverlay.window.show();
-            _desktopOverlay.window.focus();
-          }
-        }
-      }
+      click: () => revealSoduWorkSuite()
     },
     {
       label: _nativeText('隐藏 SoduWork'),
       click: () => {
-        if (_desktopOverlay.window) _desktopOverlay.window.hide();
+        _desktopOverlay.hide();
       }
     },
     { type: 'separator' },
@@ -623,7 +596,7 @@ function createTray() {
    * Tray left-click opens the workspace without toggling desktop visibility.
    */
   tray.on('click', () => {
-    if (_desktopOverlay.emergency) { _desktopOverlay.recoverFromEmergency(); return; }
+    if (_desktopOverlay.emergency) _desktopOverlay.recoverFromEmergency();
     try { openDeskWindow({ panel: 'workspace' }, null); }
     catch (e) { console.error('[tray] 打开主窗口失败', e); }
   });

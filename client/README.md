@@ -131,6 +131,18 @@ Signing in or enrolling issues a 30-minute device certificate. Local sign-out or
 
 ## Run and verify
 
+Reopening the desktop targets the workspace even when the pet and shortcut dock are hidden.
+An empty desktop overlay stays natively hidden; visible widgets or feedback restore it only
+after renderer readiness and geometry are available. Explicit hiding and workspace maximization
+still take precedence. X11 uses an auxiliary toolbar window type; native Wayland may still list
+the overlay while it has visible content.
+
+Run `node e2e/desktop-overlay-visibility.cjs --ozone-platform=wayland` or
+`node e2e/desktop-overlay-visibility.cjs --ozone-platform=x11` in a Linux desktop session
+to check native visibility, widget changes and recovery using an isolated temporary profile.
+The X11 check requires `xprop` and `xwininfo`. These checks do not replace manually verifying
+GNOME's window previews and launcher activation with the final installed package.
+
 Model capability report v3 verifies the complete streaming tool round trip: the synthetic tool result is the last message, tool definitions remain present, and the model must return that result without another forced tool call. Older v2 tool successes require a new check; independent image and streaming evidence remains available. A passed check verifies this small request, not every production prompt or provider policy. Update both desktop and Hub, then rerun the tool capability check for existing models.
 
 The receipt continuation omits `tool_choice`, matching the native Pi request. A generic 403 leaves that capability inconclusive and does not skip independent checks or diagnose missing credential permissions. Explicit authentication and billing failures retain their separate handling.

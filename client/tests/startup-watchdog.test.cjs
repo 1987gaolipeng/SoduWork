@@ -16,9 +16,11 @@ function block(start, end) {
 
 test('启动看门狗在导航开始时布防且不会在 loadFile 后把 ready 清零', () => {
   const createWindow = block('function createWindow()', '/* ----- Overlay IPC ----- */');
-  const loading = block("mainWindow.webContents.on('did-start-loading'", "mainWindow.webContents.on('page-title-updated'");
+  const loading = block("mainWindow.webContents.on('did-start-navigation'", "mainWindow.webContents.on('page-title-updated'");
+  assert.match(loading, /!event\.isMainFrame \|\| event\.isSameDocument/,
+    'subframes and same-document navigation must not rearm readiness or hide desktop content');
   assert.match(loading, /startReadyWatchdog\(/);
-  assert.ok(createWindow.indexOf("webContents.on('did-start-loading'") < createWindow.indexOf('loadRenderer()'));
+  assert.ok(createWindow.indexOf("webContents.on('did-start-navigation'") < createWindow.indexOf('loadRenderer()'));
   const afterLoad = createWindow.slice(createWindow.indexOf('loadRenderer()'));
   assert.doesNotMatch(afterLoad, /startReadyWatchdog\(/);
 });

@@ -103,8 +103,7 @@ class EndpointRpcTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_concurrent_history_probe_cannot_hold_socket_while_waiting_for_content_transaction(self):
         with tempfile.TemporaryDirectory(prefix="soduwork-content-lock-order-") as root:
-            engine = create_async_engine("sqlite+aiosqlite:///" + str(Path(root) / "test.db"),
-                                         connect_args={"timeout": .3})
+            engine = create_async_engine("sqlite+aiosqlite:///" + str(Path(root) / "test.db"))
             sessions = async_sessionmaker(engine, expire_on_commit=False)
             pending = None
             try:
@@ -120,7 +119,7 @@ class EndpointRpcTests(unittest.IsolatedAsyncioTestCase):
                 socket = SimpleNamespace()
                 node = runner_hub._Runner(socket, {"runnerId": "runner", "caps": ["conversationContent1"]})
                 node.owner_user_id, node.management_state, node.ready = "owner", "disabled", True
-                sent, waiting = [], asyncio.Event()
+                sent, waiting, writer_released = [], asyncio.Event(), asyncio.Event()
 
                 async def send(packet):
                     sent.append(packet["op"])
@@ -138,6 +137,10 @@ class EndpointRpcTests(unittest.IsolatedAsyncioTestCase):
                         async def acquire(session, runner_id):
                             if session is not writer:
                                 waiting.set()
+                                # Control the competing request's wait explicitly:
+                                # disk latency must not exhaust SQLite's busy timeout
+                                # before the content owner releases its transaction.
+                                await writer_released.wait()
                             await lock(session, runner_id)
 
                         with patch.object(runner_access_policy, "acquire_runner_policy_lock", acquire):
@@ -150,6 +153,7 @@ class EndpointRpcTests(unittest.IsolatedAsyncioTestCase):
                             self.assertFalse(pending.done())
                             self.assertNotIn("job.session", sent)
                             await writer.rollback()
+                            writer_released.set()
                             await asyncio.wait_for(pending, 1)
                     self.assertEqual(await conversation_content.get_json(pointer, "owner", "history"),
                                      {"text": "retained"})
