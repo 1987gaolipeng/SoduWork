@@ -272,7 +272,9 @@ class LocalSnapshotTests(unittest.TestCase):
         self.run.update(accessPolicy=policy, permissionWaiting=True)
 
         def advance(run):
-            run.update(permissionWaiting=False, accessPolicy={**policy, "revision": 2},
+            next_policy = access_policy.normalize({"schema": access_policy.SCHEMA, "mode": "standard",
+                "revision": 2, "workspaceRoot": run["ws"]})
+            run.update(permissionWaiting=False, accessPolicy=next_policy,
                        model="next-model", reasoningEffort="high", round=2, started=200)
             run["usage"]["output"] = 8
 
@@ -289,12 +291,16 @@ class LocalSnapshotTests(unittest.TestCase):
     def test_status_read_keeps_failure_state_and_error_when_delivery_io_overlaps_completion(self):
         self.run.update(state="failed", error="Initial fixture failure", failureKind="fixture")
         reply = self.read_during_change(lambda: ai_local.status_sync({}, self.ref, read_only=True),
-            "_fresh_entries", lambda run: run.update(state="done", error="", failureKind=""))
+            "_fresh_entries", lambda run: run.update(state="done", error="", failureKind="",
+                round=2, segment=3, admissionKey="next-turn"))
         self.assertEqual(reply["status"], "failed")
         self.assertEqual(reply["error"], "Initial fixture failure")
         self.assertEqual(reply["failureKind"], "fixture")
         self.assertFalse(reply["running"])
         self.assertTrue(reply["done"])
+        self.assertEqual(reply["round"], 1)
+        self.assertEqual(reply["segment"], 1)
+        self.assertEqual(reply["admissionKey"], "")
 
 
 class patch_budget:

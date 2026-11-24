@@ -829,7 +829,19 @@ def status_sync(cfg: dict, ref: str) -> dict:
     with _LOCK:
         run = _RUNS.get(ref)
         metadata = ({runner_usage_receipts.PRIVACY_MARKER: runner_usage_receipts.private_model(run),
+                     'status': access_policy.visible_state(run),
+                     'running': run['state'] == 'running', 'done': run['state'] != 'running',
+                     'access': access_policy.snapshot(run),
+                     'segment': int(run.get('segment') or 1),
+                     'round': int(run.get('round') or 1),
+                     'admissionKey': str(run.get('admissionKey') or ''),
                      'error': run.get('error') or '',
+                     'failureKind': run.get('failureKind') or '',
+                     'failurePath': run.get('failurePath') or '',
+                     'goal': copy.deepcopy({'taskGoal': local_task_goal.snapshot(run)}
+                         if run.get('goalContract') and run.get('cli') != 'pi' else {}),
+                     'policyGuard': execution_policy.guard_status(run.get('executionPolicy'),
+                         run.get('executionPolicyState'), run.get('executionPolicyViolation')),
                      'contextReport': copy.deepcopy(run.get('contextReport') or {})} if run else {})
     if not run:
         return {"ok": False, "error": "本地会话不在了"}
@@ -862,18 +874,18 @@ def status_sync(cfg: dict, ref: str) -> dict:
     attachments = ([{"id": bundle["id"], "filename": bundle["filename"]}] if bundle else [])
     attachments += [{"id": f, "filename": _rel_name(f)} for f in shown]
     return {
-        "ok": True, "status": access_policy.visible_state(run), "title": run.get("title") or "",
-        **access_policy.snapshot(run),
+        "ok": True, "status": metadata['status'], "title": run.get("title") or "",
+        **metadata['access'],
         "identifier": "LOCAL-" + ref[:8],
         # Context segments and semantic work rounds are different: compression may
         # open a segment, while every accepted follow-up starts a new artifact round.
-        "segment": int(run.get("segment") or 1),
-        "round": int(run.get("round") or 1),
-        "admissionKey": str(run.get("admissionKey") or ""), "turnCorrelationVersion": 1,
-        "running": run["state"] == "running",
+        "segment": metadata['segment'],
+        "round": metadata['round'],
+        "admissionKey": metadata['admissionKey'], "turnCorrelationVersion": 1,
+        "running": metadata['running'],
         # Expose the provider completion signal used to advance the plugin DAG.
         # Otherwise a successfully exited session can remain stuck in running state.
-        "done": run["state"] != "running",
+        "done": metadata['done'],
         "comments": len(run.get("lines") or []),
         "last": " / ".join(x.get("text", "")[:80] for x in (run.get("lines") or [])[-3:]),
         # Stable cross-CLI result contract: only the last completed assistant message
@@ -881,9 +893,9 @@ def status_sync(cfg: dict, ref: str) -> dict:
         "finalText": final_text,
         "error": metadata['error'],
         runner_usage_receipts.PRIVACY_MARKER: metadata[runner_usage_receipts.PRIVACY_MARKER],
-        "failureKind": run.get("failureKind") or "",
-        "failurePath": run.get("failurePath") or "",
-        **({"taskGoal": local_task_goal.snapshot(run)} if run.get("goalContract") and run.get("cli") != "pi" else {}),
+        "failureKind": metadata['failureKind'],
+        "failurePath": metadata['failurePath'],
+        **metadata['goal'],
         # Identify outputs by paths relative to this execution's workspace.
         # Keep relative paths in filenames as well.
         # Preserve website directory structure so extracted HTML can resolve styles and assets.
@@ -901,9 +913,7 @@ def status_sync(cfg: dict, ref: str) -> dict:
         "gitDeliveryPending": bool(git_delivery.get("_pending")),
         "contextReport": metadata['contextReport'],
         "workspaceGuard": guard,
-        "executionPolicyGuard": execution_policy.guard_status(
-            run.get("executionPolicy"), run.get("executionPolicyState"),
-            run.get("executionPolicyViolation")),
+        "executionPolicyGuard": metadata['policyGuard'],
     }
 
 
@@ -950,6 +960,9 @@ def session_sync(cfg: dict, ref: str, since: int = 0, limit: int = 400) -> dict:
         if run:
             mem = list(run.get("lines") or [])
             state, seq = run.get("state"), int(run.get("seq") or 0)
+            # Archive hydration may overlap settlement or a new turn. Keep the
+            # response's status, diagnostics and controls on this captured turn.
+            visible_state, access = access_policy.visible_state(run), access_policy.snapshot(run)
             pct, seg = ctx_pct(run), run.get("segment", 1)
             round_no = int(run.get("round") or 1)
             admission_key = str(run.get("admissionKey") or "")
@@ -964,6 +977,13 @@ def session_sync(cfg: dict, ref: str, since: int = 0, limit: int = 400) -> dict:
             cli = run.get("cli") or ""
             cli_name = (_PROFILES.get(cli) or {}).get("name") or cli
             cli_sid, model = run.get("cliSid") or "", run.get("model") or ""
+            reasoning_effort = str(run.get("reasoningEffort") or "")
+            usage = copy.deepcopy(dict(run.get("usage") or {}))
+            started, ended = run.get("started") or 0, run.get("ended") or 0
+            first_started = run.get("firstStarted") or started
+            execution_started = run.get("executionStartedAt") or 0
+            goal = copy.deepcopy({'taskGoal': local_task_goal.snapshot(run)}
+                if run.get('goalContract') and cli != 'pi' else {})
             # Ownership belongs to these captured fields, not a later turn.
             metadata_private = runner_usage_receipts.private_model(run)
             event_destination = ({"eventDestination": run["eventDestination"]}
@@ -979,25 +999,25 @@ def session_sync(cfg: dict, ref: str, since: int = 0, limit: int = 400) -> dict:
         items = [x for x in mem if x["seq"] > since][:limit]
     else:
         items = _read_events(ref, since, limit)      # Read the archive when the requested history predates the memory buffer.
-    return {"ok": True, "ref": ref, "taskId": task_id, "items": items, "status": access_policy.visible_state(run) if run else state,
-            **(access_policy.snapshot(run) if run else {}),
+    return {"ok": True, "ref": ref, "taskId": task_id, "items": items, "status": visible_state,
+            **access,
             "last": items[-1]["seq"] if items else since,
             "seq": seq, "segment": seg, "round": round_no, "detached": detached,
             "admissionKey": admission_key, "admissionStartSeq": admission_start, "turnCorrelationVersion": 1,
             "tokens": tokens, "ctxPct": round(pct, 1), "ctxWindow": win,
             "ctxWindowKnown": known, "error": err, "workDir": ws,
             "failureKind": failure_kind, "failurePath": failure_path,
-            **({"taskGoal": local_task_goal.snapshot(run)} if run.get("goalContract") and cli != "pi" else {}),
+            **goal,
             "cli": cli, "cliName": cli_name, "cliSid": cli_sid, "model": model,
             runner_usage_receipts.PRIVACY_MARKER: metadata_private,
             **event_destination,
             "activeExecutionSelection": {"agentId": cli, "modelName": model,
-                "reasoningEffort": str(run.get("reasoningEffort") or "")},
+                "reasoningEffort": reasoning_effort},
             # Report cumulative usage separately from current context occupancy.
-            "usage": dict(run.get("usage") or {}) if run else {},
-            "firstStarted": (run.get("firstStarted") or run.get("started") or 0) if run else 0,
-            "started": run.get("started") or 0, "ended": run.get("ended") or 0,
-            "executionStartedAt": run.get("executionStartedAt") or 0,
+            "usage": usage,
+            "firstStarted": first_started,
+            "started": started, "ended": ended,
+            "executionStartedAt": execution_started,
             "canStop": state == "running"}
 
 
