@@ -69,15 +69,15 @@ test('real Pi history distinguishes omitted model from default and task turns re
   for (const choice of [{modelName:''}, {}]) {
     opened=await sessions.open({...options,...choice});
     assert.equal(opened.ok,true,opened.reason); session=opened.session;
-    assert.equal(session.snapshot().modelSelection.name,'');
+    assert.equal(session.snapshot().modelSelection.name,'pi-default');
     assert.equal(session.snapshot().modelSelection.activeModel.id,'pi-default');
     assert.deepEqual(session.snapshot().usageReceipts.map(row => row.provider),
       ['soduwork','provider-default','provider-saved'], 'archived provider attribution survives reopening');
     await session.close();session=null;
   }
-  assert.deepEqual(selections,['saved-model','','']);
+  assert.deepEqual(selections,['saved-model','','pi-default']);
   const entries=sdk.SessionManager.open(archive.getSessionFile()).getEntries();
   assert.deepEqual(entries.filter(row => row.type === 'message' && row.message.role === 'assistant')
     .map(row => row.message.usageProvider), [undefined,'provider-default','provider-saved']);
-  assert.equal(entries.filter(row=>row.customType==='soduwork.model.selection').at(-1).data.name,'');
+  assert.equal(entries.filter(row=>row.customType==='soduwork.model.selection').at(-1).data.name,'pi-default');
 });

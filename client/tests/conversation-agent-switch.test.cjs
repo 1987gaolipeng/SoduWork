@@ -288,6 +288,32 @@ const options = f => ({ app: f.app, ref: 'chat-switch', cwd: f.root, identity: i
   resolvePlugins: async ids => ({ items: ids.map(pluginId => ({ pluginId, name: 'Meeting', context: 'Fixture plugin context' })) }) });
 async function send(handle, text) { const sent = handle.submit(text, [], {}); assert.equal(sent.accepted, true); const done = await sent.completion; assert.equal(done.ok, true, JSON.stringify(done)); }
 
+test('returning to each started chat restores its own runtime and next-turn model', async t => {
+  const f = fixture(t);
+  const chats = [];
+  for (const [adapterId, modelName] of [['qwen', 'model-a'], ['opencode', 'model-b']]) {
+    const opened = await f.bridge.open({ ...options(f), ref: 'chat-' + adapterId });
+    assert.equal(opened.ok, true, opened.reason);
+    const handle = opened.session;
+    await send(handle, 'Begin conversation');
+    const switched = await handle.selectAgent(adapterId, { modelName: '' });
+    assert.equal(switched.ok, true, switched.reason);
+    assert.equal(segments.read(f.app, handle.sessionId).active.modelName, 'model-a');
+    await send(handle, 'Use selected runtime');
+    if (modelName !== 'model-a') assert.equal((await handle.selectModel(modelName)).ok, true);
+    chats.push({ id: handle.sessionId, adapterId, modelName });
+    await handle.close();
+  }
+  await f.restart();
+  for (const chat of [chats[0], chats[1], chats[0]]) {
+    const restored = await f.bridge.open({ ...options(f), runtimeConversationId: chat.id });
+    assert.equal(restored.ok, true, restored.reason);
+    assert.equal(restored.session.adapterId, chat.adapterId);
+    assert.equal(restored.session.snapshot().modelSelection.name, chat.modelName);
+    await restored.session.close();
+  }
+});
+
 test('switching Runner preserves an indexed image without expanding the new delivery', async t => {
   const f = fixture(t), runtime = require('../main/conversation/artifact-runtime');
   const handle = (await f.bridge.open({ ...options(f), adapterId: 'dsh' })).session;
@@ -1014,7 +1040,7 @@ test('Runner 历史会话的失效模型回退到当前默认并同步清理选�
     runner: { openOptions: { app: { getPath: () => root }, cwd: root, resumePath: 'runner-stale', modelName: 'retired-model' } },
   } });
   assert.deepEqual(names, ['retired-model', '']);
-  assert.equal(session.snapshot().modelSelection.name, '');
+  assert.equal(session.snapshot().modelSelection.name, 'current-default');
   await session.dispose();
 });
 

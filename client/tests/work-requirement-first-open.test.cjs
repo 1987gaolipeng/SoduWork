@@ -193,7 +193,7 @@ test('real Pi first requirement opens the same work archive, persists its bindin
   assert.equal(prepareOptions.at(-1).options.ignoreAgentPreference, true,
     'historical fallback bypasses only the stale Agent preference');
   assert.equal(sdk.SessionManager.open(stale.getSessionFile()).getEntries().findLast(row =>
-    row.customType === 'soduwork.model.selection').data.name, '');
+    row.customType === 'soduwork.model.selection').data.name, 'fixture-default');
   await recovered.session.close();
 
   // Older archives may have no model-selection entry at all. The Hub can still
@@ -213,6 +213,13 @@ test('real Pi first requirement opens the same work archive, persists its bindin
   assert.equal(prepareOptions.at(-1).options.ignoreAgentPreference, true,
     'the empty historical fallback must bypass the stale Agent preference');
   await noSelectionOpened.session.close();
+
+  const legacy = sdk.SessionManager.create(cwd, path.join(agentDir, 'sessions', 'legacy-model'));
+  legacy.appendMessage(noSelection.getEntries().find(row => row.type === 'message').message);
+  const fromTranscript = await bridge.open({ app, identity: owner, cwd, resumePath: legacy.getSessionFile() });
+  assert.equal(fromTranscript.ok, true, fromTranscript.reason);
+  assert.equal(fromTranscript.session.snapshot().modelSelection.name, 'legacy-model');
+  await fromTranscript.session.close();
 
   const rejectedModel = await bridge.open({ app, identity: owner, cwd, modelName: 'stale-model' });
   assert.equal(rejectedModel.ok, false);

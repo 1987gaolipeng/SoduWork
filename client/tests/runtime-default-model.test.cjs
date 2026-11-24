@@ -139,10 +139,11 @@ test('Runner history preserves its saved choice when omitted and persists an exp
   const app = { getPath: () => root };
   const preference = require('../main/conversation/model-selection').preference(app, 'saved-archive');
   const calls = [];
+  let defaultModel = 'opencode-default';
   const adapter = createRunnerRuntimeAdapter({ app, runtimeSpec: runtimeCatalog.runtime('opencode'),
     runnerRuntime: { rpc: async () => ({ ok: true, data: { ok: true, status: 'done', items: [] } }) },
     modelConfig: { fetchModel: async (_, name) => {
-      calls.push(name); return { ok: true, model: { id: name || 'opencode-default', key: 'fixture', baseUrl: 'http://fixture.invalid' } };
+      calls.push(name); return { ok: true, model: { id: name || defaultModel, key: 'fixture', baseUrl: 'http://fixture.invalid' } };
     } } });
   try {
     preference.write('saved-model');
@@ -150,9 +151,14 @@ test('Runner history preserves its saved choice when omitted and persists an exp
       const session = await adapter.resumeSession({ runtimeId: 'review', identity,
         native: { runner: { openOptions: { ref: 'alias', resumePath: 'saved-archive', cwd: root, ...options } } } });
       await session.dispose();
+      if (options.modelName === '') defaultModel = 'new-default';
     }
-    assert.deepEqual(calls, ['saved-model', '', '']);
-    assert.equal(preference.read(), '');
+    assert.deepEqual(calls, ['saved-model', '', 'opencode-default']);
+    assert.equal(preference.read(), 'opencode-default');
+    const fresh = await adapter.createSession({ runtimeId: 'review', identity,
+      native: { runner: { openOptions: { ref: 'fresh', cwd: root } } } });
+    assert.equal(fresh.snapshot().modelSelection.name, 'new-default');
+    await fresh.dispose();
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -137,7 +137,7 @@ async function open(opts) {
   const savedModel = archiveEntries && [...archiveEntries].reverse().find(entry =>
     entry.type === 'custom' && entry.customType === 'soduwork.model.selection');
   const explicitModel = typeof opts.modelName === 'string';
-  let archivedLocalModel = '';
+  let archivedModel = '';
   if (!explicitModel && !savedModel?.data?.name && archiveEntries) {
     // Older sessions could persist an empty default choice. Only this archive's
     // active branch may identify that choice; models.json belongs to all chats.
@@ -145,19 +145,18 @@ async function open(opts) {
       entry.type === 'message' && entry.message?.role === 'assistant' && entry.message.model &&
         entry.message.model !== 'task-executor');
     const name = String(recorded?.type === 'model_change' ? recorded.modelId : recorded?.message?.model || '');
-    if (name.startsWith('local:')) archivedLocalModel = name;
-    else if (recorded?.localOnly === true || recorded?.message?.usageLocalOnly === true) {
+    if (!name.startsWith('local:') && (recorded?.localOnly === true || recorded?.message?.usageLocalOnly === true)) {
       return { ok: false, code: 'LOCAL_HISTORY_MODEL_UNAVAILABLE',
         reason: '历史会话的原本地模型无法确定，请主动选择可用模型后继续' };
     }
+    archivedModel = name;
   }
-  let modelName = explicitModel ? opts.modelName : savedModel?.data?.name || archivedLocalModel;
+  let modelName = explicitModel ? opts.modelName : savedModel?.data?.name || archivedModel;
   const localChoice = name => String(name || '').startsWith('local:') ||
     require('./image-model').imageChoice(name)?.name.startsWith('local:');
   if (require('./image-model').imageChoice(modelName) && ((goal.intent === 'goal' && restoredMode.visible) || opts.taskRef)) {
     return { ok: false, reason: '直接生图请使用普通对话；目标和需求可通过图片插件生成图片' };
   }
-  let resetSavedModel = false;
   const allowHistoricalModel = !opts.startDeviceSegment && Boolean(opts.resumePath || opts.resumedConversation);
   let prep = await modelConfig.prepare(app, identity, modelName, { allowHistorical: allowHistoricalModel });
   _openTiming('model-prepared', openStarted);
@@ -188,12 +187,12 @@ async function open(opts) {
     if (fallback.ok) {
       modelName = '';
       prep = fallback;
-      resetSavedModel = true;
     }
   }
   if (!prep.ok) return prep;
   if (prep.model.localOnly) modelName = prep.model.modality === 'image'
     ? prep.model.imageChoice || modelName : require('./local-model-runtime-privacy.cjs').reference(prep.model);
+  else if (!modelName) modelName = prep.model.id;
   const MODEL_TICKET_REFRESH_SKEW_MS = 2 * 60 * 1000;
   const MODEL_TICKET_FALLBACK_MS = 10 * 60 * 1000;
   const contextPrompts = Array.isArray(opts.contextPrompts)
@@ -306,9 +305,7 @@ async function open(opts) {
   if (access && (!savedAccess || savedAccess.data?.mode !== access.policy.mode)) {
     piSession.sessionManager.appendCustomEntry('soduwork.access.policy', access.policy);
   }
-  if (resetSavedModel || ((explicitModel || prep.model.localOnly) && savedModel?.data?.name !== modelName)) {
-    piSession.sessionManager.appendCustomEntry('soduwork.model.selection', { name: modelName });
-  } else if (require('./image-model').imageChoice(modelName) && !savedModel) {
+  if (savedModel?.data?.name !== modelName) {
     piSession.sessionManager.appendCustomEntry('soduwork.model.selection', { name: modelName });
   }
   let taskBinding = _taskBindingFromEntries(piSession.sessionManager.getEntries());

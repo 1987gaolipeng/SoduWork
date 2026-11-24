@@ -303,9 +303,10 @@ test('空白页面连续点开历史时，迟到的首次卡片读取不能启�
   const old = ctx.enter('', 'old');
   for (let n = 0; n < 10 && !finishOld; n++) await Promise.resolve();
   assert.equal(typeof finishOld, 'function', 'the old navigation is awaiting its work cards');
+  assert.equal(ctx._sessionId, 'old', 'the loading archive must not be editable as a new draft');
   assert.equal(await ctx.enter('', 'new'), true);
   finishOld(null); assert.equal(await old, false);
-  assert.deepEqual(opened.map(row=>row.id), ['new']); assert.equal(reset.length,0);
+  assert.deepEqual(opened.map(row=>row.id), ['new']); assert.deepEqual(reset, ['old']);
   assert.equal(ctx._sessionId,'new');
 });
 

@@ -139,9 +139,8 @@
       button.querySelector('span').textContent = label;
       button.title = '模型：' + label + ' · 用于之后发送的消息';
       button.setAttribute('aria-label', button.title);
-      // Allow model selection before a session exists; apply the choice to the first message.
-      // Disable selection only during runtime switching or incomplete cloud handoff.
-      button.disabled = Boolean(state.runtimeSwitching || state.cloudHandoff && state.cloudHandoff.phase !== 'committed');
+      // New drafts can choose a model immediately. History needs its own live handle first.
+      button.disabled = Boolean(!state.ref && !state.draftOnly || state.runtimeSwitching || state.cloudHandoff && state.cloudHandoff.phase !== 'committed');
       if (state.cloudHandoff && state.cloudHandoff.phase !== 'committed') { button.title = '请先完成云端交接'; if (!pop.hidden) close(false); }
       if (thinkingDot) {
         thinkingDot.hidden = !Boolean(state.thinking && state.thinking.enabled);
@@ -240,7 +239,8 @@
       await loadModels();
     });
     function loadModels(force = false) {
-      if (lifecycle.signal.aborted || options.state().readOnlyHistory) return Promise.resolve(false);
+      const state = options.state();
+      if (lifecycle.signal.aborted || state.readOnlyHistory || (!state.ref && !state.draftOnly)) return Promise.resolve(false);
       const scope = modelScope();
       if (!force && catalogFlight?.scope === scope && !catalogFlight.done && !catalogFlight.invalidated)
         return catalogFlight.promise;
@@ -548,6 +548,7 @@
         (await waitModel(model)) && (await waitModel(modelRequest)) && (await waitChoice(effort)) &&
         (await waitChoice(effortRequest)) && (await waitAccess(options.draft?.ready()));
       if (requested !== identity() || lifecycle.signal.aborted) return false;
+      if (!options.state().ref && !options.state().draftOnly) return false;
       if (!ready) {
         const failed = waitedModels.map(request => automaticSelections.get(request)?.error).find(Boolean);
         if (failed) throw failed;
