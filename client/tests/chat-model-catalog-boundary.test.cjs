@@ -19,7 +19,8 @@ function fixture(settings = {}) {
     setAttribute() {}, removeAttribute() {}, focus() {}, contains: () => false, querySelector: () => null,
     getBoundingClientRect: () => ({ left: 200, right: 300, top: 500 }) });
   const queue = node(), pop = node(), button = node(), label = node(), wrap = node(), el = node(), field = node();
-  pop.querySelector = () => field; button.querySelector = () => label;
+  const nativeNote = node();
+  pop.querySelector = selector => selector === '[data-native-catalog-note]' ? nativeNote : field; button.querySelector = () => label;
   wrap.querySelector = selector => selector === 'button' ? button : selector === '.nmodel-pop' ? pop : null;
   el.querySelector = selector => selector === '#nchatQueue' ? queue : selector === '#nchatModel' ? wrap : null;
   const state = { ref: 'chat', adapterId: 'qwen', model: { id: 'selected', label: 'Selected' } };
@@ -29,12 +30,14 @@ function fixture(settings = {}) {
     SoduWorkAPI: { taskStorageKey: () => owner, myModels: () => { const item = deferred(); requests.push(item); return item.promise; } },
     soduWorkAPI: { conversationSession: {
       runtimes: async () => settings.runtimes ? settings.runtimes() : ({ ok: true, runtimes: [{ id: 'pi', modelMode: 'managed' }, { id: 'qwen', modelMode: 'managed' }, { id: 'codex', modelMode: 'account' }] }),
-      runtimeModels: async id => { calls.push(id); return { models: [{ id: 'account-choice' }] }; },
+      runtimeModels: async (id, ref) => { calls.push(id); return settings.runtimeModels ? settings.runtimeModels(id, ref) : { models: [{ id: 'account-choice' }] }; },
       selectModel: async (ref, name) => { selections.push({ ref, name });
         if (settings.selectModel) return settings.selectModel(ref, name);
         return { ok: true, selection: { name, model: { id: name, label: name } } }; },
       onModelsChanged: fn => { changed = fn; return () => {}; },
     } } };
+  if (settings.nativeEffort) window.ComposeModelPicker = { nativeEffort: { paint() {}, levels: () => [],
+    html: () => '<div class="cp-effort-card"></div>', catalogNote: (reason, retry) => JSON.stringify({ reason, retry }) } };
   if (settings.runtimeWait) window.ChatRuntimePicker = { create: () => ({
     render() {}, wait: settings.runtimeWait, reset() {}, destroy() {},
   }) };
@@ -42,7 +45,7 @@ function fixture(settings = {}) {
   const controls = window.ChatComposerControls.create(el, { state: () => state, say() {},
     modelSelected: selection => { state.selection = selection; },
     modelAvailabilityChanged: selection => { state.selection = selection; } }); controls.render();
-  return { state, requests, calls, selections, field, label, controls, changed: () => changed(),
+  return { state, requests, calls, selections, field, label, controls, nativeNote, pop, changed: () => changed(),
     owner: value => { owner = value; controls.render(); },
     open: () => button.handlers.get('click')(),
   };
@@ -329,4 +332,23 @@ test('a cancelled execution-option choice remains a refusal without starting mod
   const f = fixture({ runtimeWait: async () => false });
   assert.equal(await f.controls.waitForAccess(), false);
   assert.equal(f.requests.length, 0); assert.deepEqual(f.selections, []);
+});
+
+test('an open Codex chat distinguishes a cold Runner from an empty list and recovers the same chat catalog', async () => {
+  const results = [{ ok: false, models: [] }, { ok: true, models: [], catalogAvailable: true },
+    { ok: true, models: [{ id: 'found', label: 'Found model' }], catalogAvailable: true }];
+  const refs = [];
+  const f = fixture({ nativeEffort: true, runtimeModels: (adapter, ref) => { refs.push(ref); return results.shift(); } });
+  f.state.adapterId = 'codex'; f.state.selection = { name: 'saved', model: { id: 'saved', label: 'Saved model' } };
+  f.controls.render(); await f.open();
+  assert.equal(JSON.parse(f.nativeNote.innerHTML).retry, true);
+  const click = key => f.pop.handlers.get('click')({ stopPropagation() {}, target: { closest: selector => selector === key } });
+  await click('[data-native-list]'); await tick();
+  assert.equal(JSON.parse(f.nativeNote.innerHTML).retry, false);
+  assert.match(f.field.innerHTML, /Codex 默认/);
+  assert.equal(f.state.selection.name, 'saved');
+  f.changed(); await tick();
+  assert.match(f.field.innerHTML, /Found model/);
+  assert.deepEqual(refs, ['chat', 'chat', 'chat']);
+  assert.deepEqual(f.selections, []);
 });

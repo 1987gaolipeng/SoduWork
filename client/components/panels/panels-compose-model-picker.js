@@ -16,7 +16,7 @@
   let loadChanged, signalLoadChange;
   let imageModels = [];
   let nativeModels = [], nativeCatalogAvailable = false;
-  let nativeReason = '';
+  let nativeReason = '', nativeRetryable = false;
   let activeRuntime = '';
   let activeScope = '';
   let activeOwner = '';
@@ -303,8 +303,7 @@
 
   function codexHtml(selected) {
     const selectedModel = modelById(selected.modelName);
-    const reason = nativeReason && !nativeModels.length
-      ? '<div class="cp-native-note is-warning">' + escape(nativeReason) + '</div>' : '';
+    const reason = nativeReason && !nativeModels.length ? catalogNote(nativeReason, nativeRetryable) : '';
     if (nativeView === 'models') return heading('Codex · 使用本机账号', true) +
       '<div class="cp-model-scroll cp-native-models">' + [{ id: '', label: tx('Codex 默认') }, ...nativeModels].map((item) =>
         '<button type="button" class="cp-mrow' + (item.id === selected.modelName ? ' on' : '') +
@@ -314,13 +313,19 @@
     return reason + effortCard(selected, selectedModel);
   }
 
+  function catalogNote(reason, retryable) {
+    if (!reason) return '';
+    return '<div class="cp-native-note" role="status">' + escape(tx(reason)) +
+      (retryable ? ' <button type="button" data-native-refresh>' + escape(tx('刷新')) + '</button>' : '') + '</div>';
+  }
+
   // Both composers use the same native account model and effort surface.
   function effortCard(selected, selectedModel) {
     const efforts = effortChoices(selectedModel);
     return '<div class="cp-effort-card' + (!efforts.length ? ' is-unavailable' : '') + '">' +
         '<div class="cp-effort-heading"><span aria-hidden="true"></span>' +
           '<button type="button" class="cp-native-model-trigger" data-native-list aria-label="' + escape(tx('选择 Codex 模型')) + '" aria-haspopup="dialog"><b data-effort-label>' + escape(tx(EFFORT_LABELS[selected.reasoningEffort] || '选择模型')) + '</b>' +
-          '<small>' + escape(selectedModel?.label || tx('Codex 默认')) + '<span aria-hidden="true"> ›</span></small></button>' +
+          '<small>' + escape(selectedModel?.label || selected.modelName || tx('Codex 默认')) + '<span aria-hidden="true"> ›</span></small></button>' +
           '<button type="button" data-effort-reset aria-label="重置推理强度" title="重置推理强度"' + (!efforts.length ? ' disabled' : '') + '><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 7a6.5 6.5 0 1 1-.3 5M4 3v4h4"/></svg></button></div>' +
         '<div class="cp-effort-track"><div class="cp-effort-fill" aria-hidden="true"><div class="cp-effort-sparks">' +
           [8, 22, 39, 55, 72, 88].map((left, index) => '<span style="--spark-x:' + left + '%;--spark-y:' + (index % 2 ? 68 : 30) + '%;--spark-delay:-' + (index * .21) + 's"></span>').join('') +
@@ -492,6 +497,7 @@
     }
     if (row.id === 'codex') {
       if (nativeLoaded === row.id && !force) return render();
+      if (!nativeModels.length) { nativeReason = '正在加载模型…'; nativeRetryable = false; render(); }
       try {
         const bridge = api();
         const response = prepared || await bridge?.runtimeModels?.(row.id);
@@ -506,11 +512,13 @@
           selected.unavailable = Boolean(protectedChoice && selected.modelName && !modelById(selected.modelName));
           reconcileEffort(selected);
         }
-        nativeReason = String(response && response.reason || '');
+        nativeReason = String(response.reason || (nativeCatalogAvailable ? '' : '本机 Codex 模型目录暂时无法读取，可继续使用默认模型'));
+        nativeRetryable = response.retryable === true || !nativeCatalogAvailable;
         nativeLoaded = row.id;
       } catch (error) {
         if (!current()) return;
-        nativeReason = tx('本机 Codex 模型目录暂时无法读取，可继续使用默认模型');
+        nativeModels = []; nativeCatalogAvailable = false; nativeRetryable = true;
+        nativeReason = '本机 Codex 模型目录暂时无法读取，可继续使用默认模型';
       }
       render();
       notify();
@@ -686,8 +694,10 @@
     pop.addEventListener('click', (event) => {
       event.stopPropagation();
       if (event.target.closest('[data-model-close]')) { close(); button.focus?.(); return; }
+      if (event.target.closest('[data-native-refresh]')) { if (!loading) void refresh(true); return; }
       if (event.target.closest('[data-native-list]')) {
         nativeView = 'models'; searchQuery = ''; render();
+        if (nativeRetryable && !loading) void refresh(true);
         pop.querySelector?.('input[type="search"]')?.focus(); return;
       }
       if (event.target.closest('[data-native-back]')) {
@@ -786,7 +796,7 @@
       activeScope = context.key;
       enterpriseModels = [];
       enterpriseDefaultErrors = {}; managedCatalogUnavailable = false; imageModels = []; enterpriseLoaded = false;
-      nativeModels = []; nativeCatalogAvailable = false; nativeReason = ''; nativeLoaded = '';
+      nativeModels = []; nativeCatalogAvailable = false; nativeReason = ''; nativeRetryable = false; nativeLoaded = '';
       nativeView = 'effort';
       close();
     }
@@ -882,7 +892,7 @@
 
   global.ComposeModelPicker = { bind, close, refresh, ready, value, prepareRuntimeSwitch, resetNewDraft, resetDirectory, restoreSelection, releasePreference,
     hasManualChoice: () => state(runtime().id).modelChosen,
-    nativeEffort: { html: effortCard, paint: paintEffortCard, levels: effortChoices, defaultLevel: defaultEffort },
+    nativeEffort: { catalogNote, html: effortCard, paint: paintEffortCard, levels: effortChoices, defaultLevel: defaultEffort },
     label: () => currentLabel(runtime(), state(runtime().id)) };
   const scopeChanged = () => {
     if (activeScope && activeScope !== loadContext().key) void refresh();

@@ -11,6 +11,7 @@
     const thinkingDot = wrap.querySelector('.nmodel-thinking-dot');
     let drag = null, generation = 0, rows = [], selecting = false, thinkingBusy = false, lastAdapter = '', lastIdentity = '';
     let nativeModels = [], nativeView = 'effort', effortEpoch = 0, pendingEffort = null, effortPreview = null, effortRequest = null, modelRequest = null;
+    let nativeReason = '', nativeRetryable = false;
     const effortView = () => global.ComposeModelPicker?.nativeEffort;
     const nativeMode = state => state.adapterId === 'codex' && !state.cloudHandoff && Boolean(effortView());
     let catalogScope = '', lastScope = '', catalogLoads = 0, catalogFlight = null, catalogVersion = 0;
@@ -126,7 +127,7 @@
       const identity = state.ref || (state.draftOnly ? 'draft:' + state.draftId : '');
       const scope = modelScope();
       if (lastScope !== scope || lastIdentity !== identity || lastAdapter !== state.adapterId || state.runtimeSwitching) {
-        close(false); rows = []; nativeModels = []; nativeView = 'effort'; effortEpoch++; pendingEffort = null; effortPreview = null; effortRequest = null; modelRequest = null; selecting = false;
+        close(false); rows = []; nativeModels = []; nativeReason = ''; nativeRetryable = false; nativeView = 'effort'; effortEpoch++; pendingEffort = null; effortPreview = null; effortRequest = null; modelRequest = null; selecting = false;
         pop.removeAttribute('aria-busy');
       }
       lastScope = scope;
@@ -164,19 +165,27 @@
       const selected = nativeSelection(state);
       effortView()?.paint(pop, selected, nativeModels.find(model => model.id === selected.modelName));
     }
+    function paintNativeNote() {
+      const slot = pop.querySelector('[data-native-catalog-note]');
+      if (!slot) return;
+      slot.hidden = !nativeReason;
+      slot.innerHTML = effortView()?.catalogNote?.(nativeReason, nativeRetryable) || '';
+    }
     function renderNativeEffort() {
       const state = options.state();
       pop.classList.add('cp-modelpop', 'show'); pop.dataset.modelView = nativeView;
+      const note = '<div data-native-catalog-note hidden></div>';
       if (nativeView === 'models') {
         pop.innerHTML = '<header class="nmodel-header"><button type="button" data-native-back aria-label="返回推理设置">‹</button><div class="nmodel-heading"><b>选择模型</b><span>Codex · 使用本机账号</span></div><button type="button" data-model-close aria-label="关闭模型选择">×</button></header>' +
           '<label class="nmodel-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg><input type="search" aria-label="搜索模型" placeholder="搜索可用模型"></label>' +
-          '<div class="nmodel-options" role="listbox" aria-label="可用模型"></div>';
+          '<div class="nmodel-options" role="listbox" aria-label="可用模型"></div>' + note;
         list();
       } else {
         const selected = nativeSelection(state), model = nativeModels.find(row => row.id === selected.modelName);
-        pop.innerHTML = effortView().html(selected, model);
+        pop.innerHTML = note + effortView().html(selected, model);
         paintNativeEffort(state);
       }
+      paintNativeNote();
       positionModels();
     }
     function chooseNativeEffort(level) {
@@ -231,6 +240,13 @@
       const current = options.state();
       nativeView = 'effort'; pop.classList.remove('cp-modelpop', 'show'); delete pop.dataset.modelView;
       pop.hidden = false; button.setAttribute('aria-expanded', 'true');
+      if (nativeMode(current)) {
+        if (!rows.length) rows = [{ name: '', label: 'Codex 默认' }];
+        renderNativeEffort(); pop.showPopover?.(); positionModels();
+        pop.querySelector('[data-native-list]')?.focus({ preventScroll: true });
+        await loadModels();
+        return;
+      }
       pop.innerHTML = '<header class="nmodel-header"><div class="nmodel-heading"><b>选择模型</b><span title="只对后续发送的消息生效，不会中断当前轮次">用于本次会话</span></div><button type="button" data-model-close aria-label="关闭模型选择">×</button></header>' +
         '<label class="nmodel-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg><input type="search" aria-label="搜索模型" placeholder="搜索可用模型"></label>' +
         '<div class="nmodel-options" role="listbox" aria-label="可用模型"><p class="nmodel-message">正在加载…</p></div>' +
@@ -257,12 +273,16 @@
     async function readModels(flight) {
       catalogLoads++;
       const current = options.state(), scope = flight.scope;
+      if (nativeMode(current) && !nativeModels.length && !pop.hidden) {
+        nativeReason = '正在加载模型…'; nativeRetryable = false; paintNativeNote();
+      }
       const selectedAtStart = current.selection?.name || current.selection?.model?.id || current.model?.id || '';
       const valid = () => !lifecycle.signal.aborted && !flight.invalidated && flight.version === catalogVersion && scope === modelScope();
       const stale = () => { flight.stale = true; return false; };
       const read = promise => bounded(Promise.race([promise, flight.superseded]), flight.deadline,
         () => modelError('MODEL_CATALOG_TIMEOUT', '读取模型列表超时，请检查连接后重试；输入已保留。'),
         () => { flight.invalidated = true; });
+      const previousNativeModels = nativeModels;
       let managedChoiceBlocked = false;
       try {
         const adapter = current.adapterId || 'pi';
@@ -275,7 +295,12 @@
           await read(global.SoduWorkAPI.myModels({ localDefaults: !current.cloudHandoff }));
         if (!valid()) return stale();
         if (native) {
-          nativeModels = response.models || [];
+          const localCodex = adapter === 'codex' && !current.cloudHandoff;
+          const failed = response?.ok === false || !Array.isArray(response?.models);
+          nativeModels = failed ? [] : response.models;
+          nativeRetryable = localCodex && (failed || response.catalogAvailable === false || response.retryable === true);
+          nativeReason = localCodex && !nativeModels.length ? response?.reason || (nativeRetryable
+            ? '本机 Codex 模型目录暂时无法读取，可继续使用默认模型' : '该 Agent 暂未提供可切换的模型。') : '';
           rows = nativeModels.map(row => ({ name: row.id, label: row.label || row.id }));
           if (adapter === 'codex' && !current.cloudHandoff) rows.unshift({ name: '', label: 'Codex 默认' });
         }
@@ -340,7 +365,12 @@
         render();
         if (pop.hidden) return !managedChoiceBlocked;
         if (nativeMode(options.state()) && nativeView === 'effort') {
-          if (pop.querySelector('.cp-effort-card')) paintNativeEffort();
+          const selected = nativeSelection(options.state()).modelName;
+          const before = previousNativeModels.find(model => model.id === selected);
+          const after = nativeModels.find(model => model.id === selected);
+          if (pop.querySelector('.cp-effort-card') && JSON.stringify(before) === JSON.stringify(after)) {
+            paintNativeEffort(); paintNativeNote();
+          }
           else { renderNativeEffort(); pop.querySelector('[data-native-list]')?.focus({ preventScroll: true }); }
           return true;
         }
@@ -348,6 +378,7 @@
           pop.querySelector('.nmodel-options').innerHTML = '<p class="nmodel-message">' +
             (native ? (current.cloudHandoff ? '云端 Agent 暂未提供模型列表。' : '该 Agent 暂未提供可切换的模型。') : '暂无可用模型，请检查模型服务授权。') + '</p>'; return native;
         }
+        if (nativeMode(options.state()) && nativeView === 'models') paintNativeNote();
         const listNode = pop.querySelector('.nmodel-options'), scroll = listNode?.scrollTop || 0;
         const focusedName = pop.contains(document.activeElement) ? document.activeElement?.dataset?.modelName : '';
         list(pop.querySelector('input')?.value || '');
@@ -356,6 +387,14 @@
         renderThinking(options.state()); positionModels();
         return !managedChoiceBlocked;
       } catch (error) {
+        if (!lifecycle.signal.aborted && scope === modelScope() && flight.version === catalogVersion &&
+            flight.stage === 'read' && nativeMode(options.state())) {
+          nativeReason = '本机 Codex 模型目录暂时无法读取，可继续使用默认模型';
+          nativeRetryable = true;
+          nativeModels = []; rows = [{ name: '', label: 'Codex 默认' }];
+          if (!pop.hidden) renderNativeEffort();
+          return true;
+        }
         flight.error = modelErrors.has(error) ? error : flight.stage === 'selection'
           ? modelError('MODEL_SELECTION_FAILED', '模型切换未能确认，请重新选择模型后重试；输入已保留。') : catalogError();
         if (scope === modelScope() && flight.version === catalogVersion && !pop.hidden && pop.querySelector('.nmodel-options'))
@@ -380,7 +419,12 @@
     on(pop, 'click', async event => {
       event.stopPropagation();
       if (event.target.closest('[data-model-close]')) { close(true); return; }
-      if (event.target.closest('[data-native-list]')) { nativeView = 'models'; renderNativeEffort(); pop.querySelector('input')?.focus(); return; }
+      if (event.target.closest('[data-native-refresh]')) { if (!catalogLoads) void loadModels(); return; }
+      if (event.target.closest('[data-native-list]')) {
+        nativeView = 'models'; renderNativeEffort(); pop.querySelector('input')?.focus();
+        if (nativeRetryable && !catalogLoads) void loadModels();
+        return;
+      }
       if (event.target.closest('[data-native-back]')) { nativeView = 'effort'; renderNativeEffort(); pop.querySelector('[data-native-list]')?.focus(); return; }
       if (event.target.closest('[data-effort-reset]')) {
         chooseNativeEffort(effortView().defaultLevel(nativeModels.find(row => row.id === nativeSelection(options.state()).modelName))); return;
