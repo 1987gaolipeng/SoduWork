@@ -2,8 +2,8 @@
 
 const vault = require('./linux-device-vault.cjs');
 
-// Versioned local-model envelope. Distinct from Electron safeStorage prefixes
-// (v10/v11/v20). Device-credential ciphertext is unchanged and has no prefix.
+// Versioned local-model envelope. Distinct from Electron Linux safeStorage
+// prefixes (v10/v11). Device-credential ciphertext is unchanged and has no prefix.
 const envelope = Buffer.from('soduwork-lm-v1\0');
 
 function asBuffer(value) {

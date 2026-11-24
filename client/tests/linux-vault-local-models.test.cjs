@@ -130,6 +130,7 @@ test('plain secure-storage errors stay visible without hiding mapped transport e
     assert.equal(human(new Error("Error invoking remote method 'local-models-save': Error: 本地模型配置无法读取"), '没测成'), '本地模型配置无法读取');
     assert.equal(human(new Error("Error invoking remote method 'local-models-get': Error: 系统安全存储不可用，无法保存本地模型凭据"), '没测成'), '系统安全存储不可用，无法保存本地模型凭据');
     assert.equal(human(new Error("Error invoking remote method 'local-models-capabilities-check': Error: 系统安全存储不可用，无法读取能力检测记录"), '没测成'), '系统安全存储不可用，无法读取能力检测记录');
+    assert.equal(human(new Error("Error invoking remote method 'local-models-capabilities-check': Error: 能力检测记录无法解密，当前密钥与历史记录不匹配，请恢复匹配的密钥后重试"), '没测成'), '能力检测记录无法解密，当前密钥与历史记录不匹配，请恢复匹配的密钥后重试');
     assert.equal(human(new Error('本地模型配置无法读取'), '没测成'), '本地模型配置无法读取');
     assert.equal(human(new Error('x'.repeat(300)), '没测成'), '没测成');
     assert.equal(human({ message: 'Failed to fetch' }, '没测成'), '没测成');
@@ -785,4 +786,154 @@ test('capability checks preserve native v11 evidence across keyring outage and c
   const rebuilt = await capabilities.check({ modelRef: alphaRef, checks: ['imageInput'] }, { runProbe: passProbe });
   assert.equal(rebuilt.ok, true);
   assert.equal(fs.readdirSync(dir).filter(name => name.includes('.corrupt-')).length, 1);
+});
+
+test('capability rechecks stop without probing or overwriting when active evidence uses another unlocked key', async t => {
+  const vault = require('../main/linux-device-vault.cjs');
+  const adapter = require('../main/linux-vault-safe-storage.cjs');
+  const binding = require('../main/linux-model-safe-storage.cjs');
+  const sha256 = filePath => crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+  const passProbe = async () => ({
+    reportVersion: 3, apiFamily: 'chat-completions', checkedAt: new Date().toISOString(),
+    checks: { imageInput: { status: 'passed', code: 'verified', checkedAt: new Date().toISOString() } },
+  });
+  function keyedNativeKeyring(tag) {
+    const marker = Buffer.from(`v11:${tag}:`);
+    return {
+      isEncryptionAvailable: () => true,
+      getSelectedStorageBackend: () => 'gnome_libsecret',
+      encryptString: value => Buffer.concat([marker, Buffer.from(value, 'utf8')]),
+      decryptString(value) {
+        const bytes = Buffer.from(value);
+        if (bytes.length < marker.length || !bytes.subarray(0, marker.length).equals(marker)) {
+          throw Error('Error while decrypting the ciphertext provided to safeStorage.decryptString');
+        }
+        return bytes.subarray(marker.length).toString('utf8');
+      },
+    };
+  }
+
+  // Case 1: matching unlocked vault + mismatched unlocked GNOME keyring (v11 evidence).
+  const dir1 = profile(t);
+  const capFile1 = path.join(dir1, 'local-model-capabilities.secure.json');
+  const vaultA1 = await vault.unlock(dir1, 'create', passphrase);
+  const vaultOnly1 = binding.create(blockedNative());
+  assert.equal(vaultOnly1.bindVault(vaultA1), true);
+  store.configure({ app: { getPath: () => dir1 }, safeStorage: vaultOnly1 });
+  const saved1 = store.save({
+    providers: [{ id: 'local', name: 'Local', baseUrl: 'http://127.0.0.1:9/v1', authMode: 'key' }],
+    models: [
+      { providerId: 'local', name: 'alpha' },
+      { providerId: 'local', name: 'bravo' },
+    ],
+    keys: { local: secret },
+  });
+  const alphaRef1 = saved1.myModels.find(row => row.name === 'alpha').id;
+  const bravoRef1 = saved1.myModels.find(row => row.name === 'bravo').id;
+  const catalogHash1 = sha256(modelFile(dir1));
+
+  // Detect alpha and bravo with keyring A.
+  store.configure(null);
+  const keyringA1 = binding.create(keyedNativeKeyring('keyring-a'));
+  assert.equal(keyringA1.bindVault(await vault.unlock(dir1, 'unlock', passphrase)), true);
+  store.configure({ app: { getPath: () => dir1 }, safeStorage: keyringA1 });
+  await capabilities.check({ modelRef: alphaRef1, checks: ['imageInput'] }, { runProbe: passProbe });
+  await capabilities.check({ modelRef: bravoRef1, checks: ['imageInput'] }, { runProbe: passProbe });
+  const capHash1 = sha256(capFile1);
+  const capBytes1 = fs.readFileSync(capFile1);
+  assert.equal(Buffer.from(JSON.parse(capBytes1.toString('utf8')).cipher, 'base64').subarray(0, 3).toString(), 'v11');
+
+  // Switch to another unlocked GNOME keyring B while the vault still matches; recheck alpha only.
+  store.configure(null);
+  const keyringB1 = binding.create(keyedNativeKeyring('keyring-b'));
+  assert.equal(keyringB1.bindVault(await vault.unlock(dir1, 'unlock', passphrase)), true);
+  store.configure({ app: { getPath: () => dir1 }, safeStorage: keyringB1 });
+  let probeCalls1 = 0;
+  await assert.rejects(
+    capabilities.check({ modelRef: alphaRef1, checks: ['imageInput'] }, {
+      runProbe: async () => { probeCalls1 += 1; return passProbe(); },
+    }),
+    /能力检测记录无法解密.*恢复匹配的密钥/,
+  );
+  assert.equal(probeCalls1, 0);
+  assert.equal(sha256(capFile1), capHash1);
+  assert.equal(fs.readFileSync(capFile1).equals(capBytes1), true);
+  assert.equal(sha256(modelFile(dir1)), catalogHash1);
+  assert.deepEqual(fs.readdirSync(dir1).filter(name => name.includes('.corrupt-')), []);
+
+  // Restore keyring A across process restart: both alpha and bravo remain passed.
+  store.configure(null);
+  const restoredA1 = binding.create(keyedNativeKeyring('keyring-a'));
+  assert.equal(restoredA1.bindVault(await vault.unlock(dir1, 'unlock', passphrase)), true);
+  store.configure({ app: { getPath: () => dir1 }, safeStorage: restoredA1 });
+  const restoredModels1 = store.get().myModels;
+  assert.equal(restoredModels1.find(row => row.id === alphaRef1).capabilityCheck.checks.imageInput.status, 'passed');
+  assert.equal(restoredModels1.find(row => row.id === bravoRef1).capabilityCheck.checks.imageInput.status, 'passed');
+
+  // Case 2: matching unlocked GNOME keyring (v11 catalog) + mismatched unlocked official vault (vault evidence).
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-mismatch-vault-'));
+  const otherVaultDir = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-other-vault-'));
+  t.after(() => {
+    store.configure(null);
+    fs.rmSync(dir2, { recursive: true, force: true });
+    fs.rmSync(otherVaultDir, { recursive: true, force: true });
+  });
+  const capFile2 = path.join(dir2, 'local-model-capabilities.secure.json');
+  const vaultA2 = await vault.unlock(dir2, 'create', passphrase);
+  const vaultOnly2 = binding.create(blockedNative());
+  assert.equal(vaultOnly2.bindVault(vaultA2), true);
+  store.configure({ app: { getPath: () => dir2 }, safeStorage: vaultOnly2 });
+  const saved2 = store.save({
+    providers: [{ id: 'local', name: 'Local', baseUrl: 'http://127.0.0.1:9/v1', authMode: 'key' }],
+    models: [
+      { providerId: 'local', name: 'alpha' },
+      { providerId: 'local', name: 'bravo' },
+    ],
+    keys: { local: secret },
+  });
+  const alphaRef2 = saved2.myModels.find(row => row.name === 'alpha').id;
+  const bravoRef2 = saved2.myModels.find(row => row.name === 'bravo').id;
+  await capabilities.check({ modelRef: alphaRef2, checks: ['imageInput'] }, { runProbe: passProbe });
+  await capabilities.check({ modelRef: bravoRef2, checks: ['imageInput'] }, { runProbe: passProbe });
+  const vaultCapBytes2 = fs.readFileSync(capFile2);
+  const vaultCapHash2 = sha256(capFile2);
+  assert.equal(adapter.hasEnvelope(Buffer.from(JSON.parse(vaultCapBytes2.toString('utf8')).cipher, 'base64')), true);
+
+  // Re-save the catalog once with GNOME keyring A so catalog is native v11 while capability evidence stays vault-encrypted.
+  store.configure(null);
+  const mixedKeyring2 = binding.create(keyedNativeKeyring('keyring-a'));
+  assert.equal(mixedKeyring2.bindVault(await vault.unlock(dir2, 'unlock', passphrase)), true);
+  store.configure({ app: { getPath: () => dir2 }, safeStorage: mixedKeyring2 });
+  store.save({ providers: [{ id: 'local', name: 'Local', baseUrl: 'http://127.0.0.1:9/v1', authMode: 'key' }] });
+  const nativeCatalogHash2 = sha256(modelFile(dir2));
+  assert.equal(Buffer.from(envelope(dir2).cipher, 'base64').subarray(0, 3).toString(), 'v11');
+  assert.equal(sha256(capFile2), vaultCapHash2);
+
+  // Move to another unlocked official vault B while GNOME keyring A still matches; recheck alpha only.
+  store.configure(null);
+  const vaultB2 = await vault.unlock(otherVaultDir, 'create', passphrase);
+  const mismatchedVaultFacade2 = binding.create(keyedNativeKeyring('keyring-a'));
+  assert.equal(mismatchedVaultFacade2.bindVault(vaultB2), true);
+  store.configure({ app: { getPath: () => dir2 }, safeStorage: mismatchedVaultFacade2 });
+  let probeCalls2 = 0;
+  await assert.rejects(
+    capabilities.check({ modelRef: alphaRef2, checks: ['imageInput'] }, {
+      runProbe: async () => { probeCalls2 += 1; return passProbe(); },
+    }),
+    /能力检测记录无法解密.*恢复匹配的密钥/,
+  );
+  assert.equal(probeCalls2, 0);
+  assert.equal(sha256(capFile2), vaultCapHash2);
+  assert.equal(fs.readFileSync(capFile2).equals(vaultCapBytes2), true);
+  assert.equal(sha256(modelFile(dir2)), nativeCatalogHash2);
+  assert.deepEqual(fs.readdirSync(dir2).filter(name => name.includes('.corrupt-')), []);
+
+  // Restore original vault A across process restart: both alpha and bravo remain passed.
+  store.configure(null);
+  const restoredVault2 = binding.create(keyedNativeKeyring('keyring-a'));
+  assert.equal(restoredVault2.bindVault(await vault.unlock(dir2, 'unlock', passphrase)), true);
+  store.configure({ app: { getPath: () => dir2 }, safeStorage: restoredVault2 });
+  const restoredModels2 = store.get().myModels;
+  assert.equal(restoredModels2.find(row => row.id === alphaRef2).capabilityCheck.checks.imageInput.status, 'passed');
+  assert.equal(restoredModels2.find(row => row.id === bravoRef2).capabilityCheck.checks.imageInput.status, 'passed');
 });

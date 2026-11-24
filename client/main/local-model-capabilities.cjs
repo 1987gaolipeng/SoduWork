@@ -54,6 +54,9 @@ function read() {
     if (error?.code === 'SAFE_STORAGE_UNAVAILABLE') {
       throw Object.assign(Error('系统安全存储不可用，无法读取能力检测记录'), { code: 'SAFE_STORAGE_UNAVAILABLE' });
     }
+    if (error?.code === 'SAFE_STORAGE_DECRYPT_FAILED') {
+      throw Object.assign(Error('能力检测记录无法解密，当前密钥与历史记录不匹配，请恢复匹配的密钥后重试'), { code: 'SAFE_STORAGE_DECRYPT_FAILED' });
+    }
     throw Error('能力检测记录无法读取，请重新检测以重建记录');
   }
   try {
@@ -153,7 +156,7 @@ async function check(input, options = {}) {
   const selected = target(snapshot, model);
   let state;
   try { state = read(); } catch (error) {
-    if (error?.code === 'SAFE_STORAGE_UNAVAILABLE') throw error;
+    if (error?.code === 'SAFE_STORAGE_UNAVAILABLE' || error?.code === 'SAFE_STORAGE_DECRYPT_FAILED') throw error;
     // Preserve unreadable encrypted bytes before an explicit recheck rebuilds evidence.
     fs.copyFileSync(file(), file() + '.corrupt-' + crypto.randomUUID() + '.bak'); state = empty();
   }

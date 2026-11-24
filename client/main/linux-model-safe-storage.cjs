@@ -3,7 +3,7 @@
 const vault = require('./linux-device-vault.cjs');
 const adapter = require('./linux-vault-safe-storage.cjs');
 
-const nativePrefixes = [Buffer.from('v10'), Buffer.from('v11'), Buffer.from('v20')];
+const nativePrefixes = [Buffer.from('v10'), Buffer.from('v11')];
 
 function asBuffer(value) {
   return Buffer.isBuffer(value) ? value : Buffer.from(value || []);
@@ -33,6 +33,10 @@ function storageUnavailable(message = '系统安全存储不可用，无法读�
   return Object.assign(Error(message), { code: 'SAFE_STORAGE_UNAVAILABLE' });
 }
 
+function decryptFailed(message = '无法解密已加密记录，请恢复匹配的密钥') {
+  return Object.assign(Error(message), { code: 'SAFE_STORAGE_DECRYPT_FAILED' });
+}
+
 function create(nativeSafeStorage) {
   const native = nativeSafeStorage || null;
   let bound = null;
@@ -59,7 +63,11 @@ function create(nativeSafeStorage) {
         if (!vaultUsable(bound) || typeof bound?.decryptString !== 'function') {
           throw storageUnavailable('系统安全存储不可用，无法读取凭据库加密记录');
         }
-        return bound.decryptString(bytes);
+        try {
+          return bound.decryptString(bytes);
+        } catch {
+          throw decryptFailed('无法解密凭据库加密记录，请恢复匹配的密钥');
+        }
       }
       if (isNativeCipher(bytes)) {
         if (typeof native?.decryptString !== 'function' || native.getSelectedStorageBackend?.() === 'basic_text') {
@@ -67,9 +75,9 @@ function create(nativeSafeStorage) {
         }
         try {
           return native.decryptString(bytes);
-        } catch (error) {
+        } catch {
           if (!nativeUsable(native)) throw storageUnavailable('系统安全存储不可用，无法读取原生密钥环加密记录');
-          throw error;
+          throw decryptFailed('无法解密原生密钥环加密记录，请恢复匹配的密钥');
         }
       }
       throw Error('Cannot decrypt the stored local secret');
