@@ -132,9 +132,9 @@ async def put_my_models(
     import re as _re
 
     from sqlalchemy import select
+
     from ..models import ModelProvider
-    from ..services import model_catalog
-    from ..services import model_config_guard, model_runtime
+    from ..services import model_catalog, model_config_guard, model_runtime
     from ..services.model_definition_contracts import ModelConfigTypeError
     # Serialize ownership decisions with organization provider creation/deletion.
     await model_runtime.lock_setting(session, "model_catalog_edit_lock_v1")
