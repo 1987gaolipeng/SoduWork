@@ -2,37 +2,29 @@
 
 const assert = require('assert');
 const fs = require('./renderer-source.cjs');
-const os = require('os');
+const test = require('node:test');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..', '..');
 const catalog = require('../main/agent-runtime/native-model-catalog');
 const sessionSpec = require('../main/conversation/session-spec');
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-codex-models-'));
+
 
 function source(relative) {
   return fs.readFileSync(path.join(root, relative), 'utf8');
 }
 
-try {
-  const codexHome = path.join(tempRoot, '.codex');
-  fs.mkdirSync(codexHome, { recursive: true });
-  fs.writeFileSync(path.join(codexHome, 'models_cache.json'), JSON.stringify({
-    fetched_at: '2026-08-31T00:00:00Z',
-    models: [
-      {
-        slug: 'gpt-5.6-sol',
-        display_name: '5.6 Sol',
-        supported_reasoning_levels: [{ effort: 'medium' }, { effort: 'xhigh' }, { effort: 'xhigh' }],
-        default_reasoning_level: 'xhigh',
-      },
-      { slug: 'hidden-model', visibility: 'hide' },
-      { slug: '../unsafe-model', display_name: 'unsafe' },
-    ],
-  }), 'utf8');
-
-  const listed = catalog.listCodexModels({ codexHome });
+test('only the bound Runner supplies selectable native models to a conversation', async () => {
+  const runtime = { async rpc(op, request) {
+    assert.equal(op, 'runtime.models');
+    assert.deepEqual(request, { key: 'codex', ref: 'bound-session' });
+    return { ok: true, data: { ok: true, models: [
+      { id: 'gpt-5.6-sol', label: '5.6 Sol', reasoningLevels: ['medium', 'xhigh', 'xhigh'], defaultReasoning: 'xhigh' },
+      { id: 'hidden-model', visibility: 'hide' }, { id: '../unsafe-model' },
+    ] } };
+  } };
+  const listed = await catalog.list('codex', runtime, 'bound-session');
   assert.equal(listed.ok, true);
   assert.equal(listed.models.length, 1, 'must filter hidden and unsafe models');
   assert.deepEqual(listed.models[0], {
@@ -41,7 +33,13 @@ try {
     reasoningLevels: ['medium', 'xhigh'],
     defaultReasoning: 'xhigh',
   });
-  assert.deepEqual(catalog.list('pi', { codexHome }).models, [], 'Pi must not inherit the Codex catalog');
+  assert.deepEqual((await catalog.list('pi', runtime)).models, [], 'Pi must not inherit the Codex catalog');
+  const offline = await catalog.list('codex', { rpc: async () => { throw Error('offline'); } });
+  assert.deepEqual(offline.models, []);
+  assert.equal(offline.ok, false);
+});
+
+test('native options and picker retain viewport placement and reasoning controls', () => {
 
   const spec = sessionSpec.build({
     modelName: '  gpt-5.6-sol  ',
@@ -51,7 +49,7 @@ try {
   assert.equal(spec.reasoningEffort, 'xhigh');
 
   const preload = source('client/preload.js');
-  const ipc = source('client/main/pi-session/ipc.js');
+  const ipc = source('client/main/pi-session/runtime-selection-ipc.js');
   const compose = source('client/components/panels/panels-compose.js');
   const picker = source('client/components/panels/panels-compose-model-picker.js');
   const pickerCss = source('client/components/panels/panels-compose-model-picker.css');
@@ -59,8 +57,8 @@ try {
   const desk = source('client/desk.html');
   const backend = source('hub-backend/app/services/local_base.py');
 
-  assert.match(preload, /runtimeModels:\s*\(adapterId\).*pi-session-runtime-models/s);
-  assert.match(ipc, /pi-session-runtime-models[\s\S]*nativeModelCatalog\.list/);
+  assert.match(preload, /runtimeModels:\s*\(adapterId, ref\).*pi-session-runtime-models/s);
+  assert.match(ipc, /pi-session-runtime-models[\s\S]*native-model-catalog'\)\.list/);
   assert.match(compose, /ComposeModelPicker\.value\(\)[\s\S]*reasoningEffort:\s*modelSelection\.reasoningEffort/);
   assert.match(picker, /row\.id === 'codex'[\s\S]*runtimeModels/);
   assert.match(pickerCss, /position:fixed;right:auto;bottom:auto/, 'top-layer picker uses viewport coordinates');
@@ -89,7 +87,4 @@ try {
     'model picker must load before the compose controller',
   );
 
-  console.log('codex native model selection: assertions passed');
-} finally {
-  fs.rmSync(tempRoot, { recursive: true, force: true });
-}
+});

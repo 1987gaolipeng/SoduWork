@@ -770,6 +770,11 @@ class Runner:
             from app.services import access_policy
             item["accessControl"] = access_policy.capability(key)
             return {"ok": True, "data": item}
+        if op == "runtime.models" and message.get("key") == "codex":
+            from app.services import codex_account_models, local_base
+            data = await runner_local_rpc.to_thread(codex_account_models.list_models,
+                                                    local_base._data_root(), message.get("ref", ""))
+            return {"ok": True, "data": data}
         if op == "runtime.history.imageReceipts":
             from app.services import codex_image_history, local_base
             receipts = await runner_local_rpc.to_thread(codex_image_history.lookup, local_base._STORE, message)

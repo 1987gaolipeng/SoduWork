@@ -203,16 +203,19 @@ def _sync_auth(source_home: str, runtime_home: str) -> None:
             pass
 
 
+def login_source_home(env: dict) -> str:
+    return str(env.get("CODEX_HOME") or "").strip() or \
+        os.path.join(os.path.expanduser("~"), ".codex")
+
+
 def prepare(env: dict, data_root: str, ref: str = "") -> str:
     """Select a stable private home for one SoduWork conversation."""
     from . import codex_account_home
-    source_home = str(env.get("CODEX_HOME") or "").strip() or \
-        os.path.join(os.path.expanduser("~"), ".codex")
     root = os.path.join(os.path.abspath(data_root), "agents", "codex")
     runtime_home = os.path.join(root, _folder(ref))
     selected = codex_account_home.runtime_home(data_root, runtime_home)
     if not selected:
-        _sync_auth(source_home, runtime_home)
+        _sync_auth(login_source_home(env), runtime_home)
     env["CODEX_HOME"] = selected or runtime_home
     if selected:
         env["CODEX_SQLITE_HOME"] = selected

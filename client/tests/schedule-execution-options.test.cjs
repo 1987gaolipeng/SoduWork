@@ -314,6 +314,7 @@ test('a new automation loads the default native substrate without loading unrela
   assert.deepEqual(queried, ['codex']);
   assert.equal(run(ctx, '_schDefaultAgentId()'), 'local:codex');
   assert.match(run(ctx, '_schModelFieldHtml("", "local:codex")'), /native-default/);
+  assert.equal(run(ctx, '_schDefaultModelFor("local:codex")'), '');
 });
 
 test('automation model selector translates labels generated after the editor opens', async () => {

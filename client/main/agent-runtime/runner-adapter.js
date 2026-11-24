@@ -135,6 +135,17 @@ function _fatalHarnessText(value) {
     ? clean : '';
 }
 
+const ACCOUNT_MODEL_UNAVAILABLE = '当前 Codex 账号无法使用所选模型。请在此会话中切换到 Codex 默认模型或其他可用模型，再发送消息。';
+
+function rejectedAccountModel(adapterId, data) {
+  if (adapterId !== 'codex' || data?.status !== 'failed') return null;
+  if (data.failureKind === 'native_model_unavailable') return data.activeExecutionSelection?.modelName || '';
+  // Older Runners retained the provider's model name inside the ACP failure.
+  const error = typeof data.error === 'string' ? data.error : '';
+  const match = /The '([A-Za-z0-9][A-Za-z0-9._-]{0,159})' model is not supported when using Codex with a ChatGPT account/i.exec(error);
+  return match && /model_not_found/.test(error) ? match[1] : null;
+}
+
 function _resumeCredentialError(value) {
   const text = typeof value === 'string' ? value : (() => {
     const message = value && (value.message || value.reason || value.error);
@@ -478,7 +489,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
   const savedSelection = modelPreference.readSelection();
   const explicitModel = typeof opts.modelName === 'string';
   let modelName = explicitModel ? opts.modelName : savedSelection.name || '';
-  if (resumeNative && !explicitModel && !modelName) {
+  if (resumeNative && !explicitModel && !modelName && (adapterId !== 'codex' || savedSelection.name === undefined)) {
     // Older chats may only name their model in the Runner journal. When its first
     // page is still polling, the same Runner exposes that metadata in its inventory.
     const history = initialSession?.data;
@@ -493,7 +504,20 @@ async function createRunnerHandle(request, defaults, initialSession) {
       require('../../core/model-choice').imageChoice(modelName)?.name.startsWith('local:'))) {
     throw new RuntimeContractError('RUNNER_MODEL_UNAVAILABLE', '账号型底座不能使用本地模型，请选择账号模型');
   }
-  const initialThinking = adapterId === 'codex' ? require('./codex-thinking').profile(modelName,
+  let nativeModels = [];
+  const rejectedModels = new Set();
+  async function accountCatalog() {
+    const catalog = await require('./native-model-catalog').list(adapterId, runtime, runnerRef);
+    if (!Array.isArray(catalog.models) || catalog.ok === false) return catalog;
+    nativeModels = catalog.models.filter(row => !rejectedModels.has(row.id));
+    return { ...catalog, models: nativeModels };
+  }
+  const initialCatalog = adapterId === 'codex' && modelName ? await accountCatalog() : null;
+  const previousRejection = initialSession?.ok && initialSession.data?.ok !== false && rejectedAccountModel(adapterId, initialSession.data);
+  if (previousRejection) rejectedModels.add(previousRejection);
+  const absentAccountModel = rejectedModels.has(modelName) || initialCatalog?.catalogAvailable === true && !nativeModels.some(row => row.id === modelName);
+  const accountThinking = (name, effort) => require('./codex-thinking').profile(name, effort, nativeModels);
+  const initialThinking = adapterId === 'codex' ? accountThinking(modelName,
     resumedRef && typeof savedSelection.reasoningEffort === 'string' ? savedSelection.reasoningEffort
       : opts.reasoningEffort || savedSelection.reasoningEffort || '') : null;
   if (opts.taskRef) {
@@ -512,7 +536,8 @@ async function createRunnerHandle(request, defaults, initialSession) {
   }
   const allowHistoricalModel = !opts.startDeviceSegment && Boolean(resumedRef || opts.resumedConversation);
   let prepared = accountModel
-    ? { ok: true, model: { id: modelName, name: modelName || displayName, baseUrl: '', key: '' } }
+    ? { ok: !absentAccountModel, model: { id: modelName, name: modelName || displayName, baseUrl: '', key: '' },
+      ...(absentAccountModel ? { reason: '当前 Codex 账号目录中没有所选模型，请选择 Codex 默认或其他可用模型' } : {}) }
     : await models.fetchModel(identity, modelName, undefined, undefined, false, adapterId,
       { app, allowLocal: true, allowHistorical: allowHistoricalModel });
   // A Runner archive can outlive the model catalog just like a native Pi archive.
@@ -548,7 +573,9 @@ async function createRunnerHandle(request, defaults, initialSession) {
   if (prepared.model.localOnly) modelName = require('../pi-session/local-model-runtime-privacy.cjs').reference(prepared.model);
   else if (!modelName) modelName = prepared.model.id;
   if (explicitModel || resetSavedModel || modelName && savedSelection.name !== modelName) {
-    try { modelPreference.write(modelName, initialThinking?.level); }
+    const keepSavedEffort = modelName && savedSelection.name === modelName &&
+      (initialCatalog?.ok === false || initialCatalog?.catalogAvailable === false);
+    try { modelPreference.write(modelName, keepSavedEffort ? savedSelection.reasoningEffort : initialThinking?.level); }
     catch (error) {
       // Clearing a retired historical choice is a best-effort repair. A
       // filesystem/AV lock must not turn a recoverable conversation into an
@@ -616,18 +643,19 @@ async function createRunnerHandle(request, defaults, initialSession) {
       if (!accountModel) return models.fetchModel(identity, name, undefined, undefined, false, adapterId,
         { app, allowLocal: true });
       if (adapterId !== 'codex') return { ok: false };
-      const catalog = await require('./native-model-catalog').list(adapterId);
-      const row = (catalog.models || []).find(model => model.id === name);
-      return row || !name ? { ok: true, model: { id: name, label: row && row.label || '默认模型' } } : { ok: false };
+      if (!name) return { ok: true, model: { id: '', label: 'Codex 默认' } };
+      const catalog = await accountCatalog();
+      const row = catalog.models?.find(model => model.id === name);
+      return row ? { ok: true, model: { id: name, label: row.label || name } } : { ok: false };
     },
     persist: name => {
       if (state.disposed) throw Error('会话已关闭');
-      const next = adapterId === 'codex' ? require('./codex-thinking').profile(name, state.thinking?.level) : null;
+      const next = adapterId === 'codex' ? accountThinking(name, state.thinking?.level) : null;
       modelPreference.write(name, next?.level);
     },
     changed: () => {
       if (adapterId === 'codex' && state.modelChoicePending)
-        state.thinking = require('./codex-thinking').profile(state.modelSelection.capture(), state.thinking?.level);
+        state.thinking = accountThinking(state.modelSelection.capture(), state.thinking?.level);
       emit('model-selection');
     },
     apply(next, name) {
@@ -1211,7 +1239,11 @@ async function createRunnerHandle(request, defaults, initialSession) {
         state.runtimeError = '';
         state.statusText = state.goalLimit.reason;
       } else if (data.error && !stopped) {
-        state.runtimeError = _text(redact(require('../access-control/errors').message(data.error)), 1000);
+        const rejected = rejectedAccountModel(adapterId, data);
+        if (rejected !== null) {
+          if (rejected) rejectedModels.add(rejected);
+          state.runtimeError = ACCOUNT_MODEL_UNAVAILABLE;
+        } else state.runtimeError = _text(redact(require('../access-control/errors').message(data.error)), 1000);
         state.status = 'unreachable';
         state.statusText = state.runtimeError;
       } else if (state.protocolIssue) {
@@ -1710,6 +1742,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
               reason: '插件没能在发送前完成授权：' + String(error?.message || error) };
           }
         }
+        if (rejectedModels.has(next.options.modelName)) throw Error(ACCOUNT_MODEL_UNAVAILABLE);
         if (state.model.historicalLocal) throw Error('原本地模型已删除或不可用，请先选择一个当前可用模型后再发送');
         const byteAttachments = (Array.isArray(next.attachments) ? next.attachments : []).some(item =>
           item && item.data != null && !path.isAbsolute(String(item.path || item.stagedPath || '')));
@@ -1720,7 +1753,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
           });
         }
         if (adapterId === 'codex') state.agentExecution = _nativeExecution(adapterId, {
-          modelName: state.model.id, reasoningEffort: require('./codex-thinking').profile(
+          modelName: state.model.id, reasoningEffort: accountThinking(
             next.options.modelName, next.options.reasoningEffort).level,
         });
         skillSelectionFailure = null;
@@ -1817,6 +1850,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
     ref: alias,
     adapterId, displayName,
     sessionId: runnerRef,
+    ...(adapterId === 'codex' ? { accountCatalog } : {}),
     get desktopControlScope() { return 'runner:' + runnerRef + ':' + state.round; },
     ownsDesktopControlScope(scope) {
       const prefix = 'runner:' + runnerRef + ':';
@@ -1993,7 +2027,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
       if (adapterId !== 'codex') return { ok: false, reason: '当前 Agent 不支持此思考强度设置' };
       if (state.disposed || state.modelChoicePending) return { ok: false, reason: '会话已关闭或正在切换模型，请稍候' };
       if (typeof level !== 'string' || /[\r\n\0]/.test(level)) return { ok: false, reason: '思考强度无效' };
-      const name = state.modelSelection.capture(), next = require('./codex-thinking').profile(name, level);
+      const name = state.modelSelection.capture(), next = accountThinking(name, level);
       if (!next.supported || level && !next.levels.includes(level)) return { ok: false, reason: '当前模型不支持此思考强度，请刷新模型后重试' };
       try { modelPreference.write(name, next.level); }
       catch (_) { return { ok: false, reason: '思考强度未能保存，请重试；原设置已保留' }; }
@@ -2028,6 +2062,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
       {
         const taskModelOverride = options?.taskId && !options.controlled && typeof options.modelName === 'string';
         const modelName = taskModelOverride ? options.modelName : state.modelSelection.capture();
+        if (rejectedModels.has(modelName)) return { accepted: false, result: { ok: false, reason: ACCOUNT_MODEL_UNAVAILABLE } };
         const item = turnQueue.add({ text: value, attachments, options: { ...options, modelName,
           ...(adapterId === 'codex' ? { reasoningEffort: taskModelOverride && typeof options.reasoningEffort === 'string'
             ? options.reasoningEffort : state.thinking?.level || '' } : {}),
@@ -2359,7 +2394,8 @@ function createRunnerRuntimeAdapter(options) {
         try { probe = await runtime.rpc('job.session', { ref: resumePath, since: 0, limit: 1 }, 5000); }
         catch (error) { if (_resumeCredentialError(error)) throw error; }
         const failure = probe?.error || probe?.data?.error;
-        if (_resumeCredentialError(failure)) throw Error(String(failure));
+        if (_resumeCredentialError(failure) && !(probe?.ok && !probe.error && probe.data?.ok !== false &&
+            rejectedAccountModel(adapterId, probe.data) !== null)) throw Error(String(failure));
         if (probe?.ok === true && probe.data?.ok === false && !probe.data?.items?.length) {
           let proof;
           try { proof = await runtime.rpc('job.has', { ref: resumePath }, 5000); }
@@ -2409,7 +2445,8 @@ function createRunnerRuntimeAdapter(options) {
           if (result.value?.ok && Array.isArray(result.value?.data?.items)) initialSession = result.value;
           const failure = result.error || result.value?.error || result.value?.data?.error ||
             (!result.value?.ok ? result.value : null);
-          if (_resumeCredentialError(failure)) {
+          if (_resumeCredentialError(failure) && !(result.value?.ok && !result.value.error && result.value.data?.ok !== false &&
+              rejectedAccountModel(adapterId, result.value.data) !== null)) {
             throw new Error(typeof failure === 'string' ? failure : JSON.stringify(failure));
           }
         }

@@ -23,7 +23,7 @@ function fixture(t) {
     cloud: { guard: () => cloud, selectExecution: async (_handle, choice) => {
       calls.push(['cloud', choice]); return { ok: true };
     } }, publish() {} });
-  return { handle, calls, send: value => handlers.get('pi-session-set-thinking')({}, 'chat', value),
+  return { handle, calls, catalog: () => handlers.get('pi-session-runtime-models')({}, 'codex', 'chat'), send: value => handlers.get('pi-session-set-thinking')({}, 'chat', value),
     select: (agent, choice) => handlers.get('pi-session-select-agent')({}, 'chat', agent, choice),
     trust: value => { trusted = value; }, login: value => { online = value; },
     cloud: value => { cloud = value; }, owner: value => { owned = value; }, close: () => { current = null; } };
@@ -73,4 +73,18 @@ test('cloud Agent selection rejects device model references before any selection
   }
   assert.equal((await f.select('qwen', { modelName: 'hub-model' })).ok, true);
   assert.deepEqual(f.calls, [['cloud', { agentId: 'qwen', modelName: 'hub-model' }]]);
+});
+
+test('a bound Codex catalog is authorized before and after its read', async t => {
+  const f = fixture(t);
+  f.handle.accountCatalog = async () => ({ ok: true, models: [{ id: 'fixture' }] });
+  assert.equal((await f.catalog()).models[0].id, 'fixture');
+  f.owner(false);
+  assert.deepEqual(await f.catalog(), { ok: false, models: [] });
+  f.owner(true);
+  f.handle.accountCatalog = async () => {
+    f.close();
+    return { ok: true, models: [{ id: 'old-session' }] };
+  };
+  assert.deepEqual(await f.catalog(), { ok: false, models: [] });
 });

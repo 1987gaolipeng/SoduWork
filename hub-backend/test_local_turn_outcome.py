@@ -50,6 +50,28 @@ class TurnOutcomeTests(unittest.TestCase):
             local_stream._finish(self.ref, 0, terminal, "")
         return resume
 
+    def test_codex_account_model_rejection_requires_a_new_selection_and_never_replays(self):
+        from app.services import codex_acp_outcome
+        self.run.update(cli="codex", cliSid="retained-session", timedOut="late watchdog")
+        terminal = {"overflow": True, "outputTruncated": True}
+        error = {"type": "invalid_request_error", "code": "model_not_found",
+                 "message": "The 'desktop-model' model is not supported when using Codex with a ChatGPT account."}
+        event = {"error": {"name": "AcpBridgeError", "message": "400 " + json.dumps({"error": error})}}
+        local_stream._on_line(self.ref, json.dumps(event), terminal)
+        with patch("app.services.local_ctx._recover_overflow") as recover, patch.object(local_stream, "_resume") as resume:
+            local_stream._finish(self.ref, 2, terminal, "")
+        recover.assert_not_called()
+        resume.assert_not_called()
+        self.assertEqual(self.run["state"], "failed")
+        self.assertEqual(self.run["failureKind"], "native_model_unavailable")
+        self.assertEqual(self.run["error"], codex_acp_outcome.ACCOUNT_MODEL_UNAVAILABLE)
+        self.assertEqual(self.run["cliSid"], "retained-session")
+        self.assertFalse(codex_acp_outcome.account_model_rejected("codex-harness", event))
+        self.assertFalse(codex_acp_outcome.account_model_rejected("codex", {"type": "error", "message": error["message"]}))
+        self.assertFalse(codex_acp_outcome.account_model_rejected("codex", {"error": {"name": "AcpBridgeError",
+                         "message": "authentication required"}}))
+        self.assertTrue(codex_acp_outcome.account_model_rejected("codex", {"type": "turn.failed", "error": error}))
+
     def test_zero_exit_truncation_resumes_same_node_without_false_done(self):
         terminal = self.event("length")
         self.assertTrue(terminal["outputTruncated"])

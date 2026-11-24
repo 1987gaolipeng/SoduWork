@@ -74,7 +74,7 @@ function resumeOptions(options) {
     // recover an unavailable saved model from the current default instead of
     // treating the stale selection as a new-chat explicit choice.
     resumedConversation: true, sessionTitle: segments.title(row),
-    modelName: row.active.modelName || undefined,
+    modelName: row.active.adapterId === 'codex' ? row.active.modelName : row.active.modelName || undefined,
     reasoningEffort: row.active.reasoningEffort ?? options.reasoningEffort,
     accessPolicy: row.accessPolicy, readOnly: row.readOnly, activePluginIds: row.activePluginIds,
     contextPrompts: [...(options.contextPrompts || []), row.deviceHistoryComplete
@@ -181,9 +181,6 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
         const carried = catalog.runtime(raw.adapterId)?.modelMode === 'managed' && before.modelSelection?.name;
         modelName = carried || implicitDeviceModel(identity, agentId);
       }
-      // Entering Codex uses the same first available native model as a new chat.
-      if (agentId === 'codex' && !modelName)
-        modelName = require('./native-model-catalog').list('codex').models?.[0]?.id || '';
       const nextOptions = { ...options, ref: 'chat-' + crypto.randomUUID(), cwd: raw.cwd, adapterId: agentId,
         sessionTitle: segments.title(record) || raw.historyRow?.()?.title || '',
         modelName, reasoningEffort: '', resumePath: '', resumeCwd: '', runtimeConversationId: '',

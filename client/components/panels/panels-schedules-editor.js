@@ -369,7 +369,7 @@ function _schResolveModelFor(agentId, current) {
   const agent = _schAgents.find(item => String(item.id) === String(agentId || ''));
   const options = _schModelOptionsFor(agentId);
   if (selected === 'local:unavailable') return selected;
-  if (agent?.nativeModelPick) return selected || (options.length === 1 ? options[0].name : '');
+  if (agent?.nativeModelPick) return selected;
   if (!_schAgentAllowsModel(agentId, selected)) return '';
   if (_schModelCatalogError && _schLocalModelAgent(agent)) return selected;
   return options.some(item => item.name === selected) ? selected : String(options[0]?.name || selected);

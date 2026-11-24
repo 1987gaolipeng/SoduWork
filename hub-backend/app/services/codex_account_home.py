@@ -71,6 +71,20 @@ def activate(data_root: str) -> None:
         durable_file.write_bytes(marker, _MODE)
 
 
+def model_catalog_home(data_root: str, ref: str) -> str:
+    """Resolve the runtime's account binding without creating a home or importing login data."""
+    from .codex_runtime_home import _folder, login_source_home
+    with _LOCK:
+        if ref:
+            conversation = _directory(data_root, "agents", "codex", _folder(ref))
+            if os.path.isdir(conversation):
+                binding = os.path.join(conversation, ".soduwork-account-home")
+                if _read_mode(binding):
+                    return account_home(data_root)
+                return "" if os.path.lexists(binding + ".wal") else conversation
+        return selected_home(data_root) or os.path.realpath(login_source_home(os.environ))
+
+
 def runtime_home(data_root: str, conversation_home: str) -> str:
     """Bind only new conversations; never relocate an existing native journal."""
     with _LOCK:

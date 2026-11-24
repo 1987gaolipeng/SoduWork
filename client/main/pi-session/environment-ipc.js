@@ -3,7 +3,6 @@ const path = require('path');
 const fs = require('fs');
 const { shell } = require('electron');
 const capabilities = require('../conversation/capabilities');
-const nativeModelCatalog = require('../agent-runtime/native-model-catalog');
 const conversationTitles = require('../conversation/titles');
 
 const CAPABILITY_TIMEOUT_MS = 12000;
@@ -200,11 +199,6 @@ function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skill
     }
     catch (e) { return { ok: false, reason: String((e && e.message) || e), runtimes: [] }; }
   });
-  ipcMain.handle('pi-session-runtime-models', (event, adapterId) => {
-    try { return nativeModelCatalog.list(adapterId || ''); }
-    catch (e) { return { ok: false, reason: String((e && e.message) || e), models: [] }; }
-  });
-
   /* Conversation history for sidebar navigation. */
   ipcMain.handle('pi-session-history', async (event, options) => {
     try {

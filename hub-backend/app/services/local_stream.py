@@ -16,7 +16,7 @@ from .local_base import (_CTX_WINDOW_DEFAULT, _LOCK, _MEM_LINES, _PROFILES, _RUN
                          ctx_pct)
 from .local_base import _append_events, _append_raw, _record_event, _record_terminal, _save_meta
 from .local_base import _LAUNCH_TREE_UNCONFIRMED, _LAUNCH_TREE_UNCONFIRMED_ERROR
-from . import conversation_plugins, local_turn_outcome, local_context_policy
+from . import codex_acp_outcome, conversation_plugins, local_turn_outcome, local_context_policy
 
 log = logging.getLogger("uvicorn.error")
 
@@ -820,6 +820,9 @@ def _on_line(ref: str, raw: str, term: dict, stream: str = "out",
             err = m.get("error")
             if err:
                 txt = json.dumps(err, ensure_ascii=False) if isinstance(err, dict) else str(err)
+                if codex_acp_outcome.account_model_rejected(run.get("cli"), m):
+                    txt = codex_acp_outcome.ACCOUNT_MODEL_UNAVAILABLE
+                    term.update(codexModelRejected=True, result=txt)
                 term["isError"] = True
                 term.setdefault("result", txt[:600])
                 nm = str((err or {}).get("name") or "") if isinstance(err, dict) else ""
@@ -1070,6 +1073,9 @@ def _finish(ref: str, code: int, term: dict, hard_err: str) -> None:
         timed = run.pop("timedOut", "")
         stopping = run.get("stopping")
         overflow = bool(term.get("overflow"))
+        if term.get("codexModelRejected"):
+            # Neither context recovery nor watchdog replay can change model access.
+            timed, overflow = "", False
         # Check terminal event failures as well as the process exit code.
         # Some CLIs return zero after authentication errors while marking the result as failed.
         # Do not misreport such failures as successful executions without outputs.
@@ -1166,7 +1172,10 @@ def _finish(ref: str, code: int, term: dict, hard_err: str) -> None:
                                 "请查看最后一条实况后重试。")
         else:
             run["state"] = "failed" if bad else "done"
-            if truncated and bad:
+            if term.get("codexModelRejected"):
+                run["failureKind"] = "native_model_unavailable"
+                run["error"] = codex_acp_outcome.ACCOUNT_MODEL_UNAVAILABLE
+            elif truncated and bad:
                 run["failureKind"] = "execution_incomplete"
                 run["error"] = local_turn_outcome.TRUNCATED
             elif dialogue_failure:

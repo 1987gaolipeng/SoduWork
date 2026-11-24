@@ -2,8 +2,8 @@
 const nativeCatalog = require('./native-model-catalog');
 
 // Match the new-conversation picker without inventing support for unknown models.
-function profile(modelName, preferred) {
-  const model = nativeCatalog.list('codex').models?.find(row => row.id === modelName);
+function profile(modelName, preferred, models) {
+  const model = models.find(row => row.id === modelName);
   const levels = [...nativeCatalog.REASONING_EFFORTS].filter(level => model?.reasoningLevels?.includes(level));
   const defaultLevel = levels.includes('medium') ? 'medium'
     : levels.includes(model?.defaultReasoning) ? model.defaultReasoning : levels[0] || '';

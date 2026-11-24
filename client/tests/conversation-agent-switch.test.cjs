@@ -252,13 +252,13 @@ for (const selection of [undefined, { modelName: '' }, { modelName: 'limited' }]
     await send(handle, 'Existing managed conversation');
     assert.equal((await handle.selectAgent('codex', selection)).ok, true);
     const explicit = selection?.modelName === 'limited';
-    assert.equal(handle.snapshot().modelSelection.name, explicit ? 'limited' : 'balanced');
-    assert.equal(handle.snapshot().thinking.supported, true);
-    assert.equal((await handle.setThinkingLevel(explicit ? 'low' : 'high')).ok, true);
+    assert.equal(handle.snapshot().modelSelection.name, explicit ? 'limited' : '');
+    assert.equal(handle.snapshot().thinking.supported, explicit);
+    assert.equal((await handle.setThinkingLevel(explicit ? 'low' : 'high')).ok, explicit);
     await send(handle, 'Apply selected Codex settings');
     const dispatch = f.requests.find(row => row.op === 'job.dispatch').input;
-    assert.equal(dispatch.cfg.codex_model, explicit ? 'limited' : 'balanced');
-    assert.equal(dispatch.cfg.codex_reasoning_effort, explicit ? 'low' : 'high');
+    assert.equal(dispatch.cfg.codex_model, explicit ? 'limited' : '');
+    assert.equal(dispatch.cfg.codex_reasoning_effort, explicit ? 'low' : '');
   });
 }
 
