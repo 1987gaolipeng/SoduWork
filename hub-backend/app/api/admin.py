@@ -63,6 +63,7 @@ from ..services import (
     email_auth,
     poller,
     rbac,
+    repository_catalog,
     storage,
     work_catalog,
 )
@@ -74,6 +75,8 @@ from ..services.task_access import publish_owner
 from ..timestamps import iso_utc
 from .first_chat import REPORT_KEY
 from .input_validation import parse_integer
+from .scope import integration_target_org, require_integration_org
+from .scope import require_existing_org as _require_existing_org
 
 log = logging.getLogger("uvicorn.error")
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -171,16 +174,6 @@ async def _assert_org_in_scope(session: AsyncSession, user: User, org_id: str | 
     scope = await rbac.scope_org_ids(session, user)
     if scope is not None and org_id not in scope:
         raise HTTPException(status_code=403, detail="只能在自己管辖的部门内操作")
-
-
-async def _require_existing_org(session: AsyncSession, org_id: str):
-    if not org_id:
-        return
-    org = await session.get(models.OrgUnit, org_id, populate_existing=True)
-    if org is None:
-        raise HTTPException(status_code=400, detail="部门不存在")
-    if org.is_archived:
-        raise HTTPException(status_code=409, detail="该部门已归档")
 
 
 async def _assert_user_in_scope(session: AsyncSession, user: User, target: User):
@@ -2359,6 +2352,9 @@ async def admin_sync_ai_status_task(
 
 # Integrations, bindings, and unassigned records.
 
+_REPOSITORY_SOURCE_TYPES = {"github", "gitlab"}
+
+
 @router.get("/integrations", dependencies=[Depends(require_perm("integration.manage"))])
 async def list_integrations(session: AsyncSession = Depends(get_session)):
     return await agg.list_integrations(session)
@@ -2369,8 +2365,15 @@ async def create_integration(body: IntegrationCreate,
                              user: User = Depends(require_perm("integration.manage")),
                              session: AsyncSession = Depends(get_session)):
     from ..services import scm_support
+    config = body.config
+    if body.type.strip().lower() in _REPOSITORY_SOURCE_TYPES:
+        await rbac.lock_org_tree(session, shared=True)
+        scope = await rbac.scope_org_ids(session, user)
+        if scope is not None or "orgId" in config:
+            owner = await integration_target_org(session, scope, config.get("orgId", user.org_id))
+            config = {**config, "orgId": owner}
     try:
-        result = await agg.create_integration(session, body.name, body.type, body.config)
+        result = await agg.create_integration(session, body.name, body.type, config)
     except DuplicateName as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except scm_support.RetiredScmError as exc:
@@ -2391,14 +2394,22 @@ async def update_integration(iid: str, body: IntegrationUpdate,
     project.
     """
     from ..services import scm_support
+    integration = await repository_catalog.lock_integration(session, iid)
+    if integration is None:
+        raise HTTPException(status_code=404, detail="集成不存在")
+    config = body.config
+    if integration.type.strip().lower() in _REPOSITORY_SOURCE_TYPES:
+        scope = await rbac.scope_org_ids(session, user)
+        current = require_integration_org(scope, (integration.config or {}).get("orgId"))
+        if config is not None and "orgId" in config:
+            owner = await integration_target_org(session, scope, config["orgId"], current)
+            config = {**config, "orgId": owner}
     try:
-        r = await agg.update_integration(session, iid, enabled=body.enabled, config=body.config)
+        r = await agg.update_integration(session, iid, enabled=body.enabled, config=config)
     except scm_support.RetiredScmError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if r is None:
-        raise HTTPException(status_code=404, detail="集成不存在")
     detail = {"configKeys": sorted(str(key) for key in (body.config or {}).keys())}
     if body.enabled is not None:
         detail["enabled"] = bool(body.enabled)

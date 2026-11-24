@@ -445,6 +445,8 @@ RELEASE_SMOKES = tuple(sorted((
     "test_gitlab_auth.py",
     "test_gitlab_repository_issues.py",
     "test_github_repository_issues.py",
+    "test_repository_integration_read_scope.py",
+    "test_repository_source_ownership.py",
     "test_repository_issue_access.py",
     "test_repository_issue_migration.py",
     "test_repository_issue_sync.py",
