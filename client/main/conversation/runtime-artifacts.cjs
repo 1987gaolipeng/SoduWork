@@ -119,6 +119,7 @@ function continuedPlugins(handle) {
   const packages = require('./device-history-plugins.cjs');
   const names = new Set(base.items.map(row => row.metadata.relative).filter(packages.candidate));
   const paths = [...names].map(name => path.resolve(cwd, name));
+  const folders = [...new Set([...names].map(name => path.posix.dirname(name)))];
   const processed = new Set([base.packageTurnId].filter(Boolean));
   let pending = Promise.resolve();
   const state = { current, paths, receipt: base, view: history.view(cwd, base, guard),
@@ -126,8 +127,13 @@ function continuedPlugins(handle) {
       if (!journal?.turnId || journal.truncated || !Array.isArray(journal.files) || processed.has(journal.turnId)) return pending;
       // A completed, content-matching turn can update the draft or a resource
       // in place. Filesystem timestamps alone cannot authorize a replacement.
-      const files = journal.files.filter(row => typeof row.path === 'string' &&
-        (names.has(row.path) || packages.resource(row.path) || packages.BASELINE.test(row.path)));
+      const files = journal.files.filter(row => {
+        const name = row.path;
+        if (typeof name !== 'string') return false;
+        if (packages.candidate(name)) return names.has(name);
+        return packages.BASELINE.test(name) || packages.resource(name) &&
+          folders.some(folder => folder === '.' || name.startsWith(folder + '/'));
+      });
       if (!files.length) return pending;
       processed.add(journal.turnId);
       const update = pending.then(async () => {
