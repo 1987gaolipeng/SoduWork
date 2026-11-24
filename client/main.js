@@ -679,6 +679,15 @@ if (!gotTheLock) {
   _fileOpen.fromCommand(process.argv, process.cwd());
   app.whenReady().then(() => {
     if (!_linuxStartup.showRecovery({ app, BrowserWindow, safeStorage, onUnlock: startDesktop })) startDesktop();
+    if (!app.isPackaged && process.env.SODUWORK_SOURCE_SESSION === '1' && process.env.SODUWORK_USER_DATA) {
+      require('./main/source-workspace-activation.cjs').listen(app, () => {
+        if (_quitRelaunch.quitting) return false;
+        if (_linuxStartup.focusRecovery(app)) return true;
+        if (!desktopStarted) return false;
+        openDeskWindow({ panel: 'workspace' }, null);
+        return true;
+      });
+    }
   });
 
   function startDesktop(credentials) {

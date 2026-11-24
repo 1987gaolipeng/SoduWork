@@ -91,8 +91,8 @@ Some older records identify an account but lack verifiable information about the
 ## Start again and stop
 
 - Use the same launcher next time and sign in with the same account. Data and model settings are retained.
-- Press **Ctrl+C** in the startup terminal and wait for shutdown. Closing the desktop window may only minimize it to the tray; choose Quit from the tray to exit the application.
-- Do not launch a second copy. If an instance is already running, use its existing terminal and page.
+- Closing the workspace window leaves the desktop app running. Click its tray icon or run the same launcher again with `--desktop` and the same data directory to reopen the workspace. To end the local session, choose **Quit SoduWork** from the tray or press **Ctrl+C** in the original startup terminal.
+- For a web-only session, copy the management URL from the original terminal to reopen it in your browser.
 - Before updating source, stop the service and back up the entire data directory and any separate desktop profile. Then update the source and run the same launcher. Do not edit the managed application copy inside the data directory.
 
 ## Troubleshooting
