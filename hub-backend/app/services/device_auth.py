@@ -7,10 +7,12 @@ import hmac
 import json
 import re
 import time
-from types import SimpleNamespace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from starlette.websockets import WebSocket
@@ -18,7 +20,6 @@ from starlette.websockets import WebSocket
 from ..auth import sign_claims, verify_claims
 from ..models import AppSetting, Client, User
 from . import plugin_mcp_limits
-
 
 SESSION_TTL_SECONDS = 30 * 60
 AGENT_TTL_SECONDS = 12 * 60 * 60
@@ -99,6 +100,22 @@ def hash_secret(secret: str) -> str:
 def secret_matches(client: Client | None, secret: str) -> bool:
     have = str(getattr(client, "secret_hash", "") or "")
     return bool(have and secret and hmac.compare_digest(have, hash_secret(secret)))
+
+
+async def insert_new_device(session: AsyncSession, device: str, digest: str, *,
+                            platform: str | None = None) -> Client | None:
+    """Called only after account authentication or administrative pairing."""
+    insert = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+    return await session.scalar(insert(Client).values(
+        id=device, secret_hash=digest, auth_state="pending", platform=platform,
+    ).on_conflict_do_nothing(index_elements=[Client.id]).returning(Client))
+
+
+def issue_pairing_token(device: str, digest: str, auth_version: int | None, *,
+                        platform: str | None = None) -> str:
+    """The desktop hands this short-lived key commitment to an authorized administrator."""
+    return sign_claims({"cid": device, "digest": digest, "ver": auth_version, "platform": (platform or "")[:32]},
+                       token_type="device-pairing", ttl_seconds=600)
 
 
 def issue_session(client: Client) -> tuple[str, int]:

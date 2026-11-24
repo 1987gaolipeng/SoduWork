@@ -1,5 +1,15 @@
 // UI text added by the local admin refinements, merged with remote localization.
 export default {
+  '配对设备': 'Pair a device',
+  '配对并激活': 'Pair and activate',
+  '设备配对码': 'Device pairing code',
+  '请向设备使用者索取这台设备的新配对凭据': 'Ask the employee to copy a fresh pairing code from this device.',
+  '设备登记已变化，请重新配对': 'Enrollment has changed. Copy a fresh code and pair the device again.',
+  '请先重新登记已停用的设备': 'Reset enrollment for this disabled device before pairing it.',
+  '请选择归属成员': 'Select the device owner',
+  '请核对员工的身份，让员工在自己的桌面端点击“复制设备配对码”，然后将配对码粘贴到这里。': 'Verify the employee’s identity and ask them to select “Copy device pairing code” on their desktop. Paste that code here.',
+  '设备访问已停用。如需恢复，请先重新登记，再用员工桌面端的新配对码激活。': 'Device access is disabled. Reset enrollment, then activate the device with a fresh pairing code from the employee’s desktop.',
+  '员工在桌面端成功登录或管理员完成配对后，设备会显示在这里。': 'Devices appear here after the employee signs in on the desktop or an administrator pairs the device.',
   "使用 8–128 个字符，不能全为空白。": "Use 8–128 characters, including at least one non-whitespace character.",
   '搜索部门名称或路径': 'Search department name or path',
   '未命名集成源': 'Unnamed integration source',

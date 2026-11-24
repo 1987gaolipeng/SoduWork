@@ -67,6 +67,23 @@
     return global.SoduWorkAPI || null;
   }
 
+  function bindDevicePairing(button, status) {
+    if (!button) return;
+    button.hidden = !global.soduWorkAPI?.copyDevicePairingToken;
+    button.onclick = async function () {
+      const snapshot = api().clientAuthSnapshot();
+      const scope = { hub: api().hubBase(), clientId: snapshot.clientId, userId: snapshot.user?.id || '' };
+      button.disabled = true;
+      try {
+        const result = await global.soduWorkAPI.copyDevicePairingToken(scope);
+        if (!result?.ok) throw Error(result?.error || '无法复制设备配对码');
+        status(translate('设备配对码已复制。请在 10 分钟内通过可信渠道发给管理员。'));
+      } catch (error) {
+        status(translate(error.message || '无法复制设备配对码'));
+      } finally { button.disabled = false; }
+    };
+  }
+
   function trackLoginAccount() {
     accountInput?.addEventListener('input', function () { loginAccountEdited = true; });
   }
@@ -294,7 +311,10 @@
 
   function createGate() {
     if (gate) return gate;
-    try { mountGate(); }
+    try {
+      mountGate();
+      bindDevicePairing(gate.querySelector('[data-copy-device-pairing]'), setStatus);
+    }
     catch (error) {
       // Authentication hides the workspace before mounting. A partially built
       // gate must be replaced with visible recovery, never leave a blank page
@@ -403,7 +423,7 @@
           '</div>' +
           '<button class="soduwork-auth-submit" type="submit"><span>\u767b\u5f55\u5e76\u7ee7\u7eed</span><i aria-hidden="true"></i></button>' +
         '</form>' +
-        '<footer><span class="soduwork-auth-secure"><i></i>\u5bc6\u7801\u4e0d\u4f1a\u4fdd\u5b58\u5728\u8fd9\u53f0\u7535\u8111</span>' +
+        '<footer><button type="button" class="ac-link" data-copy-device-pairing>复制设备配对码</button><span class="soduwork-auth-secure"><i></i>\u5bc6\u7801\u4e0d\u4f1a\u4fdd\u5b58\u5728\u8fd9\u53f0\u7535\u8111</span>' +
           '<span class="soduwork-auth-form-badge" hidden></span>' +
           '<span class="soduwork-auth-hub">\u8fde\u63a5 <b></b></span></footer>' +
       '</main>';
@@ -1038,6 +1058,7 @@
 
   document.documentElement.classList.add('soduwork-auth-pending');
   global.ClientAuth = {
+    bindDevicePairing: bindDevicePairing,
     logout: logout,
     confirmLogout: confirmLogout,
     connectionMessage: connectionMessage,

@@ -308,7 +308,9 @@ export const api = {
     return authenticatedData('/admin/client-releases/upload', { method: 'POST', body: form, signal }, 900000, responseData,
       onProgress ? uploadTransport(onProgress) : fetchSafe)
   },
-  assignClient: (id, userId) => call('POST', '/admin/clients/' + id + '/assign', { userId }),
+  clientOwnerOptions: () => call('GET', '/admin/client-owner-options'),
+  pairClient: (userId, pairingToken) => call('POST', '/admin/clients/pair', { userId, pairingToken }),
+  assignClient: (id, userId, pairingToken) => call('POST', '/admin/clients/' + encodeURIComponent(id) + '/assign', { userId, pairingToken }),
   revokeClient: (id) => call('POST', '/admin/clients/' + id + '/revoke', {}),
   resetClientEnrollment: (id) => call('POST', '/admin/clients/' + id + '/reset-enrollment', {}),
   // Enterprise AI ledger views by member, scenario, agent, and model.

@@ -291,7 +291,7 @@ AI 代理的图片和视频生成接口按媒体类型接收创作参数，例�
 
 省略 `sourceType` 时使用 `chat`。允许的类型为 `chat`、`task`、`workflow`、`automation` 和 `system`，使用所列的小写拼写。任务和工作流上报须关联本设备拥有或当前账号获派的任务。无效类型返回 HTTP 422。每条回执均包含已入账的累计计数，以及 `created`（新建）、`updated`（计数增长）或 `duplicate`（计数没有增长）状态。
 
-- 客户端契约（设备登记 → 管理员激活 → 短期 `Device` 会话；长期设备密钥在 Hub 只存摘要）
+- 客户端契约（员工登录或管理员配对 → 短期 `Device` 会话，Hub 只保存设备密钥摘要）
   - `GET/POST /api/v1/tasks`、`GET/PATCH/DELETE /api/v1/tasks/{id}`
   - `POST /api/v1/tasks/batch-update`、`POST /api/v1/tasks/clear-done`（只清 done）
   - `POST /api/v1/tasks/{id}/agent/{run|retry|takeover}`
@@ -315,7 +315,10 @@ AI 代理的图片和视频生成接口按媒体类型接收创作参数，例�
 
 ## 客户端接入
 
-设备长期密钥只由 Electron 主进程持有。客户端通过 `POST /api/v1/clients/enroll` 登记并轮换短期会话，
+新安装可先连接 Hub。员工成功登录或管理员配对后，Hub 才保存设备 ID 和密钥摘要。旧版客户端在兼容模式下可继续使用已登记的密钥，新安装的旧版客户端需升级到当前桌面版。
+员工可在登录页或账号安全页复制设备配对码，直接交给管理员。管理员在设备列表选择“配对设备”，选定员工，并在十分钟内粘贴配对码。配对完成后，员工可在桌面端点击“重试连接”。激活待登记设备或变更归属时也需要新的配对码。已停用设备须先重新登记，再获取配对码。
+
+设备长期密钥只由 Electron 主进程持有。已绑定设备通过 `POST /api/v1/clients/enroll` 轮换短期会话，
 业务请求使用 `Authorization: Device <session>`，WebSocket 使用同一短期会话；长期密钥不得进入渲染进程、日志或 URL。
 任务与流程状态以 Hub 为唯一事实源，本地缓存只用于断网展示和待同步命令，不能反向覆盖服务端新状态。
 

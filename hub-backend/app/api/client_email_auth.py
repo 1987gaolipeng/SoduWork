@@ -1,20 +1,19 @@
 """Explicit email registration and dual login; device credentials remain mandatory."""
+import hashlib
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, update
+from sqlalchemy import inspect, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import hash_password, verify_password
 from ..db import get_session
 from ..models import Client, User
-from ..services import client_access, device_connections, email_auth
-from ..services import legal_publications
+from ..services import client_access, device_connections, email_auth, legal_publications
 from .client_auth import _access_error, _device_with_key, complete_login
-
 
 router = APIRouter(prefix="/api/v1/client-auth", tags=["client-auth"])
 
@@ -57,16 +56,25 @@ def _invalid_credentials():
     return client_access.ClientAccessError("邮箱或登录凭据不正确", code="ACCOUNT_OR_PASSWORD_INVALID", status=401)
 
 
-async def _consume(session, body, purpose):
+def _challenge_device(client: Client) -> str:
+    if not inspect(client).transient:
+        return client.id
+    # No stored key yet. Scope the email challenge to this ID *and* key;
+    # '$' is outside the device-ID alphabet, keeping existing challenges distinct.
+    value = f"{client.id}\0{client.secret_hash}".encode()
+    return "$" + hashlib.sha256(value).hexdigest()[:63]
+
+
+async def _consume(session, body, purpose, client):
     return await email_auth.consume_challenge(session, challenge_id=body.challengeId,
-        email=body.email, purpose=purpose, device_id=body.device, code=body.code)
+        email=body.email, purpose=purpose, device_id=_challenge_device(client), code=body.code)
 
 
 @router.post("/email-challenges")
 async def challenge(body: ChallengeRequest, request: Request,
                     x_device_key: str | None = Header(default=None, alias="X-Device-Key"),
                     session: AsyncSession = Depends(get_session)):
-    await _device_with_key(session, body.device, x_device_key or "")
+    client = await _device_with_key(session, body.device, x_device_key or "", allow_new=True)
     try:
         if body.purpose not in email_auth.PUBLIC_PURPOSES:
             raise client_access.ClientAccessError("此验证码用途需要登录验证", code="CHALLENGE_PURPOSE_INVALID", status=422)
@@ -75,7 +83,8 @@ async def challenge(body: ChallengeRequest, request: Request,
         # Login challenges check registration before issuing mail; other public
         # purposes retain their existing proof and account-ownership rules.
         return await email_auth.request_challenge(session, email=body.email, purpose=body.purpose,
-            device_id=body.device, remote_ip=request.client.host if request.client else "")
+            device_id=_challenge_device(client), rate_device_id=client.id,
+            remote_ip=request.client.host if request.client else "")
     except client_access.ClientAccessError as exc:
         await session.rollback()
         raise _access_error(exc) from exc
@@ -86,10 +95,10 @@ async def challenge_status(challenge_id: str, response: Response,
                            device: str = Query(min_length=3, max_length=64),
                            x_device_key: str | None = Header(default=None, alias="X-Device-Key"),
                            session: AsyncSession = Depends(get_session)):
-    await _device_with_key(session, device, x_device_key or "")
+    client = await _device_with_key(session, device, x_device_key or "", allow_new=True)
     response.headers["Cache-Control"] = "no-store"
     try:
-        return await email_auth.challenge_delivery(session, challenge_id=challenge_id, device_id=device)
+        return await email_auth.challenge_delivery(session, challenge_id=challenge_id, device_id=_challenge_device(client))
     except client_access.ClientAccessError as exc:
         raise _access_error(exc) from exc
 
@@ -98,14 +107,14 @@ async def challenge_status(challenge_id: str, response: Response,
 async def register(body: Registration,
                    x_device_key: str | None = Header(default=None, alias="X-Device-Key"),
                    session: AsyncSession = Depends(get_session)):
-    client = await _device_with_key(session, body.device, x_device_key or "")
+    client = await _device_with_key(session, body.device, x_device_key or "", allow_new=True)
     try:
         policy = await client_access.policy(session)
         if not policy["allowSelfRegistration"]:
             raise client_access.ClientAccessError("自助注册已关闭", code="SELF_REGISTRATION_DISABLED", status=403)
         await legal_publications.validate_registration(session, body.consents)
         password = client_access.validate_password(body.password, new_account=True)
-        email = await _consume(session, body, "register")
+        email = await _consume(session, body, "register", client)
         if await session.scalar(select(User.id).where(User.email_normalized == email)):
             raise client_access.ClientAccessError("此邮箱已注册，请直接登录", code="EMAIL_ALREADY_REGISTERED", status=409)
         # An email-shaped legacy username is not proof of ownership of that old account.
@@ -136,7 +145,7 @@ async def register(body: Registration,
 async def password_login(body: PasswordLogin,
                          x_device_key: str | None = Header(default=None, alias="X-Device-Key"),
                          session: AsyncSession = Depends(get_session)):
-    client = await _device_with_key(session, body.device, x_device_key or "")
+    client = await _device_with_key(session, body.device, x_device_key or "", allow_new=True)
     try:
         email = email_auth.normalize_email(body.email)
         await email_auth.password_budget(session, email, client.id)
@@ -155,9 +164,9 @@ async def password_login(body: PasswordLogin,
 async def email_code_login(body: EmailProof,
                           x_device_key: str | None = Header(default=None, alias="X-Device-Key"),
                           session: AsyncSession = Depends(get_session)):
-    client = await _device_with_key(session, body.device, x_device_key or "")
+    client = await _device_with_key(session, body.device, x_device_key or "", allow_new=True)
     try:
-        email = await _consume(session, body, "login")
+        email = await _consume(session, body, "login", client)
         # The proof is one-time: commit the consumption before the login itself so a
         # later ClientAccessError rollback cannot hand the code back for reuse.
         await session.commit()
@@ -176,10 +185,10 @@ async def email_code_login(body: EmailProof,
 async def password_reset(body: PasswordReset,
                          x_device_key: str | None = Header(default=None, alias="X-Device-Key"),
                          session: AsyncSession = Depends(get_session)):
-    await _device_with_key(session, body.device, x_device_key or "")
+    client = await _device_with_key(session, body.device, x_device_key or "", allow_new=True)
     try:
         password = client_access.validate_password(body.newPassword, new_account=True)
-        email = await _consume(session, body, "reset_password")
+        email = await _consume(session, body, "reset_password", client)
         user = await email_auth.verified_user(session, email)
         if user is not None:
             await session.refresh(user, with_for_update=True)

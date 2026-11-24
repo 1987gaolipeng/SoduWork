@@ -487,7 +487,7 @@ function _failure(data, status) {
   };
 }
 
-async function _requestEnrollment(id, raw, app = null, generation = _generation(id), cache = true) {
+async function _requestEnrollment(id, raw, app = null, generation = _generation(id), cache = true, copyPairingToken) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 8000);
   try {
@@ -496,8 +496,8 @@ async function _requestEnrollment(id, raw, app = null, generation = _generation(
       const value = String(raw && raw[field] || '').trim();
       if (value) body[field] = value.slice(0, field === 'workRoot' ? 400 : 64);
     }
-    const res = await fetch(id.hub + '/api/v1/clients/enroll', {
-      method: 'POST', signal: ctl.signal,
+    const res = await fetch(id.hub + '/api/v1/clients/enroll' + (copyPairingToken ? '?pairing=true' : ''), {
+      method: 'POST', signal: ctl.signal, redirect: 'error',
       headers: { 'Content-Type': 'application/json', 'X-Device-Key': id.secret },
       body: JSON.stringify(body),
     });
@@ -515,6 +515,11 @@ async function _requestEnrollment(id, raw, app = null, generation = _generation(
         _anonymous.set(_sessionSlot(id.hub, id.clientId), failure);
       }
       return failure;
+    }
+    if (copyPairingToken) {
+      if (typeof data.pairingToken !== 'string' || !data.pairingToken) return { ok: false, error: '当前服务未提供设备配对码' };
+      copyPairingToken(data.pairingToken, data.user?.id);
+      return { ok: true };
     }
     const safe = {
       ok: true, stored: true, hub: id.hub, clientId: id.clientId,
@@ -830,7 +835,7 @@ function requestAdmission(app, previous) {
   return { identity: { ...id, session: row.token }, signal: _requestLifetimes.get(slot).signal };
 }
 
-function install({ app, ipcMain, safeStorage, credentials, onAuthUnavailable }) {
+function install({ app, ipcMain, safeStorage, credentials, onAuthUnavailable, copyText = value => require('electron').clipboard.writeText(value) }) {
   _onAuthUnavailable = onAuthUnavailable || (() => {});
   _credentials = credentials || require('./device-credential-store.cjs').create({ safeStorage, app });
   require('./device-auth-request').setRequestAdmission(previous => requestAdmission(app, previous));
@@ -845,6 +850,19 @@ function install({ app, ipcMain, safeStorage, credentials, onAuthUnavailable }) 
   });
   ipcMain.handle('device-auth-select-hub', (_event, hub) => selectHub(app, hub));
   ipcMain.handle('device-auth-bootstrap', (_event, raw) => enroll(app, raw || {}));
+  ipcMain.handle('device-auth-copy-pairing', (event, scope) => {
+    const trusted = () => require('./access-control/preferences').isTrusted(event);
+    if (!trusted()) return { ok: false };
+    const id = identity(app);
+    if (!id || id.hub !== scope?.hub || id.clientId !== scope?.clientId) return { ok: false, error: TEXT.authChanged };
+    const generation = _generation(id);
+    const matchesOwner = () => (_sessions.get(generation.slot)?.user?.id || '') === scope.userId;
+    if (!matchesOwner() || _authChanges.has(generation.slot) || _logouts.has(generation.slot)) return _changed(id);
+    return _requestEnrollment(id, { platform: process.platform + '/' + process.arch }, app, generation, false, (token, owner) => {
+      if (!trusted() || !matchesOwner() || (owner || '') !== scope.userId) throw new Error(TEXT.authChanged);
+      copyText(token);
+    });
+  });
   ipcMain.handle('device-auth-migrate-legacy', (event, raw) => require('./access-control/preferences').isTrusted(event)
     ? migrateLegacy(app, raw) : {stored:false});
   ipcMain.handle('device-auth-login', async (event, raw) => { const result = await login(app, raw || {}); notifySessionChanged(app, event?.sender, result); return result; });

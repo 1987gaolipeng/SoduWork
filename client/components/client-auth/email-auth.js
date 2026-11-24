@@ -61,7 +61,7 @@
       '<button type="button" class="ac-link" data-recheck-policy>重新检查</button></div>' +
       '<div class="soduwork-auth-recovery" hidden><button type="button" class="soduwork-auth-retry" hidden>重试连接</button></div>' +
       '<button class="soduwork-auth-submit ac-primary" type="submit"><span>登录</span></button></form>' +
-      '<nav class="ac-auth-links"><button type="button" class="ac-link" data-auth-mode="register">创建账号</button><button type="button" class="ac-link" data-auth-mode="resetPassword">忘记密码</button></nav>' +
+      '<nav class="ac-auth-links"><button type="button" class="ac-link" data-auth-mode="register">创建账号</button><button type="button" class="ac-link" data-auth-mode="resetPassword">忘记密码</button><button type="button" class="ac-link" data-copy-device-pairing>复制设备配对码</button></nav>' +
       '<button type="button" class="ac-link ac-auth-back" data-auth-mode="password" hidden>返回登录</button>' +
       '<footer class="ac-auth-footer"><div class="ac-auth-connection-note"><span class="soduwork-auth-secure"><i></i>密码和验证码不会保存在本机</span><span class="soduwork-auth-hub">连接 <b></b></span></div><div class="ac-auth-legal-links"><button type="button" class="ac-link" data-legal="terms">用户协议</button><i aria-hidden="true">·</i><button type="button" class="ac-link" data-legal="privacy">隐私政策</button></div>' +
       '<label class="ac-auth-language" hidden><span>界面语言</span><select data-auth-language translate="no"></select></label></footer></main>';
@@ -161,6 +161,7 @@
       text('.soduwork-auth-retry', '重试连接');
       text('[data-auth-mode="register"]', '创建账号');
       text('[data-auth-mode="resetPassword"]', '忘记密码');
+      text('[data-copy-device-pairing]', '复制设备配对码');
       text('.ac-auth-back', '返回登录');
       text('.ac-auth-language > span', '界面语言');
       language.setAttribute('aria-label', tx('界面语言'));
