@@ -12,14 +12,13 @@
 (function(){
   var q=new URLSearchParams(location.search);
   var p=q.get('panel')||'workspace';
-  var T={workspace:'工作区',preferences:'设置',aidesk:'AI 团队',account:'个人信息',settings:'设置',shortcuts:'快捷键',skin:'外观',notices:'通知',
+  var T={workspace:'工作区',aidesk:'AI 团队',account:'个人信息',settings:'设置',shortcuts:'快捷键',skin:'外观',notices:'通知',
          history:'需求池',team:'团队',inbox:'收件箱',daily:'简报',add:'添加需求',
          detail:'需求详情',multi:'多路控制台',console:'控制台',schedules:'自动化',
          skills:'插件',apps:'应用',chatbar:'对话',library:'资料库',models:'我的模型','model-editor':'模型配置',agents:'Agent 管理',cloud:'云端环境',codeacct:'代码账号',usage:'我的用量',archive:'归档会话',approvals:'待我确认',briefs:'简报',create:'新建'};
   if(!T[p])p='workspace';
-  document.documentElement.setAttribute('data-desk-panel',p==='preferences'?'workspace':p);
-  if(p==='preferences')document.documentElement.setAttribute('data-preferences-window','');
-  else document.documentElement.setAttribute('data-window-menu','');
+  document.documentElement.setAttribute('data-desk-panel',p);
+  document.documentElement.setAttribute('data-window-menu','');
   window.__deskPanel=p;
   /* Restore navigation only within this process; do not read stale localStorage views. */
   var requestedView=q.get('view')||'';
@@ -134,7 +133,6 @@
 <link rel="stylesheet" href="components/archive/archive-history-panel.css">
 <link rel="stylesheet" href="theme/workspace-page-heads.css">
 <link rel="stylesheet" href="components/client-auth/personal-account.css">
-<link rel="stylesheet" href="components/workspace/workspace-settings-dialog.css">
 <style>
   /* Fill this standard window with an opaque background. */
   html,body{margin:0;padding:0;height:100%;background:var(--bg-1);overflow:hidden}
@@ -223,11 +221,6 @@
 })();
 </script>
 <div id="deskRoot"></div>
-<section id="wsSettingsDialog" aria-label="设置" hidden>
-  <header class="ws-settings-bar"><button type="button" id="wsSettingsClose" aria-label="关闭"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-  <nav class="ws-settings-sidebar" aria-label="设置"><div class="ws-nav"></div></nav>
-  <div id="wsSettingsContent"></div>
-</section>
 <!-- The workspace sidebar uses this task-detail container. Without it, openDetail silently returns. Secondary views open centered, as requested. -->
 
 
@@ -261,7 +254,7 @@
     <div class="hub-row"><span class="set-cur" id="skinCurName">—</span><button id="skinOpenBtn" class="hub-save">更换皮肤</button></div>
     <div class="set-note">调整 SoduWork 形象与整体配色。</div></div>
   <div class="set-group set-third"><div class="k">提醒强度</div><div class="seg" id="remindSeg"><button data-remind="off">关闭</button><button class="active" data-remind="light">轻柔</button><button data-remind="strong">明显</button></div><div class="set-note">未完成需求以呼吸光晕提醒。</div></div>
-  <div class="set-group set-third"><div class="k">需求视图大小</div><div class="seg" id="scaleSeg"><button data-scale="small">小</button><button class="active" data-scale="medium">中</button><button data-scale="large">大</button></div><div class="set-note">调整需求视图大小，以及甘特图的日期列宽和行高。</div></div>
+  <div class="set-group set-third"><div class="k">需求视图大小</div><div class="seg" id="scaleSeg"><button data-scale="small">小</button><button class="active" data-scale="medium">中</button><button data-scale="large">大</button></div><div class="set-note">决定需求视图窗口在桌面上占多大空间。</div></div>
   <div class="set-group set-third"><div class="k">字体大小</div><div class="seg" id="fontSeg"><button data-font="small">小</button><button class="active" data-font="medium">中</button><button data-font="large">大</button></div><div class="set-note">只调字，不动窗口大小（用户定：两者分开设）。近视眼或高分屏可把字调大。</div></div>
   <div class="set-group set-language"><div class="k" id="settingsLanguageLabel" data-i18n="language">语言</div><div class="settings-select-wrap"><select id="localeSelect" class="settings-select" aria-labelledby="settingsLanguageLabel"><option value="zh-CN" data-i18n="languageZh">简体中文</option><option value="en-US" data-i18n="languageEn">English</option><option value="ja-JP" data-i18n="languageJa">日本語</option><option value="ko-KR" data-i18n="languageKo">한국어</option></select><svg class="settings-select-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5"></path></svg></div><div class="set-note" data-i18n="languageNote">选择后立即应用，后续可扩展更多语言。</div></div>
   <div class="set-group"><div class="k">工作目录</div>

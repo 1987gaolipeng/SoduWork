@@ -48,7 +48,7 @@
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .art-file-main i{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));line-height:1.4;font-style:normal;color:var(--ink-4)}
-.art-file-go{flex-shrink:0;color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px))}
+.art-file-go{flex-shrink:0;color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 13px)}
 .art-file:hover .art-file-go{color:var(--accent)}
 
 /*
@@ -235,7 +235,7 @@
 }
 .fwd-head{display:flex;align-items:center;margin-bottom:9px;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));color:var(--ink)}
 .fwd-head b{font-weight:700}
-.fwd-x{margin-left:auto;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));line-height:1;padding:2px 4px}
+.fwd-x{margin-left:auto;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1;padding:2px 4px}
 .fwd-x:hover{color:var(--ink-2)}
 /* Forward to an agent or a colleague. */
 .fwd-tabs{display:flex;gap:4px;padding:3px;margin-bottom:9px;border-radius:var(--r-md);background:var(--bg-2)}
@@ -422,7 +422,7 @@
   border-radius:var(--r-sm);
   background:transparent;
   color:var(--ink-4);
-  font:600 var(--ui-font-14-5, 14.5px)/1.3 inherit;
+  font:600 14.5px/1.3 inherit;
 }
 .fwd-mate-filter.on{
   border-color:var(--accent);

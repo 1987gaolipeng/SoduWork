@@ -6,7 +6,7 @@
 #schPanel .sch-create-trigger{
   display:inline-flex;align-items:center;justify-content:center;gap:0;height:36px;min-height:36px;
   padding:0;border:1px solid var(--accent);border-radius:11px;background:var(--accent);color:#fff;
-  font:600 var(--ui-font-14-5, 14.5px)/1 var(--font-ui);cursor:pointer;box-shadow:0 2px 5px color-mix(in srgb,var(--accent) 12%,transparent);
+  font:600 14.5px/1 var(--font-ui);cursor:pointer;box-shadow:0 2px 5px color-mix(in srgb,var(--accent) 12%,transparent);
   transition:background .15s ease,box-shadow .15s ease;
 }
 #schPanel .sch-create-trigger>span:first-child{padding:0 12px 0 14px}
@@ -24,7 +24,7 @@
 #schPanel .sch-create-menu button{
   display:flex;align-items:center;gap:11px;width:100%;min-height:42px;padding:10px 12px;
   border:0;border-radius:9px;background:transparent;color:var(--ink);text-align:left;
-  font:500 var(--ui-font-14-5, 14.5px)/1.4 var(--font-ui);cursor:pointer;transition:background .12s ease;
+  font:500 14.5px/1.4 var(--font-ui);cursor:pointer;transition:background .12s ease;
 }
 #schPanel .sch-create-menu button+button{margin-top:2px}
 #schPanel .sch-create-menu button svg{width:19px;height:19px;flex:none;fill:none;stroke:var(--ink-2);stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
@@ -55,12 +55,12 @@
   background:var(--accent);color:#fff}
 .sch-h-ico svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
 .sch-h-txt{display:flex;flex-direction:column;gap:2px;min-width:0}
-.sch-h-title{font-size:var(--ui-font-14-5, 14.5px);font-weight:700;color:var(--ink);line-height:1.2}
+.sch-h-title{font-size:14.5px;font-weight:700;color:var(--ink);line-height:1.2}
 .sch-h-sub{font-size:max(var(--font-min-readable, 14.5px), 11.5px);font-weight:400;color:var(--ink-3);font-style:normal}
 .sch-h-acts{margin-left:auto;display:flex;align-items:center;gap:8px}
 .sk-count{font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-3);white-space:nowrap}
 .sch-body{flex:1;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
-.sch-msg{color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));line-height:1.9;text-align:center;padding:24px 0}
+.sch-msg{color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.9;text-align:center;padding:24px 0}
 
 /* Keep loading geometry stable and animate opacity only. */
 .sch-loading{width:min(900px,100%);box-sizing:border-box;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 auto;padding:8px 0;color:var(--ink-4)}
@@ -70,15 +70,15 @@
 .sch-load-row b{width:46%}.sch-load-row em{width:78%;animation-delay:.14s}.sch-loading>small{grid-column:1/-1;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 11.5px);text-align:center}
 @keyframes schLoad{0%,100%{opacity:.42}50%{opacity:.9}}
 .sch-load-fail{min-height:240px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:28px;text-align:center}
-.sch-load-fail>b{color:var(--ink);font-size:var(--ui-font-15, 15px)}.sch-load-fail>span:not(.sk-empty-ico){max-width:480px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));line-height:1.65}.sch-load-fail .btn-mini{margin-top:4px}
+.sch-load-fail>b{color:var(--ink);font-size:15px}.sch-load-fail>span:not(.sk-empty-ico){max-width:480px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12.5px);line-height:1.65}.sch-load-fail .btn-mini{margin-top:4px}
 
 /* Empty state with explanation and a next action. */
 .sk-empty{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;
-  padding:46px 20px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));line-height:1.8}
+  padding:46px 20px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12.5px);line-height:1.8}
 .sk-empty-ico{width:52px;height:52px;border-radius:16px;display:flex;align-items:center;justify-content:center;
   background:var(--accent-soft);color:var(--accent)}
 .sk-empty-ico svg{width:26px;height:26px;stroke:currentColor;stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round}
-.sk-empty b{font-size:var(--ui-font-15, 15px);color:var(--ink)}
+.sk-empty b{font-size:15px;color:var(--ink)}
 .sk-empty-eg{display:flex;flex-direction:column;gap:6px;margin-top:4px;font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-4)}
 .sk-empty-eg em{font-style:normal;background:var(--bg-2,var(--surface-2,#eef1f6));border-radius:20px;padding:3px 12px;color:var(--ink-2)}
 
@@ -109,7 +109,7 @@
 .sch-i-when::after{content:'';position:absolute;left:-2px;top:50%;width:7px;height:7px;
   transform:translateY(-50%);border:2px solid var(--bg-0,#fff);border-radius:50%;background:var(--accent)}
 .sch-i-when b{font-size:max(var(--font-min-readable, 14.5px), 11px);font-weight:580;letter-spacing:.18em;color:var(--ink-3)}
-.sch-i-when i{font-size:var(--ui-font-20, 20px);font-weight:670;font-style:normal;letter-spacing:-.015em;
+.sch-i-when i{font-size:20px;font-weight:670;font-style:normal;letter-spacing:-.015em;
   color:var(--accent);font-variant-numeric:tabular-nums}
 .sch-item.off .sch-i-when{color:var(--ink-4)}
 .sch-item.off .sch-i-when::before,.sch-item.off .sch-i-when::after{background:var(--ink-4)}
@@ -123,7 +123,7 @@
 .sch-i-state:hover:not(:disabled){border-color:var(--accent);color:var(--accent);background:var(--accent-soft-2,var(--accent-soft))}
 .sch-i-state:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .sch-i-state:disabled{cursor:wait;opacity:.65}
-.sch-i-title{font-size:var(--ui-font-14-5, 14.5px);font-weight:400;color:var(--ink);letter-spacing:-.012em;line-height:1.38}
+.sch-i-title{font-size:14.5px;font-weight:400;color:var(--ink);letter-spacing:-.012em;line-height:1.38}
 .sch-i-off{font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-4);background:var(--bg-2,#f2f2f4);border-radius:20px;padding:2px 9px}
 .sch-i-meta{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3);line-height:1.5}
 .sch-i-meta b{font-weight:590;color:var(--ink-2)}
@@ -167,7 +167,7 @@
 @container (max-width:560px){
   .sch-i-body{gap:13px;padding:15px 14px 13px}
   .sch-i-when{flex-basis:66px;padding-left:14px;padding-right:10px}
-  .sch-i-when i{font-size:var(--ui-font-18, 18px)}
+  .sch-i-when i{font-size:18px}
   .sch-i-foot{align-items:flex-start;padding-inline:14px}
   .sch-i-ops{margin-left:auto}
 }
@@ -189,7 +189,7 @@
   border-bottom:1px solid var(--line-2);background:var(--bg-0,#fff)}
 .sch-run-drawer-title{min-width:0;display:flex;flex-direction:column;gap:4px}
 .sch-run-drawer-title>span{font-size:max(var(--font-min-readable, 14.5px), 10.5px);font-weight:620;letter-spacing:.16em;color:var(--accent)}
-.sch-run-drawer-title h2{margin:0;color:var(--ink);font-size:var(--ui-font-18, 18px);font-weight:650;line-height:1.35;
+.sch-run-drawer-title h2{margin:0;color:var(--ink);font-size:18px;font-weight:650;line-height:1.35;
   letter-spacing:-.018em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sch-run-drawer-title p{margin:0;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 11.5px);line-height:1.45}
 .sch-run-drawer-actions{margin-left:auto;display:flex;align-items:center;gap:6px;flex:0 0 auto}
@@ -205,7 +205,7 @@
   border-left:1px solid var(--line-2)}
 .sch-run-overview>span:first-child{border-left:0}
 .sch-run-overview small{font-size:max(var(--font-min-readable, 14.5px), 10px);color:var(--ink-4);white-space:nowrap}
-.sch-run-overview b{display:flex;align-items:center;gap:6px;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));
+.sch-run-overview b{display:flex;align-items:center;gap:6px;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 13px);
   font-weight:620;font-variant-numeric:tabular-nums;white-space:nowrap}
 .sch-run-latest b i{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:var(--ink-4)}
 .sch-run-latest.running b i,.sch-run-latest.starting b i{background:var(--accent)}
@@ -235,7 +235,7 @@
 .sch-run.failed .sch-run-rail i{background:var(--danger,#e0454b)}
 .sch-run-main{min-width:0;display:flex;flex-direction:column;gap:4px}
 .sch-run-title{min-width:0;display:flex;align-items:center;gap:8px}
-.sch-run-title>b{min-width:0;flex:1;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));font-weight:600;
+.sch-run-title>b{min-width:0;flex:1;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:600;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sch-run-state{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;padding:2px 7px;border-radius:999px;
   background:var(--bg-2);color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 10px);font-weight:520;font-style:normal}
@@ -254,7 +254,7 @@
 .sch-runs-load>i{width:10px;height:10px;flex:0 0 10px;border-radius:50%;background:var(--accent);
   box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 11%,transparent);animation:sch-ready-pulse 1s ease-in-out infinite}
 .sch-runs-load>span,.sch-runs-empty>span:not(.sch-runs-empty-icon){display:flex;flex-direction:column;gap:3px}
-.sch-runs-load b,.sch-runs-empty b{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));font-weight:600;color:var(--ink-2)}
+.sch-runs-load b,.sch-runs-empty b{font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:600;color:var(--ink-2)}
 .sch-runs-load small,.sch-runs-empty small{font-size:max(var(--font-min-readable, 14.5px), 11px);line-height:1.5;color:var(--ink-4)}
 .sch-runs-empty-icon{width:38px;height:38px;display:grid;place-items:center;flex:0 0 38px;border-radius:12px;
   background:var(--bg-2);color:var(--ink-4)}
@@ -301,7 +301,7 @@
 .sch-editor-mark svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;
   stroke-linecap:round;stroke-linejoin:round}
 .sch-editor-title{min-width:0;display:flex;flex-direction:column;gap:3px}
-.sch-editor-title h2{margin:0;color:var(--ink);font-size:var(--ui-font-19, 19px);font-weight:650;line-height:1.35;letter-spacing:-.02em}
+.sch-editor-title h2{margin:0;color:var(--ink);font-size:19px;font-weight:650;line-height:1.35;letter-spacing:-.02em}
 .sch-editor-close{width:34px;height:34px;display:grid;place-items:center;flex:0 0 34px;margin-left:auto;
   padding:0;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--ink-3)}
 .sch-editor-close:hover{border-color:var(--line-2);background:var(--bg-0,#fff);color:var(--ink)}
@@ -329,7 +329,7 @@
 /* Confirm deletion inline with consequences rather than window.confirm. */
 .sch-confirm{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:2px;
   padding:9px 11px;border-radius:var(--r-md,10px);
-  background:rgba(224,69,75,.08);border:1px solid rgba(224,69,75,.28);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));color:var(--ink)}
+  background:rgba(224,69,75,.08);border:1px solid rgba(224,69,75,.28);font-size:max(var(--font-min-readable, 14.5px), 12.5px);color:var(--ink)}
 .sch-confirm i{display:block;font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-3);margin-top:2px}
 .sch-c-ops{margin-left:auto;display:flex;gap:6px}
 .btn-mini.danger-solid{background:var(--danger,#e0454b);border-color:var(--danger,#e0454b);color:#fff}
@@ -343,7 +343,7 @@
 .sch-sec{display:flex;align-items:baseline;gap:9px;margin:14px 0 4px;padding-bottom:6px;
   border-bottom:1px solid var(--line-2,var(--line))}
 .sch-sec:first-child{margin-top:0}
-.sch-sec b{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));color:var(--ink);position:relative;padding-left:10px}
+.sch-sec b{font-size:max(var(--font-min-readable, 14.5px), 12.5px);color:var(--ink);position:relative;padding-left:10px}
 .sch-sec b::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);
   width:3px;height:12px;border-radius:2px;background:var(--accent)}
 .sch-sec i{font-size:max(var(--font-min-readable, 14.5px), 11.5px);font-style:normal;color:var(--ink-4)}
@@ -392,7 +392,7 @@
 .sch-chk em{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-4);margin-left:6px}
 .sch-in{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);
   border-radius:var(--r-md,10px);background:var(--bg-0,#fff);color:var(--ink);
-  font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));font-family:inherit}
+  font-size:max(var(--font-min-readable, 14.5px), 13px);font-family:inherit}
 .sch-in:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 /* Native selects share the form-field geometry but get a deliberate, compact
  * affordance so the selected execution base/model is easy to scan. Keep the
@@ -438,14 +438,14 @@ select.sch-in option{background:var(--bg-0,#fff);color:var(--ink)}
 }
 .sch-f-row{display:flex;gap:10px;flex-wrap:wrap}
 .sch-f-row > span{flex:0 0 auto;min-width:96px}
-.sch-chk{display:flex;align-items:center;gap:7px;font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));color:var(--ink-2)}
+.sch-chk{display:flex;align-items:center;gap:7px;font-size:max(var(--font-min-readable, 14.5px), 12.5px);color:var(--ink-2)}
 .sch-f-acts{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
 
 /* Present execution modes as explicit alternatives rather than an ambiguous workflow toggle. */
 .sch-mode-tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .sch-mode-btn{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:10px 12px;
   border:1px solid var(--line);border-radius:var(--r-md,10px);background:var(--bg-0,#fff);
-  color:var(--ink-2);font:inherit;font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));text-align:left;cursor:default;
+  color:var(--ink-2);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 12.5px);text-align:left;cursor:default;
   transition:border-color .14s,background .14s,box-shadow .14s}
 .sch-mode-btn i{font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-4);font-style:normal;font-weight:400}
 .sch-mode-btn:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
@@ -460,7 +460,7 @@ select.sch-in option{background:var(--bg-0,#fff);color:var(--ink)}
 .sch-cap input{position:absolute;opacity:0;pointer-events:none}
 .sch-cap-dot{grid-row:1/3;align-self:center;width:8px;height:8px;border:1.5px solid var(--ink-4);
   border-radius:50%;box-sizing:border-box}
-.sch-cap b{min-width:0;font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));font-weight:580;color:var(--ink-2)}
+.sch-cap b{min-width:0;font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:580;color:var(--ink-2)}
 .sch-cap i{min-width:0;font-size:max(var(--font-min-readable, 14.5px), 10.5px);font-style:normal;color:var(--ink-4);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sch-cap:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
@@ -497,7 +497,7 @@ select.sch-in option{background:var(--bg-0,#fff);color:var(--ink)}
   background:color-mix(in srgb,var(--warn-soft,#fff5e6) 55%,var(--bg-0,#fff))}
 .sch-plugin-title{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .sch-plugin-title>span{display:flex;align-items:baseline;gap:7px;min-width:0}
-.sch-plugin-title b{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));color:var(--ink)}
+.sch-plugin-title b{font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--ink)}
 .sch-plugin-title i{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 10.5px);color:var(--ink-4)}
 .sch-plugin-title em{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 10.5px);color:var(--ok,#159b78);
   background:color-mix(in srgb,var(--ok,#159b78) 10%,transparent);padding:3px 7px;border-radius:999px}
@@ -516,7 +516,7 @@ select.sch-in option{background:var(--bg-0,#fff);color:var(--ink)}
 .sch-method-missing b{font-size:max(var(--font-min-readable, 14.5px), 11.5px);font-weight:600;color:var(--warn,#d9821a)}
 .sch-method-kind{display:flex;align-items:baseline;gap:8px;margin-top:10px;padding:9px 10px;
   border-radius:10px;background:var(--bg-1,#fafbfc)}
-.sch-method-kind b{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));font-weight:600;color:var(--ink-2)}
+.sch-method-kind b{font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:600;color:var(--ink-2)}
 .sch-method-kind i{font-size:max(var(--font-min-readable, 14.5px), 11.5px);font-style:normal;color:var(--ink-4)}
 .sch-version-policy{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,1fr);
   align-items:stretch;gap:7px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line-2,var(--line))}
@@ -568,7 +568,7 @@ select.sch-in option{background:var(--bg-0,#fff);color:var(--ink)}
   background:var(--bg-0,#fff);box-shadow:var(--shadow-xs)}
 .sch-recipes>header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .sch-recipes>header div{display:flex;align-items:baseline;gap:9px;min-width:0}
-.sch-recipes>header b{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));font-weight:620;color:var(--ink)}
+.sch-recipes>header b{font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:620;color:var(--ink)}
 .sch-recipes>header span{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4)}
 .sch-recipes>div{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 /*
@@ -582,11 +582,11 @@ select.sch-in option{background:var(--bg-0,#fff);color:var(--ink)}
 .sch-recipes button:hover{border-color:color-mix(in srgb,var(--accent) 42%,var(--line));
   background:color-mix(in srgb,var(--accent-soft) 32%,var(--bg-0,#fff));box-shadow:var(--shadow-sm)}
 .sch-recipes button>i{display:flex;align-items:center;justify-content:center;width:34px;height:34px;
-  border-radius:11px;font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));font-style:normal;font-weight:650;color:var(--accent);
+  border-radius:11px;font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-style:normal;font-weight:650;color:var(--accent);
   background:linear-gradient(165deg,color-mix(in srgb,var(--accent) 14%,var(--bg-0,#fff)),var(--accent-soft));
   box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 14%,transparent)}
 .sch-recipes button>span{display:flex;flex-direction:column;gap:2px;min-width:0}
-.sch-recipes button b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));font-weight:600;color:var(--ink)}
+.sch-recipes button b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:600;color:var(--ink)}
 .sch-recipes button small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-4)}
 .sch-recipes button em{font-size:max(var(--font-min-readable, 14.5px), 11.5px);font-style:normal;font-weight:600;color:var(--accent);opacity:0;transition:opacity .15s}
 .sch-recipes button:hover em{opacity:1}
@@ -642,7 +642,7 @@ html[data-desk-panel="workspace"] #schPanel > .sch-body > *{
 }
 #schPanel .sch-recipes > header b{
   color:#172235!important;
-  font-size:var(--ui-font-16, 16px)!important;
+  font-size:16px!important;
   font-weight:700!important;
   line-height:1.25!important;
   letter-spacing:-.018em!important;
@@ -687,7 +687,7 @@ html[data-desk-panel="workspace"] #schPanel > .sch-body > *{
   color:var(--recipe-accent,var(--accent))!important;
   background:linear-gradient(145deg,color-mix(in srgb,var(--recipe-accent,var(--accent)) 16%,#fff),var(--recipe-soft,#edf4ff))!important;
   box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--recipe-accent,var(--accent)) 14%,transparent),0 5px 12px color-mix(in srgb,var(--recipe-accent,var(--accent)) 10%,transparent)!important;
-  font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px)) !important;
+  font-size:max(var(--font-min-readable, 14.5px), 14px) !important;
   font-weight:750!important;
 }
 #schPanel .sch-recipes button > span{
@@ -696,7 +696,7 @@ html[data-desk-panel="workspace"] #schPanel > .sch-body > *{
 }
 #schPanel .sch-recipes button b{
   color:#1d2a40!important;
-  font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px)) !important;
+  font-size:max(var(--font-min-readable, 14.5px), 14px) !important;
   font-weight:680!important;
   line-height:1.35!important;
 }
@@ -787,11 +787,11 @@ html[data-desk-panel="workspace"] #schPanel > .sch-body > *{
 #schPanel .sch-recipes > header span{
   font-size:max(var(--font-min-readable, 14.5px), 12px) !important;
 }
-#schPanel .sch-i-title{font-size:var(--ui-font-15, 15px)!important;font-weight:680!important}
+#schPanel .sch-i-title{font-size:15px!important;font-weight:680!important}
 #schPanel .sch-i-meta{font-size:max(var(--font-min-readable, 14.5px), 12px) !important}
 #schPanel .sch-i-note{font-size:max(var(--font-min-readable, 14.5px), 12px) !important;line-height:1.65!important}
 #schPanel .sch-i-when b{letter-spacing:.08em!important}
-#schPanel .sch-i-when i{font-size:var(--ui-font-24, 24px)!important}
+#schPanel .sch-i-when i{font-size:24px!important}
 #schPanel .sch-i-next{font-size:max(var(--font-min-readable, 14.5px), 12px) !important}
 #schPanel .sch-i-last{font-size:max(var(--font-min-readable, 14.5px), 12px) !important}
 #schPanel .btn-mini{font-size:max(var(--font-min-readable, 14.5px), 12px) !important}
@@ -854,5 +854,5 @@ html[data-desk-panel="workspace"] #schPanel > .sch-body > .sch-list{
 
 .sch-i-app{display:inline-flex;align-items:center;gap:8px;min-width:0;color:var(--ink)}
 .sch-i-app img{width:24px;height:24px;object-fit:contain;border-radius:6px;flex:none}
-.sch-i-app b{font-size:var(--ui-font-13, 13px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
-.sch-i-app>span{font-size:var(--ui-font-12, 12px);color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;max-width:100px;white-space:nowrap}
+.sch-i-app b{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+.sch-i-app>span{font-size:12px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;max-width:100px;white-space:nowrap}

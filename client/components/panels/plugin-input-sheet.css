@@ -8,13 +8,13 @@
 .pis-mark svg,.pis-head-actions button svg{width:19px;height:19px;fill:none;stroke:currentColor;
   stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
 .pis-head>div:nth-child(2){min-width:0}
-.pis-head>div:nth-child(2)>span{display:block;margin-bottom:3px;color:var(--accent);font:650 var(--ui-font-14-5, 14.5px) var(--font-latin);
+.pis-head>div:nth-child(2)>span{display:block;margin-bottom:3px;color:var(--accent);font:650 14.5px var(--font-latin);
   letter-spacing:.1em}
-.pis-head h2{margin:0;color:var(--ink);font-size:var(--ui-font-17, 17px);font-weight:610;line-height:1.28}
+.pis-head h2{margin:0;color:var(--ink);font-size:17px;font-weight:610;line-height:1.28}
 .pis-head p{max-width:650px;margin:3px 0 0;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 11.5px);line-height:1.5}
 .pis-head-actions{display:flex;align-items:center;gap:6px}
 .pis-head-actions em{padding:4px 7px;border-radius:7px;background:var(--bg-2);color:var(--ink-4);
-  font:500 var(--ui-font-14-5, 14.5px) var(--font-latin);font-style:normal}
+  font:500 14.5px var(--font-latin);font-style:normal}
 .pis-head-actions button{width:30px;height:30px;display:grid;place-items:center;padding:0;border:0;border-radius:8px;
   background:transparent;color:var(--ink-4)}
 .pis-head-actions button:hover{background:var(--bg-2);color:var(--ink)}
@@ -25,7 +25,7 @@
 .pis-route li{min-width:0;display:flex;align-items:center;gap:5px;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 10.5px)}
 .pis-route li+li::before{content:"";width:12px;height:1px;margin-right:1px;background:var(--line-3)}
 .pis-route li i{width:17px;height:17px;display:grid;place-items:center;flex:none;border:1px solid var(--line-2);
-  border-radius:50%;background:var(--bg-0);color:var(--ink-4);font:500 var(--ui-font-14-5, 14.5px) var(--font-latin);font-style:normal}
+  border-radius:50%;background:var(--bg-0);color:var(--ink-4);font:500 14.5px var(--font-latin);font-style:normal}
 .pis-route li b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 .pis-form{padding:14px 16px 15px}
 .pis-seed{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;margin-bottom:13px;padding:9px 10px;
@@ -35,8 +35,8 @@
   -webkit-box-orient:vertical;-webkit-line-clamp:2}
 .pis-section-head{display:flex;align-items:end;justify-content:space-between;gap:12px;margin-bottom:11px}
 .pis-section-head>div{display:flex;align-items:baseline;gap:8px}
-.pis-section-head span{color:var(--accent);font:650 var(--ui-font-14-5, 14.5px) var(--font-latin);letter-spacing:.08em}
-.pis-section-head b{color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));font-weight:590}
+.pis-section-head span{color:var(--accent);font:650 14.5px var(--font-latin);letter-spacing:.08em}
+.pis-section-head b{color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:590}
 .pis-section-head small{color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 9.5px)}
 .pis-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .pis-field{display:flex;min-width:0;flex-direction:column;gap:6px}
@@ -46,7 +46,7 @@
 .pis-field>span small{margin-left:auto;overflow:hidden;color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 9.5px);font-weight:400;
   text-overflow:ellipsis;white-space:nowrap}
 .pis-field input,.pis-field textarea,.pis-field select{width:100%;box-sizing:border-box;border:1px solid var(--line);
-  border-radius:9px;background:var(--bg-0);color:var(--ink);font:400 var(--ui-font-14-5, 14.5px)/1.55 var(--font-ui);outline:0;
+  border-radius:9px;background:var(--bg-0);color:var(--ink);font:400 14.5px/1.55 var(--font-ui);outline:0;
   transition:border-color .12s ease,box-shadow .12s ease}
 .pis-field input,.pis-field select{height:38px;padding:0 10px}.pis-field textarea{min-height:104px;padding:9px 10px;resize:vertical}
 .pis-field input:focus,.pis-field textarea:focus,.pis-field select:focus{border-color:color-mix(in srgb,var(--accent) 48%,var(--line));
@@ -67,7 +67,7 @@
 .pis-foot p{margin:0;color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 9.5px)}.pis-ready{margin-left:auto;color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 9.5px)}
 .pis-ready.is-ready{color:var(--s-done)}
 .pis-foot button{min-height:34px;padding:0 12px;border:1px solid var(--line);border-radius:9px;background:var(--bg-0);
-  color:var(--ink-3);font:550 var(--ui-font-14-5, 14.5px) var(--font-ui)}
+  color:var(--ink-3);font:550 14.5px var(--font-ui)}
 .pis-foot button:hover{background:var(--bg-2);color:var(--ink)}
 .pis-foot .pis-primary{border-color:var(--accent);background:var(--accent);color:#fff}.pis-foot .pis-primary:hover{filter:brightness(.98)}
 @media(max-width:700px){.pis-fields{grid-template-columns:1fr}.pis-field{grid-column:1}.pis-route{grid-template-columns:1fr}

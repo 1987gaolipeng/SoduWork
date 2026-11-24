@@ -245,7 +245,7 @@
   }
   function mount() {
     if (bar || !document.documentElement.dataset.deskPanel) return;
-    if (global.__deskPanel !== 'preferences') document.documentElement.setAttribute('data-window-menu', '');
+    document.documentElement.setAttribute('data-window-menu', '');
     bar = document.createElement('header'); bar.className = 'window-menu'; bar.tabIndex = -1;
     bar.innerHTML = '<button type="button" class="wm-sidebar" data-window-sidebar>' + icons.sidebar + '</button><span class="wm-divider" aria-hidden="true"></span><nav role="menubar">' + ['file', 'view', 'help'].map((key, index) => '<button type="button" id="windowMenu-' + key + '" data-window-menu="' + key + '" role="menuitem" aria-haspopup="menu" aria-expanded="false" aria-controls="windowMenuPopup" tabindex="' + (index ? -1 : 0) + '"></button>').join('') + '</nav>';
     popup = document.createElement('div'); popup.className = 'wm-popup'; popup.id = 'windowMenuPopup'; popup.setAttribute('role', 'menu'); popup.hidden = true;

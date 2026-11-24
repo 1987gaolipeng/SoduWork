@@ -45,7 +45,7 @@ app.whenReady().then(async () => {
       await js(`document.documentElement.dataset.theme=${JSON.stringify(theme)};document.querySelector('.gv-body').scrollLeft=0`); await pause(120);
       const geometry = await js(`(()=>{
         const chart=document.querySelector('.gv-body'),rows=[...chart.querySelectorAll('.gv-row:not(.gv-headrow)')];
-        return {chartWidth:chart.clientWidth,chartBoxWidth:chart.getBoundingClientRect().width-2,scrollWidth:chart.scrollWidth,documentOverflow:document.documentElement.scrollWidth>innerWidth,
+        return {chartWidth:chart.clientWidth,scrollWidth:chart.scrollWidth,documentOverflow:document.documentElement.scrollWidth>innerWidth,
           scrollbarHeight:chart.offsetHeight-chart.clientHeight-2,scrollbarBottom:chart.getBoundingClientRect().bottom,
           viewportHeight:innerHeight,
           rows:rows.map(row=>{const title=row.querySelector('.gv-rowlabel b'),lane=row.querySelector('.gv-lane'),bar=lane.querySelector('.gv-bar,.gv-act');
@@ -57,9 +57,7 @@ app.whenReady().then(async () => {
       assert.equal(geometry.documentOverflow, false, 'horizontal scrolling must stay within the Gantt chart');
       assert.equal(geometry.rows.length, 7);
       assert.ok(geometry.rows.every(row => row.tooltip === row.title && row.ownerTooltip && row.titleWrap === 'nowrap' && row.titleOverflow === 'ellipsis'));
-      assert.ok(geometry.rows.every(row => row.labelWidth >= Math.min(240, geometry.chartWidth / 2) - 1 &&
-        row.labelWidth <= Math.min(240, geometry.chartBoxWidth / 2) + 1 &&
-        Math.abs(row.laneWidth - Math.max(1200, geometry.chartWidth - row.labelWidth)) <= 2),
+      assert.ok(geometry.rows.every(row => row.labelWidth === 240 && Math.abs(row.laneWidth - Math.max(1200, geometry.chartWidth - 240)) <= 2),
         'day columns keep a readable minimum and expand together to fill wider viewports');
       assert.equal(new Set(geometry.rows.map(row=>row.rowHeight)).size, 1, 'long titles must not change row alignment');
       assert.ok(geometry.scrollbarHeight >= 10, 'horizontal scrollbar must have a visible, usable pointer target');
@@ -71,7 +69,7 @@ app.whenReady().then(async () => {
       const before = await js(`document.querySelector('.gv-rowlabel b').getBoundingClientRect().left`);
       if (geometry.scrollWidth > geometry.chartWidth) {
         // Drag the native scrollbar thumb rather than setting scrollLeft to prove pointer usability.
-        const track = await js(`(()=>{const c=document.querySelector('.gv-body'),r=c.getBoundingClientRect();return{x:r.left+2+c.clientWidth*c.clientWidth/c.scrollWidth/2,y:r.bottom-7,end:r.left+c.clientWidth-1}})()`);
+        const track = await js(`(()=>{const c=document.querySelector('.gv-body'),r=c.getBoundingClientRect();return{x:r.left+2+c.clientWidth*c.clientWidth/c.scrollWidth/2,y:r.bottom-7,end:r.right-18}})()`);
         // Electron input coordinates are device-independent window pixels, not zoomed CSS pixels.
         for (const key of ['x','y','end']) track[key] *= zoom;
         await win.webContents.capturePage();
@@ -88,7 +86,7 @@ app.whenReady().then(async () => {
         const scrolledBy = Date.now() + 3000;
         while (Date.now() < scrolledBy && !await js(`document.querySelector('.gv-body').scrollLeft>0`)) await pause(50);
         assert.ok(await js(`document.querySelector('.gv-body').scrollLeft>0`), 'the visible scrollbar must scroll the calendar using a mouse');
-        assert.ok(await js(`(()=>{const c=document.querySelector('.gv-body'),last=c.querySelector('.gv-headlane .gv-cell:last-child').getBoundingClientRect(),label=c.querySelector('.gv-headlabel').getBoundingClientRect();return last.right<=c.getBoundingClientRect().right+1&&last.left>=label.right-1})()`), 'dragging to the end must reveal the last day');
+        assert.ok(await js(`(()=>{const c=document.querySelector('.gv-body'),last=c.querySelector('.gv-headlane .gv-cell:last-child').getBoundingClientRect(),r=c.getBoundingClientRect();return last.right<=r.right&&last.left>=r.left+240})()`), 'dragging to the end must reveal the last day');
       }
       const after = await js(`document.querySelector('.gv-rowlabel b').getBoundingClientRect().left`);
       assert.ok(Math.abs(before-after)<1, 'task names stay visible while scrolling dates');
@@ -98,12 +96,6 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'gantt-' + width + '-' + zoom + '-' + theme + '.png'), (await win.webContents.capturePage()).toPNG());
       report.layouts.push({ width, height, zoom, theme, ...geometry });
     }
-    const wideDays = [];
-    for (const scale of [.85, 1, 1.22]) {
-      wideDays.push(await js(`document.documentElement.style.setProperty('--ui-scale', ${scale}); document.querySelector('.gv-daynum').getBoundingClientRect().width`));
-    }
-    assert.ok(wideDays[0] < wideDays[1] && wideDays[1] < wideDays[2], 'density scales date columns on wide screens too: ' + wideDays);
-    await js(`document.documentElement.style.removeProperty('--ui-scale')`);
     win.webContents.setZoomFactor(1); win.setSize(1366,900);
     await click('.gv-rowlabel [data-rq-open="last"]');
     assert.ok(await js(`!!document.querySelector('.rq-detail')`), 'full title opens the existing requirement detail');

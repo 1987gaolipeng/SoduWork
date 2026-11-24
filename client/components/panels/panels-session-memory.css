@@ -1,9 +1,9 @@
 /* Theme tokens and a single scrolling detail region keep laptop layouts usable. */
-.sch-panel.cmem-panel { font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px)); color: var(--ink); width: min(1120px, 94vw); height: min(860px, 90vh); }
+.sch-panel.cmem-panel { font-size: max(var(--font-min-readable, 14.5px), 14px); color: var(--ink); width: min(1120px, 94vw); height: min(860px, 90vh); }
 .cmem-panel *, .cmem-context-chip { box-sizing: border-box; }
 .cmem-head { gap: 16px; flex-shrink: 0; }
 .cmem-muted { color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.7; }
-.cmem-panel button, .cmem-panel input, .cmem-panel select, .cmem-panel textarea { font: inherit; font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px)); }
+.cmem-panel button, .cmem-panel input, .cmem-panel select, .cmem-panel textarea { font: inherit; font-size: max(var(--font-min-readable, 14.5px), 14px); }
 .cmem-panel button { min-height: 34px; border: 1px solid var(--line); background: var(--bg-1);
   color: var(--ink); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
 .cmem-panel button:hover { border-color: var(--accent); }
@@ -13,31 +13,31 @@
   color: var(--ink); border: 1px solid var(--line); border-radius: 8px; background: var(--bg-1); }
 .cmem-panel textarea { resize: vertical; line-height: 1.6; min-height: 64px; }
 .cmem-panel :focus-visible, .cmem-context-chip button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.cmem-message { padding: 0 22px; font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px)); line-height: 1.6; }
+.cmem-message { padding: 0 22px; font-size: max(var(--font-min-readable, 14.5px), 13px); line-height: 1.6; }
 .cmem-message:not(:empty) { padding-top: 10px; padding-bottom: 10px; background: var(--accent-soft, #f3f6fa); }
 .cmem-message.is-error { color: var(--danger, #c43c3c); }
 .cmem-layout { display: grid; grid-template-columns: minmax(200px, 27%) minmax(0, 1fr);
   flex: 1; min-height: 0; overflow: hidden; }
 .cmem-library { padding: 18px; border-right: 1px solid var(--line); overflow: auto; min-width: 0; }
-.cmem-search, .cmem-form label { display: flex; flex-direction: column; gap: 7px; font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px)); }
+.cmem-search, .cmem-form label { display: flex; flex-direction: column; gap: 7px; font-size: max(var(--font-min-readable, 14.5px), 13px); }
 .cmem-list { margin-top: 15px; display: flex; flex-direction: column; gap: 5px; }
 .cmem-list .cmem-row { text-align: left; width: 100%; display: grid; gap: 7px; padding: 12px; border-color: transparent; }
 .cmem-row.selected { background: var(--accent-soft, #f3f6fa); border-color: var(--accent); }
-.cmem-row b { font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmem-row b { font-size: max(var(--font-min-readable, 14.5px), 14px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cmem-row span { color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.5;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .cmem-row small { font-size: max(var(--font-min-readable, 14.5px), 12px); color: var(--ink-3); }
 .cmem-detail { overflow: auto; padding: 22px 28px; min-width: 0; }
 .cmem-detail-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.cmem-panel h2 { margin: 0; font-size: var(--ui-font-18, 18px); font-weight: 600; }
+.cmem-panel h2 { margin: 0; font-size: 18px; font-weight: 600; }
 .cmem-private { font-size: max(var(--font-min-readable, 14.5px), 12px); color: var(--accent); white-space: nowrap; }
 .cmem-form { display: flex; flex-direction: column; gap: 18px; max-width: 840px; margin: 0 auto; }
 .cmem-association { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.cmem-task-link summary, .cmem-evidence summary { font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px)); cursor: pointer; padding: 5px 0; }
+.cmem-task-link summary, .cmem-evidence summary { font-size: max(var(--font-min-readable, 14.5px), 13px); cursor: pointer; padding: 5px 0; }
 .cmem-task-link[open] .cmem-association { margin-top: 10px; }
 .cmem-evidence article { border-bottom: 1px solid var(--line); padding: 12px 0; }
 .cmem-evidence b { font-size: max(var(--font-min-readable, 14.5px), 12px); color: var(--ink-3); }
-.cmem-evidence pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.65; font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px)); }
+.cmem-evidence pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.65; font-size: max(var(--font-min-readable, 14.5px), 13px); }
 .cmem-warnings { margin: 0; padding-left: 20px; line-height: 1.65; font-size: max(var(--font-min-readable, 14.5px), 12px); color: var(--ink-3); }
 .cmem-form .cmem-confirm { flex-direction: row; align-items: flex-start; line-height: 1.6; }
 .cmem-confirm input { width: 16px; height: 16px; flex: 0 0 16px; margin-top: 3px; accent-color: var(--accent); }
@@ -62,7 +62,7 @@
 }
 
 .cmem-head { justify-content: space-between; background: var(--bg-1); padding: 18px 22px; }
-.cmem-head .sch-h-title { font-size: var(--ui-font-18, 18px); }
+.cmem-head .sch-h-title { font-size: 18px; }
 
 .cmem-head-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .cmem-archive-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); white-space: nowrap; }
@@ -99,7 +99,7 @@
 .sch-panel.cmem-panel { width: min(980px, 94vw); height: min(760px, 90vh); background: var(--bg-0, #fff); }
 .cmem-head { padding: 18px 24px 16px; align-items: flex-start; background: var(--bg-0, #fff); border-bottom: 1px solid var(--line); }
 .cmem-head .sch-h-txt { display: grid; gap: 4px; min-width: 0; }
-.cmem-head .sch-h-title { font-family: var(--font-display, inherit); font-size: var(--ui-font-20, 20px); font-weight: 650; letter-spacing: -.4px; }
+.cmem-head .sch-h-title { font-family: var(--font-display, inherit); font-size: 20px; font-weight: 650; letter-spacing: -.4px; }
 .cmem-kicker { display: block; color: var(--accent, #3d8bff); font-size: max(var(--font-min-readable, 14.5px), 11px); font-weight: 750; letter-spacing: .13em; line-height: 1.2; }
 .cmem-singleton { color: var(--ink-3, #6e6e73); font-size: max(var(--font-min-readable, 14.5px), 12px); white-space: nowrap; }
 .cmem-panel .cmem-head-actions button { height: 36px; padding: 6px 14px; border-radius: 10px; background: var(--bg-0, #fff); font-weight: 550; transition: border-color .15s var(--ease, ease), background .15s var(--ease, ease); }
@@ -108,31 +108,31 @@
 .cmem-document-layout > .cmem-detail { max-width: 940px; width: 100%; margin: 0 auto; padding: 26px 32px 44px; overflow: visible; }
 .cmem-form.cmem-personal-form { max-width: none; gap: 15px; padding: 24px 28px 20px; border: 1px solid var(--line); border-radius: 18px; background: var(--bg-0, #fff); box-shadow: var(--shadow-sm, 0 1px 3px rgba(0,0,0,.08)); }
 .cmem-document-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; padding-bottom: 2px; }
-.cmem-document-heading h2 { margin-top: 5px; font-family: var(--font-display, inherit); font-size: var(--ui-font-22, 22px); font-weight: 680; letter-spacing: -.03em; }
+.cmem-document-heading h2 { margin-top: 5px; font-family: var(--font-display, inherit); font-size: 22px; font-weight: 680; letter-spacing: -.03em; }
 .cmem-document-heading .cmem-private { display: inline-flex; align-items: center; gap: 7px; padding: 4px 12px; border-radius: 999px; background: var(--accent-soft); font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 600; }
 .cmem-document-heading .cmem-private::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent, #3d8bff); }
 .cmem-file-bar { display: flex; align-items: center; gap: 12px; min-height: 62px; padding: 11px 13px; border: 1px solid var(--line-2, rgba(0,0,0,.05)); border-radius: 14px; background: var(--bg-1, #fafafa); }
 .cmem-file-icon { display: grid; place-items: center; width: 34px; height: 38px; border-radius: 10px; background: linear-gradient(160deg, var(--accent, #3d8bff), var(--accent-hover, #2f78ea)); color: #fff; font-size: max(var(--font-min-readable, 14.5px), 10px); font-weight: 800; letter-spacing: .05em; box-shadow: var(--shadow-xs, 0 1px 2px rgba(0,0,0,.05)); }
 .cmem-file-bar div { display: grid; gap: 3px; min-width: 0; }
-.cmem-file-bar b { font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px)); }
+.cmem-file-bar b { font-size: max(var(--font-min-readable, 14.5px), 14px); }
 .cmem-file-bar small { color: var(--ink-3, #6e6e73); font-size: max(var(--font-min-readable, 14.5px), 11px); }
 .cmem-file-size { flex-shrink: 0; padding: 3px 9px; border: 1px solid var(--line-2, rgba(0,0,0,.05)); border-radius: 999px; background: var(--bg-0, #fff); color: var(--ink-3, #6e6e73); font-size: max(var(--font-min-readable, 14.5px), 11px); font-variant-numeric: tabular-nums; }
 .cmem-file-path { margin-left: auto; max-width: 40%; overflow: hidden; padding: 3px 9px; color: var(--ink-3, #6e6e73); font: max(var(--font-min-readable, 14.5px), 11.5px)/1.4 var(--font-mono, ui-monospace, Consolas, monospace); text-overflow: ellipsis; white-space: nowrap; }
 .cmem-content-label { gap: 8px !important; }
 .cmem-content-label > span { color: var(--ink-2, #3a3a3c); font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 700; letter-spacing: .02em; }
-.cmem-personal-form textarea[data-personal-content] { min-height: clamp(300px, 46vh, 460px); padding: 16px 18px; border-radius: 12px; background: var(--bg-0, #fff); font: var(--ui-font-14, 14px)/1.75 var(--font-mono, ui-monospace, Consolas, monospace); transition: border-color .15s var(--ease, ease), box-shadow .15s var(--ease, ease); }
+.cmem-personal-form textarea[data-personal-content] { min-height: clamp(300px, 46vh, 460px); padding: 16px 18px; border-radius: 12px; background: var(--bg-0, #fff); font: 14px/1.75 var(--font-mono, ui-monospace, Consolas, monospace); transition: border-color .15s var(--ease, ease), box-shadow .15s var(--ease, ease); }
 .cmem-personal-form textarea[data-personal-content]:hover:not(:disabled) { border-color: var(--line-3, rgba(0,0,0,.12)); }
 .cmem-personal-form textarea[data-personal-content]:focus { border-color: var(--accent, #3d8bff); outline: 3px solid var(--accent-soft-2, rgba(61,139,255,.14)); outline-offset: 0; }
 .cmem-personal-form[data-dirty="1"] textarea[data-personal-content] { border-color: color-mix(in srgb, var(--accent, #3d8bff) 42%, var(--line)); }
 .cmem-editor-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 22px; }
-.cmem-count { color: var(--ink-3, #6e6e73); font: var(--ui-font-12, 12px)/1.2 var(--font-mono, ui-monospace, Consolas, monospace); white-space: nowrap; }
-.cmem-personal-form[data-dirty="1"] .cmem-count::after { content: "未保存"; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent, #3d8bff); font-family: var(--font-ui, inherit); font-size: var(--ui-font-12, 12px); font-weight: 650; }
+.cmem-count { color: var(--ink-3, #6e6e73); font: 12px/1.2 var(--font-mono, ui-monospace, Consolas, monospace); white-space: nowrap; }
+.cmem-personal-form[data-dirty="1"] .cmem-count::after { content: "未保存"; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent, #3d8bff); font-family: var(--font-ui, inherit); font-size: 12px; font-weight: 650; }
 :root[lang="en-US"] .cmem-personal-form[data-dirty="1"] .cmem-count::after { content: "Unsaved"; }
 .cmem-editor-footer .cmem-muted { text-align: right; }
 .cmem-empty-hero { display: grid; justify-items: center; gap: 7px; margin: 2px 0; padding: 22px 20px 20px; border: 1.5px dashed color-mix(in srgb, var(--accent, #3d8bff) 32%, var(--line)); border-radius: 14px; background: linear-gradient(180deg, var(--accent-soft), transparent 78%); text-align: center; }
 .cmem-empty-hero svg { width: 26px; height: 26px; fill: none; stroke: var(--accent, #3d8bff); stroke-width: 1.6; stroke-linejoin: round; }
-.cmem-empty-hero b { font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-15, 15px)); color: var(--ink, #1d1d1f); }
-.cmem-empty-hero span { max-width: 480px; color: var(--ink-3, #6e6e73); font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px)); line-height: 1.7; }
+.cmem-empty-hero b { font-size: max(var(--font-min-readable, 14.5px), 15px); color: var(--ink, #1d1d1f); }
+.cmem-empty-hero span { max-width: 480px; color: var(--ink-3, #6e6e73); font-size: max(var(--font-min-readable, 14.5px), 12.5px); line-height: 1.7; }
 .cmem-personal-form .cmem-actions { border-top: 1px solid var(--line-2, rgba(0,0,0,.05)); padding-top: 14px; }
 .cmem-panel .cmem-personal-form .cmem-actions .cmem-primary { min-width: 142px; height: 38px; border-radius: 10px; background: var(--accent, #3d8bff); border-color: var(--accent, #3d8bff); color: #fff; font-weight: 650; box-shadow: var(--shadow-xs, 0 1px 2px rgba(0,0,0,.05)); transition: background .15s var(--ease, ease), transform .1s var(--ease, ease); }
 .cmem-panel .cmem-personal-form .cmem-actions .cmem-primary:hover:not(:disabled) { background: var(--accent-hover, #2f78ea); border-color: var(--accent-hover, #2f78ea); }

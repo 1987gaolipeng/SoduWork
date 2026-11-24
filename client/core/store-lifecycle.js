@@ -130,7 +130,7 @@
         clearTimeout(this._syncC);
         this._syncC = setTimeout(() => { this._syncC = null; this._syncCfgToHub(); }, 400);
       },
-      _syncCfgToHub({ notifyFailure = true } = {}) {
+      _syncCfgToHub() {
         if (!api()?.syncConfig) return;
         const epoch = this._taskEpoch, revision = this._cfgRevision;
         const done = ok => {
@@ -139,7 +139,7 @@
             cfgSyncClear();
             if (this._cfgSyncWarned) { this._cfgSyncWarned = false; global.petSay?.('设置已同步到后台'); }
           }
-          else if (notifyFailure && !this._cfgSyncWarned) {
+          else if (!this._cfgSyncWarned) {
             this._cfgSyncWarned = true;
             global.petSay?.('设置已保存到本机；后台暂不可达，稍后自动重试');
           }
@@ -196,8 +196,7 @@
         const job = Promise.resolve().then(() => api().getConfig()).then(apiCfg => {
           if (!current(epoch, key)) return;
           this._localLocaleIntent = localLocaleIntent();
-          // A new settings window retries pending device settings even before the user edits anything here.
-          if (cfgSyncPending()) this._syncCfgToHub({ notifyFailure: global.__deskPanel !== 'preferences' });
+          if (cfgSyncPending()) this._syncCfgToHub();
           else if (this._cfgRevision === revision && apiCfg && Object.keys(apiCfg).length) {
             const previous = JSON.stringify(this._cfg);
             const incoming = stripServerOwned({ ...apiCfg });

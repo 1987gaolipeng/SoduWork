@@ -48,7 +48,7 @@
 .con-btn:hover{border-color:var(--accent);color:var(--accent)}
 .con-btn.is-on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 .con-btn-stop{color:var(--s-doing);border-color:color-mix(in srgb,var(--s-doing) 45%,transparent)}
-.con-x{background:none;border:none;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px));
+.con-x{background:none;border:none;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 14px);
   padding:3px 7px;border-radius:var(--r-sm)}
 .con-x:hover{background:var(--bg-2);color:var(--ink-2)}
 

@@ -24,14 +24,14 @@
 .noutput-library-file-icon{display:grid;place-items:center;flex:none;width:20px;height:20px;color:var(--ink-3)}
 .noutput-library-file-icon .library-native-file-icon{display:grid;place-items:center;width:18px;height:18px}
 .noutput-library-file-icon img,.noutput-library-file-icon svg{display:block;width:18px;height:18px;margin:0;object-fit:contain}
-.noutput-library-extension{font:600 var(--ui-font-14-5, 14.5px)/1 var(--font-ui);color:var(--ink-3);border:1px solid var(--line);border-radius:3px;padding:4px 2px}
-.noutput-library-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:500 var(--ui-font-14-5, 14.5px)/1.4 var(--font-ui);color:var(--ink-2)}
+.noutput-library-extension{font:600 14.5px/1 var(--font-ui);color:var(--ink-3);border:1px solid var(--line);border-radius:3px;padding:4px 2px}
+.noutput-library-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:500 14.5px/1.4 var(--font-ui);color:var(--ink-2)}
 button.noutput-library-name{display:block;padding:0;border:0;background:none;text-align:left;cursor:pointer}
 button.noutput-library-name:hover{color:var(--accent)}
 button.noutput-library-name:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
-.catt-copy .catt-library-state{display:flex;align-items:center;gap:5px;color:var(--ink-3);font:400 var(--ui-font-14-5, 14.5px)/1.4 var(--font-ui)}
+.catt-copy .catt-library-state{display:flex;align-items:center;gap:5px;color:var(--ink-3);font:400 14.5px/1.4 var(--font-ui)}
 .catt-library-state.is-error{color:var(--danger,#e0454b)}
-.catt-library-retry{padding:0;border:0;background:none;color:var(--accent);font:500 var(--ui-font-14-5, 14.5px)/1.4 var(--font-ui);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.catt-library-retry{padding:0;border:0;background:none;color:var(--accent);font:500 14.5px/1.4 var(--font-ui);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
 .catt-item:has(.catt-library-state){width:264px}
 @media(max-width:640px){.catt-item:has(.catt-library-state){width:100%}.noutput-library{max-width:100%}.noutput-library-row{gap:7px}.noutput-library-name{font-size:max(var(--font-min-readable, 14.5px), 12px)}}
 @container(max-width:560px){.ncw-browserbar .library-save-action,.ncw-dochead .library-save-action{width:28px;height:28px}}

@@ -6,7 +6,7 @@
 .cap-maker-icon-field>.cap-plugin-brand{width:64px;height:64px;flex:0 0 64px;border-radius:17px}
 .cap-maker-icon-field>.cap-plugin-brand svg{width:27px;height:27px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round}
 .cap-maker-icon-copy{display:flex;flex-direction:column;gap:6px;min-width:0}
-.cap-maker-icon-copy>b{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px));font-weight:600;color:var(--ink)}
+.cap-maker-icon-copy>b{font-size:max(var(--font-min-readable, 14.5px), 14px);font-weight:600;color:var(--ink)}
 .cap-maker-icon-copy>b>em{margin-left:6px;font-size:max(var(--font-min-readable, 14.5px), 12px);font-style:normal;font-weight:400;color:var(--ink-3)}
 .cap-maker-icon-copy>span{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.5;color:var(--ink-3)}
 .cap-maker-icon-actions{display:flex;gap:8px;flex-wrap:wrap}
@@ -39,7 +39,7 @@
   border:1px solid color-mix(in srgb,var(--accent) 18%,var(--line));border-radius:9px;
   background:color-mix(in srgb,var(--accent) 3%,var(--bg-0));color:var(--ink-4)}
 .cap-maker-version-note span{padding:3px 6px;border-radius:5px;background:var(--accent-soft);color:var(--accent);
-  font:var(--ui-font-14-5, 14.5px) ui-monospace,SFMono-Regular,Consolas,monospace}
+  font:14.5px ui-monospace,SFMono-Regular,Consolas,monospace}
 .cap-maker-version-note b{font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:560;color:var(--ink-2)}
 .cap-maker-version-note em{margin-left:auto;font-size:max(var(--font-min-readable, 14.5px), 12px);font-style:normal;color:var(--ink-5)}
 
@@ -100,7 +100,7 @@
 .cap-workflow[hidden]{display:none}
 .cap-workflow-head{min-height:54px;display:flex;align-items:center;gap:16px;padding:10px 13px;border-bottom:1px solid var(--line-2)}
 .cap-workflow-head>div{min-width:0;display:flex;flex:1;flex-direction:column;gap:2px}
-.cap-workflow-head b{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));font-weight:610;color:var(--ink)}
+.cap-workflow-head b{font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:610;color:var(--ink)}
 .cap-workflow-head span{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4)}
 .cap-workflow-head>em{padding:4px 7px;border-radius:6px;background:var(--bg-1);font-size:max(var(--font-min-readable, 14.5px), 12px);font-style:normal;color:var(--ink-4);white-space:nowrap}
 .cap-workflow-layout{min-height:430px;display:grid;grid-template-columns:226px minmax(0,1fr)}
@@ -126,7 +126,7 @@
 .cap-workflow-inspector{min-width:0;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
 .cap-workflow-inspector>header{display:flex;align-items:center;gap:12px;padding-bottom:9px;border-bottom:1px solid var(--line-2)}
 .cap-workflow-inspector>header>div{min-width:0;display:flex;flex:1;align-items:baseline;gap:8px}
-.cap-workflow-inspector>header span{font:var(--ui-font-14-5, 14.5px) ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--ink-5)}
+.cap-workflow-inspector>header span{font:14.5px ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--ink-5)}
 .cap-workflow-inspector>header b{font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:600;color:var(--ink)}
 .cap-workflow-inspector>header nav{display:flex;gap:4px}
 .cap-workflow-inspector>header button,.cap-node-section header button{min-height:25px;padding:0 7px;border:1px solid var(--line);
@@ -153,7 +153,7 @@
 .cap-dependency-list>label,.cap-node-capabilities>label{display:flex;align-items:center;gap:5px;padding:5px 7px;
   border:1px solid var(--line);border-radius:7px;background:var(--bg-0);font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3)}
 .cap-dependency-list input,.cap-node-capabilities input{margin:0;accent-color:var(--accent)}
-.cap-dependency-list small{color:var(--ink-5);font:var(--ui-font-14-5, 14.5px) ui-monospace,SFMono-Regular,Consolas,monospace}
+.cap-dependency-list small{color:var(--ink-5);font:14.5px ui-monospace,SFMono-Regular,Consolas,monospace}
 .cap-workflow-empty{font-size:max(var(--font-min-readable, 14.5px), 12px);font-style:normal;color:var(--ink-5)}
 .cap-node-capabilities{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:7px}
 .cap-node-capabilities>b{margin-right:2px;font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:540;color:var(--ink-4)}
@@ -267,8 +267,8 @@
   padding: 20px 24px 17px;
   background: linear-gradient(180deg, #fff, color-mix(in srgb, var(--bg-1) 72%, #fff));
 }
-.cap-modal.cap-plugin-maker-modal .cap-modal-head b { font-size: var(--ui-font-18, 18px); letter-spacing: -.02em; }
-.cap-modal.cap-plugin-maker-modal .cap-modal-head span { font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px)); line-height: 1.45; }
+.cap-modal.cap-plugin-maker-modal .cap-modal-head b { font-size: 18px; letter-spacing: -.02em; }
+.cap-modal.cap-plugin-maker-modal .cap-modal-head span { font-size: max(var(--font-min-readable, 14.5px), 12.5px); line-height: 1.45; }
 .cap-modal.cap-plugin-maker-modal .cap-modal-body { padding: 20px 24px; gap: 16px; }
 .cap-modal.cap-plugin-maker-modal .cap-modal-foot { padding: 13px 24px; background: var(--bg-1); }
 .cap-modal.cap-plugin-maker-modal .cap-maker-shell { gap: 16px; }
@@ -282,14 +282,14 @@
 .cap-modal.cap-plugin-maker-modal .cap-node-section textarea { font-size: max(var(--font-min-readable, 14.5px), 12px); }
 .cap-modal.cap-plugin-maker-modal .cap-governance-note { border-radius: 10px; line-height: 1.55; }
 /* A quiet package manifest, shared by install, edit and publication confirmation. */
-.cap-resource-pack { flex:0 0 auto; margin:6px 0; border:1px solid var(--line,#e2e8f0); border-radius:14px; background:var(--bg-0,#fff); color:var(--ink,#202a3a); font:var(--ui-font-14-5, 14.5px)/1.5 "Segoe UI","Microsoft YaHei",sans-serif; overflow:hidden; }
+.cap-resource-pack { flex:0 0 auto; margin:6px 0; border:1px solid var(--line,#e2e8f0); border-radius:14px; background:var(--bg-0,#fff); color:var(--ink,#202a3a); font:14.5px/1.5 "Segoe UI","Microsoft YaHei",sans-serif; overflow:hidden; }
 .cap-resource-pack summary { display:flex; align-items:center; gap:12px; padding:14px 16px; cursor:pointer; list-style:none; background:var(--bg-1,#f7f9fc); }
 .cap-resource-pack summary::after { content:""; flex:0 0 auto; width:6px; height:6px; margin:0 3px; border:solid currentColor; border-width:0 1.5px 1.5px 0; color:var(--ink-3,#64748b); transform:rotate(-45deg); }
 .cap-resource-pack[open] summary::after { transform:rotate(45deg); }
 .cap-resource-pack summary::-webkit-details-marker { display:none; }
 .cap-resource-pack summary:focus-visible { outline:2px solid var(--accent,#3e79ed); outline-offset:-3px; }
 .cap-resource-pack summary>span:nth-child(2) { flex:1; min-width:0; }
-.cap-resource-pack b { display:block; font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px)); font-weight:600; }
+.cap-resource-pack b { display:block; font-size:max(var(--font-min-readable, 14.5px), 14px); font-weight:600; }
 .cap-resource-pack small { display:block; margin-top:2px; font-size:max(var(--font-min-readable, 14.5px), 12px); color:var(--text-muted,#64748b); }
 .cap-resource-emblem { display:grid; place-items:center; width:36px; height:36px; flex:0 0 auto; border-radius:10px; color:var(--accent,#3e79ed); background:var(--accent-soft,#edf3ff); }
 .cap-resource-emblem svg { width:23px; height:23px; }
@@ -298,7 +298,7 @@
 .cap-resource-row { display:grid; grid-template-columns:70px minmax(0,1fr) 60px; gap:10px; align-items:center; padding:10px 0; border-bottom:1px solid var(--border,#e2e8f0); }
 .cap-resource-row:last-child { border-bottom:0; }
 .cap-resource-kind { font-size:max(var(--font-min-readable, 14.5px), 12px); color:var(--text-muted,#64748b); }
-.cap-resource-name { font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px)); overflow-wrap:anywhere; }
+.cap-resource-name { font-size:max(var(--font-min-readable, 14.5px), 13px); overflow-wrap:anywhere; }
 .cap-resource-size { text-align:right; font-size:max(var(--font-min-readable, 14.5px), 12px); font-variant-numeric:tabular-nums; color:var(--text-muted,#64748b); }
 .cap-resource-pack p { margin:0; padding:10px 16px 12px; font-size:max(var(--font-min-readable, 14.5px), 12px); color:var(--text-muted,#64748b); border-top:1px solid var(--border,#e2e8f0); }
 @media(max-width:560px) { .cap-resource-pack summary { gap:8px; padding:12px; } .cap-resource-row { grid-template-columns:54px minmax(0,1fr) 48px; gap:6px; } }

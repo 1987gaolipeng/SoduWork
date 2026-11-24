@@ -71,12 +71,11 @@ function applyScale(v) {
   if (typeof _syncSidebar === 'function') _syncSidebar();
 }
 function applyFontScale(v) {
-  const scale = { small: 0.88, medium: 1, large: 1.15 }[v || cfg.fontScale || 'medium'] || 1;
-  const style = document.documentElement.style;
-  if (style.getPropertyValue('--font-scale') === String(scale)) return;
-  style.setProperty('--font-scale', scale);
-  if (typeof reportNativeAppearance === 'function') reportNativeAppearance();
-  window.dispatchEvent(new CustomEvent('soduwork-font-scale', {detail: scale}));
+  /* Keep .ntext at the minimum readable body size even with the small font setting. */
+  const requested = { small: 0.88, medium: 1, large: 1.15 }[v || cfg.fontScale || 'medium'] || 1;
+  const s = Math.max(1, requested);
+  document.documentElement.style.setProperty('--font-scale', s);
+  /* Reclamp panels after font changes alter card heights. */
 }
 /* Hide only the pet character; keep the dock and panels available. */
 function applyPetVisible() {

@@ -403,12 +403,6 @@ function _mcLayout(n) {
  * Fit terminals from measured character dimensions and container size; use conservative
  * fallback metrics when unavailable. FitAddon is not bundled.
  */
-window.addEventListener('soduwork-font-scale', () => {
-  for (const [key, pane] of Object.entries(_MC.terms)) {
-    pane.t.options.fontSize = terminalFontSize();
-    requestAnimationFrame(() => _mcFit(key));
-  }
-});
 function _mcFit(key) {
   const e = _MC.terms[key];
   const cell = _mcCell(key);
@@ -440,7 +434,7 @@ function _mcAttachTerm(key, box) {
   }
   _mcDropTerm(key);
   const t = new Terminal({
-    fontSize: terminalFontSize(), lineHeight: 1.1, cursorBlink: false, scrollback: 4000,
+    fontSize: 14.5, lineHeight: 1.1, cursorBlink: false, scrollback: 4000,
     fontFamily: '"Alibaba Sans Code", "Cascadia Code", "Cascadia Mono", Consolas, monospace',
     theme: _mcTermTheme(), allowProposedApi: true,
   });

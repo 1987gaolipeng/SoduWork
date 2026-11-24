@@ -8,7 +8,7 @@
 .ncloud-auto{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,var(--accent) 4%,var(--bg-0))}
 .ncloud-auto>svg{width:24px;height:24px;flex:none;fill:none;stroke:var(--accent);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .ncloud-auto p{margin:5px 0 0}.ncloud-setup-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
-.ncloud-target-picker{display:grid;gap:6px;margin:14px 0 0;color:var(--ink-2);font-size:var(--ui-font-13, 13px)}
+.ncloud-target-picker{display:grid;gap:6px;margin:14px 0 0;color:var(--ink-2);font-size:13px}
 .ncloud-target-picker select{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;background:var(--bg-0);color:var(--ink-1)}
 .ncloud-setup-actions button{border:1px solid var(--line);border-radius:8px;padding:7px 11px;font:inherit;background:var(--bg-0);color:var(--ink-2);cursor:pointer}
 .ncloud-files{margin-top:12px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--ink-2)}
@@ -16,7 +16,7 @@
 .ncloud-files ul{max-height:180px;overflow:auto;list-style:none;padding:0;margin:12px 0 0}
 .ncloud-files li{display:flex;justify-content:space-between;gap:16px;padding:5px 0;overflow-wrap:anywhere}
 .ncloud-files small{white-space:nowrap;color:var(--ink-3)}
-.ncloud-receipt{display:flex;align-items:center;gap:10px;color:var(--accent);font-size:var(--ui-font-16, 16px)}
+.ncloud-receipt{display:flex;align-items:center;gap:10px;color:var(--accent);font-size:16px}
 .ncloud-receipt svg,.nchat-cloud-state svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .nchat-cloud-state{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg-0);color:var(--ink-3);font:inherit;font-size:max(var(--font-min-readable,12px),12px);white-space:nowrap;cursor:pointer}
 .nchat-cloud-state:hover:not(:disabled){background:var(--bg-2);color:var(--ink)}

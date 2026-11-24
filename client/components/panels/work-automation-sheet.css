@@ -2,7 +2,7 @@
 .waz-layer [hidden]{display:none!important}
 .waz-layer small{font-size:max(var(--font-min-readable, 14.5px), 12px)}
 
-.waz-layer{position:relative;min-width:0;font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px));color:var(--ink);font-family:var(--font-ui,inherit)}
+.waz-layer{position:relative;min-width:0;font-size:max(var(--font-min-readable, 14.5px), 14px);color:var(--ink);font-family:var(--font-ui,inherit)}
 .waz-sheet{
   min-width:0;background:var(--bg-0);opacity:0;transform:translateY(3px);
   transition:opacity .14s ease,transform .14s ease
@@ -20,7 +20,7 @@
   width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.65;
   stroke-linecap:round;stroke-linejoin:round
 }
-.waz-head h2{margin:0;color:var(--ink);font-size:var(--ui-font-17, 17px);font-weight:610;line-height:1.25}
+.waz-head h2{margin:0;color:var(--ink);font-size:17px;font-weight:610;line-height:1.25}
 .waz-close{
   width:32px;height:32px;display:grid;place-items:center;padding:0;border-radius:9px;
   border:1px solid var(--line-2);background:var(--bg-0);color:var(--ink-2);cursor:pointer
@@ -92,7 +92,7 @@ html[data-window-titlebar="overlay"] .pui-layer.waz-plugin-surface{
 .waz-field>span>small{margin-left:auto;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:400}
 .waz-field input,.waz-field textarea,.waz-field select{
   width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;
-  background:var(--bg-0);color:var(--ink);font:400 var(--ui-font-14-5, 14.5px)/1.55 var(--font-ui,inherit)
+  background:var(--bg-0);color:var(--ink);font:400 14.5px/1.55 var(--font-ui,inherit)
 }
 .waz-field input,.waz-field select{height:37px;padding:0 10px}
 .waz-field select{
@@ -121,7 +121,7 @@ html[data-window-titlebar="overlay"] .pui-layer.waz-plugin-surface{
 .waz-field select option{background:var(--bg-0);color:var(--ink)}
 .waz-field textarea{min-height:76px;padding:9px 10px;resize:vertical}
 .waz-field textarea[name=note]{min-height:108px}
-.waz-title input{height:42px;font-size:var(--ui-font-14-5, 14.5px);font-weight:520}
+.waz-title input{height:42px;font-size:14.5px;font-weight:520}
 .waz-field input:focus,.waz-field textarea:focus,.waz-field select:focus{
   border-color:color-mix(in srgb,var(--accent) 48%,var(--line));
   box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 7%,transparent);outline:0
@@ -192,7 +192,7 @@ html[data-window-titlebar="overlay"] .pui-layer.waz-plugin-surface{
 .waz-enable b{font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:590}.waz-enable small{color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px)}
 .waz-button{
   min-height:34px;padding:6px 14px;border:1px solid var(--line);border-radius:9px;
-  background:var(--bg-0);color:var(--ink-2);font:560 var(--ui-font-14-5, 14.5px)/1 var(--font-ui,inherit);cursor:pointer
+  background:var(--bg-0);color:var(--ink-2);font:560 14.5px/1 var(--font-ui,inherit);cursor:pointer
 }
 .waz-button.primary{border-color:var(--accent);background:var(--accent);color:#fff}
 .waz-button:disabled{opacity:.5;cursor:default}
@@ -207,10 +207,10 @@ html[data-window-titlebar="overlay"] .pui-layer.waz-plugin-surface{
 }
 .waz-saved-mark{
   display:grid;place-items:center;width:46px;height:46px;border-radius:15px;
-  background:var(--liq-done);color:var(--s-done);font-size:var(--ui-font-21, 21px)
+  background:var(--liq-done);color:var(--s-done);font-size:21px
 }
 .waz-saved>p{margin:15px 0 5px;color:var(--s-done);font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:650;letter-spacing:.1em}
-.waz-saved h3{max-width:390px;margin:0;color:var(--ink);font-size:var(--ui-font-20, 20px);font-weight:610;line-height:1.4}
+.waz-saved h3{max-width:390px;margin:0;color:var(--ink);font-size:20px;font-weight:610;line-height:1.4}
 .waz-saved>div{display:flex;justify-content:center;gap:5px;flex-wrap:wrap;margin-top:10px}
 .waz-saved>div span{
   padding:4px 8px;border:1px solid var(--line);border-radius:7px;background:var(--bg-0);color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px)}

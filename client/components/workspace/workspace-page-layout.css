@@ -44,7 +44,7 @@ html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-titl
   margin:0!important;
   color:#1c2940!important;
   font-family:var(--font-display)!important;
-  font-size:var(--ui-font-25, 25px)!important;
+  font-size:25px!important;
   font-weight:750!important;
   line-height:1.18!important;
   letter-spacing:-.035em!important;
@@ -55,7 +55,7 @@ html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-kick
   display:block!important;
   margin:0!important;
   color:#4b8df8!important;
-  font:700 var(--ui-font-14-5, 14.5px)/1 var(--font-latin,Arial),sans-serif!important;
+  font:700 14.5px/1 var(--font-latin,Arial),sans-serif!important;
   letter-spacing:.16em!important;
 }
 html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-main-title{
@@ -74,7 +74,7 @@ html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-sub{
   margin:0!important;
   overflow:hidden!important;
   color:#718096!important;
-  font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px)) !important;
+  font-size:max(var(--font-min-readable, 14.5px), 13px) !important;
   font-weight:450!important;
   line-height:1.35!important;
   text-overflow:ellipsis!important;

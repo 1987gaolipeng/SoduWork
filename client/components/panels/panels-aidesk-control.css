@@ -6,7 +6,7 @@
   min-height:68px;box-sizing:border-box;padding:12px 24px 11px;
   background:linear-gradient(90deg,var(--bg-0),color-mix(in srgb,var(--accent) 4%,var(--bg-0)));
 }
-.dk-title{display:flex;align-items:baseline;flex-wrap:wrap;gap:0;font-size:var(--ui-font-22, 22px);letter-spacing:-.4px}
+.dk-title{display:flex;align-items:baseline;flex-wrap:wrap;gap:0;font-size:22px;letter-spacing:-.4px}
 .dk-title-kicker{
   flex-basis:100%;margin-bottom:2px;color:var(--accent);font-size:max(var(--font-min-readable, 14.5px), 9px);font-weight:800;
   letter-spacing:1.7px;line-height:1;

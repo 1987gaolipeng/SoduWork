@@ -25,7 +25,7 @@ html[data-desk-panel="chatbar"][data-composer-theme="dark"] .agent-brand {
   background:#f7f8fb !important;border-color:rgba(255,255,255,.18) !important;color:#242936;
 }
 .agent-brand>.agent-monogram {display:block;font-family:var(--font-ui, sans-serif);
-  font-size:max(var(--font-min-readable, 12px), calc(clamp(12px,calc(var(--agent-brand-size) * .36),16px) * var(--font-scale, 1)));font-weight:650;line-height:1;
+  font-size:clamp(12px,calc(var(--agent-brand-size) * .36),16px);font-weight:650;line-height:1;
   letter-spacing:.02em;color:inherit;user-select:none;pointer-events:none;}
 .agent-brand>svg {width:58%!important;height:58%!important;fill:none!important;stroke:currentColor!important;
   stroke-width:1.55!important;stroke-linecap:round;stroke-linejoin:round;}

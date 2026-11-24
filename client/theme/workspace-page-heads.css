@@ -41,7 +41,7 @@ html[data-desk-panel="workspace"] #libraryPanel .ws-page-head h1::before{
 :is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(#teamPanel,#skinManager) > .ws-page-head > div:first-child{
   display:flex!important;flex-direction:row!important;align-items:center!important;flex-wrap:nowrap!important;
   flex:1 1 240px!important;min-width:0!important;min-height:35px;margin:0!important;gap:12px!important;
-  color:var(--ink)!important;font:650 var(--ui-font-18, 18px)/1.4 var(--font-display)!important;letter-spacing:-.02em!important;
+  color:var(--ink)!important;font:650 18px/1.4 var(--font-display)!important;letter-spacing:-.02em!important;
   white-space:nowrap;
 }
 :is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(
@@ -51,7 +51,7 @@ html[data-desk-panel="workspace"] #libraryPanel .ws-page-head h1::before{
   .sch-h-title,#hbTitleText,.br-page-title h1,.dk-title-name,.tp-title,.sm-title,.set-page-main-title,.library-head h1
 ){
   flex:0 0 auto!important;min-width:0!important;margin:0!important;color:var(--ink)!important;
-  font:650 var(--ui-font-18, 18px)/1.4 var(--font-display)!important;letter-spacing:-.02em!important;white-space:nowrap;
+  font:650 18px/1.4 var(--font-display)!important;letter-spacing:-.02em!important;white-space:nowrap;
 }
 :is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(
   #schPanel,#historyBoard,#capPanel,#briefPanel,#aiDeskPanel,#teamPanel,
@@ -62,7 +62,7 @@ html[data-desk-panel="workspace"] #libraryPanel .ws-page-head h1::before{
   .set-page-sub,.detail-page-sub,.add-page-sub,.sch-h-txt > .cmem-muted
 ){
   min-width:0!important;margin:0!important;color:var(--ink-3)!important;
-  font:400 var(--ui-font-14-5, 14.5px)/1.5 var(--font-ui)!important;letter-spacing:normal!important;
+  font:400 14.5px/1.5 var(--font-ui)!important;letter-spacing:normal!important;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap!important;
 }
 :is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(
@@ -81,7 +81,7 @@ html[data-desk-panel="workspace"] #libraryPanel .ws-page-head h1::before{
   .btn-mini,.br-quiet,.dk-agent-manage,.dk-refresh,.np-clear,.cmem-secondary
 ){
   box-sizing:border-box;min-height:32px!important;height:32px!important;padding:0 12px!important;border-radius:var(--r-md)!important;
-  font:600 var(--ui-font-14-5, 14.5px)/1.2 var(--font-ui)!important;white-space:nowrap;
+  font:600 14.5px/1.2 var(--font-ui)!important;white-space:nowrap;
   transition:background-color .16s ease,border-color .16s ease,color .16s ease;
 }
 :is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(#schPanel,#historyBoard,#capPanel,#aiDeskPanel) > .ws-page-head :is(.btn-mini.primary){
@@ -145,6 +145,6 @@ html[data-desk-panel="workspace"][data-workspace-view="add"] #addMask .modal > .
   html[data-desk-panel="workspace"] .ws-page-head button{transition:none!important}
 }
 
-html[data-desk-panel="workspace"] #schPanel > .ws-page-head .sch-create-trigger{height:32px;min-height:32px;font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px))}
+html[data-desk-panel="workspace"] #schPanel > .ws-page-head .sch-create-trigger{height:32px;min-height:32px;font-size:max(var(--font-min-readable, 14.5px), 13px)}
 html[data-desk-panel="add"] #addMask .modal{padding-top:0!important;padding-inline:var(--ws-head-gutter)!important}
 html[data-desk-panel="add"] #addMask .modal > .ws-page-head{margin:0 calc(-1 * var(--ws-head-gutter)) 20px!important}

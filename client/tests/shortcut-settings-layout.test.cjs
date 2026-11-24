@@ -65,7 +65,7 @@ test('只有快捷键列表滚动，标题和搜索固定，空状态不占空�
   assert.match(cssRule(css, '#shortcutsPanel .shortcuts-page-head'), /flex:\s*0 0 auto/);
   assert.match(cssRule(css, '#shortcutsPanel .shortcuts-toolbar'), /flex:\s*0 0 auto/);
   assert.match(cssRule(css, '#shortcutsPanel .shortcut-status:empty'), /display:\s*none/);
-  assert.match(css, /--shortcut-text:\s*max\(var\(--font-min-readable,\s*14\.5px\),\s*var\(--ui-font-14,\s*14px\)\)/);
+  assert.match(css, /--shortcut-text:\s*max\(var\(--font-min-readable,\s*14\.5px\),\s*14px\)/);
   assert.match(cssRule(css, '#shortcutsPanel .shortcuts-search input:focus-visible'), /outline:\s*0\s*!important/);
   assert.match(cssRule(css, '#shortcutsPanel .shortcuts-search input:focus-visible'), /box-shadow:\s*none\s*!important/);
   assert.match(css, /@container shortcut-settings \(max-width:\s*480px\)/);

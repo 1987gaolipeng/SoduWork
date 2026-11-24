@@ -318,7 +318,6 @@ function openDeskWindow(payload, sourceWin) {
   const panel = _WORK_SPEC[requested.panel] ? requested.panel : 'workspace';
   const p = panel === 'workspace' ? _workspaceState.resolve(requested) : requested;
   const spec = _WORK_SPEC[panel];
-  const preferences = panel === 'preferences';
   /* Use separate configuration windows per object to preserve unsaved provider input. */
   const windowKey = panel === 'model-editor' && p.providerId
     ? panel + ':' + String(p.providerId) : panel;
@@ -334,7 +333,7 @@ function openDeskWindow(payload, sourceWin) {
     return;
   }
   /* Restore saved bounds only when they still intersect an available display. */
-  const saved = preferences ? null : _geom.get(panel);
+  const saved = _geom.get(panel);
   const restored = _geom.restore(saved, spec);
   const bounds = restored || _geom.initial(spec, sourceWin, [..._workWindows.values()]);
   const limits = _geom.limits(spec, bounds);
@@ -350,8 +349,8 @@ function openDeskWindow(payload, sourceWin) {
 
     icon: _appIcon(),
     /* Keep OS resizing and native window controls; the command row shares their titlebar. */
-    frame: !preferences,
-    ...(preferences ? { maximizable: false, fullscreenable: false } : titlebarOptions),
+    frame: true,
+    ...titlebarOptions,
     skipTaskbar: false,
     alwaysOnTop: false,
     show: false,
@@ -364,7 +363,7 @@ function openDeskWindow(payload, sourceWin) {
   });
   _workWindows.set(windowKey, win);
   win.setMenuBarVisibility(false);
-  _workspaceTitlebar.attach(win, preferences ? { frame: false } : titlebarOptions);
+  _workspaceTitlebar.attach(win, titlebarOptions);
   /*
    * Keep the native workspace title as the product name; intercept document-title changes
    * and show page titles within content.
@@ -389,7 +388,7 @@ function openDeskWindow(payload, sourceWin) {
     }
   }
   if (restored && saved.max) win.maximize();
-  if (!preferences) _geom.remember(panel, win);
+  _geom.remember(panel, win);
   /*
    * Put initial page arguments in the URL to avoid losing desk-open before listeners exist.
    * Retain IPC for changing targets in already-open windows.

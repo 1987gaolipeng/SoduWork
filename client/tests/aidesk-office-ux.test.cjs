@@ -26,7 +26,7 @@ test('AI team keeps two rows of recent deliveries at desktop width', () => {
 
 test('operation cards use readable hierarchy without a visible colored rail', () => {
   assert.match(css, /\.aio-work-item::before \{display:none/);
-  assert.match(css, /\.aio-work-item h3 \{[^}]*font-size:var\(--ui-font-16,\s*16px\)/);
+  assert.match(css, /\.aio-work-item h3 \{[^}]*font-size:16px/);
   assert.match(css, /\.aio-work-item h3 \{[^}]*-webkit-line-clamp:2/);
   assert.match(css, /\.aio-work-action \{[^}]*font-size:max\(var\(--font-min-readable,\s*14\.5px\),\s*12px\)/);
   assert.match(css, /\.aio-work-item \{[^}]*border-radius:12px/);
@@ -44,7 +44,7 @@ test('task identities are compact without reducing text readability', () => {
   assert.match(css, /\.aio-agent-avatar\.agent-brand \{[^}]*--agent-brand-size:36px/);
   assert.match(css, /\.aio-work-bot\.agent-brand \{[^}]*--agent-brand-size:28px/);
   assert.match(css, /\.aio-delivery-item \{[^}]*min-height:94px/);
-  assert.match(css, /\.aio-delivery-copy b \{[^}]*font-size:max\(var\(--font-min-readable,\s*14\.5px\),\s*var\(--ui-font-14,\s*14px\)\)/);
+  assert.match(css, /\.aio-delivery-copy b \{[^}]*font-size:max\(var\(--font-min-readable,\s*14\.5px\),\s*14px\)/);
   assert.match(css, /\.aio-delivery-copy i \{[^}]*font-size:max\(var\(--font-min-readable,\s*14\.5px\),\s*12px\)/);
   assert.match(css, /container-name:ai-team/);
   assert.match(css, /@container ai-team \(max-width:1040px\)/);

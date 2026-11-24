@@ -18,9 +18,6 @@ if (typeof electron === 'string') {
   const out = path.resolve(process.argv[2] || path.join(client, '../outputs/page-audit-20261014'));
   fs.mkdirSync(out, {recursive: true});
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-page-audit-'));
-  const settingsLayout = process.argv.includes('--settings-layout');
-  const settingsAlignment = process.argv.includes('--settings-alignment');
-  const settingsWindow = settingsLayout || settingsAlignment || process.argv.includes('--settings-window');
   app.setPath('userData', profile);
   const report = {ok: false, scope: 'Production renderer, synthetic API/bridge, blocked networking',
     profile, pages: [], checks: [], findings: [], errors: []};
@@ -64,239 +61,23 @@ if (typeof electron === 'string') {
     session.defaultSession.protocol.handle('file', request => {
       if (path.basename(fileURLToPath(request.url.split('?')[0])) !== 'desk.html') return net.fetch(request.url, {bypassCustomProtocolHandlers: true});
       const early = '<script>' + fs.readFileSync(path.join(__dirname, 'fixtures/page-audit-api.js'), 'utf8') + '</script>';
-      const setup = settingsWindow ? `
-        const initSettingsData = window.initData;
-        fixtureInstallApi();
-        window.initData = initSettingsData;
-        const demoUser = {id:'demo-01', username:'demo', displayName:'示例用户'};
-        let session = {state:'legacy', user:null}, resume;
-        const registration = new Promise(resolve => {resume = resolve;});
-        SoduWorkAPI.hubBase = () => 'fixture';
-        SoduWorkAPI.clientAuthSnapshot = () => session;
-        fixtureOverrides.registerClient = () => registration;
-        fixtureOverrides.clientAuthMe = () => ({user:demoUser});
-        fixtureOverrides.getTasksSnapshot = () => ({online:true, items:[]});
-        fixtureOverrides.syncConfig = () => false;
-        localStorage.setItem('soduwork_work_cfg_v5_sync_pending', '1');
-        window.setFixtureAuth = state => {
-          session = {state, user:state === 'active' ? demoUser : null};
-          dispatchEvent(new CustomEvent('soduwork-device-auth', {detail:session}));
-          if (session.user) resume({ok:true, user:session.user});
-        };` : 'fixtureInstallApi();soduWorkAPI.openDeskWindow=undefined;';
       const html = fs.readFileSync(path.join(client, 'desk.html'), 'utf8').replace('<head>', '<head>' + early)
-        .replace('<script src="desk-boot.js"></script>', '<script>'+setup+'</script><script src="desk-boot.js"></script>');
+        .replace('<script src="desk-boot.js"></script>', '<script>fixtureInstallApi();</script><script src="desk-boot.js"></script>');
       return new Response(html, {headers: {'content-type': 'text/html;charset=utf-8'}});
     });
     win = new BrowserWindow({show: false, width: 1440, height: 1000,
       webPreferences: {contextIsolation: true, nodeIntegration: false, offscreen: true, backgroundThrottling: false}});
     win.webContents.on('console-message', event => {if (event.level === 'error') report.errors.push(event.message);});
     try {
-      await win.loadFile(path.join(client, 'desk.html'), {query: {panel: settingsWindow ? 'preferences' : 'workspace'}});
-      if (settingsAlignment) {
-        await until('window.WorkspaceHost?.view === "account"');
-        await js(`setFixtureAuth("active");
-          const usage = {summary:{tokens:0}, trend:[{key:"2026-11-01",tokens:0},{key:"2026-11-30",tokens:0}]};
-          fixtureData.myUsage = {hub:usage, local:usage, quota:{enabled:true,totalLimited:false,used:0}};`);
-        await until('document.querySelector("#account-tab-security[aria-selected=true]")');
-        const frames = {
-          account: '.personal-account-summary, .personal-account-content',
-          usage: '.usage-grid, .usage-toolbar, .usage-records',
-          agents: '#agBody > *', models: '.cfg-master-detail', cloud: '.ce-content',
-          codeacct: '.cfg-master-detail', archive: '.archive-history-filters',
-          shortcuts: '.shortcuts-search, .shortcut-group', skin: '.skin-grid', settings: '.set-group'
-        };
-        const byWidth = new Map();
-        for (const [view, selector] of Object.entries(frames)) {
-          await click(`#wsSettingsDialog [data-view="${view}"]`);
-          await until('WorkspaceHost.view === ' + JSON.stringify(view));
-          for (const width of [960, 1440, 560, 1920]) {
-            win.setContentSize(width, 700);
-            await until('innerWidth === ' + width);
-            await js('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))');
-            const row = await js(`(() => {
-              const panel = document.querySelector('#wsSettingsContent > .show');
-              const bounds = panel.getBoundingClientRect();
-              const boxes = [...panel.querySelectorAll(${JSON.stringify(selector)})]
-                .filter(e => e.checkVisibility()).map(e => e.getBoundingClientRect());
-              const title = panel.querySelector('h1, .sch-h-title, .sm-title, .set-page-main-title');
-              const actions = [...panel.querySelectorAll('.ag-tabs, .sch-h-acts, .shortcuts-page-actions')]
-                .filter(e => e.offsetWidth > 0);
-              const filter = panel.querySelector('.usage-toolbar .usage-range');
-              const insideCards = [...panel.querySelectorAll('#usageQuotaDetails, #usageGroup, .usage-records .usage-line small')]
-                .filter(e => !e.closest('.usage-foot')).map(e => bounds.right - e.getBoundingClientRect().right);
-              return {left: boxes.map(b => b.left - bounds.left), right: boxes.map(b => bounds.right - b.right),
-                title: title?.getBoundingClientRect().left - bounds.left,
-                actions: actions.length ? bounds.right - Math.max(...actions.map(e => e.getBoundingClientRect().right)) : null,
-                filter: filter ? bounds.right - filter.getBoundingClientRect().right : null, insideCards};
-            })()`);
-            report.pages.push({view, width, ...row});
-            if ((view === 'account' || view === 'usage') && width === 1440) {
-              await delay(100);
-              await shot(`alignment-${view}-${width}`);
-            }
-            if (view === 'account') byWidth.set(width, row.left[0]);
-          }
-          if (view === 'account') {
-            for (const tab of ['devices', 'privacy', 'security']) {
-              await click(`#personalAccountPanel [data-tab="${tab}"]`);
-              await until(`document.querySelector('#account-tab-${tab}[aria-selected=true]')`);
-            }
-          } else if (view === 'usage') {
-            await click('[data-days="7"]');
-            await click('.usage-toolbar [data-source="hub"]');
-            await until(`document.querySelector('.usage-toolbar [data-source="hub"][aria-pressed=true]')`);
-          } else if (view === 'agents') {
-            await click('[data-agtab="runners"]');
-            await click('#agRefresh');
-            await click('[data-agtab="agents"]');
-          }
-        }
-        for (const row of report.pages) {
-          const gutter = byWidth.get(row.width);
-          const near = (value, expected) => assert.ok(Math.abs(value - expected) <= 1,
-            `${row.view} at ${row.width}: expected ${expected}, got ${value}`);
-          // Settings groups share a multi-column grid. Compare its two outside edges.
-          for (const edges of [row.left, row.right]) {
-            if (row.view === 'settings') near(Math.min(...edges), gutter);
-            else { assert.ok(edges.length, row.view + ' has content'); edges.forEach(edge => near(edge, gutter)); }
-          }
-          near(row.title, gutter + 8);
-          if (row.actions !== null) near(row.actions, gutter + 8);
-          if (row.filter !== null) near(row.filter, gutter + 8);
-          if (row.view === 'usage') {
-            assert.equal(row.insideCards.length, 3);
-            row.insideCards.forEach(edge => near(edge, row.insideCards[0]));
-          }
-        }
-        report.ok = true;
-      } else if (settingsLayout) {
-        await until('window.WorkspaceHost?.view === "account"');
-        await js(`setFixtureAuth("active");
-          fixtureData.myModels.providers = [{id:'demo-models', name:'示例模型服务', modelNames:[]}];
-          fixtureData.runners.runners = [{runnerId:'demo', label:'示例用户的执行机', owned:true,
-            online:true, manageable:true, scope:'current-instance', agents:[{name:'Pi',version:'1.4.0'}]}];`);
-        await click('#wsSettingsDialog [data-view="agents"]');
-        await click('[data-agtab="runners"]');
-        await until('document.querySelector(".rn-card")');
-        for (const width of [1120, 960, 620]) {
-          win.setContentSize(width, 700);
-          await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
-          const geometry = await js(`(() => {
-            const card = document.querySelector('.rn-card');
-            const box = card.getBoundingClientRect(), dir = document.querySelector('.rn-directory').getBoundingClientRect();
-            const actions = Array.from(card.querySelectorAll('.rn-actions button'));
-            return { fits: card.scrollWidth <= card.clientWidth && actions.every(b => b.offsetHeight < 40),
-              stacked: dir.top >= box.bottom, aligned: Math.abs(dir.left - box.left) < 1 };
-          })()`);
-          assert.ok(geometry.fits, 'Runner card content fits at ' + width);
-          if (width <= 960) assert.ok(geometry.stacked && geometry.aligned, 'Runner cards align at ' + width);
-          await delay(100);
-          await shot('runner-' + width);
-        }
-        await click('[data-rn-card-toggle="demo"]');
-        await until('document.querySelector(".rn-card.is-expanded")');
-        report.pages.push({view:'runners', loaded:true});
-        win.setContentSize(960, 700);
-        for (const key of ['models', 'codeacct']) {
-          await click('#wsSettingsDialog [data-view="' + key + '"]');
-          await until('document.querySelector("#wsSettingsContent > .show .cfg-master-detail")');
-          assert.ok(await js(`(() => {
-            const s = getComputedStyle(document.querySelector('#wsSettingsContent > .show .cfg-master-detail'));
-            return s.borderTopWidth === '1px' && s.borderRadius === '12px';
-          })()`), key + ' outer frame');
-          if (key === 'models') await click('[data-mdselect="demo-models"]');
-          await shot(key);
-          report.pages.push({view:key, loaded:true});
-        }
-        await click('[data-caopen="ssh"]'); await click('[data-caopen="identity"]');
-        await click('#wsSettingsDialog [data-view="shortcuts"]');
-        assert.equal(await js('getComputedStyle(document.querySelector(".shortcuts-toolbar")).borderBottomWidth'), '0px');
-        await shot('shortcuts');
-        await type('[data-shortcut-search]', 'Ctrl');
-        await click('[data-shortcut-edit]'); await click('[data-shortcut-cancel]');
-        report.pages.push({view:'shortcuts', loaded:true});
-        await click('#wsSettingsDialog [data-view="settings"]');
-        const sizes = [];
-        for (const scale of ['small', 'medium', 'large']) {
-          await click('#fontSeg [data-font="' + scale + '"]');
-          assert.equal(await js('JSON.parse(localStorage.getItem("soduwork_work_cfg_v5")).fontScale'), scale);
-          sizes.push(await js('parseFloat(getComputedStyle(document.querySelector("#fontSeg button")).fontSize)'));
-        }
-        assert.ok(sizes[0] >= 12 && sizes[0] < sizes[1] && sizes[1] < sizes[2], 'Rendered font sizes: ' + sizes);
-        report.fontSizes = sizes;
-        report.pages.push({view:'settings', loaded:true});
-        report.uiErrors = await js('fixtureErrors');
-        assert.deepEqual(report.uiErrors, []);
-        report.ok = true;
-      } else if (settingsWindow) {
-        await until('window.WorkspaceHost?.view === "account"');
-        const accountText = 'document.getElementById("personalAccountContent").textContent';
-        assert.equal(await js(accountText), await js('SoduWorkI18n.translateText("正在加载…")'));
-        await js('setFixtureAuth("pending")');
-        assert.equal(await js(accountText), await js('SoduWorkI18n.translateText("请先登录后管理个人信息。")'));
-        assert.ok(await js('getComputedStyle(personalAccountContent).paddingTop === getComputedStyle(personalAccountContent).paddingBottom'));
-        await js('setFixtureAuth("active")');
-        await until('document.querySelector("#account-tab-security[aria-selected=true]")');
-        await until('fixtureCalls.some(call => call.key === "syncConfig")');
-        assert.equal(await js('!!document.querySelector("#deskToast.show")'), false);
-        report.checks.push('delayed login restores account tabs; a background sync failure stays silent');
-        const keys = await js('[...document.querySelectorAll("#wsSettingsDialog [data-view]")].map(item=>item.dataset.view)');
-        assert.equal(keys.length, 10);
-        for (const width of [960,800,620]) {
-          win.setContentSize(width, 700);
-          for (const key of keys) {
-            await click(`#wsSettingsDialog [data-view="${key}"]`);
-            await until('WorkspaceHost.view === ' + JSON.stringify(key));
-            await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
-            assert.ok(await js(`(() => {
-              const panel = document.querySelector('#wsSettingsContent > .workspace-hosted.show');
-              const cell = wsSettingsContent.getBoundingClientRect(), box = panel?.getBoundingClientRect();
-              return !!box && box.width > 0 && Math.abs(cell.x - box.x) < 2 && Math.abs(cell.width - box.width) < 2 &&
-                Math.abs(cell.y - box.y) < 2 && Math.abs(cell.height - box.height) < 2 &&
-                panel.scrollWidth <= panel.clientWidth + 1 && panel.contains(document.elementFromPoint(box.x + box.width / 2, box.y + 25));
-            })()`), key + ' geometry at ' + width);
-            if (key === 'account' || key === 'usage') {
-              const inset = await js(`(() => {
-                const panel = document.querySelector('#wsSettingsContent > .workspace-hosted.show');
-                const title = panel.querySelector('h1');
-                const card = panel.querySelector('.personal-account-summary, .usage-card');
-                return title.getBoundingClientRect().left - card.getBoundingClientRect().left;
-              })()`);
-              assert.ok(Math.abs(inset - 8) < 1, key + ' heading inset at ' + width + ': ' + inset);
-            }
-            if (key === 'account') {
-              await click('[data-tab="devices"]'); await click('[data-tab="privacy"]'); await click('[data-tab="security"]');
-              await click('[data-email-change]'); await click('.ac-email-change [data-ac-close]');
-              await shot('settings-account-' + width);
-            } else if (width === 960) await shot('settings-' + key);
-            report.pages.push({view:key,width,loaded:true});
-          }
-          await click('#skinOpenBtn');
-          await until('WorkspaceHost.view === "skin" && document.querySelector("#wsSettingsContent > #skinManager.show")');
-          await click('#wsSettingsDialog [data-view="agents"]');
-          await click('[data-agtab=runners]'); await click('[data-agtab=agents]');
-          await click('#wsSettingsDialog [data-view="codeacct"]');
-          for (const tab of ['token','ssh','test','identity']) await click(`[data-caopen="${tab}"]`);
-          await click('#wsSettingsDialog [data-view="shortcuts"]');
-          await click('[data-shortcut-edit]'); await click('[data-shortcut-cancel]');
-        }
-        await click('#wsSettingsDialog [data-view="settings"]');
-        await click('#fontSeg [data-font="large"]');
-        await until('document.querySelector("#deskToast.show")?.textContent.includes("后台暂不可达")');
-        assert.equal(await js('JSON.parse(localStorage.getItem("soduwork_work_cfg_v5")).fontScale'), 'large');
-        report.checks.push('an explicit preference edit still saves locally and reports sync failure');
-        report.uiErrors = await js('fixtureErrors');
-        assert.deepEqual(report.uiErrors, []);
-        report.ok = true;
-      } else if (process.argv.includes('--usage-only')) {
-        await until('fixtureReady && document.querySelector(".workspace-shell")');
+      await win.loadFile(path.join(client, 'desk.html'), {query: {panel: 'workspace'}});
+      await until('fixtureReady && document.querySelector(".workspace-shell")');
+      if (process.argv.includes('--usage-only')) {
         await navigate('usage');
         await require('./page-audit-usage.cjs')({js, click, until, win, delay, shot});
         report.uiErrors = await js('fixtureErrors');
         assert.deepEqual(report.uiErrors, []);
         report.ok = true;
       } else {
-        await until('fixtureReady && document.querySelector(".workspace-shell")');
         await auditWorkspace();
       }
     } catch (error) {report.failure = String(error.stack || error); await shot('failure');}

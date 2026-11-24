@@ -6,7 +6,7 @@
   const allow = document.getElementById('consentAllow');
   const checkbox = document.getElementById('consentAcknowledged');
   const appearanceKeys = ['--bg-0','--bg-1','--bg-2','--bg-3','--ink','--ink-2','--ink-3','--ink-4',
-    '--line','--line-2','--line-3','--accent','--accent-hover','--accent-soft','--accent-soft-2','--font-ui','--font-display','--font-scale'];
+    '--line','--line-2','--line-3','--accent','--accent-hover','--accent-soft','--accent-soft-2','--font-ui','--font-display'];
   let data, finished = false, newestTheme;
   function applyAppearance(appearance) {
     if (!appearance) return;

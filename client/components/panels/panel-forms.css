@@ -103,7 +103,7 @@
 .add-att-zone.drag{border-color:var(--accent);background:var(--accent-soft,rgba(91,147,240,.08))}
 .add-att-pick{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--bg-0);color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:600;padding:5px 12px;border-radius:var(--r-sm);font-family:inherit;transition:border-color .14s,color .14s}
 .add-att-pick:hover{border-color:var(--accent);color:var(--accent)}
-.add-att-plus{font-size:var(--ui-font-15, 15px);line-height:1;font-weight:300}
+.add-att-plus{font-size:15px;line-height:1;font-weight:300}
 .add-att-tip{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-5)}
 .add-att-list{display:flex;flex-direction:column;gap:5px;margin-top:7px}
 .add-att-chip{display:flex;align-items:center;gap:8px;padding:5px 9px;border-radius:var(--r-sm);background:var(--bg-1);border:1px solid var(--line-2)}
@@ -111,7 +111,7 @@
 .add-att-ico .ico{width:15px;height:15px;vertical-align:0}
 .add-att-nm{flex:1;min-width:0;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .add-att-sz{font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-5);flex:0 0 auto}
-.add-att-x{flex:0 0 auto;border:none;background:transparent;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px));padding:2px 5px;border-radius:4px;line-height:1}
+.add-att-x{flex:0 0 auto;border:none;background:transparent;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 13px);padding:2px 5px;border-radius:4px;line-height:1}
 .add-att-x:hover{color:var(--s-critical,#e0475e);background:var(--bg-2)}
 .flow-done-badge{color:var(--s-done,#16b57f);font-weight:700;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)))}
 .flow-reject-note{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);

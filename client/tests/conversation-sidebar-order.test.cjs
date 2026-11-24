@@ -113,7 +113,7 @@ test('navigation and chats share the upper scrollport; recent tasks use a siblin
   assert.match(shellCss, /\.ws-recent\{[^}]*max-height:min\(32vh,280px\)/);
   assert.match(shellCss, /\.ws-recent \.ws-list-body\{[^}]*overflow-y:auto[^}]*overscroll-behavior:contain/);
   assert.match(shellCss, /\.ws-profile-row\{flex:none\}/);
-  assert.match(shellCss, /\.ws-section-label\{[^}]*font-size:var\(--ui-font-14-5,\s*14\.5px\)/);
+  assert.match(shellCss, /\.ws-section-label\{[^}]*font-size:14\.5px/);
 });
 
 test('the home rail starts a new conversation and utility pages reclaim the sidebar space', () => {

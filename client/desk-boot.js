@@ -96,7 +96,6 @@
         if (s) SkinRegistry.applySkinCSSVars(s);     /* Apply remote skin CSS variables. */
       }
       if (typeof applyTheme === 'function') applyTheme();
-      if (typeof applyScale === 'function') applyScale(cfg.uiScale);
       if (typeof applyFontScale === 'function') applyFontScale(cfg.fontScale);
     } catch (e) { /* Fall back to factory colors if the skin registry is unavailable. */ }
   }
@@ -307,18 +306,13 @@
       const target = document.getElementById(WORKSPACE_TARGET[key]);
       if (target) target.classList.add('workspace-hosted');
       _workspaceView = key;
-      if (PANEL === 'preferences') PreferencesWindow.show(key, target);
-      else if (window.WorkspaceShell) WorkspaceShell.setActive(key);
+      if (window.WorkspaceShell) WorkspaceShell.setActive(key);
       return opened;
     };
     return window.SoduWorkPagePerformance ? SoduWorkPagePerformance.navigate(key, open) : open();
   }
 
   function openWorkspaceRoute(view, payload) {
-    if (PANEL === 'preferences') {
-      if (PreferencesWindow.includes(view)) return openWorkspace(view, payload);
-      return window.soduWorkAPI?.openDeskWindow?.({ ...payload, panel: 'workspace', view });
-    }
     const opened = window.WorkspaceNavigation
       ? WorkspaceNavigation.open(view, payload, openWorkspace) : openWorkspace(view, payload);
     const complete = result => {
@@ -332,7 +326,6 @@
     get view() { return _workspaceView; } };
   /* An empty workspace route opens home; restored window parameters come from the main process's current-run memory. */
   OPENERS.workspace = (p) => window.WorkspaceHost.open(String((p || {}).view || 'create'), p || {});
-  OPENERS.preferences = (p) => openWorkspace(PreferencesWindow.includes(p?.view) ? p.view : 'account', p || {});
   function wireWorkspaceAutoReturn() {
     const mask = document.getElementById('addMask');
     if (!mask || mask._workspaceObserved) return;

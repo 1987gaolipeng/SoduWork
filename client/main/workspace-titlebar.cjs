@@ -149,8 +149,7 @@ function create({ app, ipcMain, BrowserWindow, Menu, getRendererRoot, getWorkspa
   }
   function attach(win, options = windowOptions()) {
     if (records.has(win)) return;
-    const actualMode = options.frame === false ? 'frameless' :
-      options.titleBarStyle === 'hiddenInset' ? 'hidden-inset' : options.titleBarStyle === 'hidden' ? 'overlay' : 'native';
+    const actualMode = options.titleBarStyle === 'hiddenInset' ? 'hidden-inset' : options.titleBarStyle === 'hidden' ? 'overlay' : 'native';
     const row = { mode: actualMode, listenerReady: false, contentReady: false, everReady: false,
       pending: [], bindings: {}, recording: false, state: { sidebarAvailable: false, sidebarHidden: false } };
     records.set(win, row);

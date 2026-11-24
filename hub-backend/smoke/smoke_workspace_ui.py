@@ -112,7 +112,7 @@ chk("左侧菜单使用高频优先的信息架构与克制字重",
     and "['协作', ['history'], 'collaboration']" in shell_js
     and "['工作内容', ['archive']]" in shell_js
     and "font-weight:700" not in nav_css and ".ws-nav-item.active" in nav_css
-    and "font-size:var(--ui-font-14-5, 14.5px)" in nav_css and "font-weight:420" in nav_css
+    and "font-size:14.5px" in nav_css and "font-weight:420" in nav_css
     and "width:15px;height:15px" in nav_css)
 navigation_groups = [
     shell_file.split(f"const {name} = [", 1)[1].split("\n  ];", 1)[0]

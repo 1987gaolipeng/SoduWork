@@ -54,7 +54,7 @@
   border:none;border-radius:var(--r-sm);
   background:transparent;
   color:var(--ink-4);
-  font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-14, 14px));
+  font-size:max(var(--font-min-readable, 14.5px), 14px);
   display:flex;align-items:center;justify-content:center;
   transition:background-color .15s ease,color .15s ease,transform .12s ease;
   z-index:2;
@@ -212,13 +212,13 @@ input[type=date]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 
 .att-ico{display:flex;align-items:center;justify-content:center;line-height:1;color:var(--ink-4)}
 .att-ico .ico{width:20px;height:20px;vertical-align:0}
 /* Set line-height explicitly so overflow:hidden does not clip glyph descenders. */
-.att-fname{font-size:max(var(--font-min-readable, 14.5px), var(--ui-font-12-5, 12.5px));line-height:1.5;font-weight:600;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.att-fname{font-size:max(var(--font-min-readable, 14.5px), 12.5px);line-height:1.5;font-weight:600;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .att-fsize{font-size:max(var(--font-min-readable, 14.5px), 11px);line-height:1.4;color:var(--ink-5)}
 /* Dashed add tile doubles as a drop target hint. */
 .att-add{width:66px;height:66px;flex-direction:column;align-items:center;justify-content:center;gap:3px;
   border-style:dashed;background:transparent;color:var(--ink-4)}
 .att-add:hover{color:var(--accent);background:var(--accent-soft,rgba(91,147,240,.06))}
-.att-add-plus{font-size:var(--ui-font-20, 20px);line-height:1;font-weight:300}
+.att-add-plus{font-size:20px;line-height:1;font-weight:300}
 .att-add-txt{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)))}
 .att-tile[data-preview]{cursor:pointer}
 .att-tile[data-preview]:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 65%,transparent);
@@ -470,7 +470,7 @@ input[type=date]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 
 .hb-title{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-lg) * var(--font-scale,1)));font-weight:700;color:var(--ink)}
 .hb-count{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:400;color:var(--ink-4);margin-left:4px}
 .hb-head-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
-.hb-close{background:none;border:none;color:var(--ink-4);font-size:var(--ui-font-15, 15px);padding:4px 8px;border-radius:var(--r-sm)}
+.hb-close{background:none;border:none;color:var(--ink-4);font-size:15px;padding:4px 8px;border-radius:var(--r-sm)}
 .hb-close:hover{background:var(--bg-2);color:var(--ink-2)}
 
 /* Inline title/note/tag editors reveal boundaries on hover or focus and placeholders when empty. */

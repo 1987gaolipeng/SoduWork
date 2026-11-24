@@ -564,7 +564,7 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
     if (owner.closed || !owner.sender || owner.sender.isDestroyed()) return { ok: false };
     owner.sender.send('work-preview-composer-hello', { tabId: found.item.id });
     try { found.item.composer.view.webContents.send('app-composer-mode', composerModePayload(found.item)); } catch (_) {} // Synchronize sidebar width and theme at page startup.
-    return { ok: true, locale: require('./native-locale.cjs').getLocale(), fontScale: owner.fontScale || '1', application: {
+    return { ok: true, locale: require('./native-locale.cjs').getLocale(), application: {
       id: String(found.item.appBridge?.appId || '').replace(/^plugin:/, ''), name: String(found.item.label || '应用'), icon: found.item.icon || '',
     } };
   }

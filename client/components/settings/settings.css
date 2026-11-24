@@ -60,7 +60,7 @@
   letter-spacing: .1em;
   color: var(--settings-accent);
 }
-#settingsPanel .set-page-main-title { grid-column: 1; font: 680 var(--ui-font-20, 20px)/1.25 var(--font-display, sans-serif); letter-spacing: -.02em; }
+#settingsPanel .set-page-main-title { grid-column: 1; font: 680 20px/1.25 var(--font-display, sans-serif); letter-spacing: -.02em; }
 #settingsPanel .set-page-sub { color: var(--settings-muted); font: 400 var(--settings-text)/1.5 var(--font-ui, sans-serif); }
 #settingsPanel > .set-group {
   grid-column: 1 / -1;
@@ -205,7 +205,7 @@
 .client-update-blockers button:hover{color:var(--accent);border-color:var(--accent)}
 .client-update-blockers p{margin:5px 0 0;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.6}
 #settingsPanel .soduwork-account-name { font-size: var(--settings-label); }
-#settingsPanel .soduwork-account-avatar { width: 42px; height: 42px; border-radius: 50%; color: var(--settings-accent); background: color-mix(in srgb, var(--settings-accent) 8%, var(--settings-paper)); font-size: var(--ui-font-18, 18px); overflow: hidden; }
+#settingsPanel .soduwork-account-avatar { width: 42px; height: 42px; border-radius: 50%; color: var(--settings-accent); background: color-mix(in srgb, var(--settings-accent) 8%, var(--settings-paper)); font-size: 18px; overflow: hidden; }
 #settingsPanel .soduwork-account-person { gap: 12px; min-width: 0; }
 #settingsPanel .soduwork-account-person > span:nth-child(2) { min-width: 0; }
 #settingsPanel :is(.soduwork-account-name, .soduwork-account-id) { overflow-wrap: anywhere; }
@@ -257,7 +257,7 @@ html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-kick
 html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-main-title {
   grid-column: 1 !important;
   grid-row: 2 !important;
-  font: 680 var(--ui-font-20, 20px)/1.25 var(--font-display, sans-serif) !important;
+  font: 680 20px/1.25 var(--font-display, sans-serif) !important;
   color: var(--ink) !important;
 }
 html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-sub {
@@ -305,8 +305,8 @@ html[data-desk-panel="workspace"] #settingsPanel > .set-third { grid-column: spa
 
 #settingsPanel .set-access-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 #settingsPanel .set-access-options button { padding: 14px 16px; text-align: left; border: 1px solid var(--settings-line); border-radius: 12px; background: var(--settings-paper); color: var(--ink); }
-#settingsPanel .set-access-options button b { display: flex; align-items: center; gap: 7px; font-size: var(--ui-font-15, 15px); font-weight: 600; }
-#settingsPanel .set-access-options button small { display: block; margin-top: 6px; color: var(--settings-muted); font-size: max(var(--font-min-readable, 14.5px), var(--ui-font-13, 13px)); line-height: 1.6; }
+#settingsPanel .set-access-options button b { display: flex; align-items: center; gap: 7px; font-size: 15px; font-weight: 600; }
+#settingsPanel .set-access-options button small { display: block; margin-top: 6px; color: var(--settings-muted); font-size: max(var(--font-min-readable, 14.5px), 13px); line-height: 1.6; }
 #settingsPanel .set-access-options button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 #settingsPanel .set-access-options button.active { border-color: var(--settings-accent); background: color-mix(in srgb, var(--settings-accent) 5%, var(--settings-paper)); }
 #settingsPanel .set-access-options button.active b { color: var(--settings-accent); }

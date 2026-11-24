@@ -284,7 +284,7 @@
     "这三件都是桌面上的快捷入口，关掉只是不显示——需求、通知、团队都在这扇主窗口里照常用。 托盘图标右键也能改这几项。": "These desktop shortcuts can be hidden. Issues, notifications and teams remain available in the main window. You can also change these options from the tray menu.",
     "未完成需求以呼吸光晕提醒。": "Incomplete issues are shown with a soft breathing glow.",
     "需求视图大小": "Issue view size",
-    "调整需求视图大小，以及甘特图的日期列宽和行高。": "Adjust the requirement view size and the column width and row height of its Gantt chart.",
+    "决定需求视图窗口在桌面上占多大空间。": "Choose how much space the issue view uses on your desktop.",
     "仅保存在此设备，用于支持统一授权的新建对话；已有会话、需求和自动化保持原有权限。": "Saved on this device for new chats with supported agents. Existing chats, issues and automations keep their own permissions.",
     "正在执行的工作不会被升级打断。": "Running work will not be interrupted by updates.",
     "团队需求": "Team issues",
