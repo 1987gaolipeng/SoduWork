@@ -101,6 +101,30 @@ class TokenQuotaTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(saved.input_tokens, 999)
             self.assertEqual(await session.scalar(select(models.AIUsageDaily.input_tokens)), 999)
 
+    async def test_usage_must_be_an_object_before_any_event_in_a_batch_is_recorded(self):
+        route = "/api/v1/usage/events"
+        valid = {"sourceId": "valid", "usage": {"input": 8, "output": 2}}
+        for value in ("x", "", 1, 0, False, [], [["input", 4]]):
+            with self.subTest(value=value):
+                response = await self.http.post(route, headers=self.headers, json={"events": [
+                    valid, {"sourceId": "invalid", "usage": value}]})
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertIn("usage 必须是对象", response.json()["detail"])
+        async with self.sessions() as session:
+            self.assertIsNone(await session.scalar(select(models.AIUsageEvent.id)))
+            self.assertIsNone(await session.scalar(select(models.AIUsageDaily.id)))
+
+        response = await self.http.post(route, headers=self.headers, json={"events": [
+            valid, {"sourceId": "omitted"}, {"sourceId": "null", "usage": None},
+            {"sourceId": "empty", "usage": {}}]})
+        self.assertEqual(response.status_code, 200, response.text)
+        async with self.sessions() as session:
+            receipts = response.json()["events"]
+            self.assertEqual(len({receipt["id"] for receipt in receipts}), 4)
+            stored = [await session.get(models.AIUsageEvent, receipt["id"]) for receipt in receipts]
+            self.assertEqual([(row.input_tokens, row.output_tokens) for row in stored],
+                             [(8, 2), (0, 0), (0, 0), (0, 0)])
+
     async def test_chat_source_matches_owner_and_device_after_late_conversation_sync(self):
         route = "/api/v1/usage/events"
         event = {"sourceId": "native", "conversationId": "native", "sourceTitle": "Unverified title",
