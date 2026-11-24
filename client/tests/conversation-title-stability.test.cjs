@@ -87,6 +87,15 @@ test('an older rename reply cannot overwrite the newer saved header or sidebar n
   assert.equal(painted.at(-1),'New explicit name');
 });
 
+test('a draft rename updates the open chat header without adding a recent conversation', () => {
+  const f = sidebarFixture(), painted = [];
+  f.window.ChatChrome = { rename: (id, title) => painted.push([id, title]) };
+  const draftTitle = { id: 'draft', title: 'My draft', customTitle: 'My draft', titleUpdatedAt: 1 };
+  f.api.updateChatState({ kind: 'renamed', sessionId: 'draft', presence: null, draftTitle });
+  assert.deepEqual(painted, [['draft', 'My draft']]);
+  assert.deepEqual(f.ctx.chatItems, []);
+});
+
 test('a rename reply from the previous account cannot repopulate the current title cache or header', async () => {
   const f=sidebarFixture(),painted=[];let resolve;
   f.window.soduWorkAPI.conversationSession.renameHistory=()=>new Promise(done=>{resolve=done;});

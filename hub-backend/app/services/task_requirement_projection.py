@@ -65,7 +65,7 @@ async def _legacy_rework_contexts(session, pairs, rejected_rows):
 
 async def decorate_many(session, tasks, apis):
     from .task_requirements import stage
-    from . import requirement_edit_policy, task_maintenance
+    from . import approval_routing, requirement_edit_policy, task_maintenance
 
     pairs = list(zip(tasks, apis))
     if not pairs:
@@ -103,8 +103,10 @@ async def decorate_many(session, tasks, apis):
                              versions.c.task_id == reviews.c.task_id)).where(
             reviews.c.position == 1, versions.c.position == 1,
         ).subquery()
+        # An automatic delivery can save its output and an unassigned ticket together.
+        # Keep the submission recoverable until an actual reviewer receives this ticket.
         pending = select(latest.c.task_id).where(
-            latest.c.status == "pending",
+            latest.c.status == "pending", ~approval_routing.unassigned_review(latest.c.request_id, latest.c.task_id),
             latest.c.artifact_state.not_in({"rejected", "superseded"}),
             or_(latest.c.expires_at.is_(None), latest.c.expires_at > datetime.now(timezone.utc)),
         ).subquery()

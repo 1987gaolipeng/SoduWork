@@ -578,19 +578,9 @@ async def _ingest_delivery(r, message: dict) -> None:
 
 
 async def _reconcile_runner_restart(r) -> None:
-    """Publish authoritative interruption for queued work lost by a process restart."""
-    try:
-        async with SessionLocal() as session:
-            updates = await execution_sessions.reconcile_runner_restart(session, r)
-            await session.commit()
-        for item in updates:
-            if item.get("clientId"):
-                await _publish_task_owner(item["taskId"], {
-                    "type": "execution.updated", "taskId": item["taskId"],
-                    "session": item["session"],
-                })
-    except Exception as exc:  # noqa: BLE001 - recovery must not reject a healthy Runner
-        log.warning("执行机重启排队对账失败 %s: %s", r.id, type(exc).__name__)
+    """Wake the queued-lease monitor. The receive loop must stay free to read probe replies."""
+    from ..services import queued_dispatch_lease
+    queued_dispatch_lease.runner_connected(r)
 
 
 def _schedule_terminal_settlement(task_id: str, ref: str) -> None:

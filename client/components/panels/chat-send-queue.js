@@ -95,6 +95,8 @@
     const state = ((ctx._snap || {}).execution || {}).turnQueue || {};
     const immediate = ((ctx._snap || {}).execution || {}).queueImmediate || {};
     const recovery = ((ctx._snap || {}).execution || {}).modelRecovery;
+    const recoveryLabel = recovery?.mode === 'text-summary' ? '切换模型并总结已有结果'
+      : recovery?.requiresModelChange ? '切换模型后恢复' : '恢复这一轮';
     const recoveryRequired = ctx._snap?.execution?.recoveryRequired === true;
     const checking = Boolean(currentVerification());
     const cloudConversation = ctx._snap?.cloudHandoff?.phase === 'committed' ||
@@ -177,7 +179,7 @@
           '<span>' + (isSending ? '引导中…' : '引导') + '</span>' + icon('steer') + '</button>' : '') +
         (movable && !showImmediate ? action('edit', icon('edit') + '<span class="nqueue-action-label">调整内容</span>', row) : '') +
         (!active && !transferred && !nativeId && row.native && /^(failed|stopped)$/.test(status) ?
-          (recovery && recovery.taskId === row.taskId ? action('retry-model', recovery.requiresModelChange ? '切换模型后恢复' : '恢复这一轮', { id: recovery.id }) : action('retry', '重试需求', row)) : '') +
+          (recovery && recovery.taskId === row.taskId ? action('retry-model', recoveryLabel, { id: recovery.id }) : action('retry', '重试需求', row)) : '') +
         (!transferred && !nativeId && status === 'todo' && !row.native ?
           action('arrange', '执行方式', row) + action('start', '发送需求', row) : '') +
         (!active ? action('remove', '<span class="nqueue-sr">移除</span>' + icon('remove'), row) : '') +
@@ -187,7 +189,7 @@
       (recoveryRequired || state.paused && (pendingCount || recovery) ? '<div class="nqueue-paused" role="status"><span>' +
         ctx.esc(recoveryRequired ? (checking ? '正在核实执行状态…' : ctx._snap.statusText || state.reason || '执行状态尚未确认') : state.reason || '队列已暂停') +
         '</span>' + (recoveryRequired ? action('resume', checking ? '核实中…' : '核实执行状态') :
-          recovery ? action('retry-model', recovery.requiresModelChange ? '切换模型后恢复' : '恢复这一轮', { id: recovery.id }) : action('resume', '继续队列')) + '</div>' : '') +
+          recovery ? action('retry-model', recoveryLabel, { id: recovery.id }) : action('resume', '继续队列')) + '</div>' : '') +
       (ctx._queueHistoryOpen && completed.length ? '<div class="nqueue-history">' + completed.map(entry => {
         const rt = entry && entry.task || {};
         // Derive receipt wording from current state so rejected approvals do not remain labeled pending acceptance.

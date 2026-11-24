@@ -21,6 +21,32 @@ const safeMarkup = content => DOMPurify.sanitize(marked.parse(content || ''), {
   ALLOWED_ATTR: ['start', 'colspan', 'rowspan']
 })
 
+async function readPublicationState(kind) {
+  const result = await api.legalDocument(kind)
+  if (Array.isArray(result.currentLocales)) return result
+  const current = result.history?.find(row => row.id === result.currentId)
+  if (Array.isArray(current?.locales)) return { ...result, currentLocales: current.locales }
+  // For older Hubs, read the active languages from the public client endpoint.
+  try {
+    const response = await api.publicLegalDocuments()
+    const locales = response.documents.filter(row => row.key === kind).map(row => row.locale)
+    return { ...result, currentLocales: locales.length ? locales : null }
+  } catch {
+    return { ...result, currentLocales: null }
+  }
+}
+
+function LanguageImpact({ current, draft, scheduled, localeName }) {
+  if (!Object.keys(draft.translations).length) return null
+  const missing = current?.filter(code => !Object.hasOwn(draft.translations, code))
+  if (missing?.length === 0) return null
+  return <p className="legal-language-impact" role="status">
+    {missing ? tx('与当前客户端生效版本相比，本次发布内容将移除 {0} 个语言版本（{1}）。',
+      [missing.length, missing.map(localeName).join(' / ')]) : tx('未能核对客户端当前生效的语言，请在发布前确认。')}
+    {scheduled && <> {tx('定时发布生效前，客户端的生效版本可能变化。')}</>}
+  </p>
+}
+
 function Preview({ draft, locale }) {
   const content = draft.translations[locale]
   if (!content) return <p className="muted">{tx('导入协议文档后，即可核对和编辑正文')}</p>
@@ -56,7 +82,7 @@ function LegalEditor({ uiLocale }) {
     const stamp = ++attempt.current
     setBusy(true); setError(''); setDialog(null); setHistoryVersion(null)
     try {
-      const result = await api.legalDocument(kind)
+      const result = await readPublicationState(kind)
       if (stamp !== attempt.current) return
       setState(result); setDraft({ ...blank, ...result.draft, version: '' }); setDirty(false); setReviewed([])
       setSourceLocale(result.draft.defaultLocale || Object.keys(result.draft.translations)[0] || '')
@@ -194,6 +220,21 @@ function LegalEditor({ uiLocale }) {
     if (dirty || !state?.revision) { if (await save()) visit('preview'); return }
     if (!ready) { visit('preview', locales.find(code => !reviewed.includes(code))); return }
     if (!validTime()) return
+    if (operation.current) return
+    operation.current = true
+    setBusy(true)
+    const stamp = attempt.current
+    let currentLocales = null
+    try {
+      currentLocales = (await readPublicationState(kind)).currentLocales
+    } catch {
+      // Keep publication available if the lookup fails and show a warning at confirmation.
+    } finally {
+      operation.current = false
+      if (stamp === attempt.current) setBusy(false)
+    }
+    if (stamp !== attempt.current) return
+    setState(old => ({ ...old, currentLocales }))
     setDialog({ publish: true, title: tx('确认发布'), text: tx('发布后正文不可覆盖。后续修改将生成新版本，历史原文保持不变。'), label: tx('确认发布'), confirm: publish })
   }
   function continueReview() {
@@ -239,6 +280,8 @@ function LegalEditor({ uiLocale }) {
           </> : <p className="muted">{tx('导入协议文档后，即可核对和编辑正文')}</p>}
           <footer className="legal-actions"><span className="muted">{tx(dirty ? '有未保存的改动' : state.revision ? '草稿已保存' : '尚未创建草稿')}</span><button className="btn btn-primary" disabled={!dirty} onClick={save}>{tx('保存草稿')}</button></footer>
         </>}
+        {(panel === 'preview' || panel === 'publish') && <LanguageImpact current={state.currentLocales}
+          draft={draft} scheduled={!!effectiveAt} localeName={localeName} />}
         {panel === 'preview' && <>
           {locales.length > 1 ? <label className="legal-language-select">{tx('正文语言')}<SelectMenu className="f-in" aria-label={tx('正文语言')} disabled={busy} value={sourceLocale} onChange={e => setSourceLocale(e.target.value)}>{locales.map(code => <option key={code} value={code}>{localeName(code)}</option>)}</SelectMenu></label> : text && <p className="legal-source-language">{tx('正文语言')} · <b>{localeName(sourceLocale)}</b></p>}
           <Preview draft={draft} locale={sourceLocale} />
@@ -288,6 +331,7 @@ function LegalEditor({ uiLocale }) {
       foot={<><button className="btn btn-ghost" disabled={busy} onClick={() => setDialog(null)}>{tx('取消')}</button>
         <button className={'btn ' + (dialog.danger ? 'btn-danger' : 'btn-primary')} disabled={busy} onClick={dialog.confirm}>{tx(busy ? '处理中…' : dialog.label)}</button></>}>
       <p>{tx(dialog.text)}</p>{dialog.detail && <p className="legal-dialog-detail" translate="no">{dialog.detail}</p>}
+      {dialog.publish && <LanguageImpact current={state.currentLocales} draft={draft} scheduled={!!effectiveAt} localeName={localeName} />}
       {dialog.publish && <dl className="legal-publication-details">
         <dt>{tx('文档')}</dt><dd>{tx(names[kind])}</dd><dt>{tx('版本号')}</dt><dd>{tx('发布时自动生成')}</dd>
         <dt>{tx('正文语言')}</dt><dd>{locales.map(localeName).join(' / ')}</dd>

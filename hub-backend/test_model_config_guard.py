@@ -1,28 +1,45 @@
 """Competing model editors must never silently overwrite each other."""
 import asyncio
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
 from test_model_runtime import IsolatedDatabase
-from app.models import Client, ModelDef, ModelProvider
+from app.models import AppSetting, Client, ModelDef, ModelProvider
 from app.api import admin, config, personal_models, tasks, model_runtime as runtime_api
 from app.services import model_catalog, model_config_guard as guard, model_runtime
 
 
 class ModelConfigTests(IsolatedDatabase):
+    async def test_department_integration_manager_cannot_save_global_llm_settings(self):
+        manager = SimpleNamespace(is_super=False, _perms={"integration.manage"})
+        async with self.sessions.begin() as session:
+            session.add(AppSetting(key="llm_model", value="original"))
+
+        async with self.sessions() as session:
+            before = await admin.get_llm_config(session)
+            with self.assertRaises(HTTPException) as denied:
+                await admin.put_llm_config(
+                    {"model": "edited", "expectedRevision": before["revision"]}, manager, session)
+            self.assertEqual(denied.exception.status_code, 403)
+
+        async with self.sessions() as session:
+            self.assertEqual(await admin.get_llm_config(session), before)
+        admin.audit.log.assert_not_awaited()
+
     async def test_organization_defaults_reject_stale_editor_and_other_worker_cache(self):
         from app.services import llm
         async with self.sessions() as session:
             original = await admin.get_llm_config(session)
             await admin.put_llm_config({"expectedRevision": original["revision"],
-                "baseUrl": "https://fresh.invalid/v1", "model": "fresh", "apiKey": "new-key"}, None, session)
+                "baseUrl": "https://fresh.invalid/v1", "model": "fresh", "apiKey": "new-key"}, self.editor, session)
         async with self.sessions() as session:
             with patch.object(llm, "_cache", {"llm_model": "old-worker-value"}):
                 self.assertEqual((await llm.load(session))["llm_model"], "fresh")
             with self.assertRaises(HTTPException) as error:
-                await admin.put_llm_config({"expectedRevision": original["revision"], "model": "stale"}, None, session)
+                await admin.put_llm_config({"expectedRevision": original["revision"], "model": "stale"}, self.editor, session)
             self.assertEqual(error.exception.status_code, 409)
 
     async def asyncSetUp(self):
@@ -37,6 +54,8 @@ class ModelConfigTests(IsolatedDatabase):
                 ModelDef(id="provider:model", provider_id="provider", name="model"),
             ])
         self.audit = patch.object(admin.audit, "log", new=AsyncMock())
+        # LLM config is platform-level (#1026): only superusers may edit it.
+        self.editor = SimpleNamespace(is_super=True, id="fixture")
         self.audit.start()
         self.addCleanup(self.audit.stop)
 

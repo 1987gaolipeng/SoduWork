@@ -7,23 +7,28 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import exists, select, update
+from sqlalchemy import exists, inspect, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import hash_password, verify_password
 from ..db import get_session
-from ..deps import authenticated_client, current_ai_client, enforce_client_quota, has_perm, quota_prefetch, require_perm
+from ..deps import (
+    authenticated_client,
+    enforce_client_quota,
+    has_perm,
+    quota_prefetch,
+    require_perm,
+)
 from ..models import AuditLog, Client, User
 from ..schemas import client_to_api
 from ..services import (
-    audit,
     account_security,
+    audit,
     client_access,
     device_auth,
     device_connections,
     rbac,
 )
-
 
 router = APIRouter(prefix="/api/v1", tags=["client-auth"])
 log = logging.getLogger(__name__)
@@ -95,6 +100,8 @@ async def _device_with_key(
     session: AsyncSession,
     device: str,
     key: str,
+    *,
+    allow_new: bool = False,
 ) -> Client:
     try:
         device_id = device_auth.validate_device_id(device)
@@ -102,6 +109,13 @@ async def _device_with_key(
     except device_auth.DeviceAuthError as exc:
         raise _device_error(exc) from exc
     client = await session.get(Client, device_id)
+    if allow_new and (client is None or (
+        client.auth_state != "revoked" and not (client.secret or client.secret_hash)
+    )):
+        # Transient until account proof succeeds. Keep the observed version so a
+        # concurrent reset cannot turn an in-flight login into a fresh enrollment.
+        return Client(id=device_id, secret_hash=device_auth.hash_secret(secret),
+                      auth_state="pending", auth_version=client.auth_version if client else None)
     if client is None:
         raise HTTPException(
             status_code=404,
@@ -168,6 +182,26 @@ async def complete_login(session, client, user, body, *, created=False):
     expected_key = client.secret_hash
     expected_version = user.auth_version
     from ..services import desktop_login_policy
+    if inspect(client).transient:
+        await session.refresh(user, with_for_update=True)
+        if client.auth_version is None:
+            bound = await device_auth.insert_new_device(session, client.id, expected_key)
+            if bound is None:
+                # A simultaneous verified login can win the insert. The normal
+                # locked checks below still require the same device credential.
+                bound = await session.get(Client, client.id, populate_existing=True)
+        else:
+            claimed = await session.execute(update(Client).where(
+                Client.id == client.id, Client.auth_version == client.auth_version,
+                Client.auth_state != "revoked", Client.secret_hash == "",
+                or_(Client.secret.is_(None), Client.secret == ""),
+                or_(Client.user_ref.is_(None), Client.user_ref == user.id),
+            ).values(secret_hash=expected_key, auth_state="pending")
+                .execution_options(synchronize_session=False))
+            bound = await session.get(Client, client.id, populate_existing=True) if claimed.rowcount == 1 else None
+        if bound is None:
+            raise client_access.ClientAccessError("设备授权已变更，请重新登录", code="DEVICE_AUTH_FAILED", status=403)
+        client = bound
     await desktop_login_policy.lock_assignment(session, client, user)
     if client.auth_state == "revoked" or client.secret_hash != expected_key:
         raise client_access.ClientAccessError("设备授权已变更，请重新登录", code="DEVICE_AUTH_FAILED", status=403)
@@ -198,7 +232,7 @@ async def login(body: ClientLogin,
                 session: AsyncSession = Depends(get_session)):
     """Compatibility password login for established usernames; registration is explicit."""
     from ..services import email_auth
-    client = await _device_with_key(session, body.device, x_device_key or "")
+    client = await _device_with_key(session, body.device, x_device_key or "", allow_new=True)
     try:
         account = client_access.normalize_account(body.account)
         await email_auth.password_budget(session, account, client.id)
@@ -350,8 +384,8 @@ async def authorize_ai(response: Response, model: str = "", agent: str = "",
     conf = {}
     runtime = model_quota.managed_runtime(agent)
     if runtime:
-        want = model.strip() or model_catalog.agent_model(client, runtime)
-        conf = await model_catalog.resolve(session, client, want)
+        want, provider = model_catalog.agent_choice(client, runtime, model)
+        conf = await model_catalog.resolve(session, client, want, provider_id=provider)
         if not conf:
             raise HTTPException(400, "所选模型不可用，请刷新模型列表后重试")
         conf["quotaScope"] = conf.get("fundingScope", "platform")

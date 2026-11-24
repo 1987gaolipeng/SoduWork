@@ -19,6 +19,61 @@ const cases = [
   [{ name: '日报\u0000' }, 'name', /控制字符/],
 ]
 
+test('new templates offer three editable work examples and keep the writing hint after selection', async t => {
+  setLocale('zh-CN')
+  const examples = [
+    ['团队日报', 'daily-report-3', 'daily', /日报/, /对应成果/],
+    ['会议纪要转待办', 'meeting-actions', 'daily', /待办表/, /待确认/],
+    ['团队周报', 'weekly-report', 'weekly', /本周成果/, /跟进动作/],
+  ]
+  for (const [label, id, every, deliverable, acceptance] of examples) {
+    const props = {
+      value: { ...valid, id: '', name: '', note: '', description: 'Keep my description' },
+      items: [{ id: 'daily-report' }, { id: 'daily-report-2', enabled: false }],
+      onChange(value) { props.value = value; page.render(props) },
+    }
+    const page = await createComponentHarness(new URL('../src/screens/AutomationTemplates.jsx', import.meta.url), {
+      exportName: 'Editor', privateExports: ['Editor'], dependencies, props,
+    })
+    t.after(() => page.unmount())
+    const buttons = () => page.nodes(n => n.type === 'button' && n.props.type === 'button'
+      && examples.some(([name]) => name === n.props.children))
+    assert.equal(buttons().length, 3)
+    page.act(() => buttons().find(n => n.props.children === label).props.onClick())
+    assert.equal(props.value.id, id)
+    assert.ok(props.value.name.trim())
+    assert.equal(props.value.every, every)
+    assert.equal(props.value.description, 'Keep my description')
+    assert.match(props.value.note, deliverable)
+    assert.match(props.value.note, acceptance)
+    assert.equal(buttons().length, 0)
+    const note = page.nodes(n => n.type === 'textarea' && n.props.required)[0]
+    assert.equal(note.props.value, props.value.note)
+    const hintId = note.props['aria-describedby']
+    assert.ok(hintId)
+    assert.match(page.nodes(n => n.props.id === hintId)[0].props.children, /待办表.*待确认/)
+  }
+})
+
+test('examples respect draft identity and explicit cadence and are hidden when editing a saved template', async t => {
+  setLocale('zh-CN')
+  const props = { value: { ...valid, id: 'team-report', name: 'Custom name', note: '' },
+    onChange(value) { props.value = value; page.render(props) } }
+  const page = await createComponentHarness(new URL('../src/screens/AutomationTemplates.jsx', import.meta.url), {
+    exportName: 'Editor', privateExports: ['Editor'], dependencies, props,
+  })
+  t.after(() => page.unmount())
+  const button = text => page.nodes(n => n.type === 'button' && n.props.children === text)[0]
+  page.act(() => button('每天').props.onClick())
+  assert.ok(button('团队周报'))
+  page.act(() => button('团队周报').props.onClick())
+  assert.equal(props.value.id, 'team-report')
+  assert.equal(props.value.name, 'Custom name')
+  assert.equal(props.value.every, 'daily', 'even choosing the default rhythm explicitly must be honored')
+  page.render({ ...props, value: { ...props.value, note: '', updatedAt: '2030-01-01' } })
+  assert.equal(button('团队周报'), undefined)
+})
+
 test('date validation rejects malformed, impossible and reversed dates', async () => {
   setLocale('zh-CN')
   for (const changes of [{ startDate: '2030-02-29' }, { endDate: '2030-13-01' }, { startDate: '0000-01-01' },

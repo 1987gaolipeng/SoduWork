@@ -9,7 +9,7 @@ export default {
   '需求没有创建：': "Issue was not created: ", '添加项目需求': "Add project issue",
   '创建需求': "Create issue", '需求标题': "Issue title", '前置需求': 'Prerequisites',
   '新需求进入需求池待整理；澄清后设为待交付。选定的前置需求交付后，才能安排执行。': "New issues enter Intake. Clarify them and mark them Ready for delivery. Selected prerequisites must be delivered before execution can begin.",
-  '从 GitLab 仓库目录选择仓库和分支，需求才能准确落到对应工程。': "Select a repository and branch from GitLab to route issues to the correct project.",
+  '从仓库目录选择仓库和分支，需求才能准确落到对应工程。': "Select a repository and branch from the repository catalog to route issues to the correct project.",
   '当前执行底座没有项目概念，需求仍可正常派发。': "This runtime does not use projects; issues can still be dispatched.",
   '需求交付进度': "Issue delivery", '查看需求池': "View issues", '需求已交付': "Issues delivered",
   '项等待前置需求': 'waiting for prerequisites', '待整理与澄清': 'Intake and clarification',

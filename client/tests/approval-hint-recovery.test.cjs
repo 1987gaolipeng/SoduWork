@@ -42,6 +42,30 @@ function runtime(approvalDetail) {
   return {ctx, block, root, hint, errorEl, proof, state, flush, calls: () => approvalCalls};
 }
 
+test('release approval card displays the localized conflict instead of the raw Hub detail', async () => {
+  const x = runtime();
+  const message = 'No deployment target is available.';
+  x.block.dataset.approvalAccess = 'allowed';
+  x.block.removeAttribute = () => {};
+  x.ctx._humanErr = error => error.detail;
+  x.ctx.SoduWorkAPI.decideApproval = async () => {
+    throw Object.assign(new Error(message), {code: 'hub.input.release_environment', detail: 'original diagnostic'});
+  };
+  const button = {
+    closest: selector => selector === '.tfd-inline-approval' ? x.block
+      : selector === '[data-tfd-approval-action]' ? button : null,
+    getAttribute: () => 'approve',
+  };
+  let click;
+  x.root.addEventListener = (name, handler) => { if (name === 'click') click = handler; };
+  x.root.contains = element => element === button;
+  x.ctx.TaskTraceApproval.bind(x.root, x.state);
+  click({target: button, preventDefault() {}, stopPropagation() {}});
+  await x.flush();
+  assert.equal(x.errorEl.textContent, message);
+  assert.equal(x.errorEl.hidden, false);
+});
+
 test('403 权限拒绝：非验收人移除卡片，不显示错误弹窗', async () => {
   const x = runtime(async () => { const e = new Error('forbidden'); e.status = 403; throw e; });
   x.ctx._humanErr = (error) => error && error.status === 403

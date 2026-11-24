@@ -15,12 +15,13 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import automation_models as am, models, repository_issue_models  # register catalog subscription metadata
+from .. import automation_models as am
+from .. import models, repository_issue_models  # noqa: F401 - register catalog subscription metadata
 from ..connectors import get_connector
-from . import code_creds, resource_leases, scm_support
-from .workdirs import validate_repo_local_dir
 from ..timestamps import iso_utc
-
+from . import code_creds, rbac, resource_leases, scm_support
+from .business_records import creation_source
+from .workdirs import validate_repo_local_dir
 
 SYNC_LEASE_SECONDS = 1800
 
@@ -135,6 +136,13 @@ async def _runtime_config(session: AsyncSession, integration: models.Integration
     return cfg, org_id
 
 
+async def lock_integration(session: AsyncSession, integration_id: str) -> models.Integration | None:
+    """Keep the organization tree and integration config stable through the write."""
+    await rbac.lock_org_tree(session, shared=True)
+    return await session.get(models.Integration, integration_id, with_for_update=True,
+                             populate_existing=True)
+
+
 async def set_pull_account(session: AsyncSession, integration_id: str, *,
                            user: str, secret, kind: str | None = None,
                            org_id: str = "") -> None:
@@ -230,6 +238,7 @@ async def sync_integration(session: AsyncSession, integration_id: str, *,
     connector = get_connector(integration.type)
     if connector is None or not callable(getattr(connector, "list_repositories", None)):
         raise ValueError("This integration cannot list repositories")
+    config_snapshot = _fingerprint(integration.config or {})
     lease = await resource_leases.acquire(
         session, "repository-sync", str(integration.id), ttl_seconds=SYNC_LEASE_SECONDS,
         detail={"integrationId": str(integration.id), "stage": "preparing"})
@@ -238,6 +247,9 @@ async def sync_integration(session: AsyncSession, integration_id: str, *,
         await _publish_sync_stage(session, lease, "listing")
         rows = await asyncio.to_thread(connector.list_repositories, cfg)
         await _publish_sync_stage(session, lease, "saving")
+        integration = await lock_integration(session, integration_id)
+        if integration is None or _fingerprint(integration.config or {}) != config_snapshot:
+            raise ValueError("Integration configuration changed during synchronization. Retry the sync.")
         seen: set[str] = set()
         created = updated = 0
         now = datetime.now(timezone.utc)
@@ -299,8 +311,8 @@ async def sync_integration(session: AsyncSession, integration_id: str, *,
         raise
     except Exception as exc:
         await session.rollback()
-        integration = await session.get(models.Integration, integration_id)
-        if integration is not None:
+        integration = await lock_integration(session, integration_id)
+        if integration is not None and _fingerprint(integration.config or {}) == config_snapshot:
             integration.repository_sync_at = datetime.now(timezone.utc)
             integration.repository_sync_ok = False
             integration.repository_sync_error = str(exc)[:512]
@@ -346,6 +358,17 @@ async def branches(session: AsyncSession, row: am.ScmRepository, *,
     return sorted({str(value).strip() for value in values or [] if str(value).strip()})
 
 
+async def lock_deployment_repository(session: AsyncSession, rid: str) -> models.Repo | None:
+    """Serialize deployment-target writes and repository deletion until commit."""
+    if session.get_bind().dialect.name == "sqlite":
+        # SQLite ignores FOR UPDATE. Reserve its writer without changing business fields.
+        query = update(models.Repo).where(models.Repo.id == rid).values(id=models.Repo.id).returning(models.Repo)
+    else:
+        query = select(models.Repo).where(models.Repo.id == rid).with_for_update()
+    # Route-level scope checks may already have populated the identity map.
+    return await session.scalar(query.execution_options(populate_existing=True, synchronize_session=False))
+
+
 async def lock_mapping_project(session: AsyncSession, pid: str) -> models.Project | None:
     """Serialize repository additions with project deletion until commit.
 
@@ -357,7 +380,7 @@ async def lock_mapping_project(session: AsyncSession, pid: str) -> models.Projec
 
 
 async def create_mapping(session: AsyncSession, project: models.Project,
-                         source: am.ScmRepository, body: dict) -> models.Repo:
+                         source: am.ScmRepository, body: dict, *, actor: models.User | None = None) -> models.Repo:
     scm_support.require_active(source.provider)
     scm_support.require_active(body)
     local = validate_repo_local_dir(body.get("localDir"))
@@ -377,6 +400,8 @@ async def create_mapping(session: AsyncSession, project: models.Project,
         project = await lock_mapping_project(session, project.id)
         if project is None:
             raise ValueError("Target project no longer exists")
+        if project.is_archived:
+            raise ValueError("请先恢复项目再登记仓库")
         existing = (await session.execute(select(models.Repo).where(
             models.Repo.project_id == project.id,
             models.Repo.source_repository_id == source.id,
@@ -390,6 +415,7 @@ async def create_mapping(session: AsyncSession, project: models.Project,
             raise InvalidRepositoryInput("routePriority must be an integer") from None
         row = models.Repo(
             project_id=project.id, org_id=project.org_id,
+            data_source=creation_source(actor, body.get("dataSource"), parent=project),
             source_repository_id=source.id, name=name,
             kind=_text(body.get("kind") or "other", 16), git_url=git_url,
             default_branch=branch, merge_branch=target,
@@ -414,7 +440,7 @@ async def create_mapping(session: AsyncSession, project: models.Project,
 
 
 async def copy_mapping(session: AsyncSession, source: models.Repo,
-                       project: models.Project, body: dict) -> models.Repo:
+                       project: models.Project, body: dict, *, actor: models.User | None = None) -> models.Repo:
     scm_support.require_active(source)
     scm_support.require_active(body)
     local = validate_repo_local_dir(body.get("localDir"))
@@ -427,9 +453,21 @@ async def copy_mapping(session: AsyncSession, source: models.Repo,
                                 "sourceRepoId": str(source.id),
                                 "branch": branch})
     try:
-        project = await lock_mapping_project(session, project.id)
+        # A legacy mapping can acquire test provenance through later classification of its project.
+        # Lock both parents in a stable order when two projects copy from one another.
+        target_id = project.id
+        parents = {}
+        for pid in sorted({target_id, source.project_id} - {None}):
+            parents[pid] = await lock_mapping_project(session, pid)
+        project = parents[target_id]
         if project is None:
             raise ValueError("Target project no longer exists")
+        source = await lock_deployment_repository(session, source.id)
+        if source is None:
+            raise ValueError("Source repository no longer exists")
+        source_project = parents.get(source.project_id)
+        if project.is_archived or source.is_archived or (source_project and source_project.is_archived):
+            raise ValueError("请先恢复项目和仓库再复制映射")
         duplicate = select(models.Repo).where(
             models.Repo.project_id == project.id,
             models.Repo.default_branch == branch)
@@ -440,8 +478,12 @@ async def copy_mapping(session: AsyncSession, source: models.Repo,
             duplicate = duplicate.where(models.Repo.git_url == source.git_url)
         if (await session.execute(duplicate)).scalar_one_or_none() is not None:
             raise ValueError("This repository branch is already mapped to the project")
+        data_source = creation_source(actor, body.get("dataSource"), parent=project)
+        if source.data_source == "test" or (source_project and source_project.data_source == "test"):
+            data_source = "test"
         row = models.Repo(
             project_id=project.id, org_id=project.org_id,
+            data_source=data_source,
             source_repository_id=source.source_repository_id,
             name=_text(body.get("name") or source.name, 120), kind=source.kind,
             git_url=source.git_url, default_branch=branch, merge_branch=target,

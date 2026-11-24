@@ -6,6 +6,10 @@
 
 当前工作区使用 Electron 与原生 HTML/CSS/JavaScript；管理端的 React 构建不参与桌面渲染。
 
+首次发消息前，桌面端会检查当前底座和对话模型。点击缺失项旁的操作即可前往设置，返回后可继续编辑草稿。Hub 总览也可以打开已安装桌面端的底座或模型设置。新对话页面打开期间，桌面端会向 Hub 报告当前账号的这两项选择是否就绪。
+
+对话模型选择器在目录读取超时后会自动重试一次；加载失败或没有可用模型时，会提供重新加载入口。发送超时会保留输入，随后返回的目录可以更新选择器，但不会自动发送消息。重新加载列表、选择可用模型后，再次发送即可。
+
 ## 构建时指定默认 Hub
 
 常规构建仍默认连接 `https://service.soduwork.ai`。为其他部署打包时，在运行
@@ -133,7 +137,7 @@ Hub 模型拒绝错误通过 JSON、SSE 和原生会话摘要保留不透明的 
 
 模型临时故障共用既有的单轮重试预算。供应商的 `Retry-After` 是最短等待时间：超过剩余时间预算时停止自动重试，不缩短等待。已识别的计费或额度耗尽错误不重试。已产生的输出和工具结果继续通过既有显式恢复流程保留。
 
-首次体验推荐根目录的 `sh start.sh --desktop`。根目录启动器在专用 `venv/` 中安装 Hub 和 Runner 依赖，并明确将生成的桌面副本绑定到同一 Python 解释器。独立开发时保持 Hub 运行，在 `client/` 安装依赖 `npm ci` 后执行 `npm start`，三种桌面系统共用这一入口；请激活 `../hub-backend/.venv`，在 `client/` 执行 `python -m pip install -r ../hub-backend/requirements-runner.txt -c ../hub-backend/requirements.txt Pillow`。桌面端通过 Pillow 校验生成的图片后再写入成果。两种方式都执行当前后端源码，不要手工复制旧发行版 Runner 代替当前源码。
+首次体验推荐根目录的 `sh start.sh --desktop`。根目录启动器在专用 `venv/` 中安装 Hub 和 Runner 依赖，并明确将生成的桌面副本绑定到同一 Python 解释器。独立开发时保持 Hub 运行，在 `client/` 安装依赖 `npm ci` 后执行 `npm start`，三种桌面系统共用这一入口；请激活 `../hub-backend/.venv`，在 `client/` 执行 `python -m pip install -r ../hub-backend/requirements-runner.txt -r ../hub-backend/requirements-image.txt`。桌面端通过 Pillow 校验生成的图片后再写入成果。两种方式都执行当前后端源码，不要手工复制旧发行版 Runner 代替当前源码。
 
 `npm test` 运行客户端的单元和契约检查。`npm run check:layout` 检查源码与生成目录的边界。`e2e/` 脚本应按文件声明选择隔离夹具或真实服务：隔离界面通过不等于真实模型、用户账号或线上交付验证通过。
 

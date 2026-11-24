@@ -1,23 +1,55 @@
 """Public module behavior and service contracts."""
 from fastapi import APIRouter, Body, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..deps import require_perm
-from ..models import Integration, Repo, RepoBinding, Task, User
+from ..models import Integration, Project, Repo, RepoBinding, Task, User
 from ..services import audit, rbac
+from ..services.business_records import business_visible
 
 router = APIRouter(prefix="/api/v1/admin", tags=["repo-map"])
 
 
-async def _repo_in_scope(session: AsyncSession, user: User, repo: Repo) -> bool:
-    scope = await rbac.scope_org_ids(session, user)
-    return scope is None or repo.org_id is None or repo.org_id in scope
+def _tasks_in_scope(scope: set[str] | None):
+    query = select(Task)
+    if scope is None:
+        return query
+
+    # Use the account recorded on the task. A device can change accounts later.
+    query = (query.join(Integration, Integration.id == Task.integration_id)
+             .outerjoin(Project, Project.id == Task.project_id)
+             .outerjoin(User, User.id == Task.owner_user_id))
+    orgs = (Task.shared_org_id, Task.pool_org_id, Project.org_id, User.org_id)
+    # A newly imported issue can still have only its source integration as evidence.
+    source_org = Integration.config["orgId"].as_string()
+    source_only = and_(source_org.in_(scope), *(
+        or_(column.is_(None), column == "")
+        for column in (Task.project_id, Task.owner_user_id, Task.owner_client_id, Task.shared_org_id, Task.pool_org_id)
+    ))
+    return query.where(
+        or_(source_org.is_(None), source_org == "", source_org.in_(scope)),
+        or_(*(org.in_(scope) for org in orgs), source_only),
+        *(or_(org.is_(None), org == "", org.in_(scope)) for org in orgs),
+        or_(Task.project_id.is_(None), Task.project_id == "", Project.id.is_not(None)),
+        or_(Task.owner_user_id.is_(None), Task.owner_user_id == "", User.id.is_not(None)),
+    )
 
 
-async def _assert_repo_scope(session: AsyncSession, user: User, repo: Repo) -> None:
-    if not await _repo_in_scope(session, user, repo):
+async def _repo_in_scope(session: AsyncSession, scope: set[str] | None, repo: Repo | None) -> bool:
+    if scope is None:
+        return True
+    if repo is None:
+        return False
+    if repo.org_id and repo.org_id not in scope:
+        return False
+    project = await session.get(Project, repo.project_id)
+    return project is not None and (project.org_id is None or project.org_id in scope)
+
+
+async def _assert_repo_scope(session: AsyncSession, scope: set[str] | None, repo: Repo | None) -> None:
+    if not await _repo_in_scope(session, scope, repo):
         raise HTTPException(status_code=403, detail="无权管理该工程")
 
 
@@ -33,6 +65,7 @@ async def list_bindings(
     user: User = Depends(require_perm("binding.manage")),
     session: AsyncSession = Depends(get_session),
 ):
+    scope = await rbac.scope_org_ids(session, user)
     q = select(RepoBinding)
     if integrationId:
         q = q.where(RepoBinding.integration_id == integrationId)
@@ -40,7 +73,7 @@ async def list_bindings(
     out = []
     for b in rows:
         repo = await session.get(Repo, b.repo_id)
-        if repo is not None and await _repo_in_scope(session, user, repo):
+        if repo is not None and await _repo_in_scope(session, scope, repo):
             out.append(_api(b, repo))
     return {"items": out}
 
@@ -59,27 +92,39 @@ async def upsert_binding(
     rid = str(body.get("repoId") or "").strip()
     if not (iid and ext and rid):
         raise HTTPException(status_code=400, detail="集成、平台工程标识、SoduWork 工程三样都要给")
-    if await session.get(Integration, iid) is None:
+    await rbac.lock_org_tree(session, shared=True)
+    scope = await rbac.scope_org_ids(session, user)
+    integration = await session.get(Integration, iid, with_for_update=True)
+    if integration is None:
         raise HTTPException(status_code=404, detail="集成不存在")
-    repo = await session.get(Repo, rid)
+    owner = (integration.config or {}).get("orgId")
+    if scope is not None and owner not in (None, "") and (not isinstance(owner, str) or owner not in scope):
+        raise HTTPException(status_code=403, detail="无权管理该集成")
+    bindings = await session.scalars(
+        select(RepoBinding).where(RepoBinding.integration_id == iid).order_by(RepoBinding.id).with_for_update())
+    b = next((row for row in bindings if (row.external_repo or "").strip().lower() == ext.lower()), None)
+    # Lock the binding first, as deletion does, then its old and new repositories in order.
+    repo_ids = {rid, b.repo_id} if b else {rid}
+    targets = await session.scalars(select(Repo).where(Repo.id.in_(repo_ids)).order_by(Repo.id).with_for_update())
+    repos = {row.id: row for row in targets}
+    repo = repos.get(rid)
     if repo is None:
         raise HTTPException(status_code=404, detail="SoduWork 这边没有这个工程")
-    await _assert_repo_scope(session, user, repo)
-    rows = (await session.execute(
-        select(RepoBinding).where(RepoBinding.integration_id == iid))).scalars().all()
-    b = next((x for x in rows if (x.external_repo or "").strip().lower() == ext.lower()), None)
+    await _assert_repo_scope(session, scope, repo)
     if b is None:
         b = RepoBinding(integration_id=iid, external_repo=ext, repo_id=rid,
                         note=str(body.get("note") or "")[:200])
         session.add(b)
     else:
+        if b.repo_id != rid:
+            await _assert_repo_scope(session, scope, repos.get(b.repo_id))
         b.repo_id = rid
         b.note = str(body.get("note") or b.note or "")[:200]
     # Apply new mappings to existing unmapped issues as well as future imports.
     # Otherwise configuring a mapping would leave previously blocked issues unresolved.
     # Fill only missing ownership; preserve manual assignments.
     rows = (await session.execute(
-        select(Task).where(Task.integration_id == iid))).scalars().all()
+        _tasks_in_scope(scope).where(Task.integration_id == iid).with_for_update(of=Task))).scalars().all()
     fixed = 0
     for t in rows:
         if (getattr(t, "repo_id", "") or "").strip():
@@ -104,12 +149,13 @@ async def delete_binding(
     user: User = Depends(require_perm("binding.manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    b = await session.get(RepoBinding, bid)
+    await rbac.lock_org_tree(session, shared=True)
+    scope = await rbac.scope_org_ids(session, user)
+    b = await session.get(RepoBinding, bid, with_for_update=True)
     if b is None:
         return {"ok": False, "reason": "not_found"}
-    repo = await session.get(Repo, b.repo_id)
-    if repo is not None:
-        await _assert_repo_scope(session, user, repo)
+    repo = await session.get(Repo, b.repo_id, with_for_update=True)
+    await _assert_repo_scope(session, scope, repo)
     external_repo = b.external_repo
     integration_id = b.integration_id
     repo_id = b.repo_id
@@ -129,9 +175,9 @@ async def pending(
     """Group imported issues with unmapped repositories by external repository ID and include
     sample titles for configuration.
     """
+    scope = await rbac.scope_org_ids(session, user)
     rows = (await session.execute(
-        select(Task).where(Task.integration_id.is_not(None),
-                           Task.status.in_(("todo", "doing"))))).scalars().all()
+        _tasks_in_scope(scope).where(Task.integration_id.is_not(None), Task.status.in_(("todo", "doing"))))).scalars().all()
     stuck = [t for t in rows
              if not (getattr(t, "repo_id", "") or "").strip()
              and (getattr(t, "ext_repo", "") or "").strip()]
@@ -144,9 +190,11 @@ async def pending(
         if len(g["samples"]) < 3:
             g["samples"].append({"id": t.id, "title": t.title})
     # Include available SoduWork repositories so the mapping form needs no additional request.
-    repos = (await session.execute(select(Repo))).scalars().all()
+    available_projects = select(Project.id).where(business_visible(Project))
+    repos = (await session.execute(select(Repo).where(
+        business_visible(Repo), Repo.project_id.is_(None) | Repo.project_id.in_(available_projects)))).scalars().all()
     visible_repos = [repo for repo in repos
-                     if await _repo_in_scope(session, user, repo)]
+                     if await _repo_in_scope(session, scope, repo)]
     return {"items": sorted(groups.values(), key=lambda x: -x["count"]), "total": len(stuck),
             "repos": [{"id": r.id, "name": r.name, "projectId": r.project_id,
                        "ready": bool((r.server_dir or "").strip() and (r.merge_branch or "").strip())}

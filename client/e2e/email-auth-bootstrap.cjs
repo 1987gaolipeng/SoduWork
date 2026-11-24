@@ -43,8 +43,10 @@ if (typeof electron === 'string') {
       window.loginReplies=[];window.SoduWorkAPI={hubBase:()=>fixtureHub,hubConfig:()=>({editable:false}),
         clientAuthSnapshot:()=>({state:fixtureUser?'active':'pending',clientId:fixtureDevice,user:fixtureUser}),
         rememberedLoginAccount:()=>fixtureParams.has('transition')?(fixtureHub==='http://fixture.invalid'?'first-account':'second-account'):'',
+        loginPreferences:()=>({rememberAccount:fixtureParams.has('transition'),autoLogin:false}),
         registerClient:()=>new Promise(resolve=>setTimeout(()=>{fixtureDevice='soduwork-real-device';resolve(fixtureUser?{ok:true,user:fixtureUser}:{ok:true,activationRequired:true});},20)),
-        clientAuthMe:async()=>({user:fixtureUser}),clientLogin:()=>new Promise(resolve=>loginReplies.push(resolve)),
+        clientAuthMe:async()=>({user:fixtureUser}),clientLogin:({rememberAccount,autoLogin})=>{
+          window.submittedOptions={rememberAccount,autoLogin};return new Promise(resolve=>loginReplies.push(resolve));},
         clientAuthPolicy:()=>{requests.push({kind:'policy',device:fixtureDevice});return new Promise((resolve,reject)=>setTimeout(()=>{if(policyFailures>0){policyFailures--;reject(Error('fixture HTTP failure'));}else resolve({mailReady,allowSelfRegistration:true,passwordMinLength:8});},80));},
         clientAccountAction:()=>{requests.push({kind:'unexpected-mail'});throw Error('No mail allowed in bootstrap fixture');}};` +
       '</script>' + scripts.map(file => '<script src="' + file + '"></script>').join('') + '</body></html>');
@@ -53,6 +55,7 @@ if (typeof electron === 'string') {
     win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_request, callback) => callback({ cancel: true }));
     await win.loadFile(fixture);
     await until('ClientAuth.snapshot().policy?.mailReady === true');
+    assert.equal(await js('document.querySelector("#soduWorkRememberAccount").checked || document.querySelector("#soduWorkAutoLogin").checked'), false);
     const statusText = 'document.querySelector(".soduwork-auth-status").textContent';
     await js(`SoduWorkI18n.setLocale('en-US', {persist:false,broadcast:false});
       dispatchEvent(new CustomEvent('soduwork-client-auth-required',{detail:{error:'TypeError: fetch failed'}}));`);
@@ -103,9 +106,12 @@ if (typeof electron === 'string') {
     await win.loadFile(fixture, { query: { transition: '1' } });
     await until('ClientAuth.snapshot().policy?.mailReady===true');
     assert.equal(await js('document.getElementById("soduWorkAuthAccount").value'), 'first-account');
+    assert.equal(await js('document.getElementById("soduWorkRememberAccount").checked'), true);
+    await click('#soduWorkAutoLogin');
     assert.equal(await js('document.getElementById("soduWorkAuthPassword").value'), '');
     await click('#soduWorkAuthPassword'); await win.webContents.insertText('Synthetic first password');
     await click('[type="submit"]'); await until('loginReplies.length===1');
+    assert.deepEqual(await js('submittedOptions'), {rememberAccount:true,autoLogin:true});
     assert.equal(await js('document.querySelector("[type=submit]").disabled'), true);
     let loaded = 0;
     win.webContents.on('did-finish-load', () => { loaded++; });
@@ -136,10 +142,12 @@ if (typeof electron === 'string') {
     report.cases.push('Switching services fills only that service’s remembered account and leaves the password blank');
     await click('#soduWorkAuthPassword'); await win.webContents.insertText('Synthetic final password');
     await click('[type="submit"]'); await until('loginReplies.length===3');
+    const reloaded = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
     await js(`sessionStorage.setItem('fixture-active','yes');fixtureUser={id:'fixture-account'};
       for(let i=0;i<2;i++)dispatchEvent(new CustomEvent('soduwork-device-auth',{
         detail:{state:'active',user:fixtureUser,interactiveLogin:true}}));
       loginReplies[2]({ok:true,user:fixtureUser});void 0;`);
+    await reloaded;
     await until('ClientAuth.snapshot().user?.id==="fixture-account" && document.getElementById("soduWorkClientAuthGate").hidden');
     await delay(710);
     assert.equal(loaded, 1, 'An interactive success reloads once and bootstrap restoration does not reload again');

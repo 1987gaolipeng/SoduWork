@@ -98,6 +98,40 @@ class EnvironmentSortValidationTests(unittest.IsolatedAsyncioTestCase):
             ])
             self.assertEqual(await session.scalar(select(func.count()).select_from(models.AuditLog)), 0)
 
+    async def test_environment_writes_reject_malformed_prerequisites_atomically(self):
+        async with self.sessions.begin() as session:
+            env = await session.get(am.Environment, "existing")
+            env.promotion_policy = {"requires": ["system"]}
+        bad_inputs = (12345, False, "system", 0, True, None, "", {}, {"system": True},
+                      ["system", 1], [None], [["system"]])
+        for method, path in (("PATCH", "/existing"), ("POST", "")):
+            for value in bad_inputs:
+                with self.subTest(method=method, requires=value):
+                    body = {"name": "Changed", "promotionPolicy": {"requires": value}}
+                    if method == "POST":
+                        body["key"] = "proposed"
+                    response = await self.request(method, path, json=body)
+                    self.assertEqual(response.status_code, 400, response.text)
+                    self.assertEqual(response.json()["detail"], "requires 必须是环境标识数组")
+                    self.assertEqual(response.headers.get("X-Error-Code"), "hub.input.promotion_requires")
+                    async with self.sessions() as session:
+                        env = await session.get(am.Environment, "existing")
+                        self.assertEqual((env.name, env.promotion_policy), ("Original", {"requires": ["system"]}))
+                        self.assertEqual(await session.scalar(select(func.count()).select_from(am.Environment)), 3)
+                        self.assertEqual(await session.scalar(select(func.count()).select_from(models.AuditLog)), 0)
+
+    async def test_valid_prerequisites_keep_normalization_and_legacy_policy_reads(self):
+        async with self.sessions.begin() as session:
+            env = await session.get(am.Environment, "existing")
+            env.promotion_policy = {"requires": None}
+        result = await self.request("POST", json={"key": "new-stage", "promotionPolicy": {"requiresApproval": True}})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()["promotionPolicy"]["requires"], [])
+        for values, expected in (([" SYSTEM ", "system"], ["system"]), ([], [])):
+            result = await self.request("PATCH", "/existing", json={"promotionPolicy": {"requires": values}})
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["promotionPolicy"]["requires"], expected)
+
     async def test_invalid_sort_returns_400_without_data_or_audit_writes(self):
         invalid = [
             [], [1], {}, {"value": 1}, True, False, 1.5, 1.0,

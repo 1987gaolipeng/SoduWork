@@ -52,17 +52,17 @@ async def _assert_promotion_graph(session: AsyncSession, row: am.Environment) ->
     requires = promotion_policy(row.promotion_policy).get("requires") or []
     missing = [k for k in requires if k not in existing_keys]
     if missing:
-        raise ValueError(f"前置环境不存在：{', '.join(missing)}")
+        raise BusinessConflict(f"前置环境不存在：{', '.join(missing)}")
     graph = {x.key: list(promotion_policy(x.promotion_policy).get("requires") or [])
              for x in rows}
     graph[row.key] = requires
     if row.key in graph[row.key]:
-        raise ValueError("环境不能依赖自己")
+        raise BusinessConflict("环境不能依赖自己")
     visiting, visited = set(), set()
 
     def visit(key: str) -> None:
         if key in visiting:
-            raise ValueError("环境推进关系存在循环依赖")
+            raise BusinessConflict("环境推进关系存在循环依赖")
         if key in visited or key not in graph:
             return
         visiting.add(key)
@@ -327,6 +327,14 @@ class InvalidEnvironmentTier(ValueError):
     """The requested deployment tier is outside the catalog."""
 
 
+class InvalidPromotionDependencies(ValueError):
+    """A submitted promotion policy has malformed environment prerequisites."""
+
+
+class BusinessConflict(ValueError):
+    """The operation conflicts with existing data or rules (e.g., circular dependency)."""
+
+
 async def _environment_selector(session: AsyncSession, value, org_id: str | None) -> dict:
     selector = _selector(value)
     if not selector["tags"]:
@@ -367,7 +375,8 @@ async def save_environment(session: AsyncSession, body: dict, row: am.Environmen
         org_id = body.get("orgId") or None
         if await session.scalar(select(func.count(am.Environment.id)).where(
                 am.Environment.key == key, am.Environment.org_id == org_id)):
-            raise ValueError("环境标识已经存在")
+            from .catalog_names import DuplicateName
+            raise DuplicateName("环境标识已经存在")
         row = am.Environment(key=key, name=_text(body.get("name"), 80) or key,
                              tier=tier, org_id=org_id)
         session.add(row)
@@ -377,7 +386,8 @@ async def save_environment(session: AsyncSession, body: dict, row: am.Environmen
         if await session.scalar(select(func.count(am.Environment.id)).where(
                 am.Environment.key == key, am.Environment.org_id == row.org_id,
                 am.Environment.id != row.id)):
-            raise ValueError("环境标识已经存在")
+            from .catalog_names import DuplicateName
+            raise DuplicateName("环境标识已经存在")
         old_key = row.key
         row.key = key
         # Update promotion chains that reference the old key
@@ -392,7 +402,10 @@ async def save_environment(session: AsyncSession, body: dict, row: am.Environmen
                 new_reqs = [k if k != old_key else key for k in reqs]
                 other.promotion_policy = {**pp, "requires": new_reqs}
     if "name" in body:
-        row.name = _text(body.get("name"), 80) or row.name
+        name = str(body.get("name") or "").strip()
+        if len(name) > 80:
+            raise ValueError("环境名称不能超过 80 个字符")
+        row.name = name or row.name
     if "tier" in body:
         row.tier = tier or "custom"
     if "description" in body:
@@ -411,7 +424,12 @@ async def save_environment(session: AsyncSession, body: dict, row: am.Environmen
     row.approval_policy_id = approval_id
     row.acceptance_policy_id = acceptance_id
     if "promotionPolicy" in body or creating:
-        row.promotion_policy = promotion_policy(body.get("promotionPolicy"))
+        policy = body.get("promotionPolicy")
+        if isinstance(policy, dict):
+            prerequisites = policy.get("requires", [])
+            if not isinstance(prerequisites, list) or not all(isinstance(key, str) for key in prerequisites):
+                raise InvalidPromotionDependencies("requires 必须是环境标识数组")
+        row.promotion_policy = promotion_policy(policy)
     if "enabled" in body:
         row.enabled = bool(body.get("enabled"))
     if "sort" in body:
@@ -506,6 +524,10 @@ async def list_secret_refs(session: AsyncSession, org_ids: set[str] | None) -> l
     return [secret_api(x) for x in (await session.execute(q)).scalars().all()]
 
 
+class InvalidSecretReferenceOrg(ValueError):
+    """The requested secret-reference organization is not a valid catalog scope."""
+
+
 async def save_secret_ref(session: AsyncSession, body: dict,
                           row: am.SecretReference | None = None) -> am.SecretReference:
     provider = _text(body.get("provider") if row is None else body.get("provider", row.provider), 32)
@@ -515,7 +537,16 @@ async def save_secret_ref(session: AsyncSession, body: dict,
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", locator):
         raise ValueError("Runner 环境变量名不合法")
     if row is None:
-        row = am.SecretReference(org_id=body.get("orgId") or None,
+        org_id = body.get("orgId")
+        if org_id is not None and not isinstance(org_id, str):
+            raise InvalidSecretReferenceOrg("orgId 必须是组织 ID 字符串")
+        # Preserve the existing explicit system-scope forms, without treating
+        # malformed falsey values ([], {}, false, 0) as system references.
+        if org_id == "":
+            org_id = None
+        if org_id is not None and await session.get(models.OrgUnit, org_id) is None:
+            raise InvalidSecretReferenceOrg("orgId 对应的组织不存在")
+        row = am.SecretReference(org_id=org_id,
                                  name=_text(body.get("name"), 100) or locator,
                                  provider=provider, locator=locator)
         session.add(row)
@@ -555,6 +586,15 @@ async def probe_secret_ref(row: am.SecretReference, tags: list[str],
             "env": row.locator, "provider": row.provider, "locator": row.locator,
         }]}, "requiredCapabilities": ["files", "terminal"]}, 30)
     return {**result, "runnerId": runner.id, "host": runner.host}
+
+
+def require_target_secret(ref: am.SecretReference | None, ref_id: str,
+                          *org_ids: str | None) -> am.SecretReference:
+    if ref is None or not ref.enabled:
+        raise ValueError(f"密钥引用不存在或已停用：{ref_id}")
+    if ref.org_id is not None and any(ref.org_id != org_id for org_id in org_ids):
+        raise ValueError(f"密钥引用不属于这个仓库或任务的组织：{ref_id}")
+    return ref
 
 
 async def probe_target(session: AsyncSession, row: am.DeploymentTarget,
@@ -609,11 +649,12 @@ async def probe_target(session: AsyncSession, row: am.DeploymentTarget,
                              "error": "没有符合标签、组织范围且具备代码仓库和命令能力的在线 Runner",
                              "tags": tags, "runnerIds": runner_ids})
     secrets = []
-    for env_name, ref_id in dict(row.secret_refs or {}).items():
-        ref = refs.get(str(ref_id))
-        if ref:
-            secrets.append({"env": str(env_name), "provider": ref.provider,
-                            "locator": ref.locator})
+    try:
+        for env_name, ref_id in dict(row.secret_refs or {}).items():
+            ref = require_target_secret(refs.get(str(ref_id)), str(ref_id), repo.org_id if repo else None)
+            secrets.append({"env": str(env_name), "provider": ref.provider, "locator": ref.locator})
+    except ValueError as exc:
+        return await finish({"ok": False, "error": str(exc)})
     result = await asyncio.to_thread(
         runner_hub.call_sync, runner, "deploy.preflight",
         {"spec": {"argv": dict(row.config or {}).get("argv") or [], "secrets": secrets},
@@ -626,7 +667,8 @@ async def save_target(session: AsyncSession, body: dict, row: am.DeploymentTarge
                       ) -> am.DeploymentTarget:
     repo_id = _text(body.get("repoId") if row is None else body.get("repoId", row.repo_id), 36)
     env_id = _text(body.get("environmentId") if row is None else body.get("environmentId", row.environment_id), 36)
-    repo_row = await session.get(models.Repo, repo_id)
+    from .repository_catalog import lock_deployment_repository
+    repo_row = await lock_deployment_repository(session, repo_id)
     if not repo_row:
         raise ValueError("代码仓库不存在")
     env_row = await session.get(am.Environment, env_id)
@@ -647,10 +689,7 @@ async def save_target(session: AsyncSession, body: dict, row: am.DeploymentTarge
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(env_name)):
             raise ValueError(f"密钥注入变量名不合法：{env_name}")
         secret = await session.get(am.SecretReference, str(ref_id))
-        if secret is None or not secret.enabled:
-            raise ValueError(f"密钥引用不存在或已停用：{ref_id}")
-        if secret.org_id is not None and secret.org_id != repo_row.org_id:
-            raise ValueError(f"密钥引用不属于这个仓库的组织：{ref_id}")
+        require_target_secret(secret, str(ref_id), repo_row.org_id)
     if row is None:
         row = am.DeploymentTarget(repo_id=repo_id, environment_id=env_id,
                                   name=_text(body.get("name"), 100) or env_row.name,

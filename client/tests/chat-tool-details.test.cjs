@@ -140,6 +140,77 @@ test('command summaries ignore old detail clicks without queueing a receipt read
   assert.equal(ctx._openTool.has(tool.id), false);
 });
 
+function commandRecordFixture() {
+  const f = imageReadHarness(), records = [];
+  f.sandbox.ChatWorkbench.openCommandRecord = tool => { records.push(tool); return true; };
+  function add(id, deferred = true) {
+    const tool = { id, name: 'bash', state: 'done', args: { command: 'echo ' + id },
+      detailsDeferred: deferred, detailVersion: 'v1' };
+    const row = f.add(tool);
+    const html = f.renderer._toolHtml(tool);
+    const owner = html.match(/data-command-owner="([^"]+)"/)[1].replaceAll('&quot;', '"');
+    const button = { isConnected: true, dataset: { commandRecord: id, commandOwner: owner },
+      closest: () => row };
+    row.contains = target => target === button;
+    const query = row.querySelector;
+    row.querySelector = selector => selector.includes('data-command-record') ? button : query(selector);
+    return { tool, button, open: () => f.details.openRecord(f.ctx, id, button) };
+  }
+  return { ...f, add, records };
+}
+
+test('explicit record selection reads only the selected receipt and keeps the transcript collapsed', async () => {
+  const f = commandRecordFixture(), calls = [];
+  const first = f.add('first'), second = f.add('second');
+  const full = { ...second.tool, detailsDeferred: false, result: 'second command output' };
+  f.ctx._api = () => ({ toolDetail: async (ref, id) => { calls.push([ref, id]); return { ok: true, tool: full }; } });
+  f.details.activate(f.ctx, first.tool.id); await tick();
+  assert.deepEqual(calls, []);
+  second.open(); await tick();
+  assert.deepEqual(calls, [['test', 'second']]);
+  assert.deepEqual(f.records, [full]);
+  assert.equal(f.ctx._openTool.size, 0);
+  assert.doesNotMatch(f.renderer._toolHtml(second.tool), /second command output|ntool-body/);
+});
+
+test('late command receipts cannot open another conversation or a newer revision of the record', async () => {
+  for (const change of ['conversation', 'version', 'selection']) {
+    const f = commandRecordFixture(), first = f.add('same-id'), second = f.add('second', false);
+    let finish;
+    f.ctx._api = () => ({ toolDetail: () => new Promise(resolve => { finish = resolve; }) });
+    first.open(); await tick();
+    if (change === 'conversation') {
+      f.ctx._ref = 'other'; f.ctx._viewEpoch++;
+      f.ctx._snap = { tools: [{ ...first.tool }] };
+    } else if (change === 'version') {
+      f.ctx._snap.tools[0] = { ...first.tool, detailVersion: 'v2' };
+    } else {
+      second.open();
+    }
+    finish({ ok: true, tool: { ...first.tool, result: 'stale output' } }); await tick();
+    assert.deepEqual(f.records, change === 'selection' ? [second.tool] : [], change);
+  }
+});
+
+test('an old command link cannot request a reused tool ID after a conversation switch', async () => {
+  const f = commandRecordFixture(), old = f.add('same-id');
+  f.ctx._ref = 'other'; f.ctx._viewEpoch++;
+  f.ctx._snap = { tools: [{ ...old.tool }] };
+  old.open(); await tick();
+  assert.equal(f.count.requests, 0);
+  assert.deepEqual(f.records, []);
+});
+
+test('a deferred bridge receipt stays private even if its projected summary looked like an ordinary command', async () => {
+  const f = commandRecordFixture(), summary = f.add('projected');
+  f.full.set('projected', { ...summary.tool, detailsDeferred: false, result: 'bridge output',
+    args: { command: 'node "C:/private/mcp.mjs" --config "C:/private/session.json" call soduwork task_list' } });
+  summary.open(); await tick();
+  assert.equal(f.count.requests, 1);
+  assert.deepEqual(f.records, []);
+  assert.doesNotMatch(f.renderer._toolHtml(summary.tool), /bridge output|session\.json/);
+});
+
 test('stale task command clicks cannot hydrate raw output into the conversation', () => {
   const { sandbox } = harness();
   const events = [{ seq: 1, kind: 'do', tool: 'bash', text: 'netstat -ano' },

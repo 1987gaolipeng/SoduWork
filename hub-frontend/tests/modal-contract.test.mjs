@@ -118,3 +118,51 @@ test('Modal ignores text-selection drags that start inside and release on the ma
   page.act(() => mask.props.onClick({ stopPropagation: stop, target: self, currentTarget: self }))
   assert.deepEqual(closed, ['closed'], 'a genuine mask click must still close the dialog')
 })
+
+test('all editor dismissal paths compare the draft, keep the safe choice and leave saving independent', async t => {
+  const { dependencies, layers } = host(t)
+  let closed = 0, saved = 0
+  const original = { name: 'Role', permissions: ['a'], access: { listed: true, scope: 'own' } }
+  const props = { title: 'Edit', draft: original, onClose: () => closed++,
+    foot: dismiss => [dismiss, () => saved++] }
+  const page = await createComponentHarness(uiFile, { exportName: 'Modal', dependencies, props })
+  t.after(() => page.unmount())
+  const footer = () => page.nodes(node => node.props.className === 'modal-foot')[0].props.children
+  const confirm = () => page.nodes(node => node.type?.name === 'Confirm')[0]
+  const backdrop = {}
+  const actions = [
+    () => layers[0].onClose(),
+    () => page.nodes(node => node.props.className === 'mx')[0].props.onClick(),
+    () => {
+      const { onMouseDown, onClick } = page.nodes(node => node.props.className === 'modal-mask')[0].props
+      const event = { target: backdrop, currentTarget: backdrop, stopPropagation() {} }
+      onMouseDown(event); onClick(event)
+    },
+    () => footer()[0](),
+  ]
+  const renderDraft = draft => page.render({ ...props, draft })
+  page.render()
+  renderDraft({ ...original, name: 'Changed' })
+  for (const dismiss of actions) {
+    page.act(dismiss)
+    const prompt = confirm()
+    assert.ok(prompt?.props.focusCancel)
+    assert.equal(closed, 0)
+    page.act(prompt.props.onClose)
+    assert.equal(confirm(), undefined)
+  }
+  page.act(footer()[1])
+  assert.equal(saved, 1)
+  assert.equal(confirm(), undefined)
+  page.act(actions[0])
+  page.act(confirm().props.onConfirm)
+  assert.equal(closed, 1)
+  assert.equal(confirm(), undefined)
+  renderDraft({ access: { scope: 'own', listed: true }, permissions: ['a'], name: 'Role' })
+  page.act(actions[3])
+  assert.equal(closed, 2)
+  assert.equal(confirm(), undefined)
+  page.render({ ...props, draft: undefined, dirty: true })
+  page.act(actions[1])
+  assert.ok(confirm())
+})

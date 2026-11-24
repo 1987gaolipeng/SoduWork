@@ -25,25 +25,37 @@ function unreadableOutput(tool) {
   return tool;
 }
 
-test('commands retain only their status in both transcripts even after a remembered expansion', () => {
+function recordIds(html) {
+  return Array.from(html.matchAll(/<button\b[^>]*\bdata-command-record="([^"]+)"[^>]*>/g), match => match[1]);
+}
+
+test('ended chat commands offer their execution record without revealing it in either transcript', () => {
   const { tools, renderer, sandbox, ctx } = harness();
   for (const state of ['running', 'done']) {
     const command = unreadableOutput({ id: 'normal-command', name: 'bash', state, after: 0,
       args: { command: 'npm test' } });
     ctx._openTool.add(command.id);
     const expected = state === 'running' ? /正在运行命令/ : /运行了命令/;
-    for (const html of [renderer._toolHtml(command), sandbox._executionStreamToolHtml({ key: command.id, model: command })]) {
+    const chat = renderer._toolHtml(command);
+    const taskStream = sandbox._executionStreamToolHtml({ key: command.id, model: command });
+    for (const html of [chat, taskStream]) {
       assert.match(html, expected);
-      assert.doesNotMatch(html, /npm test|<button|ntool-body|ntool-caret|aria-expanded|title=/);
+      assert.doesNotMatch(html, /npm test|ntool-body|ntool-caret|aria-expanded|title=/);
     }
+    assert.deepEqual(recordIds(chat), state === 'done' ? [command.id] : []);
+    if (state === 'done') assert.match(chat, /查看执行记录/);
+    else assert.doesNotMatch(chat, /<button/);
+    assert.doesNotMatch(taskStream, /<button|data-command-record/);
     const input = [command, { id: 'terminal-input', name: 'write_stdin', state, after: 1, args: { chars: 'next' } }];
     const group = tools.batchHtml(input, 'remembered', true, tool => renderer._toolHtml(tool));
     assert.match(group, expected);
-    assert.doesNotMatch(group, /npm test|<button|ntool-batch-body|ntool-batch-caret|aria-expanded|title=/);
+    assert.deepEqual(recordIds(group), state === 'done' ? [command.id, 'terminal-input'] : []);
+    assert.doesNotMatch(group, /npm test|ntool-body|title=/);
+    if (state === 'running') assert.doesNotMatch(group, /<button|ntool-batch-body|aria-expanded/);
     const parts = [], previous = [];
     tools.appendTimeline(parts, input, previous, 'turn', true, tool => renderer._toolHtml(tool), new Set(['remembered']));
     assert.match(parts.join(''), expected);
-    assert.doesNotMatch(parts.join(''), /npm test|ntool-batch-body|ntool-batch-caret|aria-expanded/);
+    assert.doesNotMatch(parts.join(''), /npm test|ntool-body/);
     assert.equal(previous.length, 2, 'execution history remains intact for status and progress');
     assert.equal(command.state, state);
     assert.equal(command.args.command, 'npm test');
@@ -53,13 +65,28 @@ test('commands retain only their status in both transcripts even after a remembe
 test('command failures and permission changes retain visible status without command details', () => {
   const { tools, renderer, sandbox } = harness();
   for (const extra of [{ state: 'error' }, { state: 'done', isError: true },
-    { state: 'failed' }, { state: 'cancelled', cancelReason: 'access-change' }]) {
+    { state: 'failed' }, { state: 'cancelled', cancelReason: 'access-change', isError: false }]) {
     const command = unreadableOutput({ id: 'important-command', name: 'exec_command',
       args: { command: 'npm test' }, ...extra });
-    assert.match(renderer._toolHtml(command), /命令执行异常|权限已调整，未执行/);
+    const html = renderer._toolHtml(command);
+    assert.match(html, /命令执行异常|权限已调整，未执行/);
+    assert.deepEqual(recordIds(html), extra.state === 'cancelled' ? [] : [command.id]);
     assert.match(sandbox._executionStreamToolHtml({ key: command.id, model: command }), /命令执行异常|权限已调整，未执行/);
     assert.equal(tools.render(command).summaryOnly, true);
-    assert.doesNotMatch(renderer._toolHtml(command), /npm test|ntool-body|ntool-caret|<button/);
+    assert.doesNotMatch(html, /npm test|ntool-body|ntool-caret/);
+  }
+});
+
+test('a record action requires an identifiable finished command', () => {
+  const { renderer } = harness();
+  for (const tool of [
+    { id: '', name: 'bash', state: 'done' },
+    { id: 'unknown-state', name: 'bash' },
+    { id: 'preparing', name: 'bash', state: 'running', phase: 'preparing' },
+    { id: 'not-executed', name: 'bash', state: 'cancelled', cancelReason: 'output-limit', isError: false },
+    { id: 'read-file', name: 'read', state: 'done', args: { path: 'file.md' } },
+  ]) {
+    assert.deepEqual(recordIds(renderer._toolHtml(unreadableOutput(tool))), [], tool.id);
   }
 });
 
@@ -120,7 +147,8 @@ test('command aliases retain status without details or reading output', () => {
     const folded = renderer._toolHtml(tool);
     assert.doesNotMatch(folded, /npm (?:run build|test)|cat README\.md/);
     assert.doesNotMatch(folded, /title="[^"]| class="[^"]* open/);
-    assert.doesNotMatch(folded, /ntool-body|ntool-caret|<button/);
+    assert.doesNotMatch(folded, /ntool-body|ntool-caret/);
+    assert.deepEqual(recordIds(folded), state === 'running' ? [] : [name]);
     ctx._openTool.add(tool.id);
     const html = renderer._toolHtml(tool);
     assert.equal(html, folded, 'a remembered expansion cannot restore command details');
@@ -142,11 +170,11 @@ test('large command results and bridge details never enter transcript markup', (
   } });
   const html = renderer._toolHtml(bridge);
   assert.match(html, /SoduWork|查看我的任务/);
-  assert.doesNotMatch(html, /mcp\.mjs|secret\.json|C:\/private|ntool-body|title=/);
+  assert.doesNotMatch(html, /mcp\.mjs|secret\.json|C:\/private|ntool-body|title=|data-command-record/);
 });
 
-test('consecutive command groups retain a status line without a remembered expansion', () => {
-  const { tools } = harness();
+test('consecutive command groups offer only the records of already executed commands', () => {
+  const { tools, renderer } = harness();
   const commands = [1, 2].map(after => unreadableOutput({ id: 'cmd-' + after,
     name: 'bash', state: after === 2 ? 'running' : 'done', args: { command: 'npm test' }, after }));
   const messages = [{ role: 'user', text: 'Check' }, ...[1, 2].map(() => ({
@@ -155,9 +183,11 @@ test('consecutive command groups retain a status line without a remembered expan
   const grouped = tools.groupConsecutiveCommands(commands, messages);
   assert.deepEqual(Array.from(grouped, tool => tool.after), [1, 1]);
   assert.equal(commands[1].after, 2);
-  const html = tools.batchHtml(grouped, 'commands', true, () => { throw Error('Unexpected child row'); });
+  const html = tools.batchHtml(grouped, 'commands', true, tool => renderer._toolHtml(tool));
   assert.match(html, /正在运行命令/); assert.match(html, />2 项</);
-  assert.doesNotMatch(html, /npm test|data-tool-group|aria-expanded|ntool-batch-caret|ntool-batch-body| open/);
+  assert.match(html, /data-tool-group="commands"/);
+  assert.deepEqual(recordIds(html), ['cmd-1']);
+  assert.doesNotMatch(html, /npm test|ntool-body/);
   commands[1].state = 'error';
   assert.match(tools.batchHtml(commands, 'commands', false), /命令执行有异常/);
   const boundary = { id: 'read', name: 'read', args: { path: 'report.md' }, state: 'done', after: 2 };
@@ -239,7 +269,7 @@ test('MCP server names cannot turn file tools into commands or record operations
     args: { command: 'npm test' }, state: 'done' });
   assert.equal(tools.render(command).commandOnly, true);
   assert.match(renderer._toolHtml(command), /运行了命令/);
-  assert.doesNotMatch(renderer._toolHtml(command), /<button|ntool-body|npm test/);
+  assert.doesNotMatch(renderer._toolHtml(command), /ntool-body|npm test/);
   assert.doesNotMatch(renderer._toolHtml(command), /title="[^"]/);
   assert.equal(tools.kind({ name: 'mcp__terminal__read_file', toolKind: 'execute' }), 'command');
   assert.equal(tools.kind({ name: 'mcp__terminal__query', toolKind: 'read' }), 'read');
@@ -323,7 +353,7 @@ test('command summary and mixed file batches replace each other without stale co
   } } };
   sandbox.window = sandbox;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/chat-dom-patch.js'), 'utf8'), sandbox);
-  const host = new Element('host'), command = { id: 'cmd', name: 'bash', args: { command: 'npm test' }, state: 'error' };
+  const host = new Element('host'), command = { id: 'cmd', name: 'bash', args: { command: 'npm test' }, state: 'running' };
   const file = { id: 'file', name: 'read', args: { path: 'report.md' }, result: 'File evidence', state: 'done' };
   const paint = items => sandbox.ChatDomPatch.patchList(host,
     tools.batchHtml(items, 'same-group', true, tool => renderer._toolHtml(tool)));
@@ -336,9 +366,11 @@ test('command summary and mixed file batches replace each other without stale co
   paint([command, { ...command, id: 'cmd-2' }]);
   assert.equal(host.querySelector('.ntool-batch-head').nodeName, 'DIV');
   assert.equal(host.querySelector('.ntool-batch-body'), null);
-  paint([{ ...command, state: 'done' }]);
-  assert.equal(host.querySelector('.ntool-batch-head').nodeName, 'DIV');
-  assert.equal(host.querySelector('.ntool-batch-body'), null, 'settled commands leave no stale detail fold');
+  paint([{ ...command, state: 'done' }, { ...command, id: 'cmd-2' }]);
+  assert.equal(host.querySelector('.ntool-batch-head').nodeName, 'BUTTON');
+  const finalRows = host.querySelector('.ntool-batch-body').innerHTML;
+  assert.deepEqual(recordIds(finalRows), ['cmd']);
+  assert.doesNotMatch(finalRows, /File evidence|ntool-file|npm test|ntool-body/);
 });
 
 test('cloud stream shows a bounded preparation row and replaces it with a real file action', () => {
