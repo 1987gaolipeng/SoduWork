@@ -10,6 +10,7 @@ os.environ["AUTH_SECRET"] = "memory-record-test-signing-key-not-for-production"
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
@@ -173,6 +174,42 @@ class MemoryRecordTests(unittest.IsolatedAsyncioTestCase):
     async def test_scope_requires_opaque_key(self):
         with self.assertRaises(Exception):
             svc._scope_key("workspace", "C:/Users/admin/project", "", "")
+
+    async def test_stale_archive_and_restore_cannot_overwrite_the_winner(self):
+        for desired in (True, False):
+            with self.subTest(archived=desired):
+                async with self.sessions() as reader, self.sessions() as writer:
+                    item = (await svc.create(reader, self.client_a, svc.MemoryWrite(
+                        key=f"archive-race-{desired}", title="Note", fields={"summary": "first"}, confirmed=True,
+                    )))["item"]
+                    cached = await svc.get(reader, self.client_a, item["id"])
+                    await reader.commit()
+                    winner = (await svc.archive(writer, self.client_a, item["id"], not desired))["item"]
+                    self.assertEqual(winner["revision"], cached.revision + 1)
+                    with self.assertRaises(HTTPException) as conflict:
+                        await svc.archive(reader, self.client_a, item["id"], desired)
+                    self.assertEqual(conflict.exception.status_code, 409)
+                    saved = await svc.get(reader, self.client_a, item["id"])
+                    self.assertEqual(svc.view(saved, True), winner)
+
+    async def test_archive_returns_its_own_write_when_restore_commits_before_the_reply(self):
+        async with self.sessions() as first, self.sessions() as second:
+            item = (await svc.create(first, self.client_a, svc.MemoryWrite(
+                key="archive-reply", title="Note", fields={"summary": "first"}, confirmed=True,
+            )))["item"]
+            commit = first.commit
+
+            async def commit_then_restore():
+                await commit()
+                await svc.archive(second, self.client_a, item["id"], False)
+
+            with patch.object(first, "commit", commit_then_restore):
+                archived = (await svc.archive(first, self.client_a, item["id"], True))["item"]
+            self.assertTrue(archived["archived"])
+            self.assertEqual(archived["revision"], item["revision"] + 1)
+            restored = await svc.get(second, self.client_a, item["id"])
+            self.assertFalse(restored.archived)
+            self.assertEqual(restored.revision, item["revision"] + 2)
 
     async def test_organization_memory_is_one_logical_upsert(self):
         async with self.sessions() as session:
