@@ -273,10 +273,12 @@
     for (let i = messages.length - 1; i >= 0; i -= 1) { if (messages[i] && messages[i].role === 'user') { latestUser = i; break; } }
     const runningTools = (Array.isArray(s.tools) ? s.tools : []).filter(t => t && t.state === 'running').map(t => Number(t.after) || 0);
     const slim = { ...s, messages: undefined, tools: undefined, notices: undefined, fileChanges: undefined,
-      history: s.history ? { messageStart: s.history.messageStart, messageIndices: s.history.messageIndices } : undefined };
+      history: s.history ? { messageStart: s.history.messageStart, messageIndices: s.history.messageIndices,
+        truncated: s.history.truncated, totalMessages: s.history.totalMessages } : undefined };
     if (s.execution && typeof s.execution === 'object') slim.execution = { ...s.execution, fileChanges: undefined };
     return JSON.stringify([slim, latestUser, runningTools, messages.flatMap((m, i) => m?.role === 'user'
-      ? [[i, m.sentAt || m.timestamp || 0]] : m?.role === 'assistant' && m.done !== false && m.completedAt ? [[i, m.completedAt]] : [])]);
+      ? [[i, m.sentAt || m.timestamp || 0]] : m?.role === 'assistant' && (s.localReplica || m.done !== false && m.completedAt)
+        ? [[i, m.completedAt || 0, m.done !== false]] : [])]);
   }
   let decorateMemo = null;
   function decorate(html, files, ref = '', snapshot = {}, previousRoot = null) {

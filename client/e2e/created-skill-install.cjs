@@ -172,7 +172,7 @@ if (typeof electron === 'string') {
       'components/panels/connector-editor.js', 'components/panels/connector-selection.js',
       'components/panels/connector-directory.js', 'components/panels/panels-capability-editors.js',
       'components/panels/panels-capabilities.js', 'components/panels/panels-plugin-maker-utils.js',
-      'components/panels/chat-plugin-draft-placement.js', 'components/panels/chat-output-links.js']) await load(file);
+      'components/panels/chat-plugin-draft-placement.js', 'components/panels/chat-deliveries.js', 'components/panels/chat-output-links.js']) await load(file);
     await js(`(async () => {
       await SoduWorkAPI.registerClient();
       const delivery = document.getElementById('delivery'), message = delivery.innerHTML;
@@ -187,11 +187,30 @@ if (typeof electron === 'string') {
       };
     })()`);
     assert.equal(await activate(skillChat), 1, 'A cold history view must restore the actionable skill card');
+    async function expectSkillExports() {
+      const groups = await js(`[...document.querySelectorAll('#delivery .ndelivery-files')].map(group =>
+        [...group.querySelectorAll('[data-open-app]')].map(button => ({
+          name: button.querySelector('[data-user-content]').textContent, id: button.dataset.openApp
+        })))`);
+      assert.equal(groups.length, 1, 'All five exports from the same turn belong in one results list');
+      assert.equal(new Set(groups[0].map(file => file.id)).size, 5);
+      for (const file of groups[0]) {
+        const resolved = await require('../main/conversation/artifact-runtime').action(current, current.ref, file.id, 'location');
+        assert.equal(resolved.ok, true);
+        assert.equal(path.relative(cwd, resolved.path).split(path.sep).join('/'), file.name);
+        assert.equal(fs.readFileSync(resolved.path).readUInt32LE(), 0x04034b50);
+      }
+      assert.deepEqual(groups[0].map(file => file.name).sort(), ['claude.zip', 'codex.zip', 'copilot.zip', 'portable.zip', 'soduwork.skill']
+        .map(suffix => 'delivery/' + name + '-1.0.0-' + suffix));
+    }
+    await expectSkillExports();
     const firstRef = current.ref;
     const firstId = await js(`document.querySelector('[data-install-plugin-draft]').dataset.installPluginDraft`);
     assert.equal(await activate(otherChat), 0, 'Switching chats must remove the former skill card');
     assert.equal(await js(`soduWorkAPI.conversationSession.pluginDraft(${JSON.stringify(firstRef)}, ${JSON.stringify(firstId)}).then(row => row.ok)`), false);
     assert.equal(await activate(skillChat), 1, 'Returning to the chat must rebuild the skill card');
+    await expectSkillExports();
+    report.cases.push('Cold reopen and switching back show one install card and one list with all five distinct platform exports');
     assert.notEqual(current.ref, firstRef);
     assert.equal(await js(`document.querySelector('[data-install-plugin-draft]').dataset.pluginDraftRef`), current.ref);
     report.cases.push('A second Electron process restores the skill action from SQLite and rebinds it after switching chats');

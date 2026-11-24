@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const plugins = require('./created-plugin-history.cjs');
 const { identity } = require('../../tests/helpers/platform-session-fixture.cjs');
 const { scope } = require('../../main/platform-connections/runtime.cjs');
-const name = 'created-skill-fixture';
+const name = 'chapter-editor';
 const references = 'Read the supplied sample and preserve its meaning.\n';
 const skillChat = 'created-skill-session', otherChat = 'other-session';
 
@@ -44,11 +44,12 @@ async function seed(app, root) {
   const history = historyFor(app, root, rows);
   try {
     const cwd = rows[0].cwd, delivery = path.join(cwd, 'delivery');
-    const built = require('../../../skills/skill-studio/scripts/skill-package.cjs').build({ source, out: delivery, targets: 'soduwork' });
-    const relative = 'delivery/' + built.exports[0].file;
+    const built = require('../../../skills/skill-studio/scripts/skill-package.cjs').build({ source, out: delivery, targets: 'all' });
+    const exports = built.exports.map(item => 'delivery/' + item.file);
+    const relative = exports.find(file => file.endsWith('.skill'));
     await history.register(rows);
     for (const row of rows) {
-      const names = row.id === skillChat ? [relative] : row.id === otherChat ? [] : await plugins.write(root, row);
+      const names = row.id === skillChat ? exports : row.id === otherChat ? [] : await plugins.write(root, row);
       const files = names.map(name => {
         const bytes = fs.readFileSync(path.join(row.cwd, name));
         return { path: name, action: 'created', after: { path: name, exists: true, size: bytes.length,

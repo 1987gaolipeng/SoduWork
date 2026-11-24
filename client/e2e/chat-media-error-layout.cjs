@@ -149,6 +149,44 @@ if (typeof electron === 'string') {
     await run(`paintHistory(historyFiles, ['shots/menu.png', '../shots/fight.png']); void 0;`);
     assert.equal(await run('Boolean(list.querySelector("pre code")) && !list.querySelector("img")'), true);
     report.cases.push({ historyGallery: 'two decoded screenshots, two unavailable entries, one message output and one session output' });
+    async function deliveryGroups(messages, files, history = {}, historyRecovery) {
+      return run(`(() => {
+        const messages = ${JSON.stringify(messages)}, supplied = ${JSON.stringify(history)};
+        const html = messages.map((message, index) => message.role === 'user'
+          ? '<div class="nmsg user" data-chat-node="message:' + index + '">Create a report.</div>'
+          : '<div class="nmsg ai" data-delivery-final="true" data-chat-node="message:' + index + '"><div class="ntext">' +
+            (message.mentions ? '<code>' + message.mentions + '</code>' : 'Delivered.') + '</div>' +
+            (message.installCard ? '<div class="nplugin-draft"><button data-install-plugin-draft="fixture">Install</button></div>' : '') + '</div>').join('');
+        const snapshot = { messages, status: 'idle', localReplica: true, execution: { readOnly: true }, historyRecovery: ${JSON.stringify(historyRecovery)},
+          history: { totalMessages: messages.length, messageStart: 0, truncated: false, ...supplied } };
+        list.innerHTML = ChatOutputLinks.decorate(html, ${JSON.stringify(files)}, 'delivery-groups', snapshot);
+        return { groups: [...list.querySelectorAll('.ndelivery')].map(card => ({
+          owner: card.closest('.nmsg')?.dataset.chatNode || 'session',
+          ids: [...card.querySelectorAll('[data-open-app]')].map(link => link.dataset.openApp).sort(),
+        })), installOwners: [...list.querySelectorAll('[data-install-plugin-draft]')].map(button => button.closest('.nmsg')?.dataset.chatNode) };
+      })()`);
+    }
+    const primary = (id, at) => ({ artifactId: id, name: id + '.txt', relative: id + '.txt', primary: true, at });
+    const group = (owner, ...ids) => ({ owner, ids: ids.sort() });
+    const user = { role: 'user' }, reply = { role: 'assistant', done: true };
+    const oneTurn = [user, { ...reply, mentions: 'named.txt' }];
+    const pair = [primary('named', 350), primary('extra', 330)];
+    assert.deepEqual((await deliveryGroups(oneTurn, [...pair,
+      { ...primary('support', 340), primary: false }, { ...primary('evidence', 345), processEvidence: true }])).groups,
+      [group('message:1', 'named', 'extra')]);
+    const bounded = [{ ...user, sentAt: 100 }, { ...reply, completedAt: 190, mentions: 'named.txt' },
+      { ...user, sentAt: 300 }, { ...reply, completedAt: 400 }];
+    assert.deepEqual((await deliveryGroups(bounded, [...pair, primary('early', 120), primary('between', 250)])).groups,
+      [group('message:1', 'early', 'named'), group('message:3', 'extra'), group('session', 'between')]);
+    const undated = [...oneTurn, user, reply];
+    assert.deepEqual((await deliveryGroups(undated, pair)).groups, [group('message:1', 'named'), group('session', 'extra')]);
+    assert.deepEqual((await deliveryGroups(oneTurn, pair, {}, { mode: 'device-history', incomplete: true })).groups,
+      [group('message:1', 'named'), group('session', 'extra')]);
+    const page = { totalMessages: 6, truncated: true, messageStart: 4, messageIndices: [4, 5] };
+    assert.deepEqual((await deliveryGroups(oneTurn, pair, page)).groups, [group('message:1', 'named'), group('session', 'extra')]);
+    assert.deepEqual(await deliveryGroups([user, { ...oneTurn[1], installCard: true }], pair, page),
+      { groups: [group('session', 'named', 'extra')], installOwners: ['message:1'] });
+    report.cases.push({ historyDeliveries: 'single turn, bounded turns, undated turns, incomplete archive, paginated history and legacy installation card' });
     report.ok = true;
   }).catch(error => { report.error = error.stack || String(error); }).finally(() => {
     fs.mkdirSync(output, { recursive: true });
