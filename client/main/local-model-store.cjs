@@ -22,7 +22,7 @@ function secure() {
   }
 }
 function empty() { return { schema: SCHEMA, revision: 0, providers: [], models: [], keys: {}, aliases: {} }; }
-function readRaw() {
+function readRaw({ migrate = true } = {}) {
   if (!deps?.app || !deps?.safeStorage) return empty();
   let encoded;
   try { encoded = fs.readFileSync(file(), 'utf8'); }
@@ -35,7 +35,7 @@ function readRaw() {
     if (!decoded || decoded.schema !== value.schema || !Array.isArray(decoded.providers) ||
         !Array.isArray(decoded.models) || !record(decoded.keys) || !Number.isSafeInteger(decoded.revision)) throw Error();
     const normalized = normalize(decoded, { persisted: true });
-    if (decoded.schema === SCHEMA) return normalized;
+    if (decoded.schema === SCHEMA || !migrate) return normalized;
     if (normalized.revision === Number.MAX_SAFE_INTEGER) invalid('配置版本');
     // Persist the random identity once before exposing it. A failed migration
     // must not return references that a subsequent read cannot recover.
@@ -253,7 +253,35 @@ function publicCatalog(value = readRaw()) {
     myModels: enriched.map(model => ({ ...model, localOnly: true })),
     revision: value.revision };
 }
-function get() { return publicCatalog(); }
+function get(historyChoice) {
+  const value = readRaw(), catalog = publicCatalog(value);
+  if (typeof historyChoice !== 'string' || !historyChoice) return catalog;
+  // Resolve only this saved alias against the same revision as the returned
+  // usable rows. Deleted aliases never point at a later same-name model.
+  const { imageChoice, imageKey } = require('../core/model-choice');
+  const image = imageChoice(historyChoice), id = canonicalIn(value, image?.name || historyChoice);
+  const rows = image ? catalog.mediaUsable.image : catalog.usable;
+  const row = rows.find(item => item.name === id && (!image || item.providerId === image.providerId.replace(/^device:/, '')));
+  catalog.historyChoiceName = row?.name || '';
+  if (row && image) catalog.historyChoiceName = imageKey({ name: row.name, providerId: 'device:' + row.providerId });
+  return catalog;
+}
+// A history preview needs only the display name, even when offline. Do not
+// resolve credentials, enrich capabilities, or migrate the vault on this read.
+function historyModel(choice) {
+  const image = require('../core/model-choice').imageChoice(choice);
+  const reference = image?.name || choice;
+  if (typeof reference !== 'string' || !reference.startsWith('local:')) return null;
+  if (!deps?.app || !deps?.safeStorage) return { label: '本地模型配置无法读取' };
+  let value;
+  try { value = readRaw({ migrate: false }); } catch { return { label: '本地模型配置无法读取' }; }
+  const id = canonicalIn(value, reference);
+  const model = id ? value.models.find(row => row.id === id)
+    : value.models.find(row => !OPAQUE_REF.test(row.id) && ref(row.providerId, row.name) === reference);
+  if (image) return model?.modality === 'image' && model.providerId === image.providerId.replace(/^device:/, '')
+    ? { label: '生成图片 · ' + model.label } : { label: '原本地图片模型已删除或不可用', unavailable: true };
+  return model?.modality === 'chat' ? { label: model.label } : { label: '原本地模型已删除或不可用', unavailable: true };
+}
 function save(input = {}) {
   if (!record(input)) invalid('配置格式');
   for (const name of ['providers', 'models']) {
@@ -365,4 +393,4 @@ async function test(providerId, modelName, fetchImpl = global.fetch) {
     return response.ok ? { ok: true, detail: '连接通过，已使用「' + selected.name + '」测试' } : { ok: false, detail: 'HTTP ' + response.status };
   } catch (error) { return { ok: false, detail: '连接失败：' + String(error?.message || error).slice(0, 120) }; }
 }
-module.exports = { configure, get, save, resolve, test, publicCatalog, normalize, ref, canonicalReference, referenceAliases, _readRaw: readRaw };
+module.exports = { configure, get, historyModel, save, resolve, test, publicCatalog, normalize, ref, canonicalReference, referenceAliases, _readRaw: readRaw };

@@ -14,7 +14,7 @@ function install({ app, ipcMain, safeStorage, changed = () => {} }) {
       throw Error('本地模型设置只允许主工作台管理');
     }
   }
-  ipcMain.handle('local-models-get', event => { assertDesk(event); return store.get(); });
+  ipcMain.handle('local-models-get', (event, historyChoice) => { assertDesk(event); return store.get(historyChoice); });
   ipcMain.handle('local-models-save', (event, input) => {
     assertDesk(event);
     const result = store.save(input || {});
