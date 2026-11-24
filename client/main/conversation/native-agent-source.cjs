@@ -45,4 +45,21 @@ function snapshot(value, agentId) {
   return { ...value, messages: (value.messages || []).map(item => message(item, agentId)),
     tools: rows(value.tools), ...(value.toolPreparations ? { toolPreparations: rows(value.toolPreparations) } : {}) };
 }
-module.exports = { fields, message, event, install, snapshot };
+// Older device-history snapshots carry the native journal ID on each Runner
+// output. Match that ID to a recorded segment before restoring a missing mark.
+function restoreRunnerSources(value, parts) {
+  if (!value) return value;
+  const owners = new Map(parts.filter(part => part?.adapterId && part.adapterId !== 'pi')
+    .map(part => [part.sessionId || part.id, part.adapterId]));
+  if (!owners.size) return value;
+  function restore(item, isTool) {
+    if (!item?.id || item.sourceAgent || (!isTool && item.role !== 'assistant')) return item;
+    const match = isTool ? /^(.+):\1:\d+$/.exec(item.id) :
+      /^(.+?):(?:\d+$|\d+:\d+:(?:say|text|thinking):)/.exec(item.id);
+    const owner = match && owners.get(match[1]);
+    return owner ? project(item, owner) : item;
+  }
+  return { ...value, messages: (value.messages || []).map(item => restore(item, false)),
+    tools: (value.tools || []).map(item => restore(item, true)) };
+}
+module.exports = { fields, message, event, install, snapshot, restoreRunnerSources };

@@ -58,15 +58,37 @@ function collect(items, kind, adapterId) {
 function fromSnapshot(snapshot, adapterId) {
   return merge(collect(snapshot?.messages, 'message', adapterId), collect(snapshot?.tools, 'tool', adapterId));
 }
+// Frozen history may contain turns represented only by tool receipts. Their
+// "after" anchors place them between messages in the displayed transcript.
+const prefixSources = new WeakMap();
+function fromTimeline(snapshot) {
+  if (!snapshot) return [];
+  const first = new Map();
+  const remember = (item, position) => {
+    const id = sourceId(item);
+    if (id && (!first.has(id) || first.get(id) > position)) first.set(id, position);
+  };
+  (snapshot.messages || []).forEach((item, index) => {
+    if (['assistant', 'toolResult'].includes(item?.role)) remember(item, index * 2);
+  });
+  for (const tool of snapshot.tools || []) remember(tool, Math.max(0, Number(tool.after) || 0) * 2 + 1);
+  return [...first.keys()].sort((a, b) => first.get(a) - first.get(b));
+}
 function fromRecord(record) {
   if (!record || typeof record !== 'object') return [];
   const previous = recordSources.get(record);
   if (previous && previous.prefix === record.prefix && previous.segments === record.segments &&
       previous.active === record.active && previous.ids === record.usedHarnesses) return previous.result.slice();
-  const result = merge(fromSnapshot(record.prefix), record.usedHarnesses,
-    ...(record?.segments || []).map(segment => segment.usedHarnesses), record?.active?.usedHarnesses);
+  const completed = (record.segments || []).map(segment => segment.usedHarnesses);
+  if (record.prefix && typeof record.prefix === 'object' && !prefixSources.has(record.prefix))
+    prefixSources.set(record.prefix, fromTimeline(record.prefix));
+  const prefix = prefixSources.get(record.prefix);
+  // A recovered prefix can predate the first retained native descriptor.
+  const result = record.deviceHistoryComplete
+    ? merge(prefix, record.usedHarnesses, ...completed, record.active?.usedHarnesses)
+    : merge(...completed, prefix, record.usedHarnesses, record.active?.usedHarnesses);
   recordSources.set(record, { prefix: record.prefix, segments: record.segments,
     active: record.active, ids: record.usedHarnesses, result });
   return result.slice();
 }
-module.exports = { add, merge, fromSnapshot, fromRecord };
+module.exports = { add, merge, fromSnapshot, fromTimeline, fromRecord };

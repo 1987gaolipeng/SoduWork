@@ -315,7 +315,8 @@ function createPiSessionBridge(options) {
       } catch (error) {
         if (error.code === 'RUNNER_SEGMENT_NOT_ADMITTED' && restored && error.snapshot) {
           const old = restored.active, previous = restored.prefix || { messages: [], tools: [] };
-          const recovered = JSON.parse(JSON.stringify(error.snapshot)), offset = previous.messages.length;
+          const recovered = require('../conversation/native-agent-source.cjs').snapshot(
+            JSON.parse(JSON.stringify(error.snapshot)), old.adapterId), offset = previous.messages.length;
           const toolIds = new Map((recovered.tools || []).map(tool => [tool.id, old.sessionId + ':' + tool.id]));
           for (const tool of recovered.tools || []) tool.id = toolIds.get(tool.id);
           for (const message of recovered.messages || []) for (const block of message.blocks || [])
@@ -368,7 +369,7 @@ function createPiSessionBridge(options) {
         restored = { version: 1, id: row.id, owner: deviceContinuation?.original || runtimeSegments.scope(legacyOptions.identity),
           ...(deviceContinuation ? { deviceShared: true, executionOwner: deviceContinuation.executionOwner } : {}),
           title: row.title || '', cwd: legacyOptions.cwd, originAdapter: previous?.originAdapter || row.adapterId || adapterId,
-          at: Date.now(), prefix: historyRecovery.prefix,
+          at: Date.now(), prefix: historyRecovery.prefix, usedHarnesses: row.usedHarnesses,
           artifactHistory: require('../conversation/runtime-artifacts.cjs').forContinuation(legacyOptions.cwd,
             row.deviceTransferId ? undefined : historyRecovery.artifactHistory, previous?.artifactHistory),
           segments: previous ? [...previous.segments, previous.active] : deviceContinuation ?
