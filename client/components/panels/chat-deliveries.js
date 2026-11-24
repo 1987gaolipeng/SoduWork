@@ -150,7 +150,7 @@
     const summaryOnly = snapshot.delivery?.presentation === 'summary' || snapshot.deliveryPresentation === 'summary' ||
       snapshot.deliveryMode === 'git' || snapshot.cloudHandoff?.deliveryMode === 'git';
     if (snapshot.localReplica === true && !snapshot.cloudHandoff?.taskId) {
-      if (!summaryOnly) decorateHistoryFiles(root, files);
+      if (!summaryOnly) decorateHistoryFiles(root, files, snapshot);
       return;
     }
     const cloudTaskId = String(snapshot.cloudHandoff?.taskId || '');
@@ -232,7 +232,25 @@
     }
     while (groups.size > 120) { const old = groups.keys().next().value; groups.delete(old); if (!jobs.get(old)?.busy) jobs.delete(old); }
   }
-  function decorateHistoryFiles(root, files) {
+  function historyDeliveryTurns(snapshot, replies) {
+    const history = snapshot.history || {}, messages = Array.isArray(snapshot.messages) ? snapshot.messages : [];
+    if (snapshot.historyRecovery?.incomplete || history.truncated || history.messageStart > 0 ||
+        (history.totalMessages != null && history.totalMessages !== messages.length)) return [];
+    const owners = new Map(replies.map(reply => [reply.dataset.chatNode, reply]));
+    const turns = [];
+    const time = value => Number(value) || Date.parse(value || '') || 0;
+    for (const [index, message] of messages.entries()) {
+      if (message?.role === 'user') {
+        turns.push({ start: time(message.sentAt || message.timestamp) });
+      } else if (message?.role === 'assistant' && turns.length) {
+        const turn = turns.at(-1);
+        turn.reply = message.done !== false && owners.get('message:' + index);
+        turn.end = time(message.completedAt);
+      }
+    }
+    return turns;
+  }
+  function decorateHistoryFiles(root, files, snapshot) {
     const remaining = new Map(groupFiles(files, '').filter(file => file.artifactId && !file.deleted &&
       file.primary === true && file.role !== 'supporting').map(file => [key(file), file]));
     const append = (owner, rows) => {
@@ -244,19 +262,41 @@
       const summary = doc.createElement('summary'); summary.textContent = tx(owner === root ? '会话成果' : text.title);
       details.append(summary, fileList(doc, rows, file => file)); card.append(details); owner.append(card);
     };
-    // An older index can identify a session's file without recording its turn.
-    // Keep such files at session level and expose only the authorized open action.
-    const replies = [...root.querySelectorAll('.nmsg.ai,[data-task-stream]')].reverse();
+    const replies = [...root.querySelectorAll('.nmsg.ai,[data-task-stream]')].filter(reply =>
+      reply.dataset.deliveryFinal !== 'false' && !reply.querySelector('.nacceptance-result')).reverse();
+    const rowsByReply = new Map(replies.map(reply => [reply, []]));
     for (const reply of replies) {
-      if (!remaining.size) break;
-      if (reply.dataset.deliveryFinal === 'false' || reply.querySelector('.nacceptance-result')) continue;
-      const rows = [];
       for (const node of reply.querySelectorAll('[data-open-app],[data-output-image],[data-output-video]')) {
         const id = node.dataset.openApp || node.dataset.outputImage || node.dataset.outputVideo;
-        if (remaining.has(id)) { rows.push(remaining.get(id)); remaining.delete(id); }
+        if (remaining.has(id)) { rowsByReply.get(reply).push(remaining.get(id)); remaining.delete(id); }
       }
-      append(reply, rows);
     }
+    // A complete single-turn transcript owns the session's verified outputs.
+    // In longer histories, only a bounded turn can claim an unmentioned file.
+    const turns = historyDeliveryTurns(snapshot, replies);
+    for (const [id, file] of remaining) {
+      const at = Number(file.at);
+      const owners = turns.length === 1 ? turns : turns.filter((turn, index) => {
+        const next = turns[index + 1]?.start;
+        return turn.start > 0 && at >= turn.start && (turn.end > 0 || next > 0) &&
+          (!turn.end || at <= turn.end) && (!next || at < next);
+      });
+      if (owners.length === 1 && owners[0].reply) {
+        rowsByReply.get(owners[0].reply).push(file);
+        remaining.delete(id);
+      }
+    }
+    const groupsWithFiles = [...rowsByReply].filter(([, rows]) => rows.length);
+    if (remaining.size && groupsWithFiles.length === 1) {
+      const [reply, rows] = groupsWithFiles[0];
+      // A legacy install result can name only part of its export set. Keep
+      // the whole index at session scope when the remaining owners are unknown.
+      if (reply.querySelector('.nplugin-draft') || rows.some(file => file.pluginDraft)) {
+        append(root, [...rows, ...remaining.values()]);
+        return;
+      }
+    }
+    for (const [reply, rows] of groupsWithFiles) append(reply, rows);
     append(root, [...remaining.values()]);
   }
   function canPreviewSaved(group, delivery) {
