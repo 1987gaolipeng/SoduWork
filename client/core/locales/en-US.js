@@ -62,6 +62,8 @@
     '账号': 'Account', '工号 / 邮箱 / 手机号': 'Employee ID / email / phone', '密码': 'Password', '请输入密码': 'Enter your password',
     '让工作更简单': 'Make work simpler', '欢迎回来': 'Welcome back', '使用账号和密码登录': 'Sign in with your account and password',
     '使用邮箱验证码登录': 'Sign in with an email code', '登录方式': 'Sign-in method', '验证码登录': 'Code sign-in', '密码登录': 'Password sign-in',
+    '记住账号': 'Remember account', '在此设备上自动登录': 'Sign in automatically on this device',
+    '自动登录使用系统加密保存的设备凭据。': 'Automatic sign-in uses device credentials encrypted by your system.',
     '邮箱': 'Email', '输入账号': 'Enter account', '邮箱验证码': 'Email verification code', '6 位验证码': '6-digit code',
     '获取验证码': 'Get code', '秒后重发': 'seconds before resend', '确认密码': 'Confirm password', '输入密码': 'Enter password',
     '再次输入密码': 'Enter password again', '设置密码': 'Set password', '显示': 'Show', '隐藏': 'Hide',

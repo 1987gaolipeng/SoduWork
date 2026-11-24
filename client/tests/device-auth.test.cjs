@@ -79,6 +79,96 @@ function accountTransitionFixture(t) {
     session: token => response({ session: token, expiresIn: 300, user: { id: 'fixture-owner' } }) };
 }
 
+test('auto sign-in is scoped to a Hub and manual sign-in lasts for this desktop process', async t => {
+  const f = accountTransitionFixture(t);
+  const otherHub = 'https://auto-login.fixture.invalid';
+  const requests = [];
+  t.mock.method(global, 'fetch', async (url, options) => {
+    requests.push(url);
+    assert.equal(Object.hasOwn(JSON.parse(options.body), 'autoLogin'), false);
+    return f.session(url.endsWith('/clients/enroll') ? 'renewed' : 'interactive');
+  });
+  assert.equal((await f.login({ autoLogin: false })).session, 'interactive');
+  assert.equal((await f.invoke('bootstrap', { staleSession: 'interactive' })).session, 'renewed');
+  assert.equal((await f.login({ hub: otherHub, autoLogin: true })).ok, true);
+  const restart = () => {
+    const modulePath = require.resolve('../main/device-auth');
+    delete require.cache[modulePath];
+    const fresh = require(modulePath);
+    fresh.install(f);
+    return fresh;
+  };
+  const fresh = restart();
+  assert.equal((await f.invoke('bootstrap', { hub: otherHub })).session, 'renewed');
+  assert.equal(fresh.selectHub(f.app, f.hub).ok, true);
+  const count = requests.length;
+  assert.equal((await f.invoke('bootstrap', { recheckAuth: true })).activationRequired, true);
+  assert.equal(fresh.canConnect(f.app), false);
+  assert.equal(fresh.identity(f.app), null);
+  assert.equal(await fresh.authenticatedIdentity(f.app), null);
+  await assert.rejects(fresh.ensureSession(f.app, { hub: f.hub }));
+  assert.equal(requests.length, count);
+  assert.equal((await f.handlers.get('device-account-action')({}, {
+    hub: f.hub, action: 'emailCode', email: 'fixture@example.test', code: '000000', autoLogin: true,
+  })).session, 'interactive');
+  restart();
+  assert.equal((await f.invoke('bootstrap')).session, 'renewed');
+  t.mock.method(global, 'fetch', async () => { throw Error('offline'); });
+  assert.equal((await f.invoke('logout')).ok, false);
+  const signedOut = restart();
+  t.mock.method(global, 'fetch', async () => assert.fail('Signed-out profile contacted the Hub'));
+  assert.equal((await f.invoke('bootstrap', { recheckAuth: true })).activationRequired, true);
+  assert.equal(signedOut.identity(f.app), null);
+});
+
+test('automatic restore rejects a device rebound to a different Hub account', async t => {
+  const f = accountTransitionFixture(t);
+  let owner = 'original-account', calls = 0;
+  t.mock.method(global, 'fetch', async () => {
+    calls++;
+    return f.response({ session: owner + '-session', user: { id: owner }, expiresIn: 300 });
+  });
+  const original = await f.login({ autoLogin: true });
+  assert.equal(original.session, 'original-account-session');
+  owner = 'new-account';
+  const rebound = await f.invoke('bootstrap', { staleSession: original.session });
+  assert.equal(rebound.activationRequired, true);
+  assert.equal(rebound.session, undefined);
+  assert.equal(rebound.user, undefined);
+  const before = calls;
+  assert.equal((await f.invoke('bootstrap', { recheckAuth: true })).activationRequired, true);
+  assert.equal(calls, before);
+  assert.equal(f.deviceAuth.identity(f.app), null);
+  assert.equal((await f.login({ autoLogin: true })).session, 'new-account-session');
+  assert.equal((await f.invoke('bootstrap', { staleSession: 'new-account-session' })).session, 'new-account-session');
+});
+
+test('a preference write failure after Hub login cannot enable automatic sign-in', async t => {
+  const f = accountTransitionFixture(t);
+  const accountFile = path.join(f.root, 'device-auth.json');
+  let lockWrites = false;
+  t.mock.method(global, 'fetch', async url => {
+    if (url.endsWith('/clients/enroll')) return f.enrolled();
+    lockWrites = true;
+    return f.session('interactive');
+  });
+  const write = fs.writeFileSync;
+  t.mock.method(fs, 'writeFileSync', (target, ...args) => {
+    if (lockWrites) throw new Error('fixture write failure');
+    return write(target, ...args);
+  });
+  const failed = await f.login({ autoLogin: false });
+  assert.equal(failed.ok, false);
+  assert.equal(f.deviceAuth.session(f.app), '');
+  assert.equal(Object.values(JSON.parse(fs.readFileSync(accountFile)).profiles)[0].signedOut, true);
+  const modulePath = require.resolve('../main/device-auth');
+  delete require.cache[modulePath];
+  const fresh = require(modulePath);
+  fresh.install(f);
+  t.mock.method(global, 'fetch', async () => assert.fail('Failed preference save allowed enrollment'));
+  assert.equal((await f.invoke('bootstrap', { recheckAuth: true })).activationRequired, true);
+});
+
 test('late session clears cannot cancel a newer login or remove its token', async t => {
   const f = accountTransitionFixture(t);
   let finishLogin, beginLogin;
@@ -794,6 +884,21 @@ test('Windows unreadable device rows self-heal from the .bak copy instead of blo
   assert.equal(auth.identity(f.app).secret, 'good-secret');
   assert.equal(persisted.profiles[slot(otherHub)].clientId, 'soduwork-keepme',
     'profiles of other hubs must not be touched by the recovery');
+});
+
+test('credential recovery cannot restore an older automatic sign-in preference', async t => {
+  const f = healingFixture(t);
+  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  const primary = { ...brokenRow(HUB), autoLoginAccountId: '' };
+  const backup = { ...primary, autoLoginAccountId: 'previous-owner',
+    cipher: Buffer.from('cipher:previous-device-key').toString('base64') };
+  seedDoc(f.root, { v: 1, activeHub: HUB, profiles: { [slot(HUB)]: primary } });
+  seedDoc(f.root, { v: 1, activeHub: HUB, profiles: { [slot(HUB)]: backup } }, '.bak');
+  auth.install(f);
+  t.mock.method(global, 'fetch', async () => assert.fail('Restored backup enrolled without login'));
+  const result = await f.handlers.get('device-auth-bootstrap')(null, { hub: HUB, recheckAuth: true });
+  assert.equal(result.activationRequired, true);
+  assert.equal(auth.identity(f.app), null);
 });
 
 test('Windows unreadable device rows without a usable backup re-enroll a fresh identity and still log in', async (t) => {

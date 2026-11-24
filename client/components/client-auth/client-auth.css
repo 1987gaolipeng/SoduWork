@@ -37,7 +37,7 @@ body.soduwork-client-auth-open {
   inset: 0;
   z-index: 2147483600;
   display: grid;
-  place-items: center;
+  place-items: safe center;
   padding: 32px;
   overflow: auto;
   color: var(--auth-ink);
@@ -126,6 +126,35 @@ body.soduwork-client-auth-open {
 .soduwork-auth-form {
   display: grid;
   gap: 14px;
+}
+.soduwork-auth-preferences {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  -webkit-app-region: no-drag;
+}
+.soduwork-auth-preferences[hidden] { display: none; }
+.soduwork-auth-gate .soduwork-auth-preferences label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.soduwork-auth-form .soduwork-auth-preferences input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent, var(--auth-blue));
+}
+.soduwork-auth-preferences p {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3, var(--auth-muted));
 }
 .soduwork-auth-connection {
   padding: 12px 14px;
