@@ -16,7 +16,7 @@ async function fixture() {
   const localCatalog = { revision: 1,
     providers: [{ id: 'organization', localOnly: true, personal: true }],
     myModels: [{ id: 'local:model-' + '1'.repeat(32), providerId: 'organization', name: 'local-model' }] };
-  const box = { URL, URLSearchParams, AbortController, AbortSignal, Response,
+  const box = { URL, URLSearchParams, AbortController, AbortSignal, Response, TextEncoder, crypto: require('node:crypto').webcrypto,
     CustomEvent: class {}, navigator: { platform: 'test' },
     console: { log() {}, error() {} }, dispatchEvent() {}, addEventListener() {},
     setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0,
@@ -49,10 +49,53 @@ async function fixture() {
   box.window = box;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../api.js'), 'utf8'), box);
   await box.SoduWorkAPI.registerClient();
-  return { api: box.SoduWorkAPI, requests, localSaves, localProbes,
+  return { api: box.SoduWorkAPI, requests, localSaves, localProbes, catalog, localCatalog,
     setRead: fn => { read = fn; }, cachedReads: () => cachedReads,
     writes: () => requests.filter(row => row.method !== 'GET') };
 }
+
+function captureTarget(api, prepared, user = 'alice') {
+  const clientId = 'desktop', session = Buffer.from(JSON.stringify({ typ: 'device', cid: clientId, uid: user })).toString('base64url') + '.fixture';
+  return require('../main/pi-session/model-failure-target.cjs').capture({ id: prepared.id, provider: 'soduwork' }, prepared,
+    { hub: api.hubBase(), session, clientId });
+}
+
+test('chat checks bind the Hub account, model, provider and saved revision', async () => {
+  const f = await fixture(), revision = 'b'.repeat(64);
+  const model = { id: 'model', quotaProvider: 'custom-personal', configRevision: revision };
+  const request = target => f.api.inspectFailedModel(target, { check: true });
+  const target = captureTarget(f.api, model);
+  f.catalog.usable = [{ providerId: 'custom-personal', name: 'model', configRevision: revision }];
+  assert.equal((await request(captureTarget(f.api, model, 'bob'))).state, 'account');
+  assert.equal(f.requests.length, 0);
+  assert.equal((await request({ ...target, revision: 'c'.repeat(64) })).state, 'changed');
+  assert.equal((await request({ ...target, revision: '' })).state, 'unversioned');
+  assert.equal((await request({ ...target, model: 'deleted' })).state, 'changed');
+  f.catalog.providers.find(row => row.id === model.quotaProvider).personal = false;
+  assert.equal((await request(target)).state, 'managed');
+  assert.equal(f.writes().length, 0);
+  f.catalog.providers.find(row => row.id === model.quotaProvider).personal = true;
+  await request(target);
+  assert.deepEqual(f.writes().map(row => row.body), [{ providerId: 'custom-personal', model: 'model',
+    expectedConfigRevision: revision, checks: ['connection', 'streaming', 'toolCalling'] }]);
+});
+
+test('device chat diagnostics use only the captured opaque reference until resolving the local catalog', async () => {
+  const f = await fixture(), model = f.localCatalog.myModels[0];
+  model.configRevision = 'd'.repeat(64);
+  const target = captureTarget(f.api, { localOnly: true, modelRef: model.id, id: model.id, providerName: 'private-service',
+    wireModelId: model.name, baseUrl: 'https://private.invalid', key: 'fixture-secret', configRevision: model.configRevision });
+  assert.doesNotMatch(JSON.stringify(target), /private|fixture-secret|local-model|alice|desktop/);
+  const labels = await f.api.inspectFailedModel(target);
+  assert.equal(labels.state, 'ready'); assert.equal(labels.model, 'local-model');
+  await f.api.inspectFailedModel(target, { check: true });
+  assert.equal(f.localProbes[0].modelRef, model.id);
+  assert.equal(f.localProbes[0].expectedTargetRevision, model.configRevision);
+  model.id = 'local:model-' + '2'.repeat(32);
+  assert.equal((await f.api.inspectFailedModel(target, { check: true })).state, 'changed');
+  assert.equal(f.localProbes.length, 1);
+  assert.equal(f.requests.length, 0);
+});
 
 test('a mixed save rejects a forged organization provider before writing either ownership domain', async () => {
   const f = await fixture();

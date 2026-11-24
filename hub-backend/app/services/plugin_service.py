@@ -1,12 +1,15 @@
 """Plugin registration, immutable versions, trust approval, and project bindings."""
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from sqlalchemy import func, inspect as sa_inspect, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am, models
@@ -22,6 +25,11 @@ from .plugin_bindings import (
     _SECRET_WORD, _secret_path, _task_user_id, resolve_binding,
     public_inputs, public_workflow_node, available_bindings,
 )
+
+
+class PackageStorageError(RuntimeError):
+    """The Hub could not persist the uploaded archive."""
+
 
 def _ms(dt):
     from .release_control import _ms as stamp
@@ -383,7 +391,6 @@ async def install(session: AsyncSession, data: bytes, user, org_id: str | None =
         raise plugin_identity.PluginVersionConflict(
             "同一个版本号的插件内容已经变化，请提升版本号后再导入")
 
-    path = plugin_packages.store(parsed)
     capability_report = dict(parsed["capabilities"] or {})
     capability_report["sourceKind"] = parsed["sourceKind"]
     version = am.PluginVersion(
@@ -392,15 +399,35 @@ async def install(session: AsyncSession, data: bytes, user, org_id: str | None =
         capability_report=capability_report,
         provenance=_provenance(
             parsed, user, source_channel, source_name, signature_proof, candidate),
-        package_path=path,
         trust_state="quarantined", visibility=mode, enabled=False, created_by=uid)
     version, created = await plugin_identity.insert_version_once(session, version)
     if not created:
         return await reuse_version(version)
-    await plugin_audience.replace(
-        session, version, mode, selected_users, org_id=org_id, created_by=uid,
-        org_unit_ids=selected_orgs)
-    await session.commit()
+    version_id = version.id
+    path = None
+    try:
+        await plugin_audience.replace(
+            session, version, mode, selected_users, org_id=org_id, created_by=uid,
+            org_unit_ids=selected_orgs)
+        await session.flush()
+        try:
+            path = plugin_packages.store(parsed, version_id=version_id)
+        except OSError as exc:
+            raise PackageStorageError(
+                "Could not save the plugin package. Check free space, write permissions "
+                "and support for atomic file operations in the Hub data directory."
+            ) from exc
+        version.package_path = path
+        await session.commit()
+    except BaseException as exc:
+        await session.rollback()
+        # A lost connection or cancellation during COMMIT can precede the
+        # server's decision. A new reader cannot prove rollback in that case.
+        uncertain = isinstance(exc, asyncio.CancelledError) or (
+            isinstance(exc, DBAPIError) and exc.connection_invalidated)
+        if path is not None and not uncertain and await session.get(am.PluginVersion, version_id) is None:
+            Path(path).unlink(missing_ok=True)
+        raise
     return {"created": created, "versionId": version.id,
             "plugin": await plugin_api(session, plugin, True)}
 

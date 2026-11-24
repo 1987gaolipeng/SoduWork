@@ -190,6 +190,12 @@ const onPiEvent = (ev) => {
     // The SDK persists the original object after notifying its subscribers.
     stampUsage(ev);
     const activeTurn = ctx.turnQueue.active();
+    if (activeTurn && (ev.type === 'agent_start' || ev.type === 'message_end')) {
+      const refusal = ev.afterToolResultId && require('./model-errors').describe(ev.message.errorMessage);
+      activeTurn.summaryReceipt = refusal && ev.failedModelRef &&
+        (ctx.prep.model.localOnly ? refusal.genericForbidden : refusal.hubGenericForbidden)
+        ? { toolId: ev.afterToolResultId, modelRef: ev.failedModelRef } : null;
+    }
     messageTime.stampPiEvent(ev, activeTurn?.options?.sentAt, activeTurn?.options?.submissionId);
     ev = require('../conversation/native-agent-source.cjs').event(ev, 'pi');
     if (ev?.type === 'agent_start') void ctx.turnQueue.markStarted?.();

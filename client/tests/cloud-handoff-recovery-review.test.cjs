@@ -34,7 +34,8 @@ async function fixture(t, phase) {
     if (route.includes('/ai-session')) return { ok: true, ref: 'fixed-run', status: 'running', last: 0, items: [] };
     if (route.endsWith('/commit')) { if (remotePhase !== 'committed') starts++; remotePhase = 'committed'; }
     if (route.endsWith('/abort')) remotePhase = 'aborted';
-    return { ok: true, ...record, phase: remotePhase, taskId: 'fixed-task', ref: remotePhase === 'committed' ? 'fixed-run' : '' };
+    const taskId = remotePhase === 'aborted' ? record.taskId : 'fixed-task';
+    return { ok: true, ...record, phase: remotePhase, taskId, ref: remotePhase === 'committed' ? 'fixed-run' : '' };
   };
   const handles = [];
   t.after(async () => { handles.forEach(handle => handle.close()); await fs.rm(root, { force: true, recursive: true }); });
@@ -98,6 +99,8 @@ test('the production IPC disposes a cancelled passive registry view before resum
   const result = await handlers.get('conversation-cloud-abort')(event, active.ref);
   assert.equal(result.ok, true);
   assert.equal(result.handoff.phase, 'aborted');
+  assert.equal(result.handoff.taskId, '');
+  assert.equal(f.starts, 0);
   assert.equal(result.reopenLocal, true);
   assert.equal(result.sessionId, f.record.sessionId);
   assert.equal(bridge.get(active.ref), null);

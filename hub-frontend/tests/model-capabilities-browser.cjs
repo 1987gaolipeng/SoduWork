@@ -12,6 +12,16 @@ const catalog = { providers: [provider], models: [
   { id: 'image', providerId: 'company', name: 'image-model', label: 'Image studio', modality: 'image', enabled: true, revision: 'm3', config: { endpointPath: '/images/generations', defaults: { size: '1024x1024' } } },
 ] }
 const llm = { baseUrl: 'https://gateway.example/v1', model: 'vision-model', keySet: true, keyLen: 32, revision: 'default1' }
+const chatImports = ['first-import', 'failed-import', 'already-checked', 'edited-import', 'second-import']
+const decisionModels = ['Clef', 'd3', 'd3-flash']
+const discoveryCandidates = [
+  ...chatImports.map(id => ({ id, purposes: ['chat'], status: 'declared' })),
+  ...decisionModels.map(id => ({ id, purposes: [], status: 'unsupported' })),
+  { id: 'image-studio', purposes: ['image'], status: 'declared' },
+  { id: 'video-studio', purposes: ['video'], status: 'declared' },
+  { id: 'visual-suite', purposes: ['image', 'video'], status: 'declared' },
+  { id: 'custom-no-metadata', purposes: [], status: 'unknown' },
+]
 const requests = [], errors = [], results = [], reportLocales = []; let checks = 0, failNext = false, win, server
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const js = code => win.webContents.executeJavaScript(code, true).catch(error=>{console.error('Renderer script:',code);throw error})
@@ -64,7 +74,11 @@ app.whenReady().then(async()=>{
           Object.assign(edited, { ctxWindow: 65536, revision: 'edited', configRevision: 'cfg-edited' })
         }
       }
-      if(key==='/admin/model-providers/company/discover') response={ok:true,models:['first-import','failed-import','already-checked','edited-import','second-import']}
+      if (key === '/admin/model-providers/company/discover' || key === '/admin/model-providers/test-connection') {
+        const known = catalog.models.map(row => row.name)
+        const candidates = key.endsWith('/discover') ? discoveryCandidates.filter(row => !known.includes(row.id)) : discoveryCandidates
+        response = { ok: true, models: candidates.map(row => row.id), candidates, known, counts: { total: 12, chat: 5, unknown: 1 } }
+      }
       if(req.method==='POST'&&key==='/admin/model-capabilities/check'){
         checks++; if (body.model.endsWith('-import')) {
           assert.equal(requests.filter(r=>r.key==='/admin/model-capabilities/check' && r.body.model.endsWith('-import')).length,
@@ -223,6 +237,57 @@ app.whenReady().then(async()=>{
   assert.ok(imageReport.includes('服务拒绝了本次图片请求。对话沿用上次通过的结果，你仍可发图。'))
   assert.ok(imageReport.includes('上次通过'))
   assert.equal(requests.filter(r=>r.key==='/admin/model-capabilities/check' && r.body.model==='new-chat-model').length,2)
+  await click('配置服务')
+  await click('测试连接')
+  const dialogText = 'document.querySelector(".modal:not(.model-provider-dialog)").innerText'
+  await wait(dialogText + ".includes('12 个模型')", 'upstream model count')
+  assert.match(await js(dialogText), /5 个声明支持对话，1 个用途未确认/)
+  await click('取消')
+
+  const importButton = 'document.querySelector(".modal:not(.model-provider-dialog) .modal-foot .btn-primary")'
+  const unknown = 'custom-no-metadata'
+  const row = id => `[...document.querySelectorAll('.model-discover-row')].find(n=>n.querySelector('code')?.textContent===${JSON.stringify(id)})`
+  async function discoveryState(property) {
+    return js(`[...document.querySelectorAll('.model-discover-row')].filter(n=>${property}).map(n=>n.querySelector('code').textContent).sort()`)
+  }
+  async function verifyChoices(ids) {
+    assert.deepEqual(await discoveryState("!n.querySelector('input').disabled"), [...ids].sort())
+    for (const id of decisionModels) assert.ok(!await js(row(id) + "?.querySelector('input:not(:disabled)')"))
+  }
+  async function saveImports() {
+    await clickElement(importButton)
+    await wait("!document.querySelector('.modal:not(.model-provider-dialog)')", 'discovery import saved')
+  }
+  await click('发现模型')
+  await wait("!!document.querySelector('#discovery-purpose')", 'discovery purpose')
+  await verifyChoices(chatImports)
+  await click('选择筛选结果')
+  assert.deepEqual(await discoveryState("n.querySelector('input').checked"), [...chatImports].sort())
+  await choose('discovery-purpose', 1)
+  await verifyChoices(['image-studio', 'visual-suite'])
+  assert.deepEqual(await discoveryState("n.querySelector('input').checked"), [])
+  await clickElement(row('image-studio') + ".querySelector('input')")
+  await clickElement(row(unknown) + ".querySelector('button')")
+  assert.deepEqual(await discoveryState("n.querySelector('input').checked"), [unknown,'image-studio'].sort())
+  await saveImports()
+  await click('发现模型')
+  await wait("!!document.querySelector('#discovery-purpose')", 'new discovery')
+  await choose('discovery-purpose', 2)
+  await verifyChoices(['video-studio', 'visual-suite'])
+  await fill('.modal input[type="search"]', 'video-studio')
+  await click('选择筛选结果')
+  await saveImports()
+  await win.loadURL(origin)
+  await wait('!!document.querySelector(".model-cloud-toggle")', 'persisted media models')
+  await clickSelector('.model-cloud-toggle')
+  for (const [id, modality] of [['image-studio','image'],[unknown,'image'],['video-studio','video']]) {
+    const saved = catalog.models.find(model => model.name === id)
+    assert.equal(saved?.modality, modality)
+    assert.equal(saved.enabled, true)
+    await wait(`[...document.querySelectorAll('.model-chip')].some(n=>n.querySelector('code')?.title===${JSON.stringify(id)} && n.querySelector('.kind-${modality}'))`, 'reloaded '+id)
+  }
+  assert.ok(!catalog.models.some(model=>[...decisionModels,'visual-suite'].includes(model.name)))
+  assert.ok(!requests.some(r=>r.key==='/admin/model-capabilities/check' && [unknown,'image-studio','video-studio'].includes(r.body.model)))
   await click('发现模型')
   await wait("document.querySelectorAll('.model-discover-row').length === 5", 'discovered models')
   await click('选择筛选结果')

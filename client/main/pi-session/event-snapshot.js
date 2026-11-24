@@ -208,6 +208,7 @@ function snapshot(state, options, { SCOPES, deriveStatus, statusText }) {
     completion: {
       reason: state.lastStopReason,
       rawReason: state.rawStopReason,
+      ...(state.lastModelFailure && state.lastStopReason === 'error' ? { modelFailure: state.lastModelFailure } : {}),
       incomplete: deriveStatus(state) === 'incomplete',
       incompleteReason: state.incompleteReason || (state.lastStopReason === 'length' ? 'length' : ''),
       error: modelErrors.forDisplay(state.lastAssistantError, 200, state.lastErrorAfterToolResult),

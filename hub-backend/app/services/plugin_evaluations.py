@@ -469,6 +469,17 @@ async def list_runs(session: AsyncSession, version: am.PluginVersion,
     return {"items": [run_api(row) for row in rows], "gate": gate}
 
 
+async def _record_verdict(session, row, decision, actor, note):
+    model = am.PluginEvaluationRun
+    written = await session.scalar(update(model).where(
+        model.id == row.id, model.state == "completed", model.verdict == "pending",
+    ).values(verdict=decision, reviewed_by=str(actor or "")[:64],
+             review_note=str(note or "")[:1200], reviewed_at=_now())
+      .returning(model.id).execution_options(synchronize_session=False))
+    await session.refresh(row)
+    return written is not None
+
+
 async def review(session: AsyncSession, row: am.PluginEvaluationRun, decision: str,
                  actor: str, note: str = "") -> am.PluginEvaluationRun:
     if row.state in ACTIVE_STATES:
@@ -481,10 +492,8 @@ async def review(session: AsyncSession, row: am.PluginEvaluationRun, decision: s
     contract = dict(dict(row.result or {}).get("contract") or {})
     if decision == "passed" and not contract.get("ok"):
         raise ValueError("产出没有满足结果契约，不能标记为通过")
-    row.verdict = decision
-    row.reviewed_by = str(actor or "")[:64]
-    row.review_note = str(note or "")[:1200]
-    row.reviewed_at = _now()
+    if not await _record_verdict(session, row, decision, actor, note):
+        raise ValueError("评测结论已确定，请重新运行评测后再评审")
     await session.commit()
     return row
 
@@ -510,11 +519,8 @@ async def accept_ready_with_release_review(
         row = latest.get(str(case.get("key") or ""))
         if not _ready_for_release_review(row):
             continue
-        row.verdict = "passed"
-        row.reviewed_by = str(actor or "")[:64]
-        row.review_note = "随插件版本发布审核一并确认"
-        row.reviewed_at = _now()
-        changed += 1
+        if await _record_verdict(session, row, "passed", actor, "随插件版本发布审核一并确认"):
+            changed += 1
     if changed:
         await session.commit()
     return changed

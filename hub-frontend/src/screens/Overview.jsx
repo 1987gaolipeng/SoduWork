@@ -5,6 +5,7 @@ import { useViewportHeight } from '../viewport-height.js'
 import { useAsync, Loading, ErrorState, AUTO, Icon, navTo } from '../ui.jsx'
 import './overview.css'
 import { requirementSummary, requirementStage, hasExecutionIssue, isOverdue } from './requirement-governance.js'
+import FirstChatChecklist from './FirstChatChecklist.jsx'
 
 const COLORS = ['var(--c-blue)', 'var(--c-green)', 'var(--c-orange)', 'var(--c-rose)', 'var(--offline)']
 
@@ -37,7 +38,7 @@ function AttentionRow({ tone, label, value, note, children }) {
     <strong>{value}</strong>{children}
   </article>
 }
-export default function Overview() {
+export default function Overview({ me }) {
   // Keep department and attention sections tall enough for their primary rows.
   // Scroll the page on short windows rather than compressing these sections.
   const mainGridRef = useViewportHeight(460)
@@ -58,9 +59,10 @@ export default function Overview() {
   const users = useAsync(() => hasDepartmentScope ? api.users() : Promise.resolve([]))
   const operations = useAsync(() => mayViewOperations ? api.operationsOverview() : Promise.resolve(null), AUTO)
   const sources = [clients, tasks, ints, unassigned, orgs, users, operations]
-  if (sources.some((source) => source.loading)) return <Loading />
+  const checklist = mayManageIntegrations && me?.id && <FirstChatChecklist key={me.id} accountId={me.id} />
+  if (sources.some((source) => source.loading)) return <section className="gov-page">{checklist}<Loading /></section>
   const failed = sources.find((source) => source.error)
-  if (failed) return <ErrorState msg={failed.error.message} onRetry={() => sources.forEach((source) => source.reload())} />
+  if (failed) return <section className="gov-page">{checklist}<ErrorState msg={failed.error.message} onRetry={() => sources.forEach(source => source.reload())} /></section>
 
   // Explain missing operational permissions rather than rendering an all-zero dashboard.
   if (!can('task.view') && !can('client.view')) {
@@ -122,6 +124,7 @@ export default function Overview() {
   const onlineRate = cl.length ? Math.round(online / cl.length * 100) : 0
   return (
     <section className="gov-page">
+      {checklist}
       <div className="gov-ledger" aria-label={tx("核心治理指标")}>
         <Metric label={tx("需求池")} value={tk.length} note={tx("待整理与澄清 {0} · 已关闭 {1}", [summary.preparing, summary.closed])} />
         <Metric label={tx("需求交付率")} value={rate + '%'} note={tx("{0} / {1} 已交付，不含已关闭", [done, tk.length])} tone="good" />

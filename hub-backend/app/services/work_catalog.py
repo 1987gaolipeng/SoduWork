@@ -8,12 +8,14 @@ import re
 from typing import Iterable
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
 from .. import models
 from .agent_naming import cli_from_name
-
+from .business_records import business_visible, creation_source, record_fields
 
 PROFILE_DEFINITIONS = [
     {"id": "p_solution", "name": "方案顾问", "category": "方案与咨询", "sort": 1,
@@ -192,6 +194,13 @@ _KEY_RE = re.compile(r"^[a-z][a-z0-9-]{1,79}$")
 _CAP_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,63}$")
 
 
+def _validate_array_fields(body: dict, *fields: str) -> None:
+    for field in fields:
+        value = body.get(field)
+        if value is not None and not isinstance(value, (list, tuple)):
+            raise ValueError(f"{field} 必须是数组")
+
+
 def _items(value, *, limit: int, length: int) -> list[str]:
     out: list[str] = []
     for raw in value or []:
@@ -221,7 +230,8 @@ def profession_api(
         "category": row.category or "", "description": row.description or "",
         "competencies": list(row.competencies or []), "sort": row.sort,
         "isSystem": bool(row.is_system), "mine": bool(mine),
-        "inherited": bool(inherited),
+        "inherited": bool(inherited), "enabled": not row.is_archived,
+        **record_fields(row),
     }
 
 def scenario_api(row: models.WorkScenario, *, inherited: bool = False) -> dict:
@@ -292,9 +302,18 @@ async def _effective_plugin(
     return max(rows, key=lambda row: order.get(row.org_id, -1))
 
 
-async def profession_rows(session: AsyncSession, org_id: str | None) -> list[models.Position]:
+def assignable_professions():
+    visible_orgs = select(models.OrgUnit.id).where(business_visible(models.OrgUnit))
+    return select(models.Position).where(business_visible(models.Position), or_(
+        models.Position.org_id.is_(None), models.Position.org_id.in_(visible_orgs)))
+
+
+async def profession_rows(
+    session: AsyncSession, org_id: str | None, *, include_inactive: bool = False
+) -> list[models.Position]:
     chain = await _org_chain(session, org_id)
-    query = select(models.Position).where(or_(
+    query = select(models.Position) if include_inactive else assignable_professions()
+    query = query.where(or_(
         models.Position.org_id.is_(None),
         models.Position.org_id.in_(chain or {"__none__"}),
     ))
@@ -403,7 +422,7 @@ async def catalog_for_user(
     include_disabled: bool = False,
 ) -> dict:
     mine = set(str(item) for item in position_ids or [])
-    profiles = await profession_rows(session, org_id)
+    profiles = await profession_rows(session, org_id, include_inactive=include_disabled)
     scenarios = await scenario_rows(session, org_id, include_disabled=include_disabled)
     result = recommend_from_rows(
         text, [row for row in scenarios if row.enabled], mine,
@@ -490,10 +509,25 @@ async def save_profession(
     body: dict,
     org_id: str | None,
     current: models.Position | None = None,
+    *, actor: models.User | None = None,
 ) -> models.Position:
     """Save a professional profile without granting platform permissions."""
     from uuid import uuid4
 
+    if current is not None:
+        # System profiles and org-less profiles are off-limits; moving a profile to
+        # another org is allowed here — the API layer validates the target org and
+        # the operator's scope (via _target_org) before calling this service.
+        if current.is_system or not current.org_id:
+            raise ValueError("只能修改本组织的职业画像")
+        if "dataSource" in body and body["dataSource"] != current.data_source:
+            raise ValueError("请通过数据来源管理修改来源")
+    if "enabled" in body and type(body["enabled"]) is not bool:
+        raise ValueError("enabled 必须是布尔值")
+    if "isArchived" in body and type(body["isArchived"]) is not bool:
+        raise ValueError("isArchived 必须是布尔值")
+    if "enabled" in body and "isArchived" in body and body["enabled"] == body["isArchived"]:
+        raise ValueError("启用与归档状态冲突")
     raw_name = body.get("name", current.name if current else "")
     if raw_name is not None and not isinstance(raw_name, str):
         raise ValueError("职位名称必须是字符串")
@@ -512,6 +546,18 @@ async def save_profession(
         raise ValueError("当前组织已经有同名职业画像")
     row = current or models.Position(
         id="pos_" + uuid4().hex[:12], org_id=org_id, is_system=False)
+    # org_id equals the row's org on plain updates; a different value moves the
+    # profile to the target org (uniqueness already checked against that org).
+    row.org_id = org_id
+    parent = await session.get(models.OrgUnit, org_id, populate_existing=True) if org_id else None
+    if parent and parent.is_archived:
+        raise ValueError("请先恢复所属部门")
+    if current is None:
+        row.data_source = creation_source(actor, body.get("dataSource"), parent=parent)
+    if "enabled" in body:
+        row.is_archived = not body["enabled"]
+    elif "isArchived" in body:
+        row.is_archived = body["isArchived"]
     row.name = name
     raw_category = body.get("category", current.category if current else "")
     if raw_category is not None and not isinstance(raw_category, str):
@@ -524,9 +570,14 @@ async def save_profession(
     row.category = category
     row.description = str(body.get(
         "description", current.description if current else "") or "").strip()[:400]
-    row.competencies = _items(
-        body.get("competencies", current.competencies if current else []),
-        limit=30, length=80)
+    _validate_array_fields(body, "competencies")
+    try:
+        competencies = _items(
+            body.get("competencies", current.competencies if current else []),
+            limit=30, length=80)
+    except (TypeError, ValueError) as error:
+        raise ValueError("competencies 必须是数组") from error
+    row.competencies = competencies
     try:
         sort = int(body.get("sort", current.sort if current else 0) or 0)
     except (TypeError, ValueError):
@@ -556,18 +607,18 @@ async def delete_profession(session: AsyncSession, row: models.Position) -> str:
     return ""
 
 
-async def validate_profession_ids(
-    session: AsyncSession, org_id: str | None, value
-) -> list[str]:
-    """Normalize profile IDs and reject references outside the current organization inheritance
-    scope.
-    """
+def check_profession_ids(value, visible_positions: set[str]) -> list[str]:
     position_ids = _items(value, limit=100, length=36)
-    visible_positions = {
-        row.id for row in await profession_rows(session, org_id)}
     if any(item not in visible_positions for item in position_ids):
         raise ValueError("职业画像不属于当前员工所在组织")
     return position_ids
+
+
+async def validate_profession_ids(
+    session: AsyncSession, org_id: str | None, value, *, retained: Iterable[str] = ()
+) -> list[str]:
+    visible_positions = {row.id for row in await profession_rows(session, org_id)}
+    return check_profession_ids(value, visible_positions.union(retained or ()))
 
 
 async def validate_scenario(
@@ -584,9 +635,16 @@ async def validate_scenario(
     if not name:
         raise ValueError("请填写工作场景名称")
     enabled = bool(body.get("enabled", current.enabled if current else True))
+    _validate_array_fields(body, "positionIds", "intentHints", "requiredCapabilities")
+    incoming_contract = body.get("outputContract")
+    if incoming_contract is not None:
+        if not isinstance(incoming_contract, dict):
+            raise ValueError("outputContract 须为对象")
+        _validate_array_fields(incoming_contract, "deliverables", "acceptance")
     position_ids = await validate_profession_ids(
         session, org_id,
-        body.get("positionIds", current.position_ids if current else []))
+        body.get("positionIds", current.position_ids if current else []),
+        retained=current.position_ids if current else ())
 
     intent_hints = _items(
         body.get("intentHints", current.intent_hints if current else []),
@@ -639,6 +697,11 @@ async def validate_scenario(
         "sort": max(0, min(sort, 9999)),
     }
 
+
+class ScenarioKeyConflict(ValueError):
+    """This organization already has a scenario with the requested key."""
+
+
 async def save_scenario(
     session: AsyncSession,
     body: dict,
@@ -646,18 +709,34 @@ async def save_scenario(
     current: models.WorkScenario | None = None,
 ) -> models.WorkScenario:
     values = await validate_scenario(session, body, org_id, current)
-    query = select(models.WorkScenario).where(models.WorkScenario.key == values["key"])
-    query = query.where(
-        models.WorkScenario.org_id.is_(None) if org_id is None
-        else models.WorkScenario.org_id == org_id)
-    duplicate = (await session.execute(query)).scalar_one_or_none()
-    if duplicate is not None and (current is None or duplicate.id != current.id):
-        raise ValueError("这个场景标识已经存在")
-    row = current or models.WorkScenario(org_id=org_id, key=values["key"])
-    for field, value in values.items():
-        setattr(row, field, value)
     if current is None:
-        session.add(row)
+        # Platform scenarios have a NULL organization, outside the unique constraint.
+        if org_id is None and await session.scalar(select(models.WorkScenario.id).where(
+            models.WorkScenario.org_id.is_(None), models.WorkScenario.key == values["key"],
+        ).limit(1)):
+            raise ScenarioKeyConflict("这个场景标识已经存在")
+        insert = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+        statement = insert(models.WorkScenario).values(org_id=org_id, **values).on_conflict_do_nothing(
+            index_elements=["org_id", "key"],
+        ).returning(models.WorkScenario)
+        row = await session.scalar(statement)
+        if row is None:
+            raise ScenarioKeyConflict("这个场景标识已经存在")
+    else:
+        row = current
+        # Moving an entry to another org (or renaming its key) must respect the
+        # target org's unique keys; the DB constraint alone would surface as 500.
+        duplicate = await session.scalar(select(models.WorkScenario.id).where(
+            models.WorkScenario.org_id == org_id,
+            models.WorkScenario.key == values["key"],
+            models.WorkScenario.id != row.id,
+        ).limit(1))
+        if duplicate is not None:
+            raise ScenarioKeyConflict("这个场景标识已经存在")
+        for field, value in values.items():
+            setattr(row, field, value)
+        # Support moving an existing scenario to another org.
+        row.org_id = org_id
     await session.commit()
     await session.refresh(row)
     return row
@@ -668,7 +747,7 @@ async def bootstrap(session: AsyncSession) -> None:
     for item in PROFILE_DEFINITIONS:
         row = await session.get(models.Position, item["id"])
         if row is None:
-            row = models.Position(id=item["id"], is_system=True)
+            row = models.Position(id=item["id"], is_system=True, data_source="business")
             session.add(row)
         row.org_id = None
         row.name = item["name"]

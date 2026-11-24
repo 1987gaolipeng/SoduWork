@@ -455,7 +455,11 @@ class DeliveryCategoryApiTests(unittest.IsolatedAsyncioTestCase):
                 task.id, files=[UploadFile(io.BytesIO(b'final report'), filename='test-report.txt')],
                 conversation_id='conversation', turn_id='turn', paths=['assets\\test-report.txt'],
                 categories=['primary'], model='test', outcome='completed',
+                declared_paths=['assets\\test-report.txt'],
+                replacements={'assets/test-report.txt': ['assets/prior-report.txt']},
                 client=models.Client(id='category-client'), session=session)
+        self.assertEqual(ingest.await_args.kwargs['declared_paths'], {'assets/test-report.txt'})
+        self.assertEqual(ingest.await_args.kwargs['replacements'], {'assets/test-report.txt': ['assets/prior-report.txt']})
         self.assertEqual(ingest.await_args.kwargs['categories'], {'assets/test-report.txt': 'primary'})
         self.assertEqual(ingest.await_args.kwargs['files'][0][0], 'assets/test-report.txt')
 

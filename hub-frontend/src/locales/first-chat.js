@@ -1,0 +1,31 @@
+const rows = {
+  "查看首次对话清单": ["Show first chat checklist","初回チャットのチェックリストを表示","첫 대화 체크리스트 보기"],
+  "首次对话清单": ["First chat checklist","初回チャットのチェックリスト","첫 대화 체크리스트"],
+  "返回首次对话清单": ["Back to first chat checklist","初回チャットのチェックリストに戻る","첫 대화 체크리스트로 돌아가기"],
+  "连接模型服务": ["Connect a model service","モデルサービスに接続","모델 서비스 연결"],
+  "添加对话模型": ["Add a chat model","チャットモデルを追加","대화 모델 추가"],
+  "选择执行底座": ["Choose a runtime","実行環境を選択","실행 환경 선택"],
+  "选择对话模型": ["Choose a chat model","チャットモデルを選択","대화 모델 선택"],
+  "打开桌面端底座设置": ["Open desktop runtime settings","デスクトップの実行環境設定を開く","데스크톱 실행 환경 설정 열기"],
+  "打开桌面端模型设置": ["Open desktop model settings","デスクトップのモデル設定を開く","데스크톱 모델 설정 열기"],
+  "正在读取模型服务…": ["Loading model services…","モデルサービスを読み込み中…","모델 서비스 불러오는 중…"],
+  "无法读取模型服务。": ["Could not load model services.","モデルサービスを読み込めませんでした。","모델 서비스를 불러오지 못했습니다."],
+  "请先连接可用的组织模型服务。": ["Connect an organization model service first.","先に組織のモデルサービスに接続してください。","먼저 조직의 모델 서비스를 연결하세요."],
+  "所选服务已停用或配置不完整，请重新选择。": ["The selected service is disabled or incomplete. Choose another service.","選択したサービスは無効か、設定が不完全です。別のサービスを選択してください。","선택한 서비스가 비활성 상태이거나 설정이 완료되지 않았습니다. 다른 서비스를 선택하세요."],
+  "重新检测": ["Check again","再確認","다시 확인"],
+  "跳过清单": ["Skip checklist","チェックリストをスキップ","체크리스트 건너뛰기"],
+  "首次对话设置进度": ["First chat setup progress","初回チャットの設定状況","첫 대화 설정 진행률"],
+  "已完成 {0}/4 步": ["{0} of 4 steps complete","4 ステップ中 {0} ステップ完了","4단계 중 {0}단계 완료"],
+  "无法读取设置进度，请重新检测。": ["Could not load setup progress. Check again.","設定状況を読み込めませんでした。もう一度確認してください。","설정 진행률을 불러오지 못했습니다. 다시 확인하세요."],
+  "正在检测设置进度…": ["Checking setup progress…","設定状況を確認中…","설정 진행률 확인 중…"],
+  "等待本账号桌面端报告": ["Waiting for this account’s desktop to report","このアカウントのデスクトップからの報告待ち","이 계정의 데스크톱 보고 대기 중"],
+  "下一步": ["Next step","次のステップ","다음 단계"],
+  "待设置": ["Needs setup","設定が必要","설정 필요"],
+  "尚未检测": ["Not checked yet","未確認","아직 확인하지 않음"],
+  "已就绪": ["Ready","準備完了","준비 완료"],
+  "模型服务": ["Model service","モデルサービス","모델 서비스"],
+  "发现模型": ["Discover models","モデルを検出","모델 검색"],
+}
+export default Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, row[0]]))
+export const ja = Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, row[1]]))
+export const ko = Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, row[2]]))

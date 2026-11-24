@@ -1,10 +1,15 @@
 """One active interactive desktop per account; phones and cloud nodes coexist."""
-from sqlalchemy import select, update, func, or_
+from sqlalchemy import or_, select, update
 
-from ..models import Client
 from ..automation_models import RunnerNode
+from ..models import Client
 
 DESKTOP_PLATFORMS = {"win32", "windows", "darwin", "macos", "linux"}
+
+
+def is_desktop_platform(platform: str | None) -> bool:
+    """Classify both bare OS names and OS/arch reports independently of the database locale."""
+    return (platform or "").partition("/")[0].strip().lower() in DESKTOP_PLATFORMS
 
 
 async def lock_devices(session, client, user):
@@ -25,16 +30,15 @@ async def replace_previous(session, client, user):
     # complete_login holds the account row lock before calling this function.
     # Clearing user_ref would invalidate independent cloud recovery receipts;
     # revoke authentication while preserving historical account provenance.
-    if str(client.platform or "").lower() not in DESKTOP_PLATFORMS:
+    if not is_desktop_platform(client.platform):
         return []
     cloud_devices = select(RunnerNode.client_id).where(RunnerNode.owner_user_id.is_not(None), RunnerNode.client_id != "")
-    if await session.scalar(select(RunnerNode.id).where(
-            RunnerNode.client_id == client.id, RunnerNode.owner_user_id.is_not(None)).limit(1)):
-        return []
-    previous = list((await session.scalars(select(Client.id).where(
+    current_is_cloud = cloud_devices.where(RunnerNode.client_id == client.id).exists()
+    candidates = await session.execute(select(Client.id, Client.platform).where(
         Client.user_ref == user.id, Client.id != client.id, Client.auth_state == "active",
-        func.lower(Client.platform).in_(DESKTOP_PLATFORMS), Client.id.not_in(cloud_devices),
-    ).order_by(Client.id).with_for_update())).all())
+        ~current_is_cloud, Client.id.not_in(cloud_devices),
+    ).order_by(Client.id).with_for_update())
+    previous = [device_id for device_id, platform in candidates if is_desktop_platform(platform)]
     if previous:
         await session.execute(update(Client).where(Client.id.in_(previous), Client.user_ref == user.id,
             Client.auth_state == "active").values(auth_state="pending", auth_version=Client.auth_version + 1,

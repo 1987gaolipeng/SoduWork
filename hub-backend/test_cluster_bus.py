@@ -30,6 +30,27 @@ class BroadcastTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({c.args[0] for c in bus.send.await_args_list}, {"healthy", "full"})
 
 
+class RunnerSnapshotTests(unittest.IsolatedAsyncioTestCase):
+    async def test_queue_lease_wakes_only_on_new_remote_connection(self):
+        from app.services import cluster_runtime as runtime, queued_dispatch_lease as lease
+
+        wake = asyncio.Event()
+        redis = SimpleNamespace(mget=AsyncMock())
+        with patch.object(runtime.bus, "redis", redis), patch.object(runtime, "_REMOTE", {}), \
+                patch.object(runtime, "_DEVICES", set()), patch.object(lease, "_wake", wake), \
+                patch.object(lease, "_connected", set()):
+            for token, revision, expect_wake in (("a", "1", True), ("a", "2", False), ("b", "3", True)):
+                info = {"runnerId": "r1", "clusterToken": token}
+                redis.mget.side_effect = [[token.encode()], [runtime.bus.codec.encode(info)]]
+                peers = {"peer": {"runners": [{**info, "revision": revision}]}}
+                await runtime.on_snapshot(peers, on_runner_connected=lease.runner_connected)
+                self.assertEqual(runtime._REMOTE["r1"].cluster_token, token)
+                self.assertEqual(wake.is_set(), expect_wake)
+                self.assertEqual(lease._connected, {"r1"} if expect_wake else set())
+                wake.clear()
+                lease._connected.clear()
+
+
 class TerminalRelayTests(unittest.IsolatedAsyncioTestCase):
     async def test_overflow_jobs_are_owned_and_joined_before_transport_shutdown(self):
         from app.services import cluster_runtime as runtime

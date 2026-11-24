@@ -10,7 +10,7 @@ import tempfile
 _tmp = tempfile.TemporaryDirectory(prefix="soduwork-operations-")
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///" + (Path(_tmp.name) / ".smoke-operations.db").as_posix()
 
-from app import automation_models as am  # noqa: E402
+from app import automation_models as am, models  # noqa: E402
 from app.db import Base, SessionLocal, engine  # noqa: E402
 from app.services import operations, runtime_telemetry  # noqa: E402
 
@@ -42,8 +42,18 @@ async def main() -> None:
 
     async with SessionLocal() as session:
         session.add(am.RunnerNode(id="runner-offline", host="build-01", dispatch_mode="accepting"))
-        session.add(am.WorkflowRun(task_id="task-1", plugin_id="p", plugin_version_id="v",
+        session.add(models.Client(id="device-1", name="Fixture device"))
+        session.add(models.Task(id="task-1", title="Fixture task", owner_client_id="device-1"))
+        session.add(am.WorkflowRun(id="run-1", task_id="task-1", plugin_id="p", plugin_version_id="v",
                                    state="failed", error="quality gate failed"))
+        session.add_all([
+            am.NodeRun(run_id="run-1", node_key="build", node_type="ai", attempt=1,
+                       state="failed", error="401 unauthorized", idempotency_key="build-1"),
+            am.NodeRun(run_id="run-1", node_key="build", node_type="ai", attempt=2,
+                       state="succeeded", idempotency_key="build-2"),
+            am.NodeRun(run_id="run-1", node_key="check", node_type="quality", state="failed",
+                       idempotency_key="check-1"),
+        ])
         session.add(am.ExecutionSession(task_id="task-1", ref="ref-1", state="running"))
         session.add(am.ApprovalRequest(task_id="task-1", artifact_version_id="a", action="accept",
                                        environment_id="env", policy_id="policy", status="pending",
@@ -66,6 +76,14 @@ async def main() -> None:
            "offline runner blocker missing")
         ok(data["recentFailures"][0]["error"] == "quality gate failed",
            "recent failure evidence missing")
+        failure = data["recentFailures"][0]
+        ok(failure["diagnosis"] == "质量门禁未通过" and failure["taskTitle"] == "Fixture task",
+           "current gate diagnosis and issue title missing")
+        ok(not (await operations.overview(session, {"other-device"}))["recentFailures"],
+           "out-of-scope run was visible")
+        limited = (await operations.overview(session, {"device-1"}, can_view_failures=False))["recentFailures"][0]
+        ok(limited["diagnosis"] and not any(limited[key] for key in ("taskId", "taskTitle", "error")),
+           "monitor-only viewer received restricted failure details")
     await engine.dispose()
 
 

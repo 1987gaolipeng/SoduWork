@@ -326,8 +326,9 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
       ];
       const paths = localFileDelivery && outcome === 'completed'
         ? require('./task-output-paths.cjs').outputPaths(contract, texts) : undefined;
+      const requestedFormat = feedback && require('../conversation/delivery-selection').requestedExtension(feedback, {explicitOnly:true});
       const delivery = await require('./task-delivery.cjs').capture(runtime?.handle, outcome, {taskId,...scope},
-        {requiresFiles, paths});
+        {requiresFiles, paths, requestedFormat});
       require('../requirement-diagnostics.cjs').record('native.capture', {taskId,...scope,outcome,
         fileCount:delivery?.files?.length || 0});
       capturedSettlement = {body: {action, ...(submissionMode ? {submissionMode} : {})}, delivery};

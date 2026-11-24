@@ -458,6 +458,13 @@ async function _sendCore(textOverride, sendOptions) {
     if (ctx._snap?.openBlocked) return false;
     const el = ctx._mount();
     if (!el) return false;
+    // Keyboard and shortcut submissions follow the same catalog gate as the button.
+    // Programmatic tasks still use the authoritative preflight below.
+    const catalog = ctx._composerControls?.modelCatalogState?.();
+    if (textOverride == null && catalog?.blocked) {
+      global.petSay?.(catalog.reason);
+      return false;
+    }
     const accessEpoch = ctx._viewEpoch, sendScopeEpoch = ctx._draftScopeEpoch, sendOwnerScope = ctx._draftOwnerScope();
     const previousPreflight = ctx._sendPreflight;
     const composerPreflight = textOverride == null ? { view: accessEpoch, scope: sendScopeEpoch, owner: sendOwnerScope } : null;
@@ -478,6 +485,7 @@ async function _sendCore(textOverride, sendOptions) {
         if (accessEpoch === ctx._viewEpoch && sendScopeEpoch === ctx._draftScopeEpoch &&
             sendOwnerScope === ctx._draftOwnerScope()) {
           const reason = String(error?.message || '发送前检查失败，请重试');
+          sendOptions?.onRefusal?.(error?.detail);
           if (ctx._runtimeBusy()) global.petSay?.(reason);
           else ctx._fail('这一轮没发出去', reason);
         }
@@ -488,7 +496,9 @@ async function _sendCore(textOverride, sendOptions) {
     }
     if (accessEpoch !== ctx._viewEpoch || sendScopeEpoch !== ctx._draftScopeEpoch || sendOwnerScope !== ctx._draftOwnerScope()) return false;
     if ((ctx._snap?.modelSelection?.model || ctx._model)?.unavailable) {
-      ctx._fail('原本地模型已删除或不可用，请主动选择可用模型后继续发送');
+      const reason = '原本地模型已删除或不可用，请主动选择可用模型后继续发送';
+      sendOptions?.onRefusal?.(reason);
+      ctx._fail(reason);
       return false;
     }
     const input = el.querySelector('#nchatInput');
@@ -679,6 +689,7 @@ async function _sendCore(textOverride, sendOptions) {
       }
       if (failedDraft.requirement && r) failedDraft.requirement.deliveryState = r.ok ? 'accepted' : 'rejected';
       if (!currentSendScope()) return false;
+      if (r?.ok === false) sendOptions?.onRefusal?.(r.reason);
       if (r?.ok && priorFailure?.draft.text === draftText &&
           (priorFailure.draft.requirement?.taskId || '') === (failedDraft.requirement?.taskId || '') &&
           ctx._failedConversationDrafts.get(sendDraftKey) === priorFailure) ctx._failedConversationDrafts.delete(sendDraftKey);
@@ -729,6 +740,7 @@ async function _sendCore(textOverride, sendOptions) {
       void Promise.resolve(attachmentRefsPromise).catch(() => {});
       retainFailure(String(error && error.message || error));
       if (!currentSendView()) return false;
+      sendOptions?.onRefusal?.(error?.detail);
       if (!wasRunning) ctx._fail('这一轮没发出去', String((error && error.message) || error), failedDraft, error);
       else if (!global.SoduWorkQuotaNotice?.show(error) && typeof petSay === 'function') petSay('排队消息没有发出去');
       return false;

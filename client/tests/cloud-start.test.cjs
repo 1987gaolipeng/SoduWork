@@ -28,7 +28,12 @@ async function fixture(t) {
       { kind: 'user', seq: 1, text: remote.config.text, attachments: remote.files },
       { kind: 'say', seq: 2, text: 'Cloud result 42' }] };
     if (route.endsWith('/ai-say')) { sends++; return { ok: true }; }
-    if (route.endsWith('/ai-status')) { if (statusWait) await statusWait; return { ok: true, status }; }
+    if (route.endsWith('/ai-status')) {
+      assert.equal(options.method, 'POST');
+      assert.deepEqual(JSON.parse(options.body), { ref: 'run1' });
+      if (statusWait) await statusWait;
+      return { ok: true, status };
+    }
     if (route.endsWith('/attachments')) return [];
     if (route.startsWith('/conversation-handoffs/')) return remote;
     assert.fail('unexpected request ' + route);

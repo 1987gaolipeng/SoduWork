@@ -82,6 +82,100 @@ class TokenQuotaTests(unittest.IsolatedAsyncioTestCase):
         return await self.http.post("/api/v1/usage/events", headers=headers or self.headers,
             json={"sourceId": key, "usage": {"input": total}})
 
+    async def test_cumulative_batch_reports_each_persisted_counter(self):
+        route = "/api/v1/usage/events"
+        events = [{"idempotencyKey": "receipt", "usage": {"input": count}}
+                  for count in (100, 999, 999, 20)]
+        response = await self.http.post(route, headers=self.headers, json={"events": events})
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["accepted"], 4)
+        rows = body["events"]
+        self.assertEqual(len({row["id"] for row in rows}), 1)
+        self.assertEqual([row["status"] for row in rows], ["created", "updated", "duplicate", "duplicate"])
+        self.assertEqual([row["usage"]["input"] for row in rows], [100, 999, 999, 999])
+        self.assertTrue(all(row["sourceId"] == "receipt" for row in rows))
+        async with self.sessions() as session:
+            saved = await session.get(models.AIUsageEvent, rows[0]["id"])
+            self.assertEqual(saved.input_tokens, 999)
+            self.assertEqual(await session.scalar(select(models.AIUsageDaily.input_tokens)), 999)
+
+    async def test_usage_must_be_an_object_before_any_event_in_a_batch_is_recorded(self):
+        route = "/api/v1/usage/events"
+        valid = {"sourceId": "valid", "usage": {"input": 8, "output": 2}}
+        for value in ("x", "", 1, 0, False, [], [["input", 4]]):
+            with self.subTest(value=value):
+                response = await self.http.post(route, headers=self.headers, json={"events": [
+                    valid, {"sourceId": "invalid", "usage": value}]})
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertIn("usage 必须是对象", response.json()["detail"])
+        async with self.sessions() as session:
+            self.assertIsNone(await session.scalar(select(models.AIUsageEvent.id)))
+            self.assertIsNone(await session.scalar(select(models.AIUsageDaily.id)))
+
+        response = await self.http.post(route, headers=self.headers, json={"events": [
+            valid, {"sourceId": "omitted"}, {"sourceId": "null", "usage": None},
+            {"sourceId": "empty", "usage": {}}]})
+        self.assertEqual(response.status_code, 200, response.text)
+        async with self.sessions() as session:
+            rows = (await session.execute(select(models.AIUsageEvent.source_id,
+                models.AIUsageEvent.input_tokens, models.AIUsageEvent.output_tokens))).all()
+            self.assertCountEqual(rows, [("valid", 8, 2), ("omitted", 0, 0), ("null", 0, 0), ("empty", 0, 0)])
+
+    async def test_usage_source_types_are_explicit_and_batch_validation_is_atomic(self):
+        route = "/api/v1/usage/events"
+        event = {"sourceId": "sample", "usage": {"input": 1}}
+        for value in ("admin", "bogus", "CHAT", "", None, 1, [], {}):
+            response = await self.http.post(route, headers=self.headers, json={"events": [
+                event, {**event, "sourceType": value}]})
+            self.assertEqual(response.status_code, 422, response.text)
+            self.assertIn("workflow", response.json()["detail"])
+        for value in ("task", "workflow"):
+            response = await self.http.post(route, headers=self.headers, json={"events": [
+                event, {**event, "sourceType": value}]})
+            self.assertEqual(response.status_code, 422, response.text)
+            self.assertIn("taskId", response.json()["detail"])
+        async with self.sessions() as session:
+            self.assertIsNone(await session.scalar(select(models.AIUsageEvent.id)))
+            self.assertIsNone(await session.scalar(select(models.AIUsageDaily.id)))
+            session.add(models.Task(id="assigned", title="Sample", assignee_user_id=self.user.id))
+            await session.commit()
+        for value in ("chat", "system", "automation", "task", "workflow"):
+            response = await self.http.post(route, headers=self.headers, json={
+                **event, "sourceId": value, "sourceType": value, "taskId": "assigned"})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["events"][0]["sourceType"], value)
+
+    async def test_usage_timestamps_are_validated_before_recording_a_batch(self):
+        route = "/api/v1/usage/events"
+        event = {"sourceId": "sample", "usage": {"input": 1}}
+        for stamp in ("not-a-date", "2026-13-45", "", None, 12345, "2026-11-21T99:99:99Z",
+                      "0001-01-01T00:00:00+08:00", "9999-12-31T23:59:59Z"):
+            with self.subTest(occurredAt=stamp):
+                response = await self.http.post(route, headers=self.headers, json={"events": [
+                    event, {**event, "sourceId": "invalid", "occurredAt": stamp}]})
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertIn("occurredAt", response.json()["detail"])
+        async with self.sessions() as session:
+            self.assertIsNone(await session.scalar(select(models.AIUsageEvent.id)))
+            self.assertIsNone(await session.scalar(select(models.AIUsageDaily.id)))
+
+        before = datetime.now(timezone.utc)
+        samples = [event, {**event, "sourceId": "offset", "occurredAt": "2026-11-21T16:30:00+08:00"},
+                   {**event, "sourceId": "naive", "occurredAt": "2026-11-21T16:30:00"}]
+        response = await self.http.post(route, headers=self.headers, json={"events": samples})
+        self.assertEqual(response.status_code, 200, response.text)
+        stamps = [datetime.fromisoformat(row["occurredAt"]) for row in response.json()["events"]]
+        self.assertLessEqual(before, stamps[0])
+        self.assertLessEqual(stamps[0], datetime.now(timezone.utc))
+        self.assertEqual(stamps[1], datetime(2026, 11, 21, 8, 30, tzinfo=timezone.utc))
+        self.assertEqual(stamps[2], datetime(2026, 11, 21, 16, 30, tzinfo=timezone.utc))
+        async with self.sessions() as session:
+            days = dict((await session.execute(select(models.AIUsageEvent.source_id, models.AIUsageDaily.day_key)
+                .join(models.AIUsageDaily, models.AIUsageDaily.usage_event_id == models.AIUsageEvent.id)
+                .where(models.AIUsageEvent.source_id.in_(["naive", "offset"])))).all())
+            self.assertEqual(days, {"naive": "2026-11-22", "offset": "2026-11-21"})
+
     async def test_existing_proxy_tickets_cannot_bypass_quota(self):
         ticket = device_auth.issue_proxy_ticket(self.devices[0])[0]
         await self.policy(10)

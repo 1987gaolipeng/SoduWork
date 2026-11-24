@@ -31,6 +31,33 @@ class EnvironmentContractsTests(unittest.TestCase):
         self.assertEqual(actual[1]["timeoutSeconds"], 120)
         self.assertTrue(actual[2]["required"])
 
+    def test_health_check_errors_identify_the_entry_and_field(self):
+        check = {"type": "http", "url": "https://fixture.invalid", "retries": 1}
+        for value in (True, 12345, {}, "http"):
+            with self.subTest(value=value), self.assertRaisesRegex(contracts.InvalidHealthCheck, "healthChecks"):
+                contracts._checks(value)
+        with self.assertRaisesRegex(contracts.InvalidHealthCheck, "第 2 条"):
+            contracts._checks([check, None])
+        for field in ("timeoutSeconds", "expectStatus", "retries", "intervalSeconds"):
+            for value in (True, [], {}, 1.5, "invalid"):
+                with self.subTest(field=field, value=value), self.assertRaisesRegex(
+                    contracts.InvalidHealthCheck, f"第 2 条.*{field}"
+                ):
+                    contracts._checks([check, {**check, field: value}])
+
+    def test_health_check_defaults_and_numeric_strings(self):
+        check = {"type": "http", "url": "https://fixture.invalid"}
+        self.assertEqual(contracts._checks(None), [])
+        self.assertEqual(contracts._checks([]), [])
+        for value in (0, "", None):
+            with self.subTest(value=value):
+                item, = contracts._checks([{**check, "timeoutSeconds": value, "expectStatus": value}])
+                self.assertEqual((item["timeoutSeconds"], item["expectStatus"]), (15, 200))
+        item, = contracts._checks([{**check, "timeoutSeconds": " 25 ", "expectStatus": 204.0,
+                                    "retries": "2", "intervalSeconds": "90"}])
+        self.assertEqual((item["timeoutSeconds"], item["expectStatus"], item["retries"],
+                          item["intervalSeconds"]), (25, 204, 2, 60))
+
     def test_credential_and_unstructured_command_guards_are_preserved(self):
         for raw in ({"argv": "deploy release"},
                     {"argv": ["deploy"], "env": {"API_TOKEN": "fixture"}},

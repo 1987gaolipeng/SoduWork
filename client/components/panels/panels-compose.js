@@ -509,6 +509,7 @@
     await _pluginSelectTask;
     await global.ComposeRuntime?.ready?.();
     if (!current()) return false;
+    if (global.FirstChatReadiness?.canStart() === false) return false;
     if (intentOptions?.intent === 'goal' && global.ComposeRuntime?.goalSupported?.() === false) {
       if (typeof petSay === 'function') petSay('当前 Agent 暂不支持目标模式，请选择其他 Agent 或取消目标后发送');
       return false;

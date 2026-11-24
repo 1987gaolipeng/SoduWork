@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from .. import automation_models as am, models
 from ..schemas import attachment_to_api
-from . import approval_routing, delivery_bundle, gate_contract, release_control, task_access
+from . import approval_routing, delivery_bundle, gate_contract, release_control, requirement_review_access, task_access
 
 _locks = weakref.WeakValueDictionary()
 
@@ -89,7 +89,8 @@ async def context(session, client, tid):
     task, actor = await _identity(session, client, tid)
     artifact, request = await _subject(session, task)
     allowed = await _allowed(session, task, request, actor, artifact)
-    if not allowed and not await task_access.can_view(session, client, task):
+    execution = await task_access.can_view(session, client, task)
+    if not allowed and not execution:
         raise HTTPException(403, "这项验收未分配给你")
     if task.status == "cancel" or task.archived_at:
         raise HTTPException(409, "已取消或归档的需求不能启动验收")
@@ -99,14 +100,14 @@ async def context(session, client, tid):
     # Gate evidence remains auditable, but only fixed deliverables are mandatory model inputs.
     selected = delivery_bundle.select_artifact(rows, artifact) if artifact.kind != "code" else []
     selected_ids = {row.id for row in selected}
-    optional = [row for row in rows if row.id not in selected_ids and
+    optional = [row for row in rows if execution and row.id not in selected_ids and
                 attachment_to_api(row)["role"] in {"input", "process", "verification", "output"}]
     bundle = None
     if len(selected) >= 2:
         bundle = {"filename": delivery_bundle.archive_filename(task.title), "artifactVersionId": artifact.id,
                   "attachmentIds": [row.id for row in selected], "fileCount": len(selected)}
     timeline = await requirement_timeline.packet(session, client, task)
-    return {"task": await tasks.task_to_api_live(session, task),
+    return {"task": await tasks.task_to_api_live(session, task) if execution else requirement_review_access.review_summary(task),
             "approvalId": request.id if request else "direct:" + task.id,
             "artifactVersionId": artifact.id, "requirementVersion": task.requirement_version,
             "criteria": _criteria(task, request), "evidence": gate.get("evidence") or [],
@@ -194,7 +195,8 @@ async def _apply(session, client, tid, body):
         if prior is not None:
             return {"ok": True, "already": True, "verdict":
                     "pending" if request.status == "pending" else request.status,
-                    "task": await tasks.task_to_api_live(session, task),
+                    "task": (await tasks.task_to_api_live(session, task) if await task_access.can_view(session, client, task)
+                             else requirement_review_access.review_summary(task)),
                     "request": release_control.request_api(request),
                     "closed": request.status == "approved" and bool(task.reviewed_at) and task.status == "done"}
         if request.status != "pending":
@@ -260,4 +262,5 @@ async def _apply(session, client, tid, body):
         await task_access.publish_owner(session, task, {"type": "notice", "taskId": tid,
             "text": f"{who} 对「{task.title}」{outcome}"})
     return {"ok": True, "verdict": verdict, "closed": closed, "taskBlocked": blocked,
-            "rework": rework, "request": release_control.request_api(request), "task": api}
+            "rework": rework, "request": release_control.request_api(request),
+            "task": api if await task_access.can_view(session, client, task) else requirement_review_access.review_summary(task)}

@@ -1,6 +1,8 @@
+import { catalogSearchView, scheduleCatalogSearch } from './repository-catalog-search.js'
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api, can } from '../api.js'
+import { RecordSource, SourceField, useBusinessRecords } from '../BusinessRecords.jsx'
 import { FilterInput, FilterSelect } from '../FilterControls.jsx'
 import { useViewportHeight } from '../viewport-height.js'
 import { useAsync, Loading, Icon, ErrorState, LiveDot, AUTO, toast, Confirm, Modal, SelectMenu } from '../ui.jsx'
@@ -64,24 +66,30 @@ function Field({ label, note, children, wide }) {
   return <label className={'pg-field' + (wide ? ' wide' : '')}><span>{label}</span>{children}{note && <small>{note}</small>}</label>
 }
 
-function ProjectModal({ project, owners, onClose, onSave }) {
+function ProjectModal({ project, owners, orgs, onClose, onSave }) {
   const uiLocale = useLocale();
-  const [form, setForm] = useState(project || { name: '', group: '', desc: '', repoUrl: '', ownerUserId: '' })
+  const [form, setForm] = useState(project ? { ...project, orgId: project.orgId || '' } : { name: '', group: '', desc: '', repoUrl: '', ownerUserId: '', orgId: '' })
   const [busy, setBusy] = useState(false); const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   async function save() {
     if (!form.name.trim()) return toast(tx("请填写项目名称"))
     if (!project && !form.ownerUserId) return toast(tx("请选择项目负责人"))
     if (form.repoUrl && !/^https?:\/\//.test(form.repoUrl)) return toast(tx("代码地址要以 http(s):// 开头"))
     const payload = { name: form.name.trim(), group: form.group.trim(), desc: form.desc.trim(), repoUrl: form.repoUrl.trim() }
-    if (!project) payload.ownerUserId = form.ownerUserId
+    if (!project) {
+      payload.ownerUserId = form.ownerUserId
+      if (form.dataSource) payload.dataSource = form.dataSource
+    }
+    if (form.orgId) payload.orgId = form.orgId
     setBusy(true); try { await onSave(payload) } catch (e) { toast(tx("项目没有保存：") + e.message) } finally { setBusy(false) }
   }
-  return <Modal scope="project-governance" title={project ? tx("编辑项目信息") : tx("新建项目")} icon="box" wide onClose={onClose} foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : project ? tx("保存项目") : tx("创建项目")}</button></>}>
+  return <Modal scope="project-governance" title={project ? tx("编辑项目信息") : tx("新建项目")} icon="box" wide draft={[form.name || '', form.group || '', form.desc || '', form.repoUrl || '', form.ownerUserId || '', form.dataSource || '']} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : project ? tx("保存项目") : tx("创建项目")}</button></>}>
     <div className="pg-modal-intro"><b>{project ? tx("维护项目资产的基本身份") : tx("先建立项目，再逐步接入仓库、流程与发布环境")}</b><span>{tx("这里登记的是业务项目；前端、后端等代码资产在项目内作为独立仓库管理。")}</span></div>
     <div className="pg-form-grid">
       <Field label={tx("项目名称")}><input autoFocus className="f-in" value={form.name || ''} onChange={set('name')} placeholder={tx("例如：示例社区")} /></Field>
       <Field label={tx("业务分组")}><input className="f-in" value={form.group || ''} onChange={set('group')} placeholder={tx("例如：内部产品")} /></Field>
+      {!project && <SourceField value={form.dataSource || ''} onChange={dataSource => setForm({ ...form, dataSource: dataSource || undefined })} />}
       {!project && <Field label={tx("项目负责人")} wide><SelectMenu className="f-in" value={form.ownerUserId || ''} onChange={set('ownerUserId')}><option value="">{tx("选择负责人…")}</option>{owners.map((o) => <option value={o.id} key={o.id}>{o.name}{o.username ? ` · ${o.username}` : ''}</option>)}</SelectMenu></Field>}
+      {(orgs || []).length > 1 && <Field label={tx("所属组织")} wide><SelectMenu className="f-in" value={form.orgId || ''} onChange={set('orgId')}><option value="">{tx("默认负责人组织")}</option>{orgs.map((o) => <option value={o.id} key={o.id}>{o.name}</option>)}</SelectMenu></Field>}
       <Field label={tx("项目说明")} wide><textarea className="f-in" rows="3" value={form.desc || ''} onChange={set('desc')} placeholder={tx("说明项目服务对象、业务目标与交付边界")} /></Field>
       <Field label={tx("主代码地址（可选）")} note={tx("多个代码仓库请在项目详情中分别登记")} wide><input className="f-in" value={form.repoUrl || ''} onChange={set('repoUrl')} placeholder="https://gitlab.example.com/team/project" /></Field>
     </div>
@@ -97,7 +105,7 @@ function AddTaskModal({ pid, tasks, clients, onClose, onDone }) {
     if (!target) return toast(tx("请选择接收需求的 SoduWork"))
     setBusy(true); try { await api.addProjectTask(pid, { title: title.trim(), target, deps, triageStage: 'intake' }); onDone() } catch (e) { toast(tx("需求没有创建：") + e.message) } finally { setBusy(false) }
   }
-  return <Modal scope="project-governance" title={tx("添加项目需求")} icon="ticket" wide onClose={onClose} foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={add}>{tx("创建需求")}</button></>}>
+  return <Modal scope="project-governance" title={tx("添加项目需求")} icon="ticket" wide draft={[title, target, [...deps].sort()]} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={add}>{tx("创建需求")}</button></>}>
     <div className="pg-form-grid"><Field label={tx("需求标题")} wide><input autoFocus className="f-in" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={tx("例如：完成前端交互开发与自测")} /></Field><Field label={tx("接收终端")} wide><SelectMenu className="f-in" value={target} onChange={(e) => setTarget(e.target.value)}><option value="">{tx("选择 SoduWork…")}</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}{c.online ? '' : tx(" · 离线")}</option>)}</SelectMenu></Field></div>
     {tasks.length > 0 && <section className="pg-dependencies"><b>{tx("前置需求")}</b><p>{tx("新需求进入需求池待整理；澄清后设为待交付。选定的前置需求交付后，才能安排执行。")}</p><div>{tasks.map((t) => <button type="button" key={t.id} className={deps.includes(t.id) ? 'on' : ''} onClick={() => toggle(t.id)}><i />{t.title}</button>)}</div></section>}
   </Modal>
@@ -125,6 +133,7 @@ function RepoEditor({ repo, isNew, dfDefault, dfSteps, onCancel, onSave }) {
       {tab === 'base' && <><div className="pg-section-title"><b>{tx("代码资产身份")}</b><span>{tx("这些信息用于定位仓库和构建真实工作目录。")}</span></div><div className="pg-form-grid">
         <Field label={tx("仓库名称")}><input autoFocus className="f-in" value={form.name || ''} onChange={set('name')} placeholder={tx("例如：Web 前端")} /></Field><Field label={tx("模块类型")}><SelectMenu className="f-in" value={form.kind || 'other'} onChange={set('kind')}>{Object.entries(REPO_KIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</SelectMenu></Field>
         <Field label={tx("Git 仓库地址")} wide><input className="f-in" value={form.gitUrl || ''} onChange={set('gitUrl')} placeholder="https://gitlab.example.com/team/repo.git" /></Field><Field label={tx("基线分支")}><input className="f-in" value={form.branch || ''} onChange={set('branch')} placeholder="main" /></Field><Field label={tx("工作目录内的相对子目录")}><input className="f-in" value={form.localDir || ''} onChange={set('localDir')} placeholder={tx("例如：apps/web")} /></Field>
+        {isNew && <SourceField value={form.dataSource || ''} onChange={dataSource => setForm({ ...form, dataSource: dataSource || undefined })} />}
         <Field label={tx("运行与验证说明")} wide><textarea className="f-in" rows="4" value={form.note || ''} onChange={set('note')} placeholder={tx("告诉 AI 如何启动、测试和验收这个模块，例如：npm run dev；npm test")} /></Field>
       </div></>}
       {tab === 'delivery' && <><div className="pg-section-title"><b>{tx("AI 完成后的交付动作")}</b><span>{tx("工作副本与合并副本必须隔离，避免未提交改动污染交付。")}</span></div><div className="pg-delivery-status"><StatusChip ok={form.serverDir && form.mergeBranch} label={form.serverDir && form.mergeBranch ? tx("自动合并至 {0}", [form.mergeBranch]) : tx("尚未启用自动合并")} /><StatusChip ok={form.aiWorkDir} label={form.aiWorkDir ? tx("支持服务端自动执行") : tx("仅支持在线终端执行")} /></div><div className="pg-form-grid"><Field label={tx("服务端干净仓库路径")} wide><input className="f-in" value={form.serverDir || ''} onChange={set('serverDir')} placeholder={tx("用于合并的干净仓库副本路径")} /></Field><Field label={tx("目标分支")}><input className="f-in" value={form.mergeBranch || ''} onChange={set('mergeBranch')} placeholder="develop / main" /></Field><Field label={tx("AI 自动执行工作目录")}><input className="f-in" value={form.aiWorkDir || ''} onChange={set('aiWorkDir')} placeholder={tx("必须与上面的合并仓库分开")} /></Field></div><div className="pg-callout"><Icon name="shield" /><div><b>{tx("交付判定")}</b><span>{tx("配置前两项后，AI push 成功不等于交付；SoduWork 会在合并成功后才关闭本阶段，冲突则转为可处理异常。")}</span></div></div></>}
@@ -143,7 +152,8 @@ function CatalogRepoModal({ pid, clients, onClose, onDone }) {
   const [integrations, setIntegrations] = useState([])
   const [sourceId, setSourceId] = useState('')
   const [clientId, setClientId] = useState((clients.find((c) => c.online) || clients[0] || {}).id || '')
-  const [catalog, setCatalog] = useState([])
+  const [pages, setPages] = useState([])
+  const [searchResult, setSearchResult] = useState(null)
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(null)
   const [branches, setBranches] = useState([])
@@ -151,36 +161,45 @@ function CatalogRepoModal({ pid, clients, onClose, onDone }) {
   const [syncing, setSyncing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [form, setForm] = useState({ name: '', kind: 'other', branch: '', mergeBranch: '', localDir: '' })
-  const sources = integrations.filter((item) => String(item.type || '').toLowerCase() === 'gitlab')
+  const provider = integrations.find(item => item.id === sourceId)?.type?.toLowerCase()
   const canSync = can('integration.manage')
 
   useEffect(() => {
     api.integrations().then((items) => {
-      const usable = (items || []).filter((item) => String(item.type || '').toLowerCase() === 'gitlab' && item.enabled !== false)
+      // Match the GitHub and GitLab providers supported by the repository catalog.
+      const usable = (items || []).filter((item) => ['gitlab', 'github'].includes(String(item.type || '').toLowerCase()) && item.enabled !== false)
       setIntegrations(usable)
       if (usable[0]) setSourceId(usable[0].id)
       else setLoading(false)
     }).catch((e) => { setLoading(false); toast(tx("代码源没有加载：") + e.message) })
   }, [])
 
-  const loadCatalog = useCallback(async (iid) => {
-    if (!iid) { setCatalog([]); setLoading(false); return }
-    setLoading(true)
-    try {
-      const result = await api.repositoryCatalog(iid)
-      setCatalog(result.items || [])
-    } catch (e) {
-      setCatalog([])
-      toast(tx("仓库目录没有加载：") + e.message)
-    } finally { setLoading(false) }
-  }, [])
-
+  const [refresh, setRefresh] = useState(0)
   useEffect(() => {
-    setSelected(null); setBranches([]); setQuery('')
+    let active = true
+    async function loadCatalog(iid) {
+      setPages([])
+      if (!iid) { setLoading(false); return }
+      setLoading(true)
+      try {
+        const result = await api.repositoryCatalog(iid)
+        if (active) setPages([{ id: iid, items: result.items || [] }])
+      } catch (e) {
+        if (active) toast(tx("仓库目录没有加载：") + e.message)
+      } finally { if (active) setLoading(false) }
+    }
     loadCatalog(sourceId)
-  }, [sourceId, loadCatalog])
+    return () => { active = false }
+  }, [sourceId, refresh])
+
+  const branchRequest = useRef(0)
+  function changeSource(id) {
+    branchRequest.current += 1
+    setSelected(null); setBranches([]); setQuery(''); setSourceId(id)
+  }
 
   async function choose(row) {
+    const request = ++branchRequest.current
     setSelected(row)
     const branch = row.defaultBranch || 'main'
     setForm({ name: row.displayName || row.fullName, kind: 'other', branch, mergeBranch: branch, localDir: '' })
@@ -188,18 +207,21 @@ function CatalogRepoModal({ pid, clients, onClose, onDone }) {
     if (!clientId) return
     try {
       const result = await api.repositoryBranches(row.id, clientId)
+      if (request !== branchRequest.current) return
       const values = result.items || []
       setBranches(values.length ? values : [branch])
-    } catch (e) { toast(tx("分支列表暂不可用，可继续使用默认分支：") + e.message) }
+    } catch (e) {
+      if (request === branchRequest.current) toast(tx("分支列表暂不可用，可继续使用默认分支：") + e.message)
+    }
   }
 
   async function sync() {
-    if (!sourceId) return toast(tx("请先接入 GitLab 代码源"))
+    if (!sourceId) return toast(tx("请先接入代码源"))
     if (!clientId) return toast(tx("请选择保存了代码账号的 SoduWork"))
     setSyncing(true)
     try {
       const result = await api.syncRepositoryCatalog(sourceId, clientId)
-      await loadCatalog(sourceId)
+      setRefresh(value => value + 1)
       toast(tx("仓库目录已同步：") + result.total + tx(" 个仓库"))
     } catch (e) { toast(tx("仓库目录同步失败：") + e.message) } finally { setSyncing(false) }
   }
@@ -212,27 +234,31 @@ function CatalogRepoModal({ pid, clients, onClose, onDone }) {
       await api.addRepoFromCatalog(pid, {
         catalogId: selected.id, name: form.name.trim(), kind: form.kind,
         branch: form.branch.trim(), mergeBranch: (form.mergeBranch || form.branch).trim(),
-        localDir: form.localDir.trim(),
+        localDir: form.localDir.trim(), dataSource: form.dataSource,
       })
       toast(tx("代码仓库与项目分支已建立映射"))
       onDone()
     } catch (e) { toast(tx("仓库没有加入项目：") + e.message) } finally { setBusy(false) }
   }
 
-  const shown = catalog.filter((row) => !query.trim() || [row.fullName, row.displayName].some((v) => String(v || '').toLowerCase().includes(query.trim().toLowerCase())))
-  return <Modal scope="project-governance" title={tx("从远程仓库目录添加")} icon="box" wide onClose={onClose} foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy || !selected} onClick={save}>{busy ? tx("正在添加…") : tx("添加到项目")}</button></>}>
+  const term = query.trim()
+  useEffect(() => scheduleCatalogSearch(pages, term, api.repositoryCatalog, setSearchResult), [pages, term])
+  const search = catalogSearchView(pages, term, searchResult)
+  const shown = search.rows
+  return <Modal scope="project-governance" title={tx("从远程仓库目录添加")} icon="box" wide draft={selected ? [selected.id, form] : null} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy || !selected} onClick={save}>{busy ? tx("正在添加…") : tx("添加到项目")}</button></>}>
     <div className="pg-catalog-lead"><div><b>{tx("选择真实代码资产，再指定这个项目使用的分支")}</b><span>{tx("同一个远程仓库可以服务多个项目；每个项目独立保存工作分支、合并目标与研发规则。")}</span></div>{canSync && <button className="btn btn-ghost btn-sm" disabled={syncing || !sourceId} onClick={sync}><Icon name="refresh" />{syncing ? tx("同步中…") : tx("同步目录")}</button>}</div>
     <div className="pg-catalog-source">
-      <Field label={tx("代码源")}><SelectMenu className="f-in" value={sourceId} onChange={(e) => setSourceId(e.target.value)}><option value="">{tx("选择 GitLab…")}</option>{sources.map((item) => <option key={item.id} value={item.id}>{item.name} · {String(item.type).toUpperCase()}</option>)}</SelectMenu></Field>
+      <Field label={tx("代码源")}><SelectMenu className="f-in" value={sourceId} onChange={(e) => changeSource(e.target.value)}><option value="">{tx("选择代码源…")}</option>{integrations.map((item) => <option key={item.id} value={item.id}>{item.name} · {String(item.type).toUpperCase()}</option>)}</SelectMenu></Field>
       <Field label={tx("用于读取的代码账号")}><SelectMenu className="f-in" value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">{tx("选择 SoduWork…")}</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name || client.id}{client.online ? tx(" · 在线") : tx(" · 离线")}</option>)}</SelectMenu></Field>
     </div>
-    {!sources.length ? <EmptyPanel icon="plug" title={tx("还没有可用代码源")} text={tx("请先在「系统集成」接入 GitLab，然后回到这里同步仓库目录。")} /> : <div className="pg-catalog-layout">
+    {!integrations.length ? <EmptyPanel icon="plug" title={tx("还没有可用代码源")} text={tx("请先在「系统集成」接入 GitLab 或 GitHub，然后回到这里同步仓库目录。")} /> : <div className="pg-catalog-layout">
       <section className="pg-catalog-browser">
         <FilterInput className="pg-catalog-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tx("搜索仓库名称或路径")} />
-        <div className="pg-catalog-list">{loading ? <Loading /> : shown.length ? shown.map((row) => <button type="button" key={row.id} className={selected && selected.id === row.id ? 'on' : ''} onClick={() => choose(row)}><span className="pg-catalog-provider">{'GL'}</span><span><b>{row.displayName || row.fullName}</b><small>{row.fullName}</small></span><em>{row.defaultBranch || 'main'}</em></button>) : <div className="pg-catalog-none"><b>{tx("目录里还没有仓库")}</b><span>{canSync ? tx("选择代码账号后点击“同步目录”。") : tx("请联系平台管理员同步企业仓库目录。")}</span></div>}</div>
+        <div className="pg-catalog-list">{loading || search.loading ? <Loading /> : search.failures.length ? <div role="alert">{tx("仓库目录没有加载：")}{search.failures.join(" · ")}</div> : shown.length ? shown.map((row) => <button type="button" key={row.id} className={selected && selected.id === row.id ? 'on' : ''} onClick={() => choose(row)}><span className="pg-catalog-provider">{provider === 'github' ? 'GH' : 'GL'}</span><span><b>{row.displayName || row.fullName}</b><small>{row.fullName}</small></span><em>{row.defaultBranch || 'main'}</em></button>) : <div className="pg-catalog-none"><b>{term ? tx("没有匹配的仓库") : tx("目录里还没有仓库")}</b><span>{term ? tx("换个关键词试试。") : canSync ? tx("选择代码账号后点击“同步目录”。") : tx("请联系平台管理员同步企业仓库目录。")}</span></div>}</div>
       </section>
       <section className={'pg-catalog-config' + (selected ? '' : ' empty')}>
         {selected ? <><header><small>PROJECT BRANCH MAPPING</small><b>{selected.fullName}</b><span>{tx("这里只定义该项目如何使用这个仓库，不会修改远程代码。")}</span></header>
+          <SourceField value={form.dataSource || ''} onChange={dataSource => setForm({ ...form, dataSource: dataSource || undefined })} />
           <Field label={tx("在项目中的名称")}><input className="f-in" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label={tx("工程类型")}><SelectMenu className="f-in" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>{Object.entries(REPO_KIND).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</SelectMenu></Field>
           <Field label={tx("工作分支")}><input className="f-in" list="pg-catalog-branches" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value, mergeBranch: form.mergeBranch === form.branch ? e.target.value : form.mergeBranch })} /><datalist id="pg-catalog-branches">{branches.map((branch) => <option value={branch} key={branch} />)}</datalist></Field>
@@ -246,7 +272,7 @@ function CatalogRepoModal({ pid, clients, onClose, onDone }) {
 
 function CopyRepoModal({ repo, pid, projects, onClose, onDone }) {
   const uiLocale = useLocale();
-  const targets = (projects || []).filter((project) => project.id !== pid)
+  const targets = (projects || []).filter((project) => project.id !== pid && !project.isArchived)
   const [form, setForm] = useState({ projectId: targets[0] ? targets[0].id : '', name: repo.name, branch: repo.branch || 'main', mergeBranch: repo.mergeBranch || repo.branch || 'main', localDir: '' })
   const [busy, setBusy] = useState(false)
   async function save() {
@@ -259,10 +285,11 @@ function CopyRepoModal({ repo, pid, projects, onClose, onDone }) {
       onDone()
     } catch (e) { toast(tx("仓库映射没有复制：") + e.message) } finally { setBusy(false) }
   }
-  return <Modal scope="project-governance" title={tx("复制仓库映射 · ") + repo.name} icon="copy" onClose={onClose} foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy || !targets.length} onClick={save}>{busy ? tx("复制中…") : tx("复制到项目")}</button></>}>
+  return <Modal scope="project-governance" title={tx("复制仓库映射 · ") + repo.name} icon="copy" draft={form} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy || !targets.length} onClick={save}>{busy ? tx("复制中…") : tx("复制到项目")}</button></>}>
     <div className="pg-modal-intro"><b>{tx("复用远程仓库，不复制环境和运行路径")}</b><span>{tx("目标项目可选择自己的工作分支；发布目标、服务端目录和 AI 工作目录需要按目标环境单独配置。")}</span></div>
     {targets.length ? <div className="pg-form-grid">
       <Field label={tx("目标项目")} wide><SelectMenu autoFocus className="f-in" value={form.projectId} onChange={(e) => setForm({ ...form, projectId: e.target.value })}>{targets.map((project) => <option value={project.id} key={project.id}>{project.name}{project.group ? ' · ' + project.group : ''}</option>)}</SelectMenu></Field>
+      <SourceField value={form.dataSource || ''} onChange={dataSource => setForm({ ...form, dataSource: dataSource || undefined })} />
       <Field label={tx("项目内名称")}><input className="f-in" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
       <Field label={tx("工作分支")}><input className="f-in" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} /></Field>
       <Field label={tx("合并目标")}><input className="f-in" value={form.mergeBranch} onChange={(e) => setForm({ ...form, mergeBranch: e.target.value })} /></Field>
@@ -271,24 +298,31 @@ function CopyRepoModal({ repo, pid, projects, onClose, onDone }) {
   </Modal>
 }
 
-function RepoSection({ pid, repos, loading, reload, clients, projects }) {
+function RepoSection({ pid, projectArchived, repos, loading, reload, clients, projects }) {
   const uiLocale = useLocale();
   const [editing, setEditing] = useState(null); const [isNew, setIsNew] = useState(false); const [del, setDel] = useState(null); const [copying, setCopying] = useState(null); const [catalogOpen, setCatalogOpen] = useState(false); const [dfDefault, setDfDefault] = useState(null); const [dfSteps, setDfSteps] = useState([])
   useEffect(() => { api.devFlow().then((r) => { setDfDefault(r.cfg); setDfSteps(r.defaultSteps || []) }).catch(() => setDfDefault(null)) }, [])
+  const [query, setQuery] = useState('')
+  const keyword = query.trim().toLowerCase()
+  const matchingRepos = repos.filter(r => !keyword || [r.name, r.localDir, r.gitUrl, r.branch].some(value => String(value || '').toLowerCase().includes(keyword)))
+  const records = useBusinessRecords({ kind: 'repositories', rows: matchingRepos, reload, canManage: can('task.dispatch'), scopeKey: pid })
+  const shown = matchingRepos.filter(records.matches)
   const blank = { name: '', kind: 'other', localDir: '', branch: 'main', gitUrl: '', note: '', serverDir: '', mergeBranch: '', aiWorkDir: '', devFlow: {} }
   if (editing) return <RepoEditor repo={editing} isNew={isNew} dfDefault={dfDefault} dfSteps={dfSteps} onCancel={() => { setEditing(null); setIsNew(false) }} onSave={async (form) => { if (isNew) await api.addRepo(pid, form); else await api.updateRepo(editing.id, form); await reload(); setEditing(null); setIsNew(false); toast(isNew ? tx("代码仓库已登记") : tx("仓库配置已保存")) }} />
   const openCatalog = () => setCatalogOpen(true)
-  return <section className="pg-work-panel"><header className="pg-panel-head"><div><h3>{tx("代码仓库")}</h3><p>{tx("管理项目分支、研发规则与交付配置。")}</p></div>{can('task.dispatch') && <div className="pg-repo-head-actions"><button className="btn btn-ghost" onClick={() => { setEditing(blank); setIsNew(true) }}>{tx("手动登记")}</button><button className="btn btn-primary" onClick={openCatalog}><Icon name="plus" />{tx("从仓库目录添加")}</button></div>}</header>
-    {loading ? <Loading /> : repos.length === 0 ? <EmptyPanel icon="box" title={tx("还没有项目代码映射")} text={tx("从 GitLab 仓库目录选择仓库和分支，需求才能准确落到对应工程。")} action={can('task.dispatch') ? <button className="btn btn-primary" onClick={openCatalog}>{tx("从仓库目录添加")}</button> : null} /> : <div className="pg-repo-list">{repos.map((r) => {
+  return <section className="pg-work-panel"><header className="pg-panel-head"><div><h3>{tx("代码仓库")}</h3><p>{tx("管理项目分支、研发规则与交付配置。")}</p></div>{can('task.dispatch') && !projectArchived && <div className="pg-repo-head-actions"><button className="btn btn-ghost" onClick={() => { setEditing(blank); setIsNew(true) }}>{tx("手动登记")}</button><button className="btn btn-primary" onClick={openCatalog}><Icon name="plus" />{tx("从仓库目录添加")}</button></div>}</header>
+    <FilterInput type="search" aria-label={tx("搜索仓库名称或路径")} value={query} onChange={e => setQuery(e.target.value)} placeholder={tx("搜索仓库名称或路径")} />
+    {records.toolbar}
+    {loading ? <Loading /> : repos.length === 0 ? <EmptyPanel icon="box" title={tx("还没有项目代码映射")} text={tx("从仓库目录选择仓库和分支，需求才能准确落到对应工程。")} action={can('task.dispatch') && !projectArchived ? <button className="btn btn-primary" onClick={openCatalog}>{tx("从仓库目录添加")}</button> : null} /> : !shown.length ? <div className="pg-catalog-none" role="status">{tx("没有匹配的仓库")}</div> : <div className="pg-repo-list">{shown.map((r) => {
       const retired = r.scm === 'gerrit'
       const merged = !retired && r.serverDir && r.mergeBranch; const released = (r.deployTargets || []).length > 0
       const customFlow = Object.values(r.devFlow || {}).some((value) => Array.isArray(value) ? value.length : String(value || '').trim())
       return <article className="pg-repo-row" key={r.id}>
-        <span className={'pg-repo-icon kind-' + r.kind}><Icon name={r.kind === 'infra' ? 'monitor' : 'box'} /></span>
-        <div className="pg-repo-primary"><div><b>{r.name}</b><span>{REPO_KIND[r.kind] || REPO_KIND.other}</span></div><code title={r.localDir || tx("自动工作目录")}>{r.localDir || tx("自动工作目录")}</code></div>
+        {records.checkbox(r) || <span className={'pg-repo-icon kind-' + r.kind}><Icon name={r.kind === 'infra' ? 'monitor' : 'box'} /></span>}
+        <div className="pg-repo-primary"><div><b>{r.name}</b><RecordSource row={r} /><span>{REPO_KIND[r.kind] || REPO_KIND.other}</span></div><code title={r.localDir || tx("自动工作目录")}>{r.localDir || tx("自动工作目录")}</code></div>
         <div className="pg-repo-source"><small>{r.sourceRepositoryId ? tx("仓库目录映射") : tx("手动登记")}{tx(" · 工作分支 → 合并目标")}</small><b>{r.branch || 'main'} → {r.mergeBranch || r.branch || 'main'}</b>{r.gitUrl ? <a href={r.gitUrl} target="_blank" rel="noreferrer"><Icon name="external" />{tx("打开远程仓库")}</a> : <span>{tx("未设置 Git 地址")}</span>}</div>
         <div className="pg-repo-health"><span className="pg-repo-config-label">{tx("交付配置")}</span><StatusChip ok={!retired && r.gitUrl} label={retired ? tx("已停用") : r.gitUrl ? tx("代码已接入") : tx("待接入代码")} /><StatusChip ok={merged} label={merged ? tx("已配置自动合并") : tx("未配置自动合并")} /><StatusChip ok={released} label={released ? r.deployTargets.length + tx(" 个发布目标") : tx("未配置发布目标")} /><span className="pg-repo-flow-note">{tx("研发规则 · ")}{customFlow ? tx("仓库覆盖") : tx("继承企业默认")}</span></div>
-        {can('task.dispatch') && <div className="pg-row-actions admin-row-actions"><button className="admin-text-action" disabled={retired} onClick={() => setCopying(r)}>{tx("复制")}</button><button className="admin-text-action" disabled={retired} onClick={() => { setEditing(r); setIsNew(false) }}>{tx("管理")}</button><button className="admin-text-action danger" onClick={() => setDel(r)}>{tx("删除")}</button></div>}
+        {can('task.dispatch') && <div className="pg-row-actions admin-row-actions"><button className="admin-text-action" disabled={retired || projectArchived || r.isArchived} onClick={() => setCopying(r)}>{tx("复制")}</button><button className="admin-text-action" disabled={retired} onClick={() => { setEditing(r); setIsNew(false) }}>{tx("管理")}</button><button className="admin-text-action danger" onClick={() => setDel(r)}>{tx("删除")}</button></div>}
       </article>
     })}</div>}
     {catalogOpen && <CatalogRepoModal pid={pid} clients={clients || []} onClose={() => setCatalogOpen(false)} onDone={async () => { setCatalogOpen(false); await reload() }} />}
@@ -341,15 +375,16 @@ function ProjectOverview({ project, repos, owners, repoStatus, onReload, onTab }
   </div>
 }
 
-function ProjectDetail({ pid, clients, owners, projects, onBack, onChanged }) {
+function ProjectDetail({ pid, clients, owners, orgs, projects, onBack, onChanged }) {
   const uiLocale = useLocale();
-  const [project, setProject] = useState(null); const [repos, setRepos] = useState([]); const [reposLoading, setReposLoading] = useState(true); const [error, setError] = useState(false); const [tab, setTab] = useState('overview'); const [taskOpen, setTaskOpen] = useState(false); const [editOpen, setEditOpen] = useState(false); const [confirmDel, setConfirmDel] = useState(false); const snapshot = useRef('')
+  const [project, setProject] = useState(null); const [allRepos, setRepos] = useState([]); const [reposLoading, setReposLoading] = useState(true); const [error, setError] = useState(false); const [tab, setTab] = useState('overview'); const [taskOpen, setTaskOpen] = useState(false); const [editOpen, setEditOpen] = useState(false); const [confirmDel, setConfirmDel] = useState(false); const snapshot = useRef('')
   const [reposError, setReposError] = useState(false)
   const loadProject = useCallback(async (quiet = false) => { try { const next = await api.projectDetail(pid); const raw = JSON.stringify(next); if (snapshot.current !== raw) { snapshot.current = raw; setProject(next) } setError(false) } catch (_e) { if (!quiet) setError(true) } }, [pid])
-  const loadRepos = useCallback(async () => { try { setRepos(await api.repos(pid)); setReposError(false) } catch (_e) { setReposError(true) } finally { setReposLoading(false) } }, [pid])
+  const loadRepos = useCallback(async () => { try { setRepos(await api.repos(pid, true)); setReposError(false) } catch (_e) { setReposError(true) } finally { setReposLoading(false) } }, [pid])
   useEffect(() => { snapshot.current = ''; setProject(null); setReposLoading(true); loadProject(); loadRepos(); const timer = setInterval(() => loadProject(true), AUTO.interval); return () => clearInterval(timer) }, [loadProject, loadRepos])
   if (error) return <ErrorState onRetry={() => loadProject()} />
   if (!project) return <Loading />
+  const repos = allRepos.filter(repo => !repo.isArchived && (project.dataSource === 'test' || repo.dataSource !== 'test'))
   const summary = requirementSummary(project.tasks)
   const { done } = summary
   const repoStatus = reposLoading ? tx("读取中…") : reposError ? tx("读取失败") : ''
@@ -367,7 +402,7 @@ function ProjectDetail({ pid, clients, owners, projects, onBack, onChanged }) {
       <div className="pg-detail-topline"><button className="pg-back" onClick={onBack}><Icon name="chevron-left" />{tx("返回项目列表")}</button><LiveDot /></div>
       <div className="pg-detail-identity">
         <div className="pg-project-mark"><Icon name="box" /></div>
-        <div className="pg-detail-title"><div className="pg-detail-name"><h2>{project.name}</h2><span className="pg-detail-state">{statusLabel}</span></div><div className="pg-detail-meta"><span>{project.group || tx("未分组")}</span><span>{tx("负责人 · ")}{project.ownerName || tx("待指定")}</span></div></div>
+        <div className="pg-detail-title"><div className="pg-detail-name"><h2>{project.name}</h2><RecordSource row={project} /><span className="pg-detail-state">{statusLabel}</span></div><div className="pg-detail-meta"><span>{project.group || tx("未分组")}</span>{project.orgName ? <span>{project.orgName}</span> : null}<span>{tx("负责人 · ")}{project.ownerName || tx("待指定")}</span></div></div>
         <div className="pg-detail-actions"><button className="btn btn-ghost btn-sm" onClick={() => { loadProject(); loadRepos() }}><Icon name="refresh" />{tx("刷新")}</button>{can('task.dispatch') && <><button className="btn btn-ghost btn-sm" onClick={() => setEditOpen(true)}><Icon name="pencil" />{tx("编辑项目")}</button><button className="admin-text-action danger" onClick={() => setConfirmDel(true)}>{tx("删除项目")}</button></>}</div>
       </div>
       <p className="pg-detail-description">{project.desc || tx("尚未补充项目说明")}</p>
@@ -377,22 +412,22 @@ function ProjectDetail({ pid, clients, owners, projects, onBack, onChanged }) {
     <main className="pg-detail-body">
       {reposError && <div className="pg-detail-warning" role="alert"><Icon name="alert" /><span>{tx("仓库配置读取失败，相关汇总暂不可用。")}</span><button className="admin-text-action" onClick={loadRepos}>{tx("重新读取")}</button></div>}
       {tab === 'overview' && <ProjectOverview project={project} repos={repos} owners={owners} repoStatus={repoStatus} onReload={() => { loadProject(); onChanged() }} onTab={setTab} />}
-      {tab === 'repos' && <RepoSection pid={pid} repos={repos} loading={reposLoading} reload={loadRepos} clients={clients} projects={projects} />}
+      {tab === 'repos' && <RepoSection pid={pid} projectArchived={project.isArchived} repos={allRepos} loading={reposLoading} reload={loadRepos} clients={clients} projects={projects} />}
       {tab === 'tasks' && <section className="pg-work-panel"><header className="pg-panel-head"><div><h3>{tx("需求依赖")}</h3><p>{tx("按前置依赖分阶段查看需求，同阶段可并行执行。")}</p></div>{can('task.dispatch') && <button className="btn btn-primary" onClick={() => setTaskOpen(true)}><Icon name="plus" />{tx("添加需求")}</button>}</header><ProjectGraph tasks={project.tasks} /></section>}
       {tab === 'link' && <AiProjectLink pid={pid} current={project.extProjectId} onSaved={async (value) => { await api.updateProject(pid, { extProjectId: value }); loadProject(); onChanged() }} />}
     </main>
     {taskOpen && <AddTaskModal pid={pid} tasks={project.tasks} clients={clients} onClose={() => setTaskOpen(false)} onDone={() => { setTaskOpen(false); loadProject(); onChanged() }} />}
-    {editOpen && <ProjectModal project={project} owners={owners} onClose={() => setEditOpen(false)} onSave={saveProject} />}
+    {editOpen && <ProjectModal project={project} owners={owners} orgs={orgs} onClose={() => setEditOpen(false)} onSave={saveProject} />}
     {confirmDel && <Confirm title={tx("删除项目")} text={tx("确定删除「{0}」？项目内需求会保留，只解除项目归属。", [project.name])} danger confirmText={tx("删除项目")} onConfirm={async () => { await api.deleteProject(pid); setConfirmDel(false); onChanged(); onBack() }} onClose={() => setConfirmDel(false)} />}
   </div>
 }
 
-function ProjectRow({ project, onOpen }) {
+function ProjectRow({ project, checkbox, onOpen }) {
   const uiLocale = useLocale();
   const pct = project.total ? Math.round(project.done / project.total * 100) : 0; const state = !project.total ? tx("尚未开始") : pct === 100 ? tx("已完成") : project.done ? tx("推进中") : tx("待启动")
   return <article className="pg-project-row">
-    <span className={'pg-project-avatar state-' + (pct === 100 ? 'done' : project.done ? 'active' : 'idle')}><Icon name="box" /></span>
-    <div className="pg-project-name"><div><b>{project.name}</b><span>{project.group || tx("未分组")}</span></div><p>{project.desc || tx("尚未补充项目说明")}</p></div>
+    {checkbox || <span className={'pg-project-avatar state-' + (pct === 100 ? 'done' : project.done ? 'active' : 'idle')}><Icon name="box" /></span>}
+    <div className="pg-project-name"><div><b>{project.name}</b><span>{[project.group || tx("未分组"), project.orgName].filter(Boolean).join(' · ')}</span></div><p><RecordSource row={project} /> {project.desc || tx("尚未补充项目说明")}</p></div>
     <div className="pg-owner-cell"><b title={tx("负责人")}>{project.ownerName || tx("待指定")}</b></div>
     <div className="pg-progress-cell"><div><span>{project.done} / {project.total}{tx(" 项完成")}</span><b>{pct}%</b></div><i aria-label={tx("需求交付进度")}><em style={{ width: pct + '%' }} /></i></div>
     <span className={'pg-project-state ' + (pct === 100 ? 'done' : '')}><i />{state}</span>
@@ -406,13 +441,15 @@ function ProjectRow({ project, onOpen }) {
 export default function Projects() {
   const listRef = useViewportHeight(180)
   const uiLocale = useLocale();
-  const projects = useAsync(() => api.projects(), AUTO); const clients = useAsync(() => api.clients().catch(() => []), AUTO); const owners = useAsync(() => api.projectOwners().catch(() => []), AUTO)
+  const projects = useAsync(() => api.projects(true), AUTO); const clients = useAsync(() => api.clients().catch(() => []), AUTO); const owners = useAsync(() => api.projectOwners().catch(() => []), AUTO); const orgs = useAsync(() => api.orgs().catch(() => []), AUTO)
   const [open, setOpen] = useState(null); const [creating, setCreating] = useState(false); const [query, setQuery] = useState(''); const [group, setGroup] = useState('all')
+  const list = projects.data || []; const people = owners.data || []; const groups = [...new Set(list.map((p) => (p.group || '').trim() || tx("未分组")))].sort((a, b) => (a === tx("未分组")) - (b === tx("未分组")))
+  const keyword = query.trim().toLowerCase(); const matchingProjects = list.filter((p) => (group === 'all' || (p.group || tx("未分组")) === group) && (!keyword || [p.name, p.desc, p.group, p.ownerName].some((x) => String(x || '').toLowerCase().includes(keyword))))
+  const records = useBusinessRecords({ kind: 'projects', rows: matchingProjects, reload: projects.reload, canManage: can('task.dispatch') })
+  const shown = matchingProjects.filter(records.matches)
   if (projects.loading) return <Loading />
   if (projects.error && !projects.data) return <ErrorState onRetry={projects.reload} />
-  const list = projects.data || []; const people = owners.data || []; const groups = [...new Set(list.map((p) => (p.group || '').trim() || tx("未分组")))].sort((a, b) => (a === tx("未分组")) - (b === tx("未分组")))
-  if (open) return <ProjectDetail pid={open} clients={clients.data || []} owners={people} projects={list} onBack={() => setOpen(null)} onChanged={projects.reload} />
-  const keyword = query.trim().toLowerCase(); const shown = list.filter((p) => (group === 'all' || (p.group || tx("未分组")) === group) && (!keyword || [p.name, p.desc, p.group, p.ownerName].some((x) => String(x || '').toLowerCase().includes(keyword))))
+  if (open) return <ProjectDetail pid={open} clients={clients.data || []} owners={people} orgs={orgs.data || []} projects={list} onBack={() => setOpen(null)} onChanged={projects.reload} />
   async function create(form) { const r = await api.createProject(form); setCreating(false); await projects.reload(); setOpen(r.id); toast(tx("项目已创建，继续登记代码仓库")) }
   return <div className="project-governance pg-index">
     <section className="admin-filterbar pg-index-filters" aria-label={tx("项目筛选")}>
@@ -426,7 +463,8 @@ export default function Projects() {
         {can('task.dispatch') && <button className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" />{tx("新建项目")}</button>}
       </div>
     </section>
-    <section ref={listRef} className="pg-ledger admin-viewport-list" tabIndex={0} aria-label={tx("项目与仓库")}><header><span>{tx("项目")}</span><span>{tx("负责人")}</span><span>{tx("需求交付进度")}</span><span>{tx("状态")}</span><span>{tx("操作")}</span></header>{shown.length ? shown.map((p) => <ProjectRow key={p.id} project={p} onOpen={() => setOpen(p.id)} />) : <EmptyPanel icon="search" title={tx("没有匹配的项目")} text={tx("调整搜索关键词或项目分组后再试。")} />}</section>
-    {creating && <ProjectModal owners={people} onClose={() => setCreating(false)} onSave={create} />}
+    {records.toolbar}
+    <section ref={listRef} className="pg-ledger admin-viewport-list" tabIndex={0} aria-label={tx("项目与仓库")}><header><span>{tx("项目")}</span><span>{tx("负责人")}</span><span>{tx("需求交付进度")}</span><span>{tx("状态")}</span><span>{tx("操作")}</span></header>{shown.length ? shown.map((p) => <ProjectRow key={p.id} project={p} checkbox={records.checkbox(p)} onOpen={() => setOpen(p.id)} />) : <EmptyPanel icon="search" title={tx("没有匹配的项目")} text={tx("调整搜索关键词或项目分组后再试。")} />}</section>
+    {creating && <ProjectModal owners={people} orgs={orgs.data || []} onClose={() => setCreating(false)} onSave={create} />}
   </div>
 }

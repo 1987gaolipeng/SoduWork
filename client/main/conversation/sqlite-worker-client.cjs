@@ -19,7 +19,9 @@ function create(script, workerData, methods) {
   worker.on('exit', code => fail(Error('Conversation storage worker exited: ' + code)));
   function call(method, ...args) {
     if (failure) return Promise.reject(failure);
-    if (pending.size >= 256) return Promise.reject(Error('Conversation storage is busy; retry after pending requests complete'));
+    // Shutdown must queue behind accepted writes even when ordinary work has
+    // filled the queue; rejecting it would terminate those writes immediately.
+    if (method !== 'close' && pending.size >= 256) return Promise.reject(Error('Conversation storage is busy; retry after pending requests complete'));
     worker.ref();
     return new Promise((resolve, reject) => {
       const id = ++serial;

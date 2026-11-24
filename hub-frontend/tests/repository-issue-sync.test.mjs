@@ -1,3 +1,4 @@
+import * as catalogSearch from '../src/screens/repository-catalog-search.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import React from 'react'
@@ -212,7 +213,7 @@ async function catalogHost(t, manage, methods, navTo = () => {}) {
   const page = await createComponentHarness(new URL('../src/screens/Repositories.jsx', import.meta.url), {
     dependencies: { '../api.js': { api: methods, can: (permission) => permission === 'integration.manage' && manage },
       '../ui.jsx': { ...ui, navTo }, '../FilterControls.jsx': { FilterInput: 'filter-input' },
-      './project-governance.css': {}, './repositories.css': {},
+      './repository-catalog-search.js': catalogSearch, './project-governance.css': {}, './repositories.css': {},
       './RepositoryIssueSync.jsx': { __esModule: true, default: 'issue-dialog', RepositoryIssueSyncStatus: 'issue-status' } },
   })
   t.after(() => page.unmount())
@@ -512,4 +513,23 @@ test('all failed catalog reads preserve previous rows and a successful retry cle
   await button(page, '重新加载').props.onClick(); page.render()
   assert.equal(page.nodes(node => node.props.role === 'alert').length, 0)
   assert.deepEqual(rows(), ['lab-repo', 'hub-repo'])
+})
+
+test('catalog search includes rows outside the browse window and complete sources stay local', async (t) => {
+  const calls = []
+  const rows = Array.from({ length: 1200 }, (_, i) => ({ ...row, id: 'lab-' + i, fullName: 'qa/repo-' + i }))
+  const small = { ...row, id: 'small', fullName: 'team/repo-1199', provider: 'github' }
+  const page = await catalogHost(t, true, {
+    integrations: async () => [{ id: 'lab', type: 'gitlab' }, { id: 'hub', type: 'github' }],
+    repositoryCatalog: async (id, term) => {
+      calls.push([id, term])
+      const all = id === 'lab' ? rows : [small]
+      return { items: all.filter(item => !term || item.fullName.includes(term)).slice(0, 1000) }
+    },
+  })
+  page.act(() => page.nodes(node => node.type === 'filter-input')[0].props.onChange({ target: { value: 'repo-1199' } }))
+  await new Promise(resolve => setTimeout(resolve, 350))
+  await page.flush()
+  assert.deepEqual(page.nodes(node => node.props.className === 'rc-row').map(node => node.key), ['lab-1199', 'small'])
+  assert.deepEqual(calls.filter(([, term]) => term), [['lab', 'repo-1199']])
 })

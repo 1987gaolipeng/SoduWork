@@ -1,3 +1,4 @@
+import * as catalogSearch from '../src/screens/repository-catalog-search.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createComponentHarness } from './helpers/react-harness.mjs'
@@ -18,7 +19,7 @@ async function host(t, methods = {}, account = {}, expand = true) {
       testPullAccount: async (id, body) => { probes.push({ id, body }); return { ok: true, detail: 'Verified' } },
       savePullAccount: async (id, body) => { saves.push({ id, body }); return { ok: true } }, ...methods,
     } }, '../FilterControls.jsx': { FilterInput: 'input' }, '../ui.jsx': { Icon: 'svg', Loading: 'loading', Modal: 'dialog', SelectMenu: 'select', toast: (value) => notices.push(value) },
-    './project-governance.css': {}, './repositories.css': {}, './RepositoryIssueSync.jsx': { default: 'issue-dialog', RepositoryIssueSyncStatus: 'issue-status' } },
+    './repository-catalog-search.js': catalogSearch, './project-governance.css': {}, './repositories.css': {}, './RepositoryIssueSync.jsx': { default: 'issue-dialog', RepositoryIssueSyncStatus: 'issue-status' } },
   })
   t.after(() => page.unmount())
   page.render()
@@ -153,7 +154,7 @@ test('catalog progress names the reported stage and shows elapsed time apart fro
   setLocale('zh-CN')
   const page = await createComponentHarness(source, { exportName: 'SyncProgress', privateExports: ['SyncProgress'],
     dependencies: { '../api.js': {}, '../FilterControls.jsx': {}, '../ui.jsx': {},
-      './project-governance.css': {}, './repositories.css': {}, './RepositoryIssueSync.jsx': {} } })
+      './repository-catalog-search.js': catalogSearch, './project-governance.css': {}, './repositories.css': {}, './RepositoryIssueSync.jsx': {} } })
   t.after(() => page.unmount())
   assert.equal(page.nodes(node => node.props.role === 'status')[0].props.children, '等待同步结果')
   page.render({ stage: 'listing' })
