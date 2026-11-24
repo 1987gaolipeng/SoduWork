@@ -2046,11 +2046,15 @@ async def my_inbox(user: User = Depends(current_user), session: AsyncSession = D
 
 @router.post("/me/inbox/{tid}/claim")
 async def claim_my_inbox_task(
-    tid: str, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
+    tid: str,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
 ):
-    """Claim an inbox task for the current client, matching the desktop claim action."""
+    """Claim for the signed-in user's own client under the applicable inbox policy."""
     r = await inbox_svc.claim_for_user(session, user, tid)
     if not r.get("ok"):
+        if r.get("reason") == "permission_denied":
+            raise HTTPException(status_code=403, detail="无该操作权限")
         code = {"already_claimed": 409, "not_found": 404}.get(r.get("reason"), 400)
         msg = {"unassigned": "你还未归属组织，无团队收件箱", "not_found": "需求不存在",
                "already_claimed": "该需求已被别人认领", "out_of_scope": "该需求不在你的团队收件箱内",
