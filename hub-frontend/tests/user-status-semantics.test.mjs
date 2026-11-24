@@ -30,7 +30,7 @@ async function mount(t, { list = fixture, batchUpdateUsers = async () => ({ upda
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { history } })
   t.after(() => previousWindow ? Object.defineProperty(globalThis, 'window', previousWindow) : delete globalThis.window)
-  const api = { users: () => list, orgs: () => orgs, roles: () => roles, batchUpdateUsers }
+  const api = { users: () => list, orgs: () => orgs, roleOptions: () => roles, batchUpdateUsers }
   const page = await createComponentHarness(source, {
     dependencies: {
       '../api.js': { api, getUser: () => ({ id: 'actor', username: 'admin' }) },

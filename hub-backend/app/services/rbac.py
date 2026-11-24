@@ -7,13 +7,13 @@ from sqlalchemy import String, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
-from ..pagination import Page, list_result, select_rows
 from ..auth import hash_password
 from ..config import get_settings
-from . import catalog_names
+from ..pagination import Page, list_result, select_rows
 from ..permissions import ALL_KEYS, valid_keys
 from ..schemas import AdminName, _ms
-from . import client_access
+from . import catalog_names, client_access
+from .business_records import business_visible, creation_source, record_fields
 
 _DEPT_ADMIN_PERMS = [
     "client.view", "client.assign", "client.control", "client.update",
@@ -34,7 +34,8 @@ class OrgMutationError(ValueError):
 # Serialization.
 
 def org_to_api(o: models.OrgUnit) -> dict:
-    return {"id": o.id, "name": o.name, "parentId": o.parent_id, "sort": o.sort, "createdAt": _ms(o.created_at)}
+    return {"id": o.id, "name": o.name, "parentId": o.parent_id, "sort": o.sort,
+            "createdAt": _ms(o.created_at), **record_fields(o)}
 
 
 def role_to_api(r: models.Role) -> dict:
@@ -56,12 +57,8 @@ def user_to_api(u: models.User, *, token_quota=None) -> dict:
 
 
 def position_to_api(p: models.Position) -> dict:
-    return {
-        "id": p.id, "orgId": p.org_id, "name": p.name,
-        "category": p.category or "", "description": p.description or "",
-        "competencies": list(p.competencies or []), "sort": p.sort,
-        "isSystem": p.is_system,
-    }
+    from .work_catalog import profession_api
+    return profession_api(p)
 
 
 def domain_to_api(d: models.Domain) -> dict:
@@ -218,27 +215,35 @@ async def _available_org_name(session: AsyncSession, name: str, parent_id: str |
     return name
 
 
-async def list_orgs(session: AsyncSession, scope: set[str] | None, *, page: Page | None = None):
+async def list_orgs(session: AsyncSession, scope: set[str] | None, *, page: Page | None = None,
+                    include_managed: bool = False):
     q = select(models.OrgUnit).order_by(models.OrgUnit.sort, models.OrgUnit.created_at, models.OrgUnit.id)
+    if not include_managed:
+        q = q.where(business_visible(models.OrgUnit))
     if scope is not None:
-        q = q.where(models.OrgUnit.id.in_(scope or {"__none__"}))
+        q = q.where(models.OrgUnit.id.in_(scope))
     rows, total = await select_rows(session, q, page)
     return list_result([org_to_api(o) for o in rows], total)
 
 
 async def create_org(
     session: AsyncSession, name: str, parent_id: str | None, sort: int = 0,
-    *, scope: set[str] | None,
+    *, actor: models.User, data_source: str | None = None,
 ) -> dict:
     """Create below an authorized parent; only super users may create a root."""
     name = _validate_org_name(name) if name else "未命名部门"
     pid = str(parent_id or "").strip() or None
+    await lock_org_tree(session)
+    scope = await scope_org_ids(session, actor)
     if scope is not None and (not pid or pid not in scope):
         raise OrgMutationError("out_of_scope")
-    await lock_org_tree(session)
-    if pid and await session.get(models.OrgUnit, pid) is None:
+    parent = await session.get(models.OrgUnit, pid, populate_existing=True) if pid else None
+    if pid and parent is None:
         raise OrgMutationError("parent_not_found")
-    o = models.OrgUnit(name=await _available_org_name(session, name, pid), parent_id=pid, sort=sort)
+    if parent and parent.is_archived:
+        raise OrgMutationError("archived_parent")
+    o = models.OrgUnit(name=await _available_org_name(session, name, pid), parent_id=pid, sort=sort,
+                       data_source=creation_source(actor, data_source, parent))
     session.add(o)
     await session.commit()
     await session.refresh(o)
@@ -247,15 +252,18 @@ async def create_org(
 
 async def update_org(
     session: AsyncSession, oid: str, name: str | None,
-    parent_id: str | None, sort: int | None, *, scope: set[str] | None,
+    parent_id: str | None, sort: int | None, *, actor: models.User,
 ) -> dict | None:
     """Update only an authorized node and keep the department tree acyclic."""
     await lock_org_tree(session)
     o = await session.get(models.OrgUnit, oid, populate_existing=True)
     if o is None:
         return None
+    scope = await scope_org_ids(session, actor)
     if scope is not None and oid not in scope:
         raise OrgMutationError("out_of_scope")
+    if o.is_archived:
+        raise OrgMutationError("archived_org")
     pid = o.parent_id
     normalized_name = _validate_org_name(name) if name is not None else o.name
     if parent_id is not None:
@@ -263,8 +271,11 @@ async def update_org(
         if scope is not None and (not pid or pid not in scope):
             raise OrgMutationError("out_of_scope")
         if pid:
-            if await session.get(models.OrgUnit, pid) is None:
+            parent = await session.get(models.OrgUnit, pid, populate_existing=True)
+            if parent is None:
                 raise OrgMutationError("parent_not_found")
+            if parent.is_archived and parent.id != o.parent_id:
+                raise OrgMutationError("archived_parent")
             if pid == oid or pid in await subtree_org_ids(session, oid):
                 raise OrgMutationError("cycle")
     if pid != o.parent_id or normalized_name != o.name:
@@ -278,21 +289,42 @@ async def update_org(
 
 
 async def delete_org(
-    session: AsyncSession, oid: str, *, scope: set[str] | None,
+    session: AsyncSession, oid: str, *, actor: models.User,
 ) -> dict:
     await lock_org_tree(session)
     o = await session.get(models.OrgUnit, oid, populate_existing=True)
     if o is None:
         return {"ok": False, "reason": "not_found"}
+    scope = await scope_org_ids(session, actor)
     if scope is not None and oid not in scope:
         raise OrgMutationError("out_of_scope")
+    # The delete is physical (repo convention: no soft-delete column), so every soft
+    # org reference (no foreign keys) must block first. Return counts so callers can
+    # show actionable messages; success also carries parent/sort so an accidental
+    # delete can be reconstructed from the audit entry.
     child = await session.scalar(select(func.count()).select_from(models.OrgUnit).where(models.OrgUnit.parent_id == oid))
     if child:
-        return {"ok": False, "reason": "has_children"}
+        return {"ok": False, "reason": "has_children", "count": int(child)}
     users = await session.scalar(select(func.count()).select_from(models.User).where(models.User.org_id == oid))
     if users:
-        return {"ok": False, "reason": "has_users"}
-    deleted = {"id": o.id, "name": o.name}
+        return {"ok": False, "reason": "has_users", "count": int(users)}
+    positions = await session.scalar(select(func.count()).select_from(models.Position).where(models.Position.org_id == oid))
+    if positions:
+        return {"ok": False, "reason": "has_positions", "count": int(positions)}
+    scenarios = await session.scalar(select(func.count()).select_from(models.WorkScenario).where(models.WorkScenario.org_id == oid))
+    if scenarios:
+        return {"ok": False, "reason": "has_scenarios", "count": int(scenarios)}
+    projects = await session.scalar(select(func.count()).select_from(models.Project).where(models.Project.org_id == oid))
+    if projects:
+        return {"ok": False, "reason": "has_projects", "count": int(projects)}
+    repos = await session.scalar(select(func.count()).select_from(models.Repo).where(models.Repo.org_id == oid))
+    if repos:
+        return {"ok": False, "reason": "has_repos", "count": int(repos)}
+    default_orgs = await session.scalar(
+        select(func.count()).select_from(models.IdentityProvider).where(models.IdentityProvider.default_org_id == oid))
+    if default_orgs:
+        return {"ok": False, "reason": "has_default_org", "count": int(default_orgs)}
+    deleted = {"id": o.id, "name": o.name, "parent_id": o.parent_id, "sort": o.sort}
     await session.delete(o)
     await session.commit()
     return {"ok": True, **deleted}
@@ -363,13 +395,17 @@ async def delete_role(session: AsyncSession, rid: str) -> dict:
 
 # Users.
 
-async def list_users(session: AsyncSession, scope: set[str] | None, *, page: Page | None = None):
+async def list_users(session: AsyncSession, scope: set[str] | None, *, page: Page | None = None, is_active: bool | None = None):
     q = select(models.User).order_by(models.User.created_at, models.User.id)
+    if is_active is not None:
+        q = q.where(models.User.is_active.is_(is_active))
     if scope is not None:
         q = q.where(models.User.org_id.in_(scope or {"__none__"}))
     users, total = await select_rows(session, q, page)
-    from . import client_access
-    quotas = await client_access.user_quotas(session, [u.id for u in users])
+    # Merged view (issue #935): an effective assignment wins admission and the
+    # quota page, so user lists must show the same numbers instead of the legacy
+    # override alone. Entries carry quotaSource so callers can label the origin.
+    quotas = await client_access.effective_quotas(session, [u.id for u in users])
     items = [user_to_api(u, token_quota=quotas.get(u.id, {"mode": "inherit", "limit": 0})) for u in users]
     return list_result(items, total)
 
@@ -432,8 +468,12 @@ async def update_user(session: AsyncSession, uid: str, patch: dict) -> dict | No
         return None
     apply_user_patch(u, patch)
     if patch.get("tokenQuota") is not None:
-        quota = await client_access.save_user_quota(session, uid, patch["tokenQuota"])
-    else:
+        await client_access.save_user_quota(session, uid, patch["tokenQuota"])
+    # The stored override never applies while an effective assignment exists
+    # (admission reads the assignment). Surface the effective numbers instead
+    # of silently acknowledging a patch that admission ignores.
+    quota = (await client_access.effective_quotas(session, [uid])).get(uid)
+    if quota is None or quota.get("quotaSource") != "assignment":
         quota = (await client_access.user_quotas(session, [uid])).get(uid)
     await session.commit()
     await session.refresh(u)
@@ -452,7 +492,7 @@ async def seed_positions(session: AsyncSession) -> None:
     changed = False
     for pid, name, sort in SEED_POSITIONS:
         if await session.get(models.Position, pid) is None:
-            session.add(models.Position(id=pid, name=name, sort=sort, is_system=True))
+            session.add(models.Position(id=pid, name=name, sort=sort, is_system=True, data_source="business"))
             changed = True
     if changed:
         await session.commit()
@@ -464,7 +504,8 @@ async def list_positions(
     """List professional profiles within the supplied scope; org_ids=None is reserved for super
     administrators.
     """
-    query = select(models.Position)
+    from .work_catalog import assignable_professions
+    query = assignable_professions()
     if org_ids is not None:
         query = query.where(or_(
             models.Position.org_id.is_(None),
@@ -630,7 +671,7 @@ async def bootstrap(session: AsyncSession) -> None:
         password = client_access.validate_password(s.admin_pass, new_account=True)
         root = None
         if not await session.scalar(select(func.count()).select_from(models.OrgUnit)):
-            root = models.OrgUnit(name="总部")
+            root = models.OrgUnit(name="总部", data_source="business")
             session.add(root)
             await session.flush()
         else:

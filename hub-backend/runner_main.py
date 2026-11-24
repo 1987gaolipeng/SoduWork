@@ -9,6 +9,7 @@ import json
 import hashlib
 import logging
 import os
+from pathlib import Path
 import platform
 import re
 import shutil
@@ -43,6 +44,7 @@ MAX_INFLIGHT_PROBE_RPC = 8
 MAX_PENDING_RPC_REPLIES = 64
 from app.services.runner_release import RUNNER_VERSION
 from app.services import runner_admission, runner_local_rpc
+from app.services.runner_admission_journal import acquire_owner_lock, release_owner_lock
 from app.services.runner_node import _node_major, ensure_node_shim as _ensure_node_shim
 from app.services.runner_handshake import HELLO_TIMEOUT_S, negotiate as _negotiate_hello
 from app.services.runner_identity_error import RunnerIdentityConflict
@@ -501,7 +503,7 @@ class Runner:
     def __init__(self, hub: str, token: str, client_id: str, rid: str, work_root: str = "",
                  secret: str = "", tags: list[str] | None = None, key: str = "",
                  capability_grants=None, max_concurrent: int = MAX_CONCURRENT_LIMIT,
-                 journal_runner_id: str = ""):
+                 journal_runner_id: str = "", boot_id: str = ""):
         base = str(hub or "").rstrip("/")
         # Retain the HTTP Hub base for personal-plugin MCP ticket exchange.
         self.http_base = ("https://" + base[len("wss://"):] if base.startswith("wss://")
@@ -519,7 +521,7 @@ class Runner:
         self.id = rid
         # A reconnect keeps this process identity; a restart changes it.
         # The Hub uses it to distinguish lost state from an authoritative negative ACK.
-        self.boot_id = uuid.uuid4().hex
+        self.boot_id = boot_id or uuid.uuid4().hex
         self.work_root = str(work_root or "")
         self.tags = _tags(tags)
         self.capability_grants = capability_grants
@@ -543,7 +545,7 @@ class Runner:
             task_capacity=runner_admission.DEFAULT_TASK_CAPACITY,
             journal=Journal(os.path.join(_data_root(), "runner-queue"),
                             self.url + "|" + (journal_runner_id or self.id) + "|" + self.client_id,
-                            exclusive=True))
+                            exclusive=True, boot_id=self.boot_id))
         self._admission_wake = asyncio.Event()
         self._admission_task = None
         self._admission_workers: set[asyncio.Task] = set()
@@ -908,6 +910,7 @@ class Runner:
         for item in self._admission.active_items():
             if item.cancel_requested and item.state == "running":
                 await self._stop_admitted(item)
+        next_pressure_log = 0.0
         while True:
             self._reap_admission()
             resource = self._resource_budget.snapshot()
@@ -917,6 +920,13 @@ class Runner:
                 item = self._admission.claim_next(
                     limit=resource.limit, can_start=resource.can_start, **self._admission_load())
                 if item is None:
+                    if not resource.can_start and time.monotonic() >= next_pressure_log:
+                        next_pressure_log = time.monotonic() + 30
+                        depth = self._admission.metrics()["queueDepth"]
+                        if depth:
+                            log.warning("admission paused: pressure=%s cpu=%.1f mem_available_mib=%d queued=%d",
+                                        resource.pressure, resource.cpu_percent,
+                                        resource.memory_available // (1024 ** 2), depth)
                     break
                 task = asyncio.create_task(self._run_admitted(item))
                 self._admission_workers.add(task)
@@ -1787,13 +1797,17 @@ class Runner:
             if queued_item is not None and queued_item.ref != ref:
                 return {"ok": False, "code": "ADMISSION_REF_MISMATCH",
                         "error": "Admission key does not belong to this execution"}
-            inflight = (not admission_key and ref in self._dispatching_refs) or bool(
+            preparing = admission_key == "dispatch:" + ref and any(
+                getattr(request, "operation", "") == "job.dispatch" and request.key == ref
+                for request in getattr(self, "_pending_rpc_requests", {}).values())
+            inflight = preparing or (not admission_key and ref in self._dispatching_refs) or bool(
                 queued_item and queued_item.state in runner_admission.ACTIVE_STATES)
             if not admission_key and not inflight and ref not in ai_local._RUNS:
                 # Recover historical execution refs from local archives even when only Hub restarted.
                 await runner_local_rpc.to_thread(ai_local.reclaim)
             persisted = queued_item is not None or (not admission_key and ref in ai_local._RUNS)
             data = {
+                "ref": ref,
                 "has": inflight or persisted,
                 "inflight": inflight,
                 "persisted": persisted,
@@ -1823,11 +1837,12 @@ class Runner:
                     "error": result.get("error", ""), "code": result.get("code", "")}
         if op in {"job.status", "job.info"}:
             ref = str(m.get("ref") or "")
+            preview = op == "job.info" and m.get("statusPreview") is True
             item = self._admission.latest_for_ref(ref, include_terminal=True)
             with ai_local._LOCK:
                 local_exists = ref in ai_local._RUNS
             if runner_admission.owns_status(item, local_exists):
-                snapshot = runner_admission.status_data if op == "job.status" else runner_admission.info_data
+                snapshot = runner_admission.status_data if op == "job.status" or preview else runner_admission.info_data
                 data = snapshot(item, self._admission.position(item.key))
                 if item.state == "queued":
                     resource = self._resource_budget.snapshot()
@@ -1836,8 +1851,11 @@ class Runner:
                     if reason:
                         data["waitReason"] = reason
                 return {"ok": True, "data": data}
-            reader = ai_local.status_sync if op == "job.status" else ai_local.runner_info_sync
-            data = await runner_local_rpc.to_thread(reader, {}, ref)
+            if preview:
+                data = await runner_local_rpc.to_thread(ai_local.status_sync, {}, ref, read_only=True)
+            else:
+                reader = ai_local.status_sync if op == "job.status" else ai_local.runner_info_sync
+                data = await runner_local_rpc.to_thread(reader, {}, ref)
             return {"ok": True, "data": remote_snapshot(data, ref)}
         if op == "job.authorize":
             # Model credentials may be refreshed only by this desktop's private
@@ -2382,45 +2400,20 @@ def _lock_path(rid: str) -> str:
     return os.path.join(root, "runner-%s.lock" % re.sub(r"[^A-Za-z0-9_.-]", "_", rid)[:40])
 
 
-def _single_instance(rid: str):
+def _single_instance(rid: str, boot_id: str = ""):
     """Acquire a per-machine, per-Runner-ID singleton lock. Duplicate processes would replace each
     other's connections and orphan active jobs; return the lock handle or None.
     """
-    path = _lock_path(rid)
     try:
-        handle = open(path, "a+", encoding="utf-8")
-    except OSError:
-        return None                      # If the lock file cannot be created, preserve the existing startup fallback.
-    try:
-        if os.name == "nt":
-            import msvcrt
-            # Seek to byte zero before msvcrt.locking.
-            # Append mode starts at EOF and could let competing processes lock different bytes.
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        handle.close()
+        return acquire_owner_lock(Path(_lock_path(rid)), boot_id or uuid.uuid4().hex)
+    except BlockingIOError as exc:
+        log.error("%s", exc)
         return None
-    try:
-        handle.seek(1)          # Reserve byte zero for the lock.
-        handle.truncate(1)
-        handle.write(" %s %s\n" % (os.getpid(), time.strftime("%Y-%m-%d %H:%M:%S")))
-        handle.flush()
-    except OSError:
-        pass
-    return handle
 
 
 def _release(handle) -> None:
     try:
-        if os.name == "nt":
-            import msvcrt
-            handle.seek(0)          # Unlock the same byte-zero region used during acquisition.
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        handle.close()
+        release_owner_lock(handle)
     except Exception:  # noqa: BLE001 - Cleanup failures must not prevent exit.
         pass
 
@@ -2572,7 +2565,8 @@ def main() -> None:
         os.environ.setdefault("SODUWORK_HUB_HTTP_BASE", http_base)
     log.info("执行机 %s @ %s → %s（并发上限 %d）",
              rid, socket.gethostname(), hub, max_concurrent)
-    lock = _single_instance(rid)
+    boot_id = uuid.uuid4().hex
+    lock = _single_instance(rid, boot_id)
     if lock is None:
         log.error("这台机器上已经有一个执行机 %s 在跑了——第二个不启动。\n"
                   "  ★为什么必须拦：两份用的是同一个执行机 id，会在后台互相顶替连接，"
@@ -2598,10 +2592,14 @@ def main() -> None:
             max_concurrent=max_concurrent,
             # Keep this device's queued work reachable after an identity repair;
             # the authenticated client and Hub still isolate every journal.
-            journal_runner_id=desktop_identity_scope[3] if desktop_identity_scope else "")
+            journal_runner_id=desktop_identity_scope[3] if desktop_identity_scope else "",
+            boot_id=boot_id)
         runner.desktop_owned = bool(a.config_stdin)
         runner.desktop_identity_scope = desktop_identity_scope
-        asyncio.run(run_until_stopped(runner))
+        try:
+            asyncio.run(run_until_stopped(runner))
+        finally:
+            runner._admission._journal.close()
     except KeyboardInterrupt:
         log.info("收工")
     finally:

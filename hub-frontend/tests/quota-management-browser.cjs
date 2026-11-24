@@ -179,7 +179,12 @@ app.whenReady().then(async () => {
   }
   await input(totalField, '120000')
   assert.equal(await js(fieldHint(totalField)), '')
-  await click('添加模型额度'); await select('[aria-label="模型 1"]', 'Model A · Primary')
+  await click('添加模型额度')
+  const modelSearch = `document.querySelector('[aria-label="模型 1"]')`
+  await input(modelSearch, 'absent-fixture-model')
+  await waitFor("document.querySelector('.select-menu-empty')?.textContent === '没有匹配的模型'", 'model search empty feedback')
+  await input(modelSearch, 'Model A')
+  await select('[aria-label="模型 1"]', 'Model A · Primary')
   for (const value of ['-1', '3.5', '10000000000001']) {
     await input(modelField, value)
     assert.equal(await js(fieldHint(modelField)), '请输入 0 到 10,000,000,000,000 的整数')

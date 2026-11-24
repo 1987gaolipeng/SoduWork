@@ -50,7 +50,7 @@ def _to_api(a: models.AuditLog) -> dict:
     }
 
 
-async def _audit_query(session, user, action=None, actor=None, since=None, until=None):
+async def _audit_query(session, user, *, action=None, actor=None, actor_id=None, since=None, until=None):
     entry = models.AuditLog
     q = select(entry)
     scope = await rbac.scope_org_ids(session, user)
@@ -58,6 +58,8 @@ async def _audit_query(session, user, action=None, actor=None, since=None, until
         q = q.where(entry.actor_org_id.in_(scope))
     if action:
         q = q.where(entry.action == action)
+    if actor_id is not None:
+        q = q.where(entry.actor_id == actor_id)
     if actor and actor.strip():
         actor = actor.strip()
         q = q.where(or_(entry.actor_id == actor, entry.actor_name.icontains(actor, autoescape=True)))
@@ -69,15 +71,15 @@ async def _audit_query(session, user, action=None, actor=None, since=None, until
 
 
 async def list_audit(session: AsyncSession, user, action: str | None = None,
-                     limit: int = 50, offset: int = 0, *, actor=None, since=None, until=None) -> dict:
-    query = await _audit_query(session, user, action, actor, since, until)
+                     limit: int = 50, offset: int = 0, *, actor=None, actor_id=None, since=None, until=None) -> dict:
+    query = await _audit_query(session, user, action=action, actor=actor, actor_id=actor_id, since=since, until=until)
     rows, total = await select_rows(session, query, Page(limit, offset))
     return {"total": total, "items": [_to_api(a) for a in rows]}
 
 
-async def export_csv(session, user, environment, **filters):
+async def export_csv(session, user, environment, *, limit=None, offset=0, **filters):
     query = await _audit_query(session, user, **filters)
-    rows = await session.stream_scalars(query.execution_options(yield_per=400))
+    rows = await session.stream_scalars(query.offset(offset).limit(limit).execution_options(yield_per=400))
     fields = ("id", "at", "actorId", "actorName", "action", "targetType", "targetId",
               "targetLabel", "detail", "hubEnvironment")
 

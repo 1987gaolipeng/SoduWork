@@ -133,14 +133,15 @@ class ScheduleDeviceLivenessTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(result["code"], "AUTOMATION_TARGET_OFFLINE")
                     prepare.assert_not_awaited()
 
-    async def test_expired_unclaimed_runs_close_on_history_inbox_and_claim_without_replay(self):
+    async def test_expired_unclaimed_runs_close_on_tick_inbox_and_claim_without_replay(self):
         age = liveness.ACCEPT_TIMEOUT_SECONDS + 30
-        for entry in ("history", "inbox", "claim"):
+        for entry in ("tick", "inbox", "claim"):
             with self.subTest(entry=entry):
                 await self.add_run(entry, age=age)
                 async with self.sessions() as session:
                     client = await session.get(models.Client, "device")
-                    if entry == "history":
+                    if entry == "tick":
+                        await schedules.tick(session)
                         rows = await schedules.list_runs(session, "plan", owner_client_id="device",
                                                          owner_user_id="alice")
                         self.assertEqual(next(row for row in rows if row["id"] == entry)["state"], "failed")

@@ -307,6 +307,43 @@ async def save_user_quota(session: AsyncSession, user_id: str, value: dict) -> d
     return result
 
 
+async def effective_quotas(session: AsyncSession, user_ids) -> dict:
+    """Merged allowance view: an effective assignment wins; accounts without one
+    fall back to the legacy personal override. Entries carry quotaSource so user
+    lists show the same effective numbers as quota management and admission
+    (issue #935). Loads both keys in batches, without one query per user.
+    """
+    from . import quota_plans
+    ids = [str(uid) for uid in user_ids if uid]
+    if not ids:
+        return {}
+    keys = [quota_plans.CATALOG_KEY]
+    for uid in ids:
+        keys.extend([USER_QUOTA_PREFIX + uid, quota_plans.GRANT_PREFIX + uid])
+    rows = {}
+    for offset in range(0, len(keys), 500):
+        batch = (await session.execute(select(AppSetting.key, AppSetting.value).where(
+            AppSetting.key.in_(keys[offset:offset + 500])))).all()
+        rows.update(dict(batch))
+    plans = quota_plans.catalog_from(rows.get(quota_plans.CATALOG_KEY))
+    result = {}
+    for uid in ids:
+        grant = quota_plans.parse(rows.get(quota_plans.GRANT_PREFIX + uid))
+        policy = None
+        if grant and grant.get("mode") != "inherit":
+            # Named plans need the catalog; trial and custom grants carry their policy.
+            policy = quota_plans.effective(grant, plans)
+        if policy is not None:
+            result[uid] = {"mode": grant.get("mode"), "limit": int(policy.get("totalLimit") or 0),
+                           "quotaSource": "assignment", "planId": policy.get("id", ""),
+                           "planName": policy.get("name", "")}
+        else:
+            # Missing plan references fall back exactly like the quota page does.
+            result[uid] = {**user_quota(_stored_json(rows.get(USER_QUOTA_PREFIX + uid))),
+                           "quotaSource": "legacy"}
+    return result
+
+
 async def monthly_tokens(session: AsyncSession, user_id: str, *, month_start=None) -> int:
     key = str(user_id or "")
     if not key:

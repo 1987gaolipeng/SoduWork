@@ -340,6 +340,7 @@ class OrgCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: AdminName
     parentId: Optional[str] = None
+    dataSource: Literal["business", "test"] | None = None
     sort: OrgSort = 0
 
 
@@ -467,15 +468,21 @@ def integration_to_api(i, stats: dict | None = None,
     return d
 
 
+def attachment_role(a) -> str:
+    uploaded = str(getattr(a, "uploaded_by", None) or "")
+    role = getattr(a, "role", None) or "input"
+    if role == "input" and (uploaded.startswith("agent:") or uploaded.lower() in {"soduwork ai", "soduwork"}):
+        return "output"  # Legacy role defaults must not classify AI outputs as human inputs.
+    return role
+
+
 def attachment_to_api(a) -> dict[str, Any]:
     from .services import delivery_manifest, resource_access
 
     ct = a.content_type or ""
     uploaded = getattr(a, "uploaded_by", None) or ""
     by_agent = str(uploaded).startswith("agent:")
-    role = getattr(a, "role", None) or ("output" if by_agent else "input")
-    if role == "input" and (by_agent or str(uploaded).lower() in {"soduwork ai", "soduwork"}):
-        role = "output"  # Legacy role defaults must not classify AI outputs as human inputs.
+    role = attachment_role(a)
     evidence_meta = getattr(a, "evidence_meta", None) or {}
     explicit_category = str(evidence_meta.get("category") or "").strip().lower()
     category = explicit_category if explicit_category in {"primary", "supporting", "evidence", "internal"} else \

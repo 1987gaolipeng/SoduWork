@@ -421,7 +421,14 @@ function updateChatState(event) {
     const presence = rememberChatName(event && event.presence);
     const row = presence?.live ? { ...presence, workOnly: false, draftAdapterId: '' } : presence;
     const id = String(event && event.sessionId || row && row.id || '');
-    if (!id || !row) return;
+    if (!id) return;
+    if (!row) {
+      if (event.kind === 'renamed' && event.draftTitle) {
+        const saved = rememberChatName(event.draftTitle);
+        global.ChatChrome?.rename?.(id, saved.title);
+      }
+      return;
+    }
     if (Object.hasOwn(row, 'state') || Object.hasOwn(row, 'status') || Object.hasOwn(row, 'draftAdapterId') ||
         Array.isArray(row.usedHarnesses)) {
       const canonical = canonicalLocalId(id) || id;

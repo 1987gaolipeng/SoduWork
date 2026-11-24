@@ -4,6 +4,8 @@ import asyncio
 import errno
 from pathlib import Path
 import stat
+import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -154,8 +156,97 @@ class JournalTests(unittest.TestCase):
         with self.assertRaises(OSError):
             Journal(self.tmp.name, "leased", exclusive=True)
         first.close()
-        replacement = Journal(self.tmp.name, "leased", exclusive=True)
+        replacement = Journal(self.tmp.name, "leased", exclusive=True, boot_id="b" * 32)
+        first.close()
+        with self.assertRaisesRegex(BlockingIOError, f"bootId={'b' * 32}"):
+            Journal(self.tmp.name, "leased", exclusive=True)
         replacement.close()
+
+    def test_cli_and_queue_contention_report_the_same_runner_owner(self):
+        import runner_main
+
+        command = ["runner_main.py", "--id", "owner-probe", "--client", "test-device",
+                   "--hub", "ws://127.0.0.1:1", "--data-root", self.tmp.name]
+        locks = []
+
+        async def check(runner):
+            owner = f"pid={os.getpid()} bootId={runner.boot_id}"
+            journal = runner._admission._journal
+            locks.extend([Path(runner_main._lock_path(runner.id)), journal.root / "owner.lock"])
+            for path in locks:
+                with path.open("rb", buffering=0) as handle:
+                    handle.seek(1)  # The live process holds byte zero on Windows.
+                    self.assertEqual(handle.read().decode().strip(), owner)
+            duplicate = subprocess.run([sys.executable, *command], cwd=Path(__file__).parent,
+                                       capture_output=True, timeout=15)
+            self.assertEqual(duplicate.returncode, 3, duplicate.stderr)
+            self.assertIn(owner.encode(), duplicate.stderr)
+            with self.assertRaisesRegex(BlockingIOError, owner):
+                Journal(Path(self.tmp.name) / "runner-queue", f"{runner.url}|{runner.id}|{runner.client_id}",
+                        exclusive=True)
+
+        with patch.dict(os.environ), patch.object(sys, "argv", command), \
+                patch("app.services.runner_lifecycle.run_until_stopped", check):
+            runner_main.main()
+        for path in locks:
+            self.assertEqual(path.stat().st_size, 1)
+
+    def test_crashed_queue_owner_can_be_replaced_without_stale_identity(self):
+        child = subprocess.run([sys.executable, "-c",
+            "import os, sys; from app.services.runner_admission_journal import Journal; "
+            "q=Journal(sys.argv[1], 'restart', exclusive=True, boot_id='a'*32); os._exit(0)",
+            self.tmp.name], cwd=Path(__file__).parent, capture_output=True, timeout=15)
+        self.assertEqual(child.returncode, 0, child.stderr)
+        replacement = Journal(self.tmp.name, "restart", exclusive=True, boot_id="b" * 32)
+        self.addCleanup(replacement.close)
+        with self.assertRaisesRegex(BlockingIOError, f"pid={os.getpid()} bootId={'b' * 32}"):
+            Journal(self.tmp.name, "restart", exclusive=True)
+
+    def test_legacy_and_malformed_lock_details_remain_private(self):
+        lock_path = Journal(self.tmp.name, "details").root / "owner.lock"
+        lock_path.touch()
+        if os.name != "nt":
+            lock_path.chmod(0o644)
+        holder = Journal(self.tmp.name, "details", exclusive=True)
+        self.addCleanup(holder.close)
+        lock_path = holder.root / "owner.lock"
+        if os.name != "nt":
+            self.assertEqual(stat.S_IMODE(lock_path.stat().st_mode), 0o600)
+        for contents in (b"", b"private content\n", b"pid=1 bootId=" + b"a" * 32 + b"\nother"):
+            with lock_path.open("r+b", buffering=0) as record:
+                record.seek(1)
+                record.write(contents)
+                record.truncate()
+            with self.assertRaisesRegex(BlockingIOError, "^Runner lock is already held$"):
+                Journal(self.tmp.name, "details", exclusive=True)
+
+    def test_registration_failure_releases_lock_and_does_not_claim_a_duplicate(self):
+        fdopen = os.fdopen
+
+        def short_write(*args, **kwargs):
+            handle = Mock(wraps=fdopen(*args, **kwargs))
+            handle.write.return_value = 0
+            return handle
+
+        with patch("app.services.runner_admission_journal.os.fdopen", short_write):
+            with self.assertRaisesRegex(OSError, "Incomplete Runner lock registration"):
+                Journal(self.tmp.name, "failed", exclusive=True)
+        Journal(self.tmp.name, "failed", exclusive=True).close()
+
+    @unittest.skipUnless(hasattr(os, "fork"), "POSIX fork inheritance")
+    def test_closing_inherited_handle_leaves_parent_registration(self):
+        holder = Journal(self.tmp.name, "fork", exclusive=True, boot_id="a" * 32)
+        self.addCleanup(holder.close)
+        child = os.fork()
+        if child == 0:
+            try:
+                holder.close()
+            except OSError:
+                os._exit(1)
+            os._exit(0)
+        self.assertEqual(os.waitpid(child, 0)[1], 0)
+        with self.assertRaisesRegex(BlockingIOError, f"pid={os.getpid()} bootId={'a' * 32}"):
+            Journal(self.tmp.name, "fork", exclusive=True)
 
     def test_pruned_terminal_receipt_still_fences_replay_after_restart(self):
         queue = self.queue()
@@ -244,6 +335,36 @@ class AdmissionStatusTests(unittest.IsolatedAsyncioTestCase):
             self.runner = Runner("http://127.0.0.1:1", "", "device", "runner", work_root=storage)
         self.queue = self.runner._admission
         self.addCleanup(self.queue._journal.close)
+
+    async def test_pressure_logs_once_while_the_same_backlog_remains_blocked(self):
+        from app.services import ai_local
+        from app.services.runner_admission import ResourceSnapshot
+        self.queue.submit("dispatch:waiting", "waiting", MANUAL, "dispatch", {})
+        memory_pressure = ResourceSnapshot(cpu_percent=98, memory_available=700 * 1024 ** 2,
+                                           pressure="critical", can_start=False)
+        with patch.object(self.runner._resource_budget, "snapshot", return_value=memory_pressure), \
+                patch.object(ai_local, "reclaim"), patch.dict(ai_local._RUNS, {}, clear=True), \
+                patch.object(self.runner._admission_wake, "wait", side_effect=[True, asyncio.CancelledError]), \
+                self.assertLogs("runner", level="WARNING") as logged:
+            with self.assertRaises(asyncio.CancelledError):
+                await self.runner._admission_loop()
+        self.assertEqual([r.getMessage() for r in logged.records],
+                         ["admission paused: pressure=critical cpu=98.0 mem_available_mib=700 queued=1"])
+
+    def test_budget_logs_changes_in_start_permission_under_critical_pressure(self):
+        budget = self.runner._resource_budget
+        sample = {"cpuPercent": 100, "memoryTotalBytes": 16 * 1024 ** 3,
+                  "memoryAvailableBytes": 8 * 1024 ** 3}
+        budget.sampler = lambda: sample
+        with patch("app.services.runner_admission.time.monotonic", side_effect=[100, 101, 102, 103, 104]), \
+                self.assertLogs("app.services.runner_admission", level="INFO") as captured:
+            for available in (8 * 1024 ** 3,) * 3 + (64 * 1024 ** 2,) * 2:
+                sample["memoryAvailableBytes"] = available
+                budget.snapshot(force=True)
+        messages = [record.getMessage() for record in captured.records]
+        self.assertEqual(len(messages), 3, messages)
+        for message, allowed in zip(messages, (False, True, False)):
+            self.assertIn(f"pressure=critical canStart={allowed} limit=1", message)
 
     async def test_only_first_durable_dispatch_logs_its_ref_and_position(self):
         from app.services import dispatch_identity

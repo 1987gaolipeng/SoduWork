@@ -83,7 +83,15 @@ async function main() {
           items: rows.filter(row => row.seq > Number(url.searchParams.get('since'))) });
       }
       if (url.pathname.endsWith('/ai-status')) {
-        assert.equal(url.searchParams.get('ref'), 'original-run');
+        if (count === 2) {
+          // The first revision uses a Hub from before explicit collection.
+          if (request.method === 'POST') return json(405, { detail: 'Method Not Allowed' });
+          assert.equal(request.method, 'GET');
+          assert.equal(url.searchParams.get('ref'), 'original-run');
+        } else {
+          assert.equal(request.method, 'POST');
+          assert.equal(body.ref, 'original-run');
+        }
         reviews.push({ round: count, bytes: fs.readFileSync(path.join(original, 'result.md'), 'utf8') });
         return json(200, { done: true });
       }

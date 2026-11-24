@@ -55,6 +55,7 @@ def _verification_api(result: dict, state: str) -> dict:
 def run_api(row: am.DeploymentRun, env: am.Environment | None = None,
             target: am.DeploymentTarget | None = None) -> dict:
     result = dict(row.result or {})
+    result.pop("hubRunnerChecks", None)
     return {
         "id": row.id, "taskId": row.task_id, "artifactVersionId": row.artifact_version_id,
         "environmentId": row.environment_id, "environmentName": env.name if env else "",
@@ -564,11 +565,14 @@ async def _spec(session: AsyncSession, run: am.DeploymentRun,
                 env: am.Environment, target: am.DeploymentTarget, repo: models.Repo,
                 task: models.Task) -> dict:
     descriptors = []
-    for env_name, ref_id in dict(target.secret_refs or {}).items():
-        ref = await session.get(am.SecretReference, str(ref_id))
-        if ref is None or not ref.enabled:
-            raise ValueError(f"密钥引用不可用：{ref_id}")
-        descriptors.append({"env": str(env_name), "provider": ref.provider, "locator": ref.locator})
+    if target.secret_refs:
+        repo_org = await session.scalar(select(models.Repo.org_id).where(models.Repo.id == target.repo_id))
+        task_org = await environment_service.task_org_id(session, task)
+        for env_name, ref_id in target.secret_refs.items():
+            ref = environment_service.require_target_secret(
+                await session.get(am.SecretReference, str(ref_id), populate_existing=True),
+                str(ref_id), repo_org, task_org)
+            descriptors.append({"env": str(env_name), "provider": ref.provider, "locator": ref.locator})
     cfg = dict(target.config or {})
     checks = [*list(env.health_checks or []), *list(target.health_checks or [])]
     rollback = environment_service.effective_rollback(env, target)
@@ -612,22 +616,66 @@ async def _spec(session: AsyncSession, run: am.DeploymentRun,
     }
 
 
-def _apply_runner_status(run: am.DeploymentRun, res: dict, fallback_state: str = "") -> None:
+def _runner_check_plan(specs: list) -> list:
+    # Screenshot receipts are captured separately by the Hub after the Runner finishes.
+    return [[item.get("type") or "http", item.get("name") or "健康检查"]
+            for item in specs if item.get("type") != "screenshot"]
+
+
+def _apply_runner_status(run: am.DeploymentRun, res: dict, fallback_state: str = "") -> bool:
     """Persist one Runner snapshot, including terminal snapshots returned by idempotent start."""
-    run.state = str(res.get("state") or fallback_state or run.state)
+    state = res.get("state", fallback_state or run.state)
+    if run.state in _TERMINAL and (run.finished_at is not None or state != run.state):
+        return False
+    if state not in (*_ACTIVE_RELEASE, *_TERMINAL):
+        run.error = "执行机返回了无效的部署状态"
+        return False
+    if run.state == "running" and state == "queued":
+        return False
+    try:
+        started = datetime.fromtimestamp(int(res["startedAt"]) / 1000, timezone.utc) if res.get("startedAt") else None
+        finished = datetime.fromtimestamp(int(res["finishedAt"]) / 1000, timezone.utc) if res.get("finishedAt") else None
+    except (ValueError, TypeError, OverflowError, OSError):
+        run.error = "执行机返回了无效的部署时间"
+        return False
+    current = dict(run.result or {})
+    reported = res.get("result")
+    if reported is not None and not isinstance(reported, dict):
+        run.error = "执行机返回了无效的部署回执"
+        return False
+    result = dict(reported or {})
+    for key in ("clientRelease", "hubRunnerChecks"):
+        result.pop(key, None)
+        if key in current:
+            result[key] = current[key]
+    checks = result.get("checks", [])
+    if not isinstance(checks, list) or any(not isinstance(item, dict) for item in checks):
+        run.error = "执行机返回了无效的健康检查回执"
+        return False
+    if state == "succeeded":
+        runner_checks = [item for item in checks if item.get("type") != "screenshot"]
+        actual = [[item.get("type"), item.get("name")] for item in runner_checks]
+        # Runs already dispatched by an older Hub have no immutable check plan.
+        if actual != current.get("hubRunnerChecks", actual) or any(
+                item.get("ok") is not True for item in runner_checks):
+            run.error = "执行机尚未返回本次部署所需的全部健康检查回执"
+            return False
+    # A Runner can report that screenshot collection was delegated; only the Hub owns attachments.
+    if any(item.get("type") == "screenshot" for item in checks):
+        result["checks"] = [{key: value for key, value in item.items() if key != "attachmentId"}
+                            if item.get("type") == "screenshot" else item for item in checks]
+    run.state = state
     run.logs = str(res.get("log") or "")[-12000:]
     run.error = str(res.get("error") or "")[:1000]
-    current = dict(run.result or {})
-    sticky = {key: current[key] for key in ("clientRelease",) if key in current}
-    run.result = {**dict(res.get("result") or {}), **sticky,
-                  **({"stage": str(res["stage"])[:20]} if res.get("stage") else {})}
-    if res.get("startedAt"):
-        run.started_at = datetime.fromtimestamp(int(res["startedAt"]) / 1000, timezone.utc)
-    if res.get("finishedAt"):
-        run.finished_at = datetime.fromtimestamp(int(res["finishedAt"]) / 1000, timezone.utc)
+    run.result = {**result, **({"stage": str(res["stage"])[:20]} if res.get("stage") else {})}
+    if started:
+        run.started_at = started
+    if finished and state in _TERMINAL:
+        run.finished_at = finished
     elif run.state in _TERMINAL and run.finished_at is None:
         # Older Runners may omit completion time; terminal runs must still leave the reconciliation queue.
         run.finished_at = _now()
+    return True
 
 
 async def _release_queue_gate(session: AsyncSession, run: am.DeploymentRun) -> dict:
@@ -776,17 +824,23 @@ async def _start(session: AsyncSession, run: am.DeploymentRun) -> None:
         run.state, run.error, run.finished_at = "failed", str(e), _now()
         await session.commit()
         return
-    old = run.state
     res = await asyncio.to_thread(runner_hub.call_sync, runner, "deploy.start", {"spec": spec}, 45)
+    await session.refresh(run, with_for_update=True)
+    old = run.state
+    accepted = False
     if res.get("ok"):
+        if old in _TERMINAL and run.finished_at is not None:
+            await session.commit()
+            return
         run.runner_id = runner.id
-        await session.refresh(run, attribute_names=["result"])
-        _apply_runner_status(run, res, "running")
-        if run.started_at is None and run.state != "queued":
+        if "hubRunnerChecks" not in (run.result or {}):
+            run.result = {**(run.result or {}), "hubRunnerChecks": _runner_check_plan(spec["checks"])}
+        accepted = _apply_runner_status(run, res, "running")
+        if accepted and run.started_at is None and run.state != "queued":
             run.started_at = _now()
     else:
         run.error = str(res.get("error") or "执行机没接住部署")[:1000]
-    if res.get("ok") and run.state in _TERMINAL and old not in _TERMINAL:
+    if accepted and run.state in _TERMINAL and old not in _TERMINAL:
         await _after_terminal(session, run)
     else:
         await session.commit()
@@ -1024,11 +1078,8 @@ async def _poll(session: AsyncSession, run: am.DeploymentRun) -> None:
         run.error = str(res.get("error") or "读取部署状态失败")[:1000]
         await session.commit()
         return
-    old = run.state
-    recovering = old in _TERMINAL and run.finished_at is None
-    await session.refresh(run, attribute_names=["result"])
-    _apply_runner_status(run, res)
-    if run.state in _TERMINAL and (old not in _TERMINAL or recovering):
+    await session.refresh(run, with_for_update=True)
+    if _apply_runner_status(run, res) and run.state in _TERMINAL:
         await _after_terminal(session, run)
     else:
         await session.commit()
@@ -1046,20 +1097,15 @@ async def ingest_runner_snapshots(session: AsyncSession, runner, snapshots: list
         if not run_id or run_id in seen:
             continue
         seen.add(run_id)
-        run = await session.get(am.DeploymentRun, run_id)
-        if run is None or str(run.runner_id or "") != str(getattr(runner, "id", "") or ""):
+        if pending_progress and snap.get("state") in tuple(_TERMINAL):
+            # Finish earlier progress before locking and settling the next terminal run.
+            await session.commit()
+            pending_progress = False
+        run = await session.get(am.DeploymentRun, run_id, with_for_update=True, populate_existing=True)
+        if run is None or not run.runner_id or run.runner_id != getattr(runner, "id", ""):
             continue
         before = _progress_signature(run)
-        old = run.state
-        recovering = old in _TERMINAL and run.finished_at is None
-        await session.refresh(run, attribute_names=["result"])
-        _apply_runner_status(run, snap)
-        if run.state in _TERMINAL and (old not in _TERMINAL or recovering):
-            # Terminal handlers own durable receipts and external side effects.
-            # Flush preceding progress before entering that existing boundary.
-            if pending_progress:
-                await session.commit()
-                pending_progress = False
+        if _apply_runner_status(run, snap) and run.state in _TERMINAL:
             await _after_terminal(session, run)
         else:
             pending_progress = True

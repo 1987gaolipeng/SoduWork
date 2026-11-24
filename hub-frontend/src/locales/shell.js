@@ -1,5 +1,6 @@
 export const dictionary = {
   "zh-CN": {
+    "login.restricted": "账号已停用或登录受限，请联系管理员。",
     "plugin.recommend.action": "推荐",
     "plugin.recommend.edit": "编辑推荐",
     "plugin.type.app": "应用",
@@ -8,6 +9,7 @@ export const dictionary = {
     "language.enUS": "English",
     "account.settings": "我的设置",
     "account.languageHint": "界面语言",
+    "account.languageFallback": "繁体中文暂不可用，当前使用简体中文显示。",
     "account.logout": "退出",
     "nav.menu": "菜单",
     "nav.search": "搜索导航",
@@ -73,6 +75,7 @@ export const dictionary = {
     "sub.client-releases": "上传已签名安装包、启用或停用各平台版本"
   },
   "en-US": {
+    "login.restricted": "This account is disabled or sign-in is restricted. Contact your administrator.",
     "plugin.recommend.action": "Recommend",
     "plugin.recommend.edit": "Edit",
     "plugin.type.app": "App",
@@ -81,6 +84,7 @@ export const dictionary = {
     "language.enUS": "English",
     "account.settings": "My settings",
     "account.languageHint": "Interface language",
+    "account.languageFallback": "Traditional Chinese is not available yet. The interface currently uses Simplified Chinese.",
     "account.logout": "Sign out",
     "nav.menu": "Menu",
     "nav.search": "Search navigation",
@@ -146,6 +150,7 @@ export const dictionary = {
     "sub.client-releases": "Upload signed installers and enable or disable platform versions"
   },
   "ja-JP": {
+    "login.restricted": "アカウントが停止されているか、ログインが制限されています。管理者にお問い合わせください。",
     "plugin.recommend.action": "おすすめ",
     "plugin.recommend.edit": "編集",
     "plugin.type.app": "アプリ",
@@ -154,6 +159,7 @@ export const dictionary = {
     "language.enUS": "English",
     "account.settings": "個人設定",
     "account.languageHint": "表示言語",
+    "account.languageFallback": "繁体中国語はまだ利用できないため、簡体中国語で表示しています。",
     "account.logout": "ログアウト",
     "nav.menu": "メニュー",
     "nav.search": "ナビゲーションを検索",
@@ -219,6 +225,7 @@ export const dictionary = {
     "sub.client-releases": "署名済みインストーラーをアップロードし、各プラットフォームのバージョンを有効化または無効化"
   },
   "ko-KR": {
+    "login.restricted": "계정이 비활성화되었거나 로그인이 제한되었습니다. 관리자에게 문의하세요.",
     "plugin.recommend.action": "추천",
     "plugin.recommend.edit": "편집",
     "plugin.type.app": "앱",
@@ -227,6 +234,7 @@ export const dictionary = {
     "language.enUS": "English",
     "account.settings": "내 설정",
     "account.languageHint": "화면 언어",
+    "account.languageFallback": "아직 번체 중국어를 지원하지 않아 간체 중국어로 표시합니다.",
     "account.logout": "로그아웃",
     "nav.menu": "메뉴",
     "nav.search": "탐색 메뉴 검색",
