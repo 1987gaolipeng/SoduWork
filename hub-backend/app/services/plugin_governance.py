@@ -213,6 +213,8 @@ async def overview(session: AsyncSession, org_ids: set[str] | None = None,
             at=_ms(run.finished_at or run.updated_at or run.created_at),
         ))
 
+    # The summary counts plugins across all pending versions; only the displayed queue is capped.
+    review_plugins = {item["pluginId"] for item in queues["review"]}
     for key in queues:
         queues[key].sort(
             key=lambda item: (item.get("severity") == "high", item.get("at") or 0),
@@ -228,12 +230,6 @@ async def overview(session: AsyncSession, org_ids: set[str] | None = None,
     success_rate = (round(sum(row.state == "succeeded" for row in decided) * 100 /
                           len(decided), 1) if decided else None)
     counts = {key: len(value) for key, value in queues.items()}
-    # The review queue counts quarantined versions; a plugin with several
-    # pending versions would make pendingReview exceed the plugin total.
-    # Count distinct plugins instead so the summary stays on the same
-    # basis as "total".
-    review_plugins = {item.get("pluginId") for item in queues.get("review", [])
-                      if item.get("pluginId")}
     return {
         "generatedAt": _ms(datetime.now(timezone.utc)),
         "summary": {

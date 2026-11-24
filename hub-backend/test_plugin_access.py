@@ -542,6 +542,27 @@ class PluginAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail["latestVersion"]["id"], self.version.id)
         self.assertEqual(catalog[0]["latestVersion"]["id"], self.version.id)
 
+    async def test_governance_counts_pending_plugins_before_limiting_the_review_queue(self):
+        stamp = datetime(2026, 10, 20, tzinfo=timezone.utc)
+        for key, org, versions in (("older", "company", 1), ("newer", "company", 31),
+                                   ("outside", "other", 1)):
+            self.session.add(am.Plugin(id=key, key=key, name=key, org_id=org))
+            for index in range(versions):
+                self.session.add(am.PluginVersion(
+                    plugin_id=key, version=f"1.0.{index}", checksum=f"{key}-{index}",
+                    trust_state="quarantined", created_at=stamp + timedelta(minutes=index)))
+        await self.session.commit()
+
+        response = await self.http.get("/api/v1/admin/plugins/governance")
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertEqual(result["summary"]["total"], 3)  # Includes the approved fixture plugin.
+        self.assertEqual(result["summary"]["pendingReview"], 2)
+        self.assertEqual(result["counts"]["review"], 30)
+        queue = result["queues"]["review"]
+        self.assertEqual(len(queue), 30)
+        self.assertEqual({item["pluginId"] for item in queue}, {"newer"})
+
     async def test_governance_latest_items_and_action_queues_agree(self):
         stamp = datetime(2026, 10, 20, tzinfo=timezone.utc)
         expected_latest = {}
