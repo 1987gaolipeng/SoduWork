@@ -140,7 +140,7 @@ async def handoff(session, client, row):
     await session.commit()
     legacy = options.get("legacyBlob")
     if legacy:
-        await asyncio.to_thread(storage.delete, legacy["key"], legacy["backend"])
+        await storage.delete_unreferenced(session, legacy["key"], legacy["backend"])
         current.options = {key: value for key, value in options.items() if key != "legacyBlob"}
         await session.commit()
     return {"ok": True, "handoffId": row.id}

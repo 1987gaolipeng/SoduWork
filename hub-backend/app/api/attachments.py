@@ -302,11 +302,7 @@ async def delete_attachment(
 async def remove_unreferenced_object(session: AsyncSession, aid: str, storage_key: str, backend: str) -> None:
     """Clean up the object after the caller commits the metadata deletion."""
     try:
-        # Older same-name uploads could share an object. Keep it for any surviving row.
-        remaining = await session.scalar(select(Attachment.id).where(
-            Attachment.storage_key == storage_key, Attachment.backend == backend).limit(1))
-        if storage_key and remaining is None:
-            await asyncio.to_thread(storage.delete, storage_key, backend)
+        await storage.delete_unreferenced(session, storage_key, backend)
     except Exception as exc:  # noqa: BLE001  Storage cleanup failure does not undo the committed deletion.
         log.warning("attachment object cleanup failed (%s): %s",
                     aid, type(exc).__name__)

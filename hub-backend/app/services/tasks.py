@@ -867,10 +867,13 @@ async def purge_task_children(
     return out, storage_refs
 
 
-def _delete_task_storage(refs: list[tuple[str, str]]) -> None:
+async def _delete_task_storage(session: AsyncSession, refs: list[tuple[str, str]]) -> None:
     from . import storage
-    for key, backend in refs:
-        storage.delete(key, backend)
+    try:
+        await storage.delete_unreferenced_objects(session, refs)
+    except Exception as exc:
+        # Task deletion is committed. Keep the bytes if ownership cannot be checked.
+        log.warning("Task attachment cleanup deferred (%s)", type(exc).__name__)
 
 
 async def delete_task(session: AsyncSession, owner_id: str, tid: str) -> dict:
@@ -890,7 +893,7 @@ async def delete_task(session: AsyncSession, owner_id: str, tid: str) -> dict:
     task_notifications.enqueue(session, t, "task.deleted", recipients=[c.id for c in recipients],
         recipient_accounts={c.id: c.user_ref or "" for c in recipients}, previous_org=previous_org)
     await session.commit()
-    _delete_task_storage(storage_refs)
+    await _delete_task_storage(session, storage_refs)
     return {"ok": True}
 
 
@@ -917,7 +920,7 @@ async def clear_done(session: AsyncSession, owner_id: str) -> dict:
         task_notifications.enqueue(session, t, "task.deleted", recipients=[c.id for c in viewers],
             recipient_accounts={c.id: c.user_ref or "" for c in viewers})
     await session.commit()
-    _delete_task_storage(storage_refs)
+    await _delete_task_storage(session, storage_refs)
     return {"removed": len(ids)}
 
 

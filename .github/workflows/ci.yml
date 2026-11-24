@@ -145,10 +145,15 @@ jobs:
           cygpath -aw "$package" >> "$GITHUB_PATH"
       - name: Verify ripgrep is on the client test PATH
         run: rg --version
-      - name: Verify attachment storage names under native Windows rules
-        if: runner.os == 'Windows'
-        run: .venv/Scripts/python.exe -m unittest -v test_attachment_storage_names
+      - name: Verify local attachment storage and live Hub upgrades
+        shell: bash
         working-directory: hub-backend
+        run: |
+          python=.venv/bin/python
+          if [ "$RUNNER_OS" = Windows ]; then python=.venv/Scripts/python.exe; fi
+          "$python" -m unittest -v test_attachment_storage_names
+          "$python" -m unittest -v test_cloud_conversations.CloudConversationTests.test_concurrent_submissions_keep_one_input_object
+          "$python" tests/local_storage_upgrade_http.py
       - run: npm ci
         working-directory: client
       - run: xvfb-run -a npm test
