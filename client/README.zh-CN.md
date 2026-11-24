@@ -135,7 +135,7 @@ Hub 模型拒绝错误通过 JSON、SSE 和原生会话摘要保留不透明的 
 
 模型临时故障共用既有的单轮重试预算。供应商的 `Retry-After` 是最短等待时间：超过剩余时间预算时停止自动重试，不缩短等待。已识别的计费或额度耗尽错误不重试。已产生的输出和工具结果继续通过既有显式恢复流程保留。
 
-首次体验推荐根目录的 `sh start.sh --desktop`。根目录启动器在专用 `venv/` 中安装 Hub 和 Runner 依赖，并明确将生成的桌面副本绑定到同一 Python 解释器。独立开发时保持 Hub 运行，在 `client/` 安装依赖 `npm ci` 后执行 `npm start`，三种桌面系统共用这一入口；请激活 `../hub-backend/.venv`，在 `client/` 执行 `python -m pip install -r ../hub-backend/requirements-runner.txt -r ../hub-backend/requirements.txt Pillow`。桌面端通过 Pillow 校验生成的图片后再写入成果。两种方式都执行当前后端源码，不要手工复制旧发行版 Runner 代替当前源码。
+首次体验推荐根目录的 `sh start.sh --desktop`。根目录启动器在专用 `venv/` 中安装 Hub 和 Runner 依赖，并明确将生成的桌面副本绑定到同一 Python 解释器。独立开发时保持 Hub 运行，在 `client/` 安装依赖 `npm ci` 后执行 `npm start`，三种桌面系统共用这一入口；请激活 `../hub-backend/.venv`，在 `client/` 执行 `python -m pip install -r ../hub-backend/requirements-runner.txt -r ../hub-backend/requirements-image.txt`。桌面端通过 Pillow 校验生成的图片后再写入成果。两种方式都执行当前后端源码，不要手工复制旧发行版 Runner 代替当前源码。
 
 `npm test` 运行客户端的单元和契约检查。`npm run check:layout` 检查源码与生成目录的边界。`e2e/` 脚本应按文件声明选择隔离夹具或真实服务：隔离界面通过不等于真实模型、用户账号或线上交付验证通过。
 

@@ -22,7 +22,7 @@ function validator() {
     : path.join(venv, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
   const help = managed ? '请修复或重新安装 SoduWork 的 Python 运行环境。'
     : source ? '请从项目根目录重新运行 sh start.sh --desktop（Windows 使用 start.cmd --desktop）。'
-      : '请激活 ../hub-backend/.venv，在 client/ 目录运行 python -m pip install -r ../hub-backend/requirements.txt Pillow 并重新启动客户端。';
+      : '请激活 ../hub-backend/.venv，在 client/ 目录运行 python -m pip install -r ../hub-backend/requirements-image.txt 并重新启动客户端。';
   const unavailable = new ImageResultError('本机图片校验组件不可用。' + help);
   unavailable.code = 'IMAGE_VALIDATOR_UNAVAILABLE';
   if (!python || !fs.existsSync(python) || !fs.existsSync(script)) throw unavailable;
