@@ -18,7 +18,7 @@ test('completed goal conversations can switch while active goals remain protecte
   assert.equal(goalSwitchBlocked({ execution: { configured: true, harness: { state: 'completed' } } }), false);
 });
 
-function fixture(t, { nativeHistory = false, nativeOutputs = false } = {}) {
+function fixture(t, { nativeHistory = false, nativeOutputs = false, modelConfig } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-agent-switch-')), app = { getPath: () => root };
   const archives = new Map(), runs = new Map(), openings = [], requests = [];
   let serial = 0, unavailable = '', busy = false, gate = null, strictMissing = false;
@@ -28,6 +28,11 @@ function fixture(t, { nativeHistory = false, nativeOutputs = false } = {}) {
     probe: async () => ({ ok: true }),
     async open(options) {
       openings.push(options);
+      if (modelConfig) {
+        const result = await modelConfig.fetchModel(options.identity, options.modelName, undefined,
+          undefined, false, 'pi', { app, allowLocal: true });
+        if (!result.ok) return result;
+      }
       const id = archives.get(options.resumePath)?.raw.sessionId || 'pi-' + (++serial), file = options.resumePath || path.join(root, id + '.jsonl');
       const messages = archives.get(file)?.messages || [];
       const listeners = new Set(); let model = options.modelName || 'model-a';
@@ -98,7 +103,7 @@ function fixture(t, { nativeHistory = false, nativeOutputs = false } = {}) {
   } };
   function bridge() { return createPiSessionBridge({ app, sessionModule: engine, runnerAdapters: catalog.runnerRuntimes().map(spec => createRunnerRuntimeAdapter({
     app, runtimeSpec: spec, runnerRuntime: runtime,
-    modelConfig: { fetchModel: async (_id, name) => name === 'denied' ? { ok: false, reason: 'unauthorized model' } :
+    modelConfig: modelConfig || { fetchModel: async (_id, name) => name === 'denied' ? { ok: false, reason: 'unauthorized model' } :
       { ok: true, model: { id: name || 'model-a', name: name || 'model-a', key: 'fixture-secret', baseUrl: 'http://fixture.invalid' } } },
   })) }); }
   let current = bridge();
@@ -256,6 +261,50 @@ for (const selection of [undefined, { modelName: '' }, { modelName: 'limited' }]
     assert.equal(dispatch.cfg.codex_reasoning_effort, explicit ? 'low' : 'high');
   });
 }
+
+test('leaving Codex for a managed runtime selects a compatible device model and preserves the conversation', async t => {
+  const first = 'local:model-' + 'a'.repeat(32), streaming = 'local:model-' + 'b'.repeat(32);
+  const deviceModels = require('../main/local-model-store.cjs');
+  t.mock.method(deviceModels, 'get', () => ({ usable: [
+    { name: first, capabilityProfile: { streaming: { state: 'unsupported' } } }, { name: streaming },
+  ] }));
+  t.mock.method(deviceModels, 'resolve', name => [first, streaming].includes(name) ? {
+    modelRef: name, name: 'fixture-wire-model', baseUrl: 'https://fixture.invalid/v1', authMode: 'none',
+  } : null);
+  const hub = t.mock.method(global, 'fetch', async () => Response.json({ ok: false, reason: 'Hub has no models' }));
+  const f = fixture(t, { modelConfig: require('../main/pi-session/model-config') });
+  const handle = (await f.bridge.open({ ...options(f), adapterId: 'codex', modelName: 'native-model' })).session;
+  await send(handle, 'Keep this earlier turn');
+  const id = handle.sessionId;
+  for (const [target, expected] of [['pi', streaming], ['qwen', streaming], ['codex', 'native-model'], ['opencode', first]]) {
+    const switched = await handle.selectAgent(target, target === 'codex' ? { modelName: expected } : undefined);
+    assert.equal(switched.ok, true, switched.reason);
+    assert.equal(handle.snapshot().modelSelection.name, expected);
+    assert.equal(segments.read(f.app, id).active.modelName, expected);
+    assert.ok(handle.snapshot().messages.some(message => message.text === 'Keep this earlier turn'));
+  }
+  assert.equal(hub.mock.callCount(), 0);
+});
+
+test('implicit device selection respects the target preference and an explicit switch selection', async t => {
+  const defaults = require('../main/local-agent-model-store.cjs');
+  t.mock.method(defaults, 'configured', () => true);
+  t.mock.method(defaults, 'fromIdentity', () => ({ configured: true, unavailable: true, modelName: 'local:removed' }));
+  const catalogRead = t.mock.method(require('../main/local-model-store.cjs'), 'get', () => ({ usable: [{ name: 'local:other' }] }));
+  const f = fixture(t, { modelConfig: require('../main/pi-session/model-config') });
+  const handle = (await f.bridge.open({ ...options(f), adapterId: 'codex', modelName: 'native-model' })).session;
+  for (const selection of [undefined, { modelName: '' }]) {
+    assert.equal((await handle.selectAgent('pi', selection)).ok, false);
+    assert.equal(f.openings.at(-1).modelName, '');
+    assert.equal(handle.snapshot().adapterId, 'codex');
+  }
+  const replacement = 'local:model-' + 'c'.repeat(32);
+  t.mock.method(require('../main/local-model-store.cjs'), 'resolve', name =>
+    name === replacement ? { modelRef: replacement, name: 'fixture', baseUrl: 'https://fixture.invalid/v1' } : null);
+  assert.equal((await handle.selectAgent('pi', { modelName: replacement })).ok, true);
+  assert.equal(handle.snapshot().modelSelection.name, replacement);
+  assert.equal(catalogRead.mock.callCount(), 0);
+});
 
 test('switching to Codex with an empty native directory retains an unknown default without invented levels', async t => {
   t.mock.method(require('../main/agent-runtime/native-model-catalog'), 'list', () => ({ ok: true, models: [] }));

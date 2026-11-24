@@ -841,10 +841,16 @@ class AcpBridge:
                     _emit({"type": "step_finish", "part": {
                         "reason": "max_tokens" if reason == "max_tokens" else "stop"}})
             if self.outcome and result.get("stopReason") in (None, "", "end_turn"):
-                native_reason = self.outcome.finish()
-                _emit({"type": "step_finish", "part": {"reason": native_reason}})
-                if native_reason in {"length", "max_tokens"}:
-                    result = {**result, "stopReason": "max_tokens"}
+                interrupted = bool(self.transition.blocked or self.transition.cancel_sent)
+                native_reason = self.outcome.finish(interrupted=interrupted)
+                if native_reason == "cancelled":
+                    # OpenCode can return end_turn after a withdrawn approval. The
+                    # transition still has to confirm that all other tools settled.
+                    result = {**result, "stopReason": "cancelled"}
+                else:
+                    _emit({"type": "step_finish", "part": {"reason": native_reason}})
+                    if native_reason in {"length", "max_tokens"}:
+                        result = {**result, "stopReason": "max_tokens"}
             if not self.transition.complete(result):
                 if (self.agent_name == "dsh" and result.get("stopReason") == "max_tokens"
                         and not self.task_output_recovery_owned

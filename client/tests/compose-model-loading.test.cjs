@@ -593,6 +593,17 @@ test('a stale directory model restore cannot overwrite a new account or explicit
   assert.equal(f.picker.value().modelName, 'new-account');
 });
 
+test('a saved Codex account default stays usable before and after its native catalog becomes available', async () => {
+  const f = fixture(); f.agent('codex'); f.start();
+  f.requests[0].resolve({ ok: true, models: [] });
+  assert.equal(await f.picker.ready(), true);
+  assert.equal(await f.picker.restoreSelection({ adapterId: 'codex', modelName: '' }), true);
+  const refresh = f.picker.refresh(true); f.reply(1, 'native-model'); await refresh;
+  assert.equal(await f.picker.ready(), true);
+  assert.equal(f.picker.value().modelName, '');
+  assert.ok(f.requests.every(row => row.kind === 'native'));
+});
+
 test('Codex directory preferences restore model effort and retain a missing model through refresh', async () => {
   const f = fixture(); f.agent('codex'); f.start();
   f.requests[0].resolve({ ok: true, models: [{ id: 'first', label: 'First', reasoningLevels: ['medium', 'high'] },

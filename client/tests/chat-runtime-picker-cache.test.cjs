@@ -284,7 +284,12 @@ test('authoritative selection failures and busy recovery keep the existing conve
   const f = fixture(t); const first = f.click(); await settle(); f.calls[0].resolve(inventory()); await first;
   await f.choose('opencode'); f.selection.resolve({ ok: false, reason: 'runtime unavailable now' });
   assert.equal(await f.picker.wait(), false); assert.equal(f.selected.length, 0);
-  assert.match(f.pop.textContent, /runtime unavailable now/); await f.click();
+  assert.match(f.pop.textContent, /runtime unavailable now/);
+  const target = f.pop.querySelectorAll('[data-runtime]').find(row => row.dataset.runtime === 'opencode');
+  assert.equal(target.querySelector('.cp-runtime-state').dataset.state, 'ready');
+  assert.equal(target.disabled, false);
+  assert.equal(f.pop.querySelector('[role=status]').hidden, false);
+  await f.click();
   f.state.busy = true; f.state.recoveryRequired = true; f.state.recoveryReason = 'fixture recovery required';
   await f.click(); assert.equal(f.pop.hidden, true); assert.equal(f.calls.length, 1);
   assert.match(f.notices[0], /fixture recovery required/);

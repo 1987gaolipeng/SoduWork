@@ -280,8 +280,10 @@
           checkingId = ''; options.runtimeSelected?.(result); close(); return true;
         } catch (error) {
           if (token === generation && currentScope(identity)) {
-            checkingId = ''; if (status) status.textContent = error.message;
-            pop.querySelectorAll('[data-runtime]').forEach(b => { b.disabled = false; });
+            checkingId = '';
+            if (availability) renderPicker(availability);
+            const failure = pop.querySelector('[role=status]');
+            if (failure) { failure.textContent = error.message; failure.hidden = false; }
           }
           return false;
         } finally { if (scopeToken === scopeGeneration && currentScope(identity)) {

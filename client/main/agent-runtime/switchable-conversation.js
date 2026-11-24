@@ -8,6 +8,9 @@ const windowed = require('../pi-session/snapshot-window');
 const clone = value => JSON.parse(JSON.stringify(value));
 const nativeSource = require('../conversation/native-agent-source.cjs');
 const harnesses = require('../conversation/used-harnesses');
+const localModels = require('../local-model-store.cjs');
+const agentModels = require('../local-agent-model-store.cjs');
+const capabilities = require('../model-capability-contract.cjs');
 const BUSY = '请等待本轮和排队消息完成后切换 Agent';
 
 function busy(handle) {
@@ -28,6 +31,17 @@ function goalSwitchBlocked(snapshot) {
   if (execution.terminalConfirmed) return false;
   const state = String(execution.harness?.state || '').toLowerCase();
   return !TERMINAL_GOAL_STATES.has(state);
+}
+function implicitDeviceModel(identity, agentId) {
+  try {
+    // Let the model resolver honor a saved preference, including a removed model.
+    if (agentModels.configured() && agentModels.fromIdentity(identity, agentId).configured) return '';
+    const required = agentId === 'pi' ? ['streaming'] : [];
+    return localModels.get().usable.find(model => !capabilities.incompatibility(model, required))?.name || '';
+  } catch {
+    // An unreadable device catalog must still allow normal default resolution.
+    return '';
+  }
 }
 function descriptor(raw, history = raw.historyRow?.()) {
   const nativeDispatchId = history?.nativeDispatchId;
@@ -140,7 +154,8 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
     let before = snapshot();
     if (goalSwitchBlocked(before))
       return { ok: false, reason: '请先结束目标模式，再切换 Agent' };
-    if (!catalog.runtime(agentId)) return { ok: false, reason: '未知 Agent，请刷新后重试' };
+    const target = catalog.runtime(agentId);
+    if (!target) return { ok: false, reason: '未知 Agent，请刷新后重试' };
     switching = true; emit({ kind: 'runtime-switching' });
     let candidate = null;
     try {
@@ -158,12 +173,14 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       const ready = await probe(options.app, agentId);
       if (!ready?.ok) throw Error(ready?.reason || '此 Agent 尚不可用');
       const policy = before.nextAccessPolicy || before.accessPolicy;
-      const support = ready.accessControl || catalog.runtime(agentId).accessControl;
+      const support = ready.accessControl || target.accessControl;
       if (policy && (!support?.supported || !support.modes?.includes(policy.mode)))
         throw Error('目标 Agent 不支持当前权限模式，请先选择兼容的权限');
-      let modelName = typeof selection.modelName === 'string' ? selection.modelName :
-        catalog.runtime(agentId).modelMode !== 'account' &&
-          catalog.runtime(agentId).modelMode === catalog.runtime(raw.adapterId)?.modelMode ? before.modelSelection?.name || '' : '';
+      let modelName = typeof selection.modelName === 'string' ? selection.modelName : '';
+      if (typeof selection.modelName !== 'string' && target.modelMode === 'managed') {
+        const carried = catalog.runtime(raw.adapterId)?.modelMode === 'managed' && before.modelSelection?.name;
+        modelName = carried || implicitDeviceModel(identity, agentId);
+      }
       // Entering Codex uses the same first available native model as a new chat.
       if (agentId === 'codex' && !modelName)
         modelName = require('./native-model-catalog').list('codex').models?.[0]?.id || '';

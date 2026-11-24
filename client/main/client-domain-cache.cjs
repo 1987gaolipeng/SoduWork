@@ -23,7 +23,7 @@ function matches(expected, identity) {
 }
 function stale() { return Object.assign(Error(SAME_SCOPE), { code: 'STALE_TASK_SCOPE' }); }
 
-// One authoritative HTTP snapshot per domain and signed account/device scope.
+// Share domain snapshots within a signed account/device scope.
 // Existing renderer stores retain local edits, dismissal markers and folders.
 function create({ identityOf, fetch = fetchWithDeviceAuthRetry, discovery = require('./native-discovery.cjs'),
   changed = () => {}, now = Date.now, setTimeout: later = setTimeout, clearTimeout: cancel = clearTimeout,
@@ -82,6 +82,8 @@ function create({ identityOf, fetch = fetchWithDeviceAuthRetry, discovery = requ
       do {
         reads++;
         const identity = await guard(captured);
+        const pushed = domain === 'models' && discovery.modelCatalog?.(identity);
+        if (pushed) return pushed;
         version = entry.version;
         let response;
         try { response = await fetch(identity, captured.expected.hub + '/api/v1' + DOMAINS[domain].path,
@@ -129,6 +131,13 @@ function create({ identityOf, fetch = fetchWithDeviceAuthRetry, discovery = requ
   async function read(domain, expected, report = () => {}) {
     if (!Object.hasOwn(DOMAINS, domain)) throw Error('不支持的同步目录');
     const captured = await capture(expected);
+    const pushed = () => domain === 'models' && discovery.modelCatalog?.(captured.identity);
+    if (domain === 'models' && !pushed() && discovery.waitForModelCatalog) {
+      await discovery.waitForModelCatalog(captured.identity);
+      await guard(captured);
+    }
+    const catalog = pushed();
+    if (catalog) return structuredClone(catalog);
     const confirmed = discovery.confirmed(captured.identity, DOMAINS[domain].topic || domain);
     if (DOMAINS[domain].requirePush && !confirmed) throw Object.assign(Error('Use legacy polling'), {code: 'DOMAIN_POLL_FALLBACK'});
     let entry = entries.get(domain);
@@ -145,24 +154,34 @@ function create({ identityOf, fetch = fetchWithDeviceAuthRetry, discovery = requ
       const value = cached ? entry.value : await load(domain, entry, captured);
       await guard(captured);
       if (!cached) report(true);
-      return structuredClone(value);
+      return structuredClone(pushed() || value);
     } catch (error) {
       await guard(captured);
+      const catalog = pushed();
+      if (catalog) return structuredClone(catalog);
       if (typeof error.networkOnline === 'boolean') report(error.networkOnline);
       throw error;
     }
   }
-  async function invalidate(domain, expected) {
+  async function invalidate(domain, expected, localWrite = true) {
     if (!Object.hasOwn(DOMAINS, domain)) return;
     const captured = await capture(expected), entry = entries.get(domain);
+    if (domain === 'models' && localWrite) discovery.invalidateModelCatalog?.(captured.identity);
     if (entry) { entry.version++; schedule(domain, entry, captured); }
     notify(domain, captured);
   }
-  for (const topic of new Set(Object.entries(DOMAINS).map(([domain, value]) => value.topic || domain))) subscriptions.push(discovery.register(topic, () => {
+  for (const topic of new Set(Object.entries(DOMAINS).map(([domain, value]) => value.topic || domain))) subscriptions.push(discovery.register(topic, event => {
     Promise.resolve(identityOf()).then(identity => {
       if (closed || !accountId(identity) || scopeOf(identity) !== currentScope) return;
+      if (topic === 'models' && event?.type === 'model-catalog' && discovery.modelCatalog?.(identity)) {
+        const old = entries.get('models');
+        if (old?.timer) cancel(old.timer);
+        entries.delete('models');
+        notify('models', { identity, scope: currentScope, expected: actor(identity) });
+        return;
+      }
       return Promise.all(Object.entries(DOMAINS).filter(([domain, value]) => (value.topic || domain) === topic)
-        .map(([domain]) => invalidate(domain, actor(identity))));
+        .map(([domain]) => invalidate(domain, actor(identity), false)));
     }).catch(() => {});
   }));
   // Quota is a wake-up signal only. The renderer's account refresh owns its
@@ -193,7 +212,11 @@ function install({ app, ipcMain, webContents, deviceAuth, modelsChanged = () => 
   for (const action of ['read', 'invalidate']) ipcMain.handle('client-domain-' + action, async (event, domain, expected) => {
     if (!isTrusted(event)) return { ok: false, reason: '不允许的读取来源' };
     let online;
-    try { const value = await cache[action](domain, expected, value => { online = value; }); return { ok: true, value, online }; }
+    try {
+      const value = action === 'read' ? await cache.read(domain, expected, value => { online = value; })
+        : await cache.invalidate(domain, expected);
+      return { ok: true, value, online };
+    }
     catch (error) { return { ok: false, reason: error.message, status: error.status, code: error.code, body: error.httpBody, online }; }
   });
   app.once('will-quit', () => cache.close());

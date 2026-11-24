@@ -87,7 +87,11 @@ def heartbeat_request(raw):
     supported = TOPICS if value["protocol"] == 1 else EXTENDED_TOPICS
     if not isinstance(topics, list) or not topics or len(topics) > len(supported) or any(not isinstance(t, str) or t not in supported for t in topics):
         return None
-    return {"protocol": value["protocol"], "topics": list(dict.fromkeys(topics))}
+    request = {"protocol": value["protocol"], "topics": list(dict.fromkeys(topics))}
+    if value["protocol"] == 2 and "models" in topics and value.get("modelCatalog") == "snapshot-v1":
+        request["modelCatalog"] = "snapshot-v1"
+        request["needsModelCatalog"] = value.get("needsModelCatalog") is True
+    return request
 
 
 def heartbeat_topics(raw):

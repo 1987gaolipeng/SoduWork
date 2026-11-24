@@ -54,7 +54,7 @@ def fake_agent():
             update({"sessionUpdate": "tool_call_update", "toolCallId": "approval", "status": "failed",
                     "content": [{"type": "content", "content": {"type": "text", "text": "Permission request withdrawn"}}]})
             if scenario == "approval-end":
-                native_outcome.end("native-kept")
+                native_outcome.end("native-kept", "tool-calls" if agent == "opencode" else "stop")
                 send({"jsonrpc": "2.0", "id": prompt_id, "result": {
                     "stopReason": "end_turn"}})
             continue
@@ -65,6 +65,12 @@ def fake_agent():
                 time.sleep(1)
             result = {"protocolVersion": 1, "agentCapabilities": {"loadSession": scenario != "unsupported"}}
         elif method in {"session/new", "session/load", "session/resume"}:
+            if agent == "opencode":
+                from tests.opencode_peer_session import create_session, require_session
+                if method == "session/new":
+                    create_session(os.environ, "native-kept", params["cwd"])
+                else:
+                    require_session(os.environ, params["sessionId"], params["cwd"])
             if method != "session/new":
                 resumed = True
                 assert params["sessionId"] == "native-kept"
@@ -166,6 +172,10 @@ class TransitionTests(unittest.TestCase):
         handle.start(); self.patches.append(handle)
         if agent == "opencode":
             from app.services import local_process
+            from tests.opencode_peer_session import environment
+            isolated = patch.dict(os.environ, environment(self.ws / "runner"), clear=True)
+            isolated.start()
+            self.addCleanup(isolated.stop)
             handle = patch.object(local_process, "_command_argv", lambda exe, args, ws, cfg, prof: prof["command"](exe, args, ws, cfg))
             handle.start(); self.patches.append(handle)
         policy = access_policy.normalize({"schema": access_policy.SCHEMA, "revision": 1,
@@ -348,6 +358,23 @@ class TransitionTests(unittest.TestCase):
         wait_for(lambda: len(self.prompts()) == 2)
         self.assertEqual(self.prompts()[-1], access_transition.CONTINUATION)
         self.assertEqual(run["state"], "running")
+
+    def test_opencode_resumes_after_a_withdrawn_tool_ends_the_native_turn(self):
+        ref, run, policy = self.start("approval-end", agent="opencode")
+        wait_for(lambda: run.get("pendingPermissions"))
+        original = self.prompts()[0]
+        changed = self.change(ref, policy)
+        self.assertTrue(changed["ok"], changed)
+        wait_for(lambda: len(self.prompts()) == 2)
+        self.assertEqual(self.prompts(), [original, access_transition.CONTINUATION])
+        self.assertEqual(run["cliSid"], "native-kept")
+        self.assertEqual(run["state"], "running")
+        self.assertEqual([row["permission"]["outcome"]["optionId"] for row in self.trace()
+                          if "permission" in row], ["deny"])
+        withdrawn = next(row for row in local_base._read_events(ref, 0)
+                         if row.get("kind") == "out" and row.get("callId") == "approval")
+        self.assertEqual(withdrawn["cancelReason"], "access-change")
+        self.assertFalse(withdrawn["isError"])
 
     def test_unsupported_resume_leaves_original_turn_running(self):
         ref, run, policy = self.start("unsupported")

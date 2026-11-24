@@ -15,6 +15,8 @@ class Hub:
     def __init__(self) -> None:
         self._conns: dict[str, set[WebSocket]] = defaultdict(set)
         self._users: dict[WebSocket, str] = {}
+        self._model_subscribers: dict[WebSocket, asyncio.Event] = {}
+        self.model_read_slots = asyncio.Semaphore(8)
         self._lock = asyncio.Lock()
 
     async def connect(self, device: str, ws: WebSocket, *, accept: bool = True,
@@ -43,6 +45,7 @@ class Hub:
 
     async def disconnect(self, device: str, ws: WebSocket) -> None:
         async with self._lock:
+            self._model_subscribers.pop(ws, None)
             self._conns[device].discard(ws)
             self._users.pop(ws, None)
             if not self._conns[device]:
@@ -57,11 +60,21 @@ class Hub:
             conns = list(self._conns.pop(device, set()))
             for ws in conns:
                 self._users.pop(ws, None)
+                self._model_subscribers.pop(ws, None)
         for ws in conns:
             try:
                 await ws.close(code=code)
             except Exception:  # noqa: BLE001 - the socket may already be gone
                 pass
+
+    def subscribe_models(self, ws: WebSocket) -> asyncio.Event:
+        changed = asyncio.Event()
+        self._model_subscribers[ws] = changed
+        changed.set()
+        return changed
+
+    def unsubscribe_models(self, ws: WebSocket) -> None:
+        self._model_subscribers.pop(ws, None)
 
     async def publish(self, device: str, event: dict, *, _local: bool = False,
                       user_id: str | None = None) -> None:
@@ -87,6 +100,11 @@ class Hub:
                 await on_failure()
         conns = [ws for ws in self._conns.get(device, ())
                  if user_id is None or self._users.get(ws, "") == str(user_id)]
+        if event.get("type") == "native-discovery" and event.get("topic") == "models":
+            for ws in conns:
+                if changed := self._model_subscribers.get(ws):
+                    changed.set()
+            conns = [ws for ws in conns if ws not in self._model_subscribers]
         # A device can have several windows or sockets; fan out concurrently so one slow connection
         # does not impose its timeout on every other connection in sequence.
         dead = []

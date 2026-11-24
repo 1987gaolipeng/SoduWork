@@ -75,6 +75,11 @@ async def my_models(
     Client-local services are removed from legacy rows and are never returned or persisted here.
     Credentials are masked and never returned in plaintext.
     """
+    return await model_directory(session, client)
+
+
+async def model_directory(session: AsyncSession, client: Client) -> dict:
+    """Build the same device-scoped public projection for HTTP and WebSocket clients."""
     from ..services import model_catalog
     from ..services import model_config_guard
     providers = await model_catalog.effective_provider_map(session, client)

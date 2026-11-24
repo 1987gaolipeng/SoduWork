@@ -1172,6 +1172,28 @@ class LocalStartupTests(unittest.TestCase):
         self.assertEqual(json.loads((self.state / 'desktop-profile/chat-config.json').read_text()),
                          {'workDir': str(self.state / 'workspaces')})
 
+    def test_windows_source_desktop_resolves_native_codex_account_separately_from_hub(self):
+        user_home = Path(self.temp.name) / 'user'
+        legacy = self.state / 'home/.codex'
+        custom = user_home / 'custom-codex'
+        for existing_login, override, expected in (
+                (False, '', user_home / '.codex'), (True, '', legacy), (True, str(custom), custom)):
+            with self.subTest(existing_login=existing_login, override=override):
+                if existing_login:
+                    legacy.mkdir(parents=True, exist_ok=True)
+                    (legacy / 'auth.json').write_text('{}', encoding='utf-8')
+                with patch.object(sys, 'platform', 'win32'), patch.object(Path, 'home', return_value=user_home), \
+                        patch.dict(os.environ, {'CODEX_HOME': override}), patch('shutil.which', return_value='node'), \
+                        patch.object(start.subprocess, 'Popen') as popen:
+                    service = start.runtime_environment(self.state, {'adminUser': 'test', 'authSecret': 'fixture'},
+                                                        'fixture', '127.0.0.1', 18989)
+                    start.launch_desktop(self.state, self.state / 'application/client', service,
+                                         'http://127.0.0.1:18989', io.BytesIO())
+                env = popen.call_args.kwargs['env']
+                self.assertEqual(env.get('CODEX_HOME'), str(expected))
+                self.assertEqual(env['USERPROFILE'], service['USERPROFILE'])
+                self.assertNotIn('CODEX_HOME', service)
+
     def test_macos_desktop_preserves_native_home_without_inheriting_service_secrets(self):
         native_home = Path(self.temp.name) / 'native-home'
         config = start.initialize(self.state, 'owner')
