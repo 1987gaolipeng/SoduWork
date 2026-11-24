@@ -82,6 +82,9 @@ function create(nativeSafeStorage) {
       }
       throw Error('Cannot decrypt the stored local secret');
     },
+    isUnauthenticatedNativeCipher(value) {
+      return isNativeCipher(asBuffer(value));
+    },
     bindVault(credentials) {
       if (!vault.isUnlockedVault(credentials)) return false;
       bound = adapter.create(credentials);

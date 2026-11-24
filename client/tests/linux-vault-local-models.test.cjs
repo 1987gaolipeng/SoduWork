@@ -130,7 +130,8 @@ test('plain secure-storage errors stay visible without hiding mapped transport e
     assert.equal(human(new Error("Error invoking remote method 'local-models-save': Error: 本地模型配置无法读取"), '没测成'), '本地模型配置无法读取');
     assert.equal(human(new Error("Error invoking remote method 'local-models-get': Error: 系统安全存储不可用，无法保存本地模型凭据"), '没测成'), '系统安全存储不可用，无法保存本地模型凭据');
     assert.equal(human(new Error("Error invoking remote method 'local-models-capabilities-check': Error: 系统安全存储不可用，无法读取能力检测记录"), '没测成'), '系统安全存储不可用，无法读取能力检测记录');
-    assert.equal(human(new Error("Error invoking remote method 'local-models-capabilities-check': Error: 能力检测记录无法解密，当前密钥与历史记录不匹配，请恢复匹配的密钥后重试"), '没测成'), '能力检测记录无法解密，当前密钥与历史记录不匹配，请恢复匹配的密钥后重试');
+    assert.equal(human(new Error("Error invoking remote method 'local-models-capabilities-check': Error: 能力检测记录无法解密，当前密钥与历史记录不匹配，请恢复匹配的密钥或从备份恢复"), '没测成'), '能力检测记录无法解密，当前密钥与历史记录不匹配，请恢复匹配的密钥或从备份恢复');
+    assert.equal(human(new Error("Error invoking remote method 'local-models-capabilities-check': Error: 能力检测记录无法读取，当前密钥可能不匹配，请恢复匹配的密钥或从备份恢复"), '没测成'), '能力检测记录无法读取，当前密钥可能不匹配，请恢复匹配的密钥或从备份恢复');
     assert.equal(human(new Error('本地模型配置无法读取'), '没测成'), '本地模型配置无法读取');
     assert.equal(human(new Error('x'.repeat(300)), '没测成'), '没测成');
     assert.equal(human({ message: 'Failed to fetch' }, '没测成'), '没测成');
@@ -936,4 +937,96 @@ test('capability rechecks stop without probing or overwriting when active eviden
   const restoredModels2 = store.get().myModels;
   assert.equal(restoredModels2.find(row => row.id === alphaRef2).capabilityCheck.checks.imageInput.status, 'passed');
   assert.equal(restoredModels2.find(row => row.id === bravoRef2).capabilityCheck.checks.imageInput.status, 'passed');
+
+  // Case 3: unauthenticated AES-CBC Linux v11 decrypt returning unparseable or invalid JSON text (no throw) vs throwing.
+  for (const mode of ['throw', 'garbage-text', 'invalid-json-shape']) {
+    const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), `soduwork-v11-${mode}-`));
+    t.after(() => {
+      store.configure(null);
+      fs.rmSync(dir3, { recursive: true, force: true });
+    });
+    const capFile3 = path.join(dir3, 'local-model-capabilities.secure.json');
+    const vault3 = await vault.unlock(dir3, 'create', passphrase);
+    const vaultOnly3 = binding.create(blockedNative());
+    assert.equal(vaultOnly3.bindVault(vault3), true);
+    store.configure({ app: { getPath: () => dir3 }, safeStorage: vaultOnly3 });
+    const saved3 = store.save({
+      providers: [{ id: 'local', name: 'Local', baseUrl: 'http://127.0.0.1:9/v1', authMode: 'key' }],
+      models: [
+        { providerId: 'local', name: 'alpha' },
+        { providerId: 'local', name: 'bravo' },
+      ],
+      keys: { local: secret },
+    });
+    const alphaRef3 = saved3.myModels.find(row => row.name === 'alpha').id;
+    const bravoRef3 = saved3.myModels.find(row => row.name === 'bravo').id;
+    const catalogHash3 = sha256(modelFile(dir3));
+
+    const alphaInitialAt = '2026-11-24T04:38:01.000Z';
+    const bravoInitialAt = '2026-11-24T04:38:11.857Z';
+    const alphaUpdatedAt = '2026-11-24T05:00:00.000Z';
+    const probeWithAt = checkedAt => async () => ({
+      reportVersion: 3, apiFamily: 'chat-completions', checkedAt,
+      checks: { imageInput: { status: 'passed', code: 'verified', checkedAt } },
+    });
+
+    store.configure(null);
+    const goodKeyring3 = binding.create(keyedNativeKeyring('good-keyring'));
+    assert.equal(goodKeyring3.bindVault(await vault.unlock(dir3, 'unlock', passphrase)), true);
+    store.configure({ app: { getPath: () => dir3 }, safeStorage: goodKeyring3 });
+    await capabilities.check({ modelRef: alphaRef3, checks: ['imageInput'] }, { runProbe: probeWithAt(alphaInitialAt) });
+    await capabilities.check({ modelRef: bravoRef3, checks: ['imageInput'] }, { runProbe: probeWithAt(bravoInitialAt) });
+    const capHash3 = sha256(capFile3);
+    const capBytes3 = fs.readFileSync(capFile3);
+
+    // Substitute native decrypt double simulating wrong-key throw or unauthenticated AES-CBC false-padding output.
+    store.configure(null);
+    const badNative = {
+      isEncryptionAvailable: () => true,
+      getSelectedStorageBackend: () => 'gnome_libsecret',
+      encryptString: value => Buffer.concat([Buffer.from('v11:bad:'), Buffer.from(value, 'utf8')]),
+      decryptString(value) {
+        const bytes = Buffer.from(value);
+        assert.equal(bytes.subarray(0, 3).toString(), 'v11');
+        if (mode === 'throw') throw Error('Error while decrypting the ciphertext');
+        if (mode === 'garbage-text') return '\u0019not-json-\ufffd-unauthenticated-cbc-output';
+        return '{"schema":1,"secret":"wrong","sequence":0,"targets":{}}';
+      },
+    };
+    const badFacade3 = binding.create(badNative);
+    assert.equal(badFacade3.bindVault(await vault.unlock(dir3, 'unlock', passphrase)), true);
+    store.configure({ app: { getPath: () => dir3 }, safeStorage: badFacade3 });
+    let badProbeCalls = 0;
+    await assert.rejects(
+      capabilities.check({ modelRef: alphaRef3, checks: ['imageInput'] }, {
+        runProbe: async () => { badProbeCalls += 1; return probeWithAt(alphaUpdatedAt)(); },
+      }),
+      /恢复匹配的密钥|从备份恢复/,
+    );
+    assert.equal(badProbeCalls, 0);
+    assert.equal(sha256(capFile3), capHash3);
+    assert.equal(fs.readFileSync(capFile3).equals(capBytes3), true);
+    assert.equal(sha256(modelFile(dir3)), catalogHash3);
+    assert.deepEqual(fs.readdirSync(dir3).filter(name => name.includes('.corrupt-')), []);
+
+    // Restore matching keyring, verify both records and timestamps, then recheck alpha only and confirm bravo timestamp stays untouched.
+    store.configure(null);
+    const restoredGood3 = binding.create(keyedNativeKeyring('good-keyring'));
+    assert.equal(restoredGood3.bindVault(await vault.unlock(dir3, 'unlock', passphrase)), true);
+    store.configure({ app: { getPath: () => dir3 }, safeStorage: restoredGood3 });
+    const beforeRecheck = store.get().myModels;
+    assert.equal(beforeRecheck.find(row => row.id === alphaRef3).capabilityCheck.checks.imageInput.status, 'passed');
+    assert.equal(beforeRecheck.find(row => row.id === bravoRef3).capabilityCheck.checks.imageInput.status, 'passed');
+    assert.equal(beforeRecheck.find(row => row.id === bravoRef3).capabilityCheck.checks.imageInput.checkedAt, bravoInitialAt);
+
+    let recheckProbeCalls = 0;
+    await capabilities.check({ modelRef: alphaRef3, checks: ['imageInput'] }, {
+      runProbe: async () => { recheckProbeCalls += 1; return probeWithAt(alphaUpdatedAt)(); },
+    });
+    assert.equal(recheckProbeCalls, 1);
+    const afterRecheck = store.get().myModels;
+    assert.equal(afterRecheck.find(row => row.id === alphaRef3).capabilityCheck.checks.imageInput.checkedAt, alphaUpdatedAt);
+    assert.equal(afterRecheck.find(row => row.id === bravoRef3).capabilityCheck.checks.imageInput.status, 'passed');
+    assert.equal(afterRecheck.find(row => row.id === bravoRef3).capabilityCheck.checks.imageInput.checkedAt, bravoInitialAt);
+  }
 });
