@@ -24,6 +24,8 @@ function select(row, request, action = request.action) {
   return { row: contribution, definition: row.definition, revision: row.revision };
 }
 function run(request) {
+  if (request.action === 'history-skill-cards')
+    return require('./conversation/device-history-skills.cjs').inspect(request.root, request.files, request.skillRuntimeEntry);
   if (request.action === 'draft-candidates')
     return require('./pi-session/plugin-draft-candidates').collect(request.cwd, request.snapshot);
   if (request.action === 'draft-check') {

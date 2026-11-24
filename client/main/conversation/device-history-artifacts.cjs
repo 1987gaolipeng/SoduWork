@@ -160,6 +160,8 @@ async function capture({ row, workRoot, workspace, previous, retained, journal }
 
 function view(cwd, history, guard, authorize = guard) {
   const byPath = new Map();
+  const drafts = require('../pi-session/plugin-draft-candidates');
+  const skillCards = new Map();
   for (const row of [...(history?.items || []), ...(history?.resources || [])]) {
     if (!eligible(row.metadata?.relative)) continue;
     byPath.set(path.resolve(cwd, row.metadata.relative), row);
@@ -177,10 +179,32 @@ function view(cwd, history, guard, authorize = guard) {
     guard();
     const items = versions.restore(cwd, history).filter(item => matches(item.path))
       .map(item => ({ ...item, primary: item.historicalPrimary, pluginDraft: false }));
+    const skills = items.filter(item => skillCards.has(item.relative)).map(item =>
+      Object.assign(item, skillCards.get(item.relative), { pluginRevisionAt: item.at, pluginSuperseded: false }));
+    drafts.mergePluginCandidates(skills);
+    for (const item of skills) if (!item.pluginKey) item.pluginIdentity = 'skill-file:' + item.artifactId;
     const delivery = { schemaVersion: 1, source: 'history', items: items.filter(item => item.primary && !item.processEvidence) };
     return { got: { files: [], delivery }, items, delivery };
   }
-  return { verify(target, stat) { guard(); return matches(target, stat); }, snapshot, authorize, async snapshotAsync() { await authorize(); return snapshot(); } };
+  async function snapshotAsync() {
+    await authorize();
+    const initial = snapshot();
+    const files = initial.items.filter(item => drafts.SKILL_ARCHIVE.test(item.relative) && !skillCards.has(item.relative))
+      .map(item => ({ relative: item.relative, stamp: item.historicalVersion }));
+    if (!files.length) return initial;
+    const skillRuntimeEntry = require('./skill-frontmatter').runtimeEntry(undefined, true);
+    const cards = await require('../app-resource-cache.cjs').request({ action: 'history-skill-cards', root: history.root, files, skillRuntimeEntry });
+    await authorize();
+    for (const card of cards) skillCards.set(card.relative, card);
+    return snapshot();
+  }
+  function readSkill(item) {
+    guard();
+    const record = byPath.get(item.path);
+    if (!record || record.metadata.artifactId !== item.artifactId || !matches(item.path)) throw Error('技能包已改变');
+    return require('./device-history-skills.cjs').read(history.root, record.metadata.relative, record.stamp);
+  }
+  return { verify(target, stat) { guard(); return matches(target, stat); }, snapshot, snapshotAsync, readSkill, authorize };
 }
 
 module.exports = { capture, view };

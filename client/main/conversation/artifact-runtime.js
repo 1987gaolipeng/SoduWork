@@ -76,7 +76,8 @@ async function snapshotAsync(session) {
     : typeof synchronous === 'function' ? await synchronous.call(session)
       : { files: typeof list === 'function' ? await list.call(session) : [] };
   const candidates = cwd ? await pluginDrafts.collectAsync(cwd, scanned || {}) : [];
-  const retained = require('./runtime-artifacts.cjs').restore(cwd, history).filter(file => file.pluginDraft);
+  const retained = require('./runtime-artifacts.cjs').restore(cwd, history)
+    .filter(file => file.pluginDraft || pluginDrafts.SKILL_ARCHIVE.test(file.relative));
   if (retained.length) {
     // Recheck only exact retained package paths, including their current
     // resource revisions. A saved validation receipt is never authority.
@@ -160,6 +161,7 @@ function sessionSnapshot(session, scanned, recovered, candidates) {
     indexed.add(path.resolve(file.path));
   }
   for (const file of candidates || pluginDrafts.collect(session.cwd, got)) {
+    if (file.historical && !historicalPaths.has(path.resolve(file.path))) continue;
     const existing = items.findIndex(row => row.path && path.resolve(row.path) === file.path);
     const previous = existing >= 0 ? items[existing] : null;
     const item = { ...file, ...previous, pluginDraft: true, pluginPackage: file.pluginPackage, skillPackage: file.skillPackage === true,
@@ -169,7 +171,7 @@ function sessionSnapshot(session, scanned, recovered, candidates) {
       pluginIdentity: file.pluginIdentity || '', pluginSuperseded: file.pluginSuperseded === true,
       pluginRevision: file.pluginRevision, pluginRevisionAt: file.pluginRevisionAt,
       pluginValidation: (got.pluginValidation || []).find(row => row.relative === file.relative && row.revision === file.pluginRevision) || { state: 'pending' },
-      artifactId: previous && previous.artifactId || deliveryContract._artifactId('file', file.relative),
+      artifactId: previous?.artifactId || (file.historical && file.artifactId) || deliveryContract._artifactId('file', file.relative),
       kind: 'file', primary: previous ? previous.primary !== false : false,
       preview: false, actions: ['open', 'reveal'] };
     if (existing >= 0) items[existing] = item; else items.push(item);
