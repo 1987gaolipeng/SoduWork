@@ -64,6 +64,23 @@ const authenticatedOperations = {
   download: api => api.downloadClientRelease('synthetic-release', 'fixture.bin'),
 }
 
+test('release environment conflict is displayed in each selected language', async t => {
+  const f = await fixture(t)
+  const previous = getLocale()
+  t.after(() => setLocale(previous))
+  const code = 'hub.input.release_environment'
+  f.respond(409, { detail: 'original Hub diagnostic' }, { 'X-Error-Code': code })
+  for (const [locale, message] of [
+    ['zh-CN', '当前任务在所选环境中没有可用的部署目标，请检查发布链配置'],
+    ['en-US', 'This task has no available deployment target in the selected environment. Check the release pipeline configuration.'],
+    ['ja-JP', '選択した環境には、このタスクで使用できるデプロイ先がありません。リリースパイプラインの設定を確認してください。'],
+    ['ko-KR', '선택한 환경에서 이 작업에 사용할 수 있는 배포 대상이 없습니다. 릴리스 파이프라인 설정을 확인하세요.'],
+  ]) {
+    setLocale(locale)
+    await assert.rejects(f.api.me(), { status: 409, code, message })
+  }
+})
+
 for (const [kind, operation] of Object.entries(authenticatedOperations)) {
   test(`${kind}: a previous session's 401 preserves the new session`, async t => {
     const f = await fixture(t)

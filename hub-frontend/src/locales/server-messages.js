@@ -1,5 +1,6 @@
 // Only reviewed server message keys are translated; parameters remain business data.
 export const serverMessages = {
+  'hub.input.release_environment': ['当前任务在所选环境中没有可用的部署目标，请检查发布链配置', 'This task has no available deployment target in the selected environment. Check the release pipeline configuration.', '選択した環境には、このタスクで使用できるデプロイ先がありません。リリースパイプラインの設定を確認してください。', '선택한 환경에서 이 작업에 사용할 수 있는 배포 대상이 없습니다. 릴리스 파이프라인 설정을 확인하세요.'],
   "catalog.department.in_use": ["请先迁移部门成员或一并归档下属部门", "Move department members first, and include active child departments in the archive.", "先に所属メンバーを移動し、有効な子部門も一緒にアーカイブしてください。", "먼저 소속 구성원을 이동하고 활성 하위 부서도 함께 보관하세요."],
   "catalog.department.restore_parent": ["请先恢复上级部门", "Restore the parent department first.", "先に上位部門を復元してください。", "상위 부서를 먼저 복원하세요."],
   "catalog.department.classify_children": ["请将未归档的非测试下属部门一并标记为测试", "Include unarchived non-test child departments when marking a department as test data.", "アーカイブされていない非テストの子部門も一緒にテストに分類してください。", "보관되지 않은 비테스트 하위 부서도 함께 테스트로 분류하세요."],

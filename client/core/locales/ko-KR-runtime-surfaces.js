@@ -23,6 +23,7 @@
     "hub.input.inbox": "팀 수신함에 넣을 작업에는 수신자를 지정할 수 없습니다. 개인에게 보내려면 팀원에게 할당하세요.",
     "hub.input.tier": "지원하지 않는 환경 등급입니다.",
     "hub.input.host_type": "호스트 이름은 문자열이어야 합니다.",
+    "hub.input.release_environment": "선택한 환경에서 이 작업에 사용할 수 있는 배포 대상이 없습니다. 릴리스 파이프라인 설정을 확인하세요.",
     "hub.input.host_required": "이 Runner를 식별할 호스트 이름을 입력하세요.",
     "hub.input.comment_type": "댓글 본문은 문자열이어야 합니다.",
     "hub.input.comment_length": "댓글은 4,000자 이내로 입력하세요.",

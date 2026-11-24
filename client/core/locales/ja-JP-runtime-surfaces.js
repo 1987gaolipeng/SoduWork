@@ -23,6 +23,7 @@
     "hub.input.inbox": "チームの受信箱に入れるタスクには宛先を指定できません。個人に送る場合はメンバーに割り当ててください。",
     "hub.input.tier": "この環境レベルには対応していません。",
     "hub.input.host_type": "ホスト名を文字列で指定してください。",
+    "hub.input.release_environment": "選択した環境には、このタスクで使用できるデプロイ先がありません。リリースパイプラインの設定を確認してください。",
     "hub.input.host_required": "この Runner を識別するためにホスト名を入力してください。",
     "hub.input.comment_type": "コメントの本文を文字列で指定してください。",
     "hub.input.comment_length": "コメントは4,000文字以内で入力してください。",
