@@ -151,6 +151,42 @@ if (typeof electron === 'string') {
     assert.ok(await js('document.querySelector(".nmodel-pop").hidden'));
     assert.doesNotMatch(await js('document.querySelector(".nmodel-options").textContent'), /Stale private model/);
     report.checks.push('Changing chat while catalog is loading closes the picker and rejects stale results');
+    await js(fs.readFileSync(path.join(__dirname, '../components/panels/chat-composer-bindings.js'), 'utf8'));
+    await js(`
+      controls.destroy();
+      window.previewAgents = [{id:'pi',displayName:'Pi',modelMode:'managed'}, {id:'codex',displayName:'Codex',modelMode:'account'}];
+      window.coldRuntimes = previewAgents.slice(0,1);
+      soduWorkAPI.conversationSession.runtimes = async () => ({ok:true,runtimes:previewAgents,availableRuntimes:coldRuntimes});
+      SoduWorkAPI.myModels = async () => ({usable:[]});
+      window.preview = {_ref:'local-history-preview-fixture',_sessionId:'original-chat',_viewEpoch:1,
+        _sessionOptions:{adapterId:'codex',modelName:'saved-account-model'},
+        _snap:{adapterId:'codex',displayName:'Codex',execution:{canContinueOnDevice:true},
+          modelSelection:{name:'saved-account-model',model:{id:'saved-account-model',label:'Saved account model'}}},
+        _paintBar(){ controls.render(); }};
+      window.draft = ChatComposerBindings.createDraftControls(preview);
+      controls=ChatComposerControls.create(document.querySelector('main'), {draft,
+        state:()=>({ref:preview._ref,...draft.state()}),say:s=>notices.push(s),renderQueue(){},updateQueue(){},
+        runtimeSelected(result){ preview._snap=result.snapshot; preview._sessionOptions={adapterId:result.adapterId,modelName:''}; controls.render(); },
+        modelSelected(selection){ preview._snap.modelSelection=selection; preview._sessionOptions.modelName=selection.name; controls.render(); }});
+      controls.render(); void 0;
+    `);
+    await js('draft.runtimes().then(()=>{controls.render()})');
+    const badges = () => js('[document.querySelector("#nchatRuntimeName").textContent,document.querySelector(".nmodel-button span").textContent]');
+    assert.deepEqual(await badges(), ['Codex', 'Saved account model']);
+    await js('coldRuntimes=previewAgents; draft.runtimes(true).then(()=>{controls.render()})');
+    assert.deepEqual(await badges(), ['Codex', 'Saved account model']);
+    await js(`preview._viewEpoch++; preview._ref='local-history-preview-other-account';
+      preview._sessionOptions={adapterId:'codex',modelName:''}; preview._snap.modelSelection={};
+      coldRuntimes=previewAgents.slice(0,1); draft.runtimes(true).then(()=>{controls.render()})`);
+    assert.deepEqual(await badges(), ['Codex', 'Codex 默认']);
+    await js('coldRuntimes=previewAgents; draft.runtimes(true).then(()=>{controls.render()})');
+    await click('#nchatRuntime'); await until('document.querySelector("[data-runtime=pi]")');
+    await click('[data-runtime=pi]');
+    assert.equal(await js('preview._sessionOptions.adapterId'), 'pi');
+    await js('draft.runtimes(true).then(()=>{controls.render()})');
+    assert.equal((await badges())[0], 'Pi');
+    assert.deepEqual(await js('sent'), []);
+    report.checks.push('A restored device preview keeps its Codex model through cold discovery and honors an explicit runtime change');
     assert.deepEqual(await js('errors'), []); assert.deepEqual(await js('notices'), []);
     report.ok = true;
   }).catch(async error => { report.error = error.stack; if (win) fs.writeFileSync(path.join(out, 'failure.png'), (await win.webContents.capturePage()).toPNG()); })
