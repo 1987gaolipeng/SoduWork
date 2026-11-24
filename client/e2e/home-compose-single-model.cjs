@@ -126,13 +126,14 @@ app.whenReady().then(async () => {
   assert.equal(await js('document.querySelector("#cpModelName").textContent'), '本机优先模型');
   mark('Multiple models choose local first; valid choices and Hub choices in partial catalogs are preserved; confirmed deletion selects a replacement');
 
-  for (const id of ['codex']) {
-    assert.equal(await fresh(catalog(local, 'Private model', true), id), true);
-    const selected = await js('ComposeModelPicker.value().modelName');
-    assert.equal(selected, id === 'codex' ? 'account-codex' : '');
-    assert.equal(await js('document.querySelector("#cpModelPop").innerHTML.includes(' + JSON.stringify(local) + ')'), false);
-  }
-  mark('Codex keeps independent account model behavior and never selects the device model');
+  assert.equal(await fresh(catalog(local, 'Private model', true), 'codex'), true);
+  assert.equal(await js('ComposeModelPicker.value().modelName'), '');
+  assert.equal(await js('document.querySelector("#cpModelPop").innerHTML.includes(' + JSON.stringify(local) + ')'), false);
+  await click('#cpModelBtn'); await click('[data-native-list]');
+  assert.deepEqual(await js('Array.from(document.querySelectorAll("[data-native-model]"),e=>e.dataset.nativeModel)'), ['', 'account-codex']);
+  await click('[data-native-model="account-codex"]');
+  assert.equal(await js('ComposeModelPicker.value().modelName'), 'account-codex');
+  mark('Codex keeps its native default until the user chooses a listed account model and excludes device-owned managed models');
   assert.equal(await fresh({ usable: [{ name: local, localOnly: true }, { name: 'cloud-hub', label: 'Cloud Hub' }] }, 'pi', 'cloud'), true);
   assert.equal(await js('ComposeModelPicker.value().modelName'), 'cloud-hub');
   assert.equal(await js('document.querySelector("#cpModelPop").innerHTML.includes(' + JSON.stringify(local) + ')'), false);

@@ -4,13 +4,13 @@ import os
 from pathlib import Path
 import stat
 
-from . import agent_execution_options as options, codex_account_home
+from . import agent_execution_options as options, codex_account_home, codex_model_catalog
 from .native_history_archive import stamp
 
 _MAX_CACHE_BYTES = 16 * 1024 * 1024
 
 
-def _cache(home: str) -> dict:
+def _cache(home: str) -> tuple[dict, tuple]:
     target = Path(home) / "models_cache.json"
     if target.resolve(strict=True) != target:
         raise ValueError("Unexpected Codex catalog location")
@@ -25,12 +25,12 @@ def _cache(home: str) -> dict:
         if len(content) != info.st_size or target.resolve(strict=True) != target or stamp(target.lstat()) != stamp(info):
             raise ValueError("Codex catalog changed")
     value = json.loads(content)
-    return value if isinstance(value, dict) else {}
+    return (value if isinstance(value, dict) else {}), stamp(info)
 
 
 def list_models(data_root: str, ref: str = "") -> dict:
     from . import agent_setup
-    result = {"ok": True, "adapterId": "codex", "source": "codex-account-cache", "catalogAvailable": False, "models": []}
+    result = {"ok": True, "adapterId": "codex", "source": "", "catalogAvailable": False, "retryable": True, "models": []}
     if not isinstance(ref, str) or len(ref) > 160:
         return result
     try:
@@ -38,20 +38,22 @@ def list_models(data_root: str, ref: str = "") -> dict:
         home = codex_account_home.model_catalog_home(root, ref)
         if not home:
             return result
-        cached = _cache(home)
-        version = cached.get("client_version") or cached.get("clientVersion")
-        if not isinstance(version, str) or not version:
+        executable = agent_setup._bin_of("codex")
+        try:
+            cached, before = _cache(home)
+        except (OSError, ValueError, RuntimeError):
+            cached, before = {}, None
+        rows, source = codex_model_catalog.discover(executable, cached)
+        if (rows is None or codex_account_home.model_catalog_home(root, ref) != home
+                or agent_setup._bin_of("codex") != executable):
             return result
-        reported = agent_setup._selected_cli_version("codex")
-        if version != reported.removeprefix("codex-cli ") or codex_account_home.model_catalog_home(root, ref) != home:
-            return result
-        if not isinstance(cached.get("models"), list):
+        if before is not None and stamp((Path(home) / "models_cache.json").lstat()) != before:
             return result
     except (OSError, ValueError, RuntimeError):
         return result
-    result["catalogAvailable"] = True
+    result.update(source=source, catalogAvailable=True, retryable=source != "codex-native")
     seen = set()
-    for row in cached["models"]:
+    for row in rows:
         if not isinstance(row, dict) or row.get("hidden") or row.get("visibility") not in (None, "", "list"):
             continue
         model = row.get("slug") or row.get("id") or row.get("name")

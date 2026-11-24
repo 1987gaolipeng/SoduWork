@@ -39,6 +39,20 @@ test('only the bound Runner supplies selectable native models to a conversation'
   assert.equal(offline.ok, false);
 });
 
+test('the native discovery source, completed empty list and temporary failure remain distinct', async () => {
+  const catalogFor = data => catalog.list('codex', { rpc: async (_op, _request, timeout) => {
+    assert.ok(timeout > 5000 && timeout < 12000, 'RPC must leave room for process cleanup inside the composer deadline');
+    return { ok: true, data: { ok: true, models: [], ...data } };
+  } });
+  const empty = await catalogFor({ source: 'codex-native', catalogAvailable: true });
+  assert.equal(empty.source, 'codex-native');
+  assert.equal(empty.retryable, false);
+  const missing = await catalogFor({ catalogAvailable: false, retryable: true });
+  assert.equal(missing.retryable, true);
+  assert.notEqual(empty.reason, missing.reason);
+  assert.equal((await catalogFor({ source: 'codex-account-cache', catalogAvailable: true, retryable: true })).retryable, true);
+});
+
 test('native options and picker retain viewport placement and reasoning controls', () => {
 
   const spec = sessionSpec.build({
