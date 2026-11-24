@@ -7,9 +7,10 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
+from ..account_conversation_models import AccountConversation
 from ..timestamps import iso_utc
+from .usage_ledger import chat_source_match, source_reference
 from .usage_values import MAX_REPORTED_COUNTER
-
 
 SOURCE_LABELS = {
     "chat": "\u5bf9\u8bdd",
@@ -237,22 +238,33 @@ async def overview(
     page = max(1, min(page, last_page))
     recent_rows = (await session.execute(select(
         daily, event, models.Task.title, models.User.display_name, models.User.username,
+        AccountConversation.source_session_id, AccountConversation.title,
     ).select_from(joined).outerjoin(models.Task, models.Task.id == event.task_id).
+        outerjoin(AccountConversation, chat_source_match()
+                  & (daily.billing_user_id == event.billing_user_id)
+                  & (daily.client_id == event.client_id)
+                  & (daily.source_type == "chat")).
         outerjoin(models.User, models.User.id == daily.billing_user_id).
         where(*detail_conditions).order_by(daily.day_key.desc(), daily.updated_at.desc(), daily.id.desc()).
         offset((page - 1) * _PAGE_SIZE).limit(_PAGE_SIZE))).all()
 
     recent = []
-    for daily_row, event_row, task_title, display_name, username in recent_rows:
+    for daily_row, event_row, task_title, display_name, username, verified_session, chat_title in recent_rows:
+        reference = source_reference(event_row, verified_session)
+        title = task_title or event_row.source_title
+        if event_row.reported_chat_session_id is not None:
+            # Only display a chat title when the usage report included one.
+            title = chat_title if event_row.source_title else None
+        elif daily_row.source_type == "chat" and event_row.source_type != "chat":
+            # Before source types were anchored, a later receipt could relabel the event.
+            reference = {"sourceId": "", "conversationId": "", "sourceVerification": "unverified"}
+            title = None
         recent.append({
             "id": daily_row.id,
             "eventId": event_row.id,
             "taskId": str(event_row.task_id or ""),
-            "sourceId": str(event_row.source_id or ""),
-            # Display task title first, then the client's conversation title.
-            # Fall back to the source label for older records without source_title.
-            "title": task_title or str(event_row.source_title or "") or SOURCE_LABELS.get(
-                daily_row.source_type, event_row.source_id or "AI \u4f7f\u7528"),
+            **reference,
+            "title": title or SOURCE_LABELS.get(daily_row.source_type, reference["sourceId"] or "AI \u4f7f\u7528"),
             "sourceType": daily_row.source_type,
             "sourceLabel": SOURCE_LABELS.get(daily_row.source_type, daily_row.source_type),
             "agent": daily_row.agent_key or "unknown",

@@ -8,6 +8,7 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 from sqlalchemy import func, select
 
 from app import automation_models as am, models
+from app.account_conversation_models import AccountConversation
 from app.db import Base, SessionLocal, engine
 from app.services import usage_analytics, usage_ledger
 
@@ -62,6 +63,8 @@ async def main():
             }})
         session.add_all([
             user, client, task, execution, foreign_user, foreign_client, foreign_task,
+            AccountConversation(owner_user_id=user.id, source_client_id=client.id,
+                                source_session_id="chat-1", title="周报整理与今日同步"),
         ])
         await session.flush()
         await usage_ledger.from_execution(
@@ -114,7 +117,7 @@ async def main():
             select(func.count(models.AIUsageEvent.id)))).scalar_one()
         ok(count == 3, "execution heartbeat and client retry are idempotent")
         chat = (await session.execute(select(models.AIUsageEvent).where(
-            models.AIUsageEvent.conversation_id == "chat-1"))).scalar_one()
+            models.AIUsageEvent.reported_chat_session_id == "chat-1"))).scalar_one()
         ok(chat.total_tokens == 100, "stale cumulative retry cannot reduce counters")
         ok(chat.billing_user_id == user.id, "device identity owns chat usage")
         ok(chat.task_id == "", "device cannot link usage to another user's task")
@@ -128,7 +131,7 @@ async def main():
         ok(task_row.agent_key == "future-agent", "new agent names need no schema change")
         ok(task_row.total_tokens == 150, "effective task tokens preserved")
         cross_day = (await session.execute(select(models.AIUsageEvent).where(
-            models.AIUsageEvent.conversation_id == "cross-day"))).scalar_one()
+            models.AIUsageEvent.reported_chat_session_id == "cross-day"))).scalar_one()
         daily_rows = (await session.execute(select(models.AIUsageDaily).where(
             models.AIUsageDaily.usage_event_id == cross_day.id
         ).order_by(models.AIUsageDaily.day_key))).scalars().all()
@@ -142,7 +145,7 @@ async def main():
         ok(report["recent"][0]["user"] == "用量用户", "user display name resolved")
         titles = {row["sourceId"]: row["title"] for row in report["recent"]}
         ok(titles.get("chat-1") == "周报整理与今日同步",
-           "chat events show the reported conversation title")
+           "verified chat events show the synced conversation title")
         ok(all(t != "新建会话" for t in titles.values()),
            "legacy generic label never reappears")
         trend_total = sum(int(item["tokens"] or 0) for item in report["trend"])
