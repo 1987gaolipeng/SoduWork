@@ -3,6 +3,8 @@
   // Core Korean copy. Untranslated source phrases intentionally fall back to
   // English through the locale registry instead of mixing Chinese into a page.
   const messages = {
+    "以下是本机保存的对话，与上方执行记录存在差异": "아래는 이 기기에 저장된 대화로, 위의 실행 기록과 내용이 다릅니다.",
+    "设备对话记录校验失败，已显示可读取的执行记录": "기기 대화 기록을 검증하지 못해 읽을 수 있는 실행 기록을 표시합니다.",
     '服务或模型': '서비스 또는 모델',
     '密码需为 {min} 至 {max} 个字符。': '비밀번호는 {min}자 이상 {max}자 이하로 입력하세요.',
     '此邮箱尚未注册，请先创建账号。': '등록되지 않은 이메일입니다. 계정을 만들어 주세요.',

@@ -1124,3 +1124,42 @@ test('cold Runner open carries the saved title before history polling finishes',
   await send(h, 'Follow-up cannot rename history');
   assert.equal(h.historyRow().title, 'Original saved request');
 });
+
+test('ordinary chat reopens from desktop history after two runtimes, a model switch and loss of native archives', async t => {
+  const f = fixture(t), actor = identity('alice');
+  const database = path.join(f.root, 'conversation-replicas', 'history.sqlite');
+  const { createWorker } = require('../main/conversation/replica-store.cjs');
+  const { create } = require('../main/conversation/shared-history.cjs');
+  const openHistory = () => {
+    const store = createWorker(database);
+    return { store, history: create({ app: f.app, session: f.bridge, store, identityOf: () => actor }) };
+  };
+  let { history, store } = openHistory();
+  try {
+    const opened = await f.bridge.open({ ...options(f), identity: actor, activePluginIds: [] });
+    assert.equal(opened.ok, true, opened.reason);
+    const handle = opened.session, id = handle.sessionId;
+    require('../main/conversation/session-memory').bind(f.app, id, actor, [], true);
+    history.observe(handle, actor);
+    await send(handle, 'First ordinary question');
+    const switched = await handle.selectAgent('qwen', { modelName: 'model-b' });
+    assert.equal(switched.ok, true, switched.reason);
+    assert.equal(handle.sessionId, id);
+    assert.equal(handle.snapshot().modelSelection.name, 'model-b');
+    await send(handle, 'Second ordinary question');
+    assert.deepEqual(handle.historyRow().usedHarnesses, ['pi', 'qwen']);
+    await history.close();
+    // Assembly and persistence must survive the loss of the native files,
+    // runtime journal and all in-memory handles.
+    await f.restart();
+    for (const file of f.archives.keys()) fs.unlinkSync(file);
+    f.archives.clear(); f.runs.clear();
+    ({ history, store } = openHistory());
+    const expected = ['First ordinary question', 'Pi reply', 'Second ordinary question', 'Reply qwen'];
+    assert.deepEqual((await store.conversationTranscript(id)).map(item => item.text), expected);
+    const view = await history.open(id, { historyPreview: true, allowContinuation: true });
+    assert.deepEqual(view.snapshot().messages.map(item => item.text), expected);
+    assert.equal(view.snapshot().historyRecovery.incomplete, true);
+    assert.equal(view.snapshot().execution.canContinueOnDevice, false);
+  } finally { await history.close(); }
+});

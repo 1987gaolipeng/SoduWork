@@ -711,6 +711,10 @@
     if (priorTools.length) agents?.breakRun();
     if (!ctx._pending && latestUser < messageStart && latestUser >= 0 && !summaryTurns.has(messageStart)) parts.push(turnMetrics());
     visibleMessages.forEach(({ message: m, index: mi }) => {
+      if (ctx._snap?.localReplica && m.historyTranscriptBoundary) {
+        parts.push('<div class="nruntime-notice is-info" data-chat-node="history-source:' + mi + '">' +
+          ctx.esc(uiText('以下是本机保存的对话，与上方执行记录存在差异')) + '</div>');
+      }
       appendWorkCards(mi);
       if (m.role === 'user') {
         agents?.breakRun?.();   // turn boundary: next turn's same-run messages repaint the crew head; tool-group dedup resets too

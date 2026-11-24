@@ -485,3 +485,226 @@ test('catalog scope retains persisted protection without disclosing protected ID
   assert.deepEqual(denied.localCatalog.items, [], 'Catalog IDs and aliases obey the full row protection boundary');
   assert.equal((await f.store.list({ limit: 20 })).items.length, signals.length, 'Filtering does not delete protected records');
 });
+
+test('a missing runtime archive cannot strand new user and assistant text behind the initial empty capture', async t => {
+  const f = setup(t);
+  fs.unlinkSync(f.file);
+  let messages = [];
+  const handle = { snapshot: () => ({ messages }), historyRow: () => f.row };
+  await f.history.capture(handle, f.identityOf());
+  messages = [{ role: 'user', text: 'A new request' }, { role: 'assistant', blocks: [{ kind: 'text', text: 'A reply' }] }];
+  await f.history.capture(handle, f.identityOf());
+  messages = [];
+  await f.history.capture(handle, f.identityOf());
+  f.switch(identity('two'));
+  const view = await f.history.open('one', { historyPreview: true, allowContinuation: true });
+  assert.deepEqual(view.snapshot().messages.map(m => m.text), ['A new request', 'A reply']);
+  assert.equal(view.snapshot().execution.canContinueOnDevice, false);
+  await assert.rejects(f.history.prepareContinuation('one'), { code: 'HISTORY_INCOMPLETE' });
+  await view.close();
+});
+
+test('a verified prefix enriches the displayed dialogue without discarding a newer turn or authorizing replay', async t => {
+  const f = setup(t);
+  f.row.workOwner = require('../main/platform-connections/runtime.cjs').scope(f.identityOf());
+  await f.history.register([f.row]);
+  const live = [{ role: 'user', text: 'saved by Alice' }, { role: 'assistant', text: 'local answer' },
+    { role: 'user', text: 'next request' }, { role: 'assistant', text: 'newest reply' }];
+  await f.history.capture({ snapshot: () => ({ messages: live }), historyRow: () => f.row }, f.identityOf());
+  const page = await f.history.read(f.row.id);
+  assert.deepEqual(page.items.map(m => m.text), live.map(m => m.text));
+  assert.ok(page.items[1].blocks.length);
+  assert.equal(page.coverage.complete, false);
+  await assert.rejects(f.history.exportPortable(f.row.id), /尚未完整/);
+  fs.appendFileSync(f.file, '\n' + live.slice(2).map((m, i) => JSON.stringify({ type: 'message', id: 'new-' + i,
+    message: { role: m.role, content: [{ type: 'text', text: m.text }] } })).join('\n') + '\n');
+  const restored = await f.history.prepareContinuation(f.row.id, { refresh: true });
+  assert.deepEqual(restored.prefix.messages.map(m => m.text), live.map(m => m.text));
+});
+
+test('an accepted turn checkpoints its dialogue while native replay is still blocked', async t => {
+  const f = setup(t);
+  let begin, finish;
+  const started = new Promise(resolve => { begin = resolve; });
+  const gate = new Promise(resolve => { finish = resolve; });
+  const lookup = f.session.historyEntry;
+  f.session.historyEntry = async (...args) => { begin(); await gate; return lookup(...args); };
+  let messages = [], on;
+  const handle = { snapshot: () => ({ messages }), historyRow: () => f.row,
+    on(listener) { on = listener; return () => {}; }, close: async () => true };
+  f.history.observe(handle, f.identityOf());
+  await started;
+  try {
+    messages = [{ role: 'user', text: 'accepted while the archive is busy' }];
+    on({ kind: 'started' });
+    for (let i = 0; i < 20 && !f.store.conversationTranscript('one').length; i++)
+      await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.store.conversationTranscript('one'), messages);
+  } finally { finish(); await handle.close(); }
+});
+
+test('an accepted turn before initial registration survives even while the native read waits', async t => {
+  const f = setup(t);
+  let indexed, release, on, messages = [];
+  const registered = new Promise(resolve => { indexed = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  const lookup = f.session.historyEntry;
+  f.session.historyEntry = async (...args) => { indexed(); await blocked; return lookup(...args); };
+  const handle = { snapshot: () => ({ messages }), historyRow: () => f.row,
+    on(listener) { on = listener; return () => {}; }, close: async () => true };
+  f.history.observe(handle, f.identityOf());
+  messages = [{ role: 'user', text: 'accepted before the index commit' }];
+  on({ kind: 'started' });
+  try {
+    await registered;
+    for (let i = 0; i < 20 && !f.store.conversationTranscript('one').length; i++)
+      await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.store.conversationTranscript('one'), messages);
+    messages = [...messages, { role: 'assistant', text: 'provisional', done: false }];
+    on({ kind: 'message' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.store.conversationTranscript('one').at(-1).text, 'provisional');
+    messages = [messages[0], { role: 'assistant', text: 'corrected', done: true }, { role: 'user', text: 'next' }];
+    on({ kind: 'message' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.store.conversationTranscript('one').map(item => item.text),
+      ['accepted before the index commit', 'corrected', 'next']);
+  } finally { release(); await handle.close(); }
+});
+
+test('a live task binding protects the indexed conversation before the native read completes', async t => {
+  const f = setup(t);
+  let begin, release, on, original = f.row;
+  const started = new Promise(resolve => { begin = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  const lookup = f.session.historyEntry;
+  f.session.historyEntry = async (...args) => { begin(); await blocked; return lookup(...args); };
+  const handle = { snapshot: () => ({ messages: [{ role: 'user', text: 'protected' }] }), historyRow: () => original,
+    on(listener) { on = listener; return () => {}; }, close: async () => true };
+  const write = t.mock.method(f.store, 'saveConversationTranscript');
+  f.history.observe(handle, f.identityOf());
+  await started;
+  try {
+    original = { ...f.row, taskBindings: [{ taskId: 'bound-after-index' }] };
+    on({ kind: 'message' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(write.mock.callCount(), 0);
+    assert.equal(f.store.get('one').historyProtection, 'account');
+    original = f.row;
+  } finally { release(); await handle.close(); }
+  assert.equal(f.store.get('one').historyProtection, 'account');
+  f.switch(identity('two'));
+  assert.equal(await f.history.open('one'), null);
+});
+
+test('additional dialogue write failures leave native archiving available', async t => {
+  const f = setup(t);
+  f.store.saveConversationTranscript = () => { throw Error('synthetic transcript write failure'); };
+  const handle = { snapshot: () => ({ messages: [{ role: 'user', text: 'visible' }] }), historyRow: () => f.row };
+  await f.history.capture(handle, f.identityOf());
+  assert.match(handle.localHistoryError, /synthetic transcript write failure/);
+  const saved = f.store.deviceHistory('one');
+  assert.equal(saved.coverage.complete, true);
+  assert.equal(saved.snapshot.messages[0].text, 'saved by Alice');
+});
+
+test('dialogue retries a concurrent index refresh only after checking the latest protection', async t => {
+  for (const protectedRow of [false, true]) await t.test(protectedRow ? 'bound task' : 'ordinary update', async t => {
+    const f = setup(t), save = f.store.saveConversationTranscript;
+    let writes = 0;
+    f.store.saveConversationTranscript = (id, entries, expected) => {
+      if (++writes === 1) f.store.register([{ id, title: 'New catalog revision',
+        ...(protectedRow ? { taskId: 'private-task' } : {}) }]);
+      return save(id, entries, expected);
+    };
+    const messages = [{ role: 'user', text: 'Latest visible request' }];
+    await f.history.capture({ snapshot: () => ({ messages }), historyRow: () => f.row }, f.identityOf());
+    assert.deepEqual(f.store.conversationTranscript('one'), protectedRow ? [] : messages);
+    assert.equal(writes, protectedRow ? 1 : 2);
+  });
+});
+
+test('cloud message events keep the batched cloud cache schedule', async t => {
+  const f = setup(t);
+  let on, messages = [{ role: 'user', text: 'first' }];
+  const cloud = { id: 'cloud-origin', cloud: true };
+  const handle = { snapshot: () => ({ messages }), historyRow: () => cloud,
+    on(listener) { on = listener; return () => {}; }, close: async () => true };
+  const cache = t.mock.method(f.store, 'cache'), dialogue = t.mock.method(f.store, 'saveConversationTranscript');
+  f.history.observe(handle, f.identityOf());
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(cache.mock.callCount(), 1);
+  messages.push({ role: 'assistant', text: 'cloud answer' });
+  for (const kind of ['started', 'message', 'settled']) {
+    on({ kind }); await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.equal(cache.mock.callCount(), 1);
+  await handle.close();
+  assert.equal(cache.mock.callCount(), 2);
+  assert.equal(dialogue.mock.callCount(), 0);
+});
+
+test('a cold desktop preview paints committed dialogue while the native history read is blocked', async t => {
+  const f = setup(t);
+  const messages = [{ role: 'user', text: 'saved by Alice' }, { role: 'assistant', text: 'local answer' }];
+  await f.history.capture({ historyRow: () => f.row, snapshot: () => ({ messages }) }, f.identityOf());
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const lookup = f.session.historyEntry;
+  f.session.historyEntry = async (...args) => { await gate; return lookup(...args); };
+  let timer;
+  try {
+    const view = await Promise.race([f.history.open('one', { historyPreview: true }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(Error('Preview waited for the native runtime')), 2000); })]);
+    assert.deepEqual(view.snapshot().messages.map(m => m.text), messages.map(m => m.text));
+    await view.close();
+  } finally { clearTimeout(timer); release(); }
+});
+
+test('distinct saved versions keep rich native messages and mark the independent dialogue', async t => {
+  const f = setup(t);
+  const live = [{ role: 'user', text: 'saved by Alice' }, { role: 'assistant', text: 'a different confirmed reply', done: true }];
+  await f.history.capture({ historyRow: () => f.row, snapshot: () => ({ messages: live }) }, f.identityOf());
+  const view = await f.history.open('one', { historyPreview: true, allowContinuation: true });
+  const messages = view.snapshot().messages;
+  assert.deepEqual(messages.map(m => m.text), ['saved by Alice', 'local answer', 'a different confirmed reply']);
+  assert.equal(messages[2].historyTranscriptBoundary, true);
+  assert.equal(view.snapshot().execution.canContinueOnDevice, false);
+  await view.close();
+});
+
+test('a stale streaming draft allows the verified final answer and following turns to be displayed', async t => {
+  const f = setup(t);
+  const live = [{ role: 'user', text: 'saved by Alice' }, { role: 'assistant', text: 'obsolete stream', done: false }];
+  await f.history.capture({ historyRow: () => f.row, snapshot: () => ({ messages: live }) }, f.identityOf());
+  const later = { type: 'message', id: 'msg-3', message: { role: 'user', content: 'another request' } };
+  fs.appendFileSync(f.file, '\n' + JSON.stringify(later));
+  const restored = await f.history.prepareContinuation('one', { refresh: true });
+  assert.deepEqual(restored.prefix.messages.map(m => m.text), ['saved by Alice', 'local answer', 'another request']);
+});
+
+test('corruption of independent text leaves verified native history readable and explicitly blocks continuation', async t => {
+  const f = setup(t);
+  const live = [{ role: 'user', text: 'saved by Alice' }, { role: 'assistant', text: 'local answer' }];
+  await f.history.capture({ historyRow: () => f.row, snapshot: () => ({ messages: live }) }, f.identityOf());
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(path.join(f.root, 'replicas.sqlite'));
+  db.prepare('UPDATE conversation_transcript SET digest=? WHERE replica=? AND position=1').run('damaged', 'one');
+  db.close();
+  const page = await f.history.read('one');
+  assert.deepEqual(page.items.map(m => m.text), live.map(m => m.text));
+  assert.equal(page.nativeReadError.code, 'TRANSCRIPT_CHECKSUM_MISMATCH');
+  await assert.rejects(f.history.prepareContinuation('one'), { code: 'HISTORY_INCOMPLETE' });
+});
+
+test('different stream boundaries for identical assistant text preserve native messages and execution evidence', async t => {
+  const f = setup(t);
+  const messages = [{ role: 'user', text: 'saved by Alice' }, { role: 'assistant', text: 'local ' },
+    { role: 'assistant', text: 'answer' }];
+  await f.history.capture({ historyRow: () => f.row, snapshot: () => ({ messages }) }, f.identityOf());
+  const view = await f.history.open('one', { historyPreview: true, allowContinuation: true });
+  assert.deepEqual(view.snapshot().messages.map(m => m.text), ['saved by Alice', 'local answer']);
+  assert.equal(view.snapshot().execution.canContinueOnDevice, true);
+  await view.close();
+  assert.equal((await f.history.prepareContinuation('one', { refresh: true })).prefix.messages.length, 2);
+});

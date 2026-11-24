@@ -1,5 +1,7 @@
 (function (global) {
   const messages = {
+    "以下是本机保存的对话，与上方执行记录存在差异": "The following dialogue was saved on this device and differs from the execution record above.",
+    "设备对话记录校验失败，已显示可读取的执行记录": "The device transcript failed verification. The available execution record is shown.",
     "读取本轮连接器工具": "Read this turn’s connector tools",
     "执行连接器操作": "Perform connector action",
     "查看 连接器 的能力": "View connector capabilities",

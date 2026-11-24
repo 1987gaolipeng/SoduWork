@@ -3,6 +3,8 @@
   // Core Japanese copy. Untranslated source phrases intentionally fall back to
   // English through the locale registry instead of mixing Chinese into a page.
   const messages = {
+    "以下是本机保存的对话，与上方执行记录存在差异": "以下はこの端末に保存された会話です。上の実行記録とは内容が異なります。",
+    "设备对话记录校验失败，已显示可读取的执行记录": "端末の会話記録を検証できなかったため、読み取れる実行記録を表示しています。",
     '服务或模型': 'サービス・モデル',
     '密码需为 {min} 至 {max} 个字符。': 'パスワードは {min} 文字以上 {max} 文字以下で入力してください。',
     '此邮箱尚未注册，请先创建账号。': 'このメールアドレスは未登録です。アカウントを作成してください。',

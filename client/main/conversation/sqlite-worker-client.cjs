@@ -11,7 +11,7 @@ function create(script, workerData, methods) {
     const request = pending.get(reply.id);
     if (!request) return;
     pending.delete(reply.id);
-    reply.error ? request.reject(Error(reply.error)) : request.resolve(reply.value);
+    reply.error ? request.reject(Object.assign(Error(reply.error), reply.code ? { code: reply.code } : {})) : request.resolve(reply.value);
     if (!pending.size) worker.unref();
   });
   const fail = error => { failure = error; for (const request of pending.values()) request.reject(error); pending.clear(); };

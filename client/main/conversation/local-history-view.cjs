@@ -17,7 +17,7 @@ async function create({ row, read, historyPreview = false, allowContinuation = f
     mode: row.historyContentState === 'missing' ? 'metadata-only' : 'device-history',
     bodyMissing: row.historyContentState === 'missing', incomplete: true,
     reason: row.historyContentState === 'missing' ? '仅剩会话标题，正文文件已丢失，无法恢复原会话内容' :
-      row.historyContentState === 'unresolved-tools' ? '历史中有工具缺少终结回执，结果尚未确认，暂时只能查看，不能恢复执行或迁移' : '仅保存了部分历史，无法完整恢复执行上下文',
+      row.historyContentState === 'unresolved-tools' ? '历史中有工具缺少终结回执，结果尚未确认，暂时只能查看，不能恢复执行或迁移' : previewReason || '仅保存了部分历史，无法完整恢复执行上下文',
   };
   else if (historyPreview && previewReason) value.historyRecovery = { mode: 'device-history', reason: previewReason };
   const keyFor = (page, item, cursor, index) => page.format === 'events'

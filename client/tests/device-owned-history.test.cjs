@@ -477,7 +477,9 @@ test('a Qwen write cancelled before execution never succeeds or blocks a settled
   response = { ...response, callIds: [], archiveMissing: true };
   await verify();
   events[0].text = 'Replaced history';
-  await assert.rejects(history.prepareContinuation(row.id, { refresh: true }), { code: 'HISTORY_UNRESOLVED_TOOLS' });
+  await assert.rejects(history.prepareContinuation(row.id, { refresh: true }), { code: 'NATIVE_HISTORY_DIVERGED' });
+  assert.equal(f.store.deviceHistory(id).snapshot.messages[0].text, 'Create a small example');
+  events[0].text = 'Create a small example';
   for (const invalid of [{ ref: 'other', revision: 3, binding }, { ref: id, revision: 2, binding }, { ref: id, revision: 3 }]) {
     response = { ...invalid, callIds: ['x'] };
     await assert.rejects(history.prepareContinuation(row.id, { refresh: true }), { code: 'HISTORY_UNRESOLVED_TOOLS' });
@@ -493,11 +495,11 @@ test('a locally verified image read survives loss of its rollout only for the sa
   const confirmed = { ref: id, revision: 2, binding, callIds: ['once'] };
   const missing = { ...confirmed, archiveMissing: true, callIds: [] };
   let receipt = confirmed;
+  const runtime = { rpc: async op => ({ ok: true, data: op === 'job.session'
+    ? { ok: true, ref: id, seq: 2, items } : receipt }) };
   const history = require('../main/conversation/device-history.cjs').create({
     app: f.app, session: f.session, store: f.store, resolve: key => f.store.get(key), register: () => {},
-    guard: () => () => {}, authorize() {}, identityOf: f.identity,
-    runtime: { rpc: async op => ({ ok: true, data: op === 'job.session'
-      ? { ok: true, ref: id, seq: 2, items } : receipt }) },
+    guard: () => () => {}, authorize() {}, identityOf: f.identity, runtime,
   });
   const unresolved = async () => (await history.refresh(row.id)).coverage.unresolvedTools.length;
   assert.equal(await unresolved(), 0);
@@ -506,6 +508,12 @@ test('a locally verified image read survives loss of its rollout only for the sa
   const [proof] = (await f.store.deviceHistory(id)).localToolReceipts;
   assert.match(proof, /^[a-f0-9]{64}$/);
   assert.ok(!JSON.stringify(bundle).includes(proof));
+  async function rejectRewrittenJournal() {
+    const native = await require('../main/conversation/device-history-native.cjs').read({
+      app: f.app, session: f.session, row, runtime, guard() {}, previousToolReceipts: [proof] });
+    assert.equal(native.coverage.unresolvedTools.length, 1, 'a changed journal cannot inherit a previous receipt');
+    await assert.rejects(history.refresh(id), { code: 'NATIVE_HISTORY_DIVERGED' });
+  }
   receipt = missing;
   assert.equal(await unresolved(), 0, 'an exact previously verified receipt survives native archive cleanup');
   for (const invalid of [{ ...missing, binding: 'b'.repeat(64) }, { ...missing, archiveMissing: false },
@@ -517,12 +525,13 @@ test('a locally verified image read survives loss of its rollout only for the sa
     receipt = confirmed; assert.equal(await unresolved(), 0);
     const previous = items[1][field];
     items[1][field] = field === 'arguments' ? { path: '/other.png' } : 2;
-    receipt = missing; assert.equal(await unresolved(), 1);
+    receipt = missing; await rejectRewrittenJournal();
     items[1][field] = previous;
   }
   receipt = confirmed; await unresolved();
   receipt = missing; items[0].text = 'Different journal, same cursor and call ID';
-  assert.equal(await unresolved(), 1);
+  await rejectRewrittenJournal();
+  items[0].text = 'Inspect the image';
   receipt = confirmed; await unresolved();
   const saved = await f.store.deviceHistory(id);
   receipt = missing;
@@ -575,18 +584,20 @@ test('only a confirmed first-page Runner archive absence can continue a preserve
   const recovery = await f.history.prepareContinuation(row.id, { refresh: true });
   assert.equal(recovery.historyRecovery.nativeArchiveMissing, true);
   assert.equal(recovery.prefix.messages[0].text, event.text);
-  for (const unexpected of [
-    { ok: false, data: missing.data },
-    { ok: true, data: { ...missing.data, ref: 'other' } },
-    { ok: true, data: { ok: false, error: '本地会话不在了', items: [] } },
-    { ok: true, data: { ok: true, seq: 0, items: [] } },
-    { ok: true, data: { ok: true, seq: 1, items: [event] } },
+  for (const [unexpected, code] of [
+    [{ ok: false, data: missing.data }, 'NATIVE_HISTORY_UNAVAILABLE'],
+    [{ ok: true, data: { ...missing.data, ref: 'other' } }, 'NATIVE_HISTORY_UNAVAILABLE'],
+    [{ ok: true, data: { ok: false, error: '本地会话不在了', items: [] } }, 'NATIVE_HISTORY_UNAVAILABLE'],
+    [{ ok: true, data: { ok: true, seq: 0, items: [] } }, 'NATIVE_HISTORY_DIVERGED'],
+    [{ ok: true, data: { ok: true, seq: 1, items: [event] } }, 'NATIVE_HISTORY_DIVERGED'],
   ]) {
     reply = () => unexpected;
-    await assert.rejects(f.history.prepareContinuation(row.id, { refresh: true }), { code: 'NATIVE_HISTORY_UNAVAILABLE' });
+    await assert.rejects(f.history.prepareContinuation(row.id, { refresh: true }), { code });
     assert.equal(f.store.deviceHistory(row.id).snapshot.messages[0].text, event.text);
     assert.equal(f.store.deviceHistory(row.id).snapshot.messages.length, 2);
   }
+  reply = () => present;
+  await f.history.backfill(row.id);
   reply = ({ since }) => since ? missing : { ok: true, data: { ok: true, seq: 2, items: [event] } };
   await assert.rejects(f.history.prepareContinuation(row.id, { refresh: true }), { code: 'NATIVE_HISTORY_UNAVAILABLE' });
 });

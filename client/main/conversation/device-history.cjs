@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const native = require('./device-history-native.cjs');
+const { withTranscript } = require('./conversation-body.cjs');
 const { mergeNativeEvidence } = require('./history-evidence.cjs');
 const { accountId } = require('../device-auth-request');
 const SCHEMA = 'soduwork.device-history/v1';
@@ -16,7 +17,7 @@ function assertSettled(data) {
     throw Object.assign(Error('历史中有工具缺少终结回执，结果尚未确认，暂时只能查看，不能恢复执行或迁移'), { code: 'HISTORY_UNRESOLVED_TOOLS' });
 }
 function create({ app, session, store, resolve, guard, authorize, authorizeContinuation = authorize,
-  requiresNativeEvidence = () => false, allowsArtifacts = () => false, workRoot, identityOf, register, runtime }) {
+  requiresNativeEvidence = () => false, usesDeviceDialogue = () => false, allowsArtifacts = () => false, workRoot, identityOf, register, runtime }) {
   const pending = new Map(), writers = new Map();
   let background = Promise.resolve();
   const scheduled = new Set();
@@ -63,7 +64,7 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       let data;
       try {
         data = await native.read({ app, session, row, guard: check, runtime, previousToolReceipts,
-          previousSources: previous?.coverage?.complete ? previous.coverage.sources : [] });
+          previousSources: previous?.coverage?.complete ? previous.coverage.sources : [], previousSnapshot: previous?.snapshot });
       } catch (error) {
         if (error.code !== 'NATIVE_HISTORY_DIVERGED' || !previous) throw error;
         check();
@@ -111,22 +112,42 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     });
     writers.set(id, work); pending.set(key, work); return work;
   }
-  async function saved(id, { refresh: update = false, verify } = {}) {
+  async function saved(id, { refresh: update = false, verify, preferRecorded = false } = {}) {
     const row = await resolve(id);
     if (!row || row.deleted || row.cached) return null;
     const check = readGuard(row, verify); check();
     let data = await store.deviceHistory(row.id); check();
     check(data?.historyProtection ? { historyProtection: data.historyProtection } : undefined);
-    if (requiresNativeEvidence(row)) await native.probe({ app, session, row, guard: check });
+    const shared = requiresNativeEvidence(row);
+    if (shared) await native.probe({ app, session, row, guard: check });
     if (row.deviceTransferId && data?.imported?.transferId !== row.deviceTransferId)
       throw Object.assign(Error('交接历史尚未完整接收，请先完成迁移'), { code: 'HISTORY_IMPORT_PENDING' });
-    if (update || !data || !data.coverage?.complete) {
+    let dialogue = [], transcriptError, inspected = false;
+    async function readDialogue() {
+      if (inspected || !usesDeviceDialogue(check.evidence())) return;
+      inspected = true;
+      try { dialogue = await store.conversationTranscript(row.id, { includeDraftState: true }); }
+      catch (error) {
+        if (error.code !== 'TRANSCRIPT_CHECKSUM_MISMATCH') throw error;
+        transcriptError = error;
+      }
+      check();
+    }
+    if (preferRecorded && !shared && !verify) await readDialogue();
+    // An owner's passive desktop view can paint its committed dialogue without
+    // waiting for a model or a Runner RPC. Execution and peer access revalidate.
+    const localDisplay = preferRecorded && !shared && !verify && dialogue.length > 0;
+    if (!localDisplay && (update || !data || !data.coverage?.complete || transcriptError)) {
       try { data = await refresh(row.id, { verify }); }
       catch (error) {
-        if (!data && error.code === 'NATIVE_HISTORY_MISSING') {
+        if (error.historyAccessFailure || error.code === 'HISTORY_CONCURRENT_UPDATE') throw error;
+        if (!data) await readDialogue();
+        if (!data && transcriptError && error.code === 'NATIVE_HISTORY_MISSING') throw transcriptError;
+        if (!data && !dialogue.length && error.code === 'NATIVE_HISTORY_MISSING') {
           await register([{ ...row, historyContentState: 'missing' }]); check();
         }
-        if (!data || error.historyAccessFailure || error.code === 'HISTORY_CONCURRENT_UPDATE') throw error;
+        if (!data && (!dialogue.length || !['NATIVE_HISTORY_MISSING', 'NATIVE_HISTORY_UNAVAILABLE',
+          'NATIVE_HISTORY_CHANGED'].includes(error.code))) throw error;
         if (error.code === 'NATIVE_HISTORY_DIVERGED') {
           data = await store.deviceHistory(row.id); check();
           if (!data) throw error;
@@ -137,8 +158,13 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
         data = { ...data, nativeReadError: { code: error.code || 'NATIVE_HISTORY_UNAVAILABLE', reason: error.message } };
       }
     }
+    if (localDisplay && update) schedule([row], { includeSaved: true });
     if (data?.nativeConflict) data = { ...data, nativeReadError: data.nativeConflict };
-    check(); return data;
+    check(data?.historyProtection ? { historyProtection: data.historyProtection } : undefined);
+    await readDialogue();
+    if (data && transcriptError) return { ...data, coverage: { ...data.coverage, complete: false },
+      nativeReadError: { code: transcriptError.code, reason: '设备对话记录校验失败，已显示可读取的执行记录' } };
+    return dialogue.length && usesDeviceDialogue(check.evidence()) ? withTranscript(data, dialogue) : data;
   }
   async function attachments(snapshot) {
     const values = [];
@@ -275,9 +301,9 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
         ? { artifactHistory: data.localArtifactHistory } : {}), historyRecovery: { mode: 'device-history',
       nativeArchiveMissing, savedAt: data.savedAt || Date.now(), attachments: references } };
   }
-  function schedule(rows) {
+  function schedule(rows, { includeSaved = false } = {}) {
     for (const row of rows) {
-      if (row.cached || row.deleted || row.deviceHistory || scheduled.has(row.id)) continue;
+      if (row.cached || row.deleted || row.deviceHistory && !includeSaved || scheduled.has(row.id)) continue;
       scheduled.add(row.id);
       background = background.then(async () => {
         await new Promise(resolve => setImmediate(resolve));

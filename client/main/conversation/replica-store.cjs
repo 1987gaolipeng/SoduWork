@@ -11,7 +11,7 @@ const { DatabaseSync } = require('node:sqlite');
 
 const METHODS = ['register', 'join', 'importChunk', 'importPlan', 'importPage', 'sealImport', 'discardImport', 'get', 'sourceCopies', 'nativeRows', 'list', 'catalog', 'page', 'directory', 'lifecycleRows', 'remoteLifecycleRows', 'lifecycle', 'cache', 'messages', 'changes', 'ack', 'workspace', 'close'];
 const REMOTE_LIFECYCLE = "deleted=0 AND revision>0 AND json_extract(data,'$.cached')=1 AND coalesce(json_extract(data,'$.taskId'),'')<>''";
-METHODS.push('saveDeviceHistory', 'deviceHistory', 'deviceHistoryVersion');
+METHODS.push('saveDeviceHistory', 'deviceHistory', 'deviceHistoryVersion', 'saveConversationTranscript', 'conversationTranscript');
 function key(value) {
   if (typeof value !== 'string' || !value.trim() || value.length > 512 || /[\x00-\x1f]/.test(value))
     throw Error('Invalid local conversation identity');
@@ -53,6 +53,8 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
       CREATE INDEX IF NOT EXISTS aliases_replica ON aliases(replica);
       CREATE TABLE IF NOT EXISTS messages(replica TEXT NOT NULL REFERENCES replicas(id),position INTEGER NOT NULL,
         data TEXT NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(replica,position));
+      CREATE TABLE IF NOT EXISTS conversation_transcript(replica TEXT NOT NULL REFERENCES replicas(id),position INTEGER NOT NULL,
+        data TEXT NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(replica,position));
       CREATE TABLE IF NOT EXISTS device_history(replica TEXT PRIMARY KEY REFERENCES replicas(id),
         data TEXT NOT NULL,digest TEXT NOT NULL,updated INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS import_chunks(replica TEXT NOT NULL,digest TEXT NOT NULL,offset INTEGER NOT NULL,
@@ -67,6 +69,10 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
       PRAGMA user_version=1;`);
     db.prepare("INSERT OR IGNORE INTO metadata VALUES('workspace',?)").run(crypto.randomUUID());
   });
+  // Joined segment rows retire under the public identity. Delete their text
+  // with the public conversation without treating a segment as its full prefix.
+  const deleteTranscript = db.prepare(`DELETE FROM conversation_transcript WHERE replica=? OR replica IN
+    (SELECT alias FROM aliases WHERE replica=?)`);
   const exact = id => db.prepare('SELECT r.* FROM replicas r JOIN aliases a ON r.id=a.replica WHERE a.alias=?').get(key(id));
   const resolve = id => {
     const wanted = key(id), direct = exact(wanted);
@@ -237,6 +243,7 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
             archived ? 1 : 0, deleted ? 1 : 0);
         if (deleted) db.prepare('UPDATE replicas SET deleted=1 WHERE id=?').run(id);
         db.prepare('INSERT OR IGNORE INTO aliases VALUES(?,?)').run(id, id);
+        deleteTranscript.run(id, id);
         db.prepare('DELETE FROM messages WHERE replica=?').run(id);
         (deleted || plan ? [] : messages).forEach((message, position) => {
           const data = JSON.stringify(message);
@@ -281,6 +288,7 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
         db.prepare('INSERT INTO aliases(alias,replica) VALUES(?,?) ON CONFLICT(alias) DO UPDATE SET replica=excluded.replica').run(id, id);
         db.prepare('UPDATE replicas SET archived=?,deleted=?,revision=? WHERE id=?')
           .run(lifecycle.archived, lifecycle.deleted, lifecycle.revision, winner.id);
+        if (lifecycle.deleted) deleteTranscript.run(winner.id, winner.id);
         const revision = Number(db.prepare("INSERT INTO operations(replica,action,actor,created) VALUES(?,'upsert','{}',?)")
           .run(winner.id, Date.now()).lastInsertRowid);
         db.prepare('UPDATE replicas SET catalog_revision=? WHERE id=?').run(revision, winner.id);
@@ -295,6 +303,7 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
         return { ok: true };
       });
     },
+    ...require('./conversation-transcript.cjs').create(db, exact, transaction),
     get: id => project(resolve(id)),
     sourceCopies(ids) {
       if (!Array.isArray(ids) || ids.length > 200) throw Error('Invalid source history batch');
@@ -431,6 +440,7 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
         if (action === 'delete') {
           db.prepare('DELETE FROM messages WHERE replica=?').run(row.id);
           db.prepare('DELETE FROM device_history WHERE replica=?').run(row.id);
+          deleteTranscript.run(row.id, row.id);
         }
         // Migrated copies of this same local source are recovery records, not
         // independent cloud originals. A late import must obey its tombstone.
@@ -445,6 +455,7 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
               .run(copy.id, action, audit, Date.now()).lastInsertRowid);
             db.prepare('UPDATE replicas SET deleted=1,revision=?,catalog_revision=? WHERE id=?').run(revision, revision, copy.id);
             db.prepare('DELETE FROM messages WHERE replica=?').run(copy.id);
+            deleteTranscript.run(copy.id, copy.id);
           }
         }
         return { ok: true, conversation: project(resolve(row.id)) };
