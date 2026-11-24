@@ -82,6 +82,9 @@ check("distributed maintenance entries preserve every aggregate test exactly onc
       bool(expected) and expected == distributed and not loader.errors, loader.errors)
 check("account deletion and device-channel revocation stay in the offline release gate",
       {"test_account_privacy.py", "test_device_connections.py"} <= set(RELEASE_SMOKES))
+for profile in ("release", "extended"):
+    check("inbox claim HTTP permission regressions run exactly once in " + profile,
+          scripts_for(profile).count("test_inbox_claim_permission.py") == 1)
 check("tier entries stay sorted for reviewability",
       all(tuple(sorted(group)) == group
           for group in (RELEASE_SMOKES, EXTENDED_SMOKES, LIVE_SMOKES)))
