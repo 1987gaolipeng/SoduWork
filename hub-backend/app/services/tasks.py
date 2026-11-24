@@ -790,7 +790,9 @@ async def purge_task_children(
     """
     if not tids:
         return {}, []
-    from sqlalchemy import delete as _del, update as _update
+    from sqlalchemy import delete as _del
+    from sqlalchemy import update as _update
+
     from .. import automation_models as am
     from ..conversation_handoff_models import ConversationHandoff
 
