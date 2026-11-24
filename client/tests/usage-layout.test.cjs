@@ -20,3 +20,11 @@ test('small panels retain record metadata and allow totals to wrap', () => {
   assert.match(narrow, /\.usage-records \.usage-extra\s*\{display:none/);
   assert.match(narrow, /\.usage-records td \.usage-mobile\s*\{display:block/);
 });
+
+test('recent work footer contains only right-aligned pagination', () => {
+  const panel = readFileSync(path.join(__dirname, '..', 'components', 'panels', 'panels-usage.js'), 'utf8');
+  const footer = panel.split('class="usage-line usage-foot"')[1].split('</section>')[0];
+  assert.match(footer, /usagePrev.*usageNext/);
+  assert.doesNotMatch(footer, /北京时间/);
+  assert.match(css, /\.usage-foot\s*\{[^}]*justify-content:flex-end/);
+});

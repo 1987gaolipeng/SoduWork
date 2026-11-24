@@ -11,7 +11,7 @@ function create({ app, identityOf, authorizeAI, isCurrent, resolveModel = fetchM
   const drafts = new WeakSet(), generators = new Map();
   function generator(agent) {
     if (!generators.has(agent)) generators.set(agent, createGenerator({
-      app, authenticatedIdentityOf: identityOf, authorizeAI, fetchImpl,
+      app, authenticatedIdentityOf: identityOf, authorizeAI, fetchImpl, usageSource: 'conversation_title',
       async resolveModel(identity, name, timeout, fetch, force, _defaultAgent, options) {
         const result = await resolveModel(identity, name, timeout, fetch, force, agent, options);
         return result?.model?.id === name ? result : null;

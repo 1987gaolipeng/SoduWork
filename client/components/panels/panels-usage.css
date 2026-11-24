@@ -135,7 +135,12 @@
 .usage-badge.local {background:color-mix(in srgb,var(--bg-0) 88%,var(--usage-local));color:color-mix(in srgb,var(--usage-ink) 65%,var(--usage-local))}
 .usage-records td .usage-mobile {display:none}
 .usage-records tbody tr:hover {background:var(--usage-wash)}
-.usage-foot {margin-top:12px}
+.usage-denominator {margin-top:4px}
+.usage-attribution {margin-top:8px;padding-top:8px;border-top:1px solid var(--usage-rule)}
+.usage-extra-row {display:flex;justify-content:space-between;align-items:baseline;gap:12px;width:100%;padding:4px 0;text-align:start}
+.usage-extra-row span:last-child {white-space:nowrap;font-variant-numeric:tabular-nums}
+.usage-quality > small {display:block;margin-top:10px}
+.usage-foot {margin-top:12px;justify-content:flex-end}
 .usage-foot button:disabled {opacity:.45;cursor:default}
 .usage-panel dialog {width:min(460px,92vw);max-height:85vh;overflow:auto;margin:auto;border:1px solid var(--usage-rule);border-radius:14px;background:var(--bg-0);padding:22px;color:var(--usage-ink);overflow-wrap:anywhere}
 .usage-panel dialog::backdrop {background:#1e1a3699}
