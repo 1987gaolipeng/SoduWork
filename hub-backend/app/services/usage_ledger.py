@@ -6,11 +6,13 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am, models
+from ..account_conversation_models import AccountConversation
 
 
 _COUNTERS = (
@@ -56,31 +58,33 @@ async def record_cumulative(
         raise ValueError("idempotency_key is required")
     if len(key) > 240:
         key = 'sha256:' + hashlib.sha256(key.encode()).hexdigest()
-    row = (await session.execute(select(models.AIUsageEvent).where(
+    locked_event = select(models.AIUsageEvent).where(
         models.AIUsageEvent.idempotency_key == key).limit(1).with_for_update()
-        .execution_options(populate_existing=True))).scalar_one_or_none()
+    locked_event = locked_event.execution_options(populate_existing=True)
+    row = await session.scalar(locked_event)
     reported_at = _dt(values.get("occurred_at"))
     created = False
     if row is None:
-        # Set the anchor before flush so the model's ``default=now`` cannot
-        # win over a client timestamp that arrived a little later.
-        candidate = models.AIUsageEvent(
-            idempotency_key=key,
-            occurred_at=reported_at,
-            # The first receipt supplies its own quality before later upgrades.
-            quality="unknown",
-        )
-        try:
-            async with session.begin_nested():
-                session.add(candidate)
-                await session.flush()
-            row = candidate
-            created = True
-        except IntegrityError:
-            row = (await session.execute(select(models.AIUsageEvent).where(
-                models.AIUsageEvent.idempotency_key == key).limit(1).with_for_update()
-                .execution_options(populate_existing=True))
-            ).scalar_one()
+        # Keep the first insert in the batch transaction, including on SQLite
+        # where releasing an outermost SAVEPOINT would commit an empty anchor.
+        insert = sqlite_insert if session.get_bind().dialect.name == "sqlite" else pg_insert
+        statement = insert(models.AIUsageEvent).values(
+            idempotency_key=key, occurred_at=reported_at, quality="unknown",
+        ).on_conflict_do_nothing(index_elements=["idempotency_key"]).returning(models.AIUsageEvent)
+        row = await session.scalar(statement)
+        created = row is not None
+        if not created:
+            row = (await session.scalars(locked_event)).one()
+
+    if "reported_chat_session_id" in values:
+        claim = values["reported_chat_session_id"]
+        new_type = values["source_type"]
+        if not created and row.source_type != new_type and "chat" in (row.source_type, new_type):
+            raise InvalidUsageSource("A chat receipt cannot change its source type")
+        if row.reported_chat_session_id is not None and claim and claim != row.reported_chat_session_id:
+            raise InvalidUsageSource("A chat receipt cannot change its source session")
+        if row.reported_chat_session_id is None:
+            row.reported_chat_session_id = claim
 
     # Old integrations may have cumulative events without daily facts. Preserve
     # their unknown funding before the first new increment makes the legacy
@@ -155,13 +159,41 @@ async def record_cumulative(
     return row, "updated" if any(deltas.values()) else "duplicate"
 
 
+def chat_source_match():
+    event = models.AIUsageEvent
+    return and_(AccountConversation.owner_user_id == event.billing_user_id,
+                AccountConversation.source_client_id == event.client_id,
+                AccountConversation.source_session_id == event.reported_chat_session_id,
+                event.reported_chat_session_id != "", event.billing_user_id != "")
+
+
+def source_reference(row: models.AIUsageEvent, verified_session_id: str | None) -> dict:
+    if row.reported_chat_session_id is None:
+        return {"sourceId": row.source_id}
+    return {"sourceId": verified_session_id or "", "conversationId": verified_session_id or "",
+            "sourceVerification": "verified" if verified_session_id else "unverified"}
+
+
+async def verify_chat_receipts(session: AsyncSession, receipts: list[dict]) -> None:
+    ids = {item["id"] for item in receipts if "sourceVerification" in item}
+    if not ids:
+        return
+    event = models.AIUsageEvent
+    query = (select(event.id, AccountConversation.source_session_id).select_from(event)
+             .join(AccountConversation, chat_source_match()).where(event.id.in_(ids)))
+    matches = dict((await session.execute(query)).all())
+    for item in receipts:
+        if item["id"] in matches:
+            item.update(sourceId=matches[item["id"]], conversationId=matches[item["id"]], sourceVerification="verified")
+
+
 def to_api(row: models.AIUsageEvent) -> dict:
     return {
         "id": row.id,
         "sourceType": row.source_type,
-        "sourceId": row.source_id,
-        "taskId": row.task_id,
         "conversationId": row.conversation_id,
+        **source_reference(row, None),
+        "taskId": row.task_id,
         "agent": row.agent_key,
         "provider": row.provider,
         "model": row.model,
@@ -252,6 +284,14 @@ async def prepare_client_event(
     if source_type not in allowed_sources:
         raise InvalidUsageSource("sourceType must be one of: " + ", ".join(allowed_sources))
     source_id = str(payload.get("sourceId") or payload.get("conversationId") or "")[:180]
+    claim = None
+    if source_type == "chat":
+        ids = [payload[field] for field in ("sourceId", "conversationId") if payload.get(field) not in (None, "")]
+        if any(not isinstance(value, str) or len(value) > 180 or not value.strip() for value in ids):
+            raise InvalidUsageSource("Chat session IDs must be nonempty strings of at most 180 characters")
+        if len(set(ids)) > 1:
+            raise InvalidUsageSource("sourceId and conversationId must identify the same chat session")
+        claim = source_id
     reported_key = str(payload.get("idempotencyKey") or source_id)[:180]
     if not reported_key:
         raise ValueError("sourceId is required")
@@ -283,9 +323,10 @@ async def prepare_client_event(
         "client_id": client.id,
         "runner_id": str(payload.get("runnerId") or ""),
         "source_type": source_type,
-        "source_id": source_id or reported_key,
+        "reported_chat_session_id": claim,
+        "source_id": (source_id or reported_key) if claim is None else "",
         "source_title": str(payload.get("sourceTitle") or "").strip()[:200],
-        "conversation_id": str(payload.get("conversationId") or source_id),
+        "conversation_id": str(payload.get("conversationId") or source_id) if claim is None else "",
         "task_id": task_id,
         "workflow_run_id": workflow_run_id,
         "node_run_id": node_run_id,

@@ -182,9 +182,14 @@ for (const locale of ['zh-CN', 'en-US', 'ja-JP', 'ko-KR']) {
     assert.ok(labels.includes(tx('对话')))
     assert.ok(labels.includes('客户用药研发项目'))
     const recent = await mount(t, screen, { privateExports: ['RecentLedger'], exportName: 'RecentLedger', dependencies: dependencies({}), props: {
-      rows: [{ id: 'one', title: '客户用药研发项目', sourceType: 'task', sourceLabel: '需求执行', agent: 'pi', model: '客户模型', tokens: 1000 }],
+      rows: [
+        { id: 'one', title: '客户用药研发项目', sourceType: 'task', sourceLabel: '需求执行', agent: 'pi', model: '客户模型', tokens: 1000 },
+        { id: 'two', sourceType: 'chat', sourceVerification: 'unverified' },
+        { id: 'three', sourceType: 'chat', sourceVerification: 'verified', sourceId: 'session' },
+      ],
     } })
-    assert.ok(recent.nodes(node => node.type === 'small').some(node => textOf(node) === tx('需求执行')))
+    const details = recent.nodes(node => node.type === 'small').map(textOf)
+    for (const label of ['需求执行', '会话来源未核验', '会话来源已核验']) assert.ok(details.includes(tx(label)))
     assert.ok(recent.nodes(node => node.type === 'b').some(node => textOf(node) === '客户用药研发项目'))
     assert.ok(recent.nodes(node => node.type === 'b').some(node => textOf(node) === 'Pi'))
   })

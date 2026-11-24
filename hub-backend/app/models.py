@@ -952,6 +952,8 @@ class AIUsageEvent(Base):
     runner_id: Mapped[str] = mapped_column(String(80), default="", index=True)
     source_type: Mapped[str] = mapped_column(String(32), default="chat", index=True)
     source_id: Mapped[str] = mapped_column(String(180), default="", index=True)
+    # Device chat claims are resolved against the account conversation directory at read time.
+    reported_chat_session_id: Mapped[str | None] = mapped_column(String(180))
     # Client-reported conversation title, including later renames, for the recent AI work list.
     # Runner tasks fall back to the task title.
     source_title: Mapped[str] = mapped_column(String(200), default="")
