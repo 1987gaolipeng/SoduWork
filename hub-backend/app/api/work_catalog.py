@@ -90,6 +90,7 @@ async def admin_catalog(
     catalog.update({
         "targetOrgId": target,
         "workflows": [{
+            "id": row["id"],
             "key": row.get("key") or "",
             "name": row.get("name") or row.get("key") or "",
             "description": row.get("description") or "",
@@ -105,9 +106,10 @@ async def create_profession(
     user: models.User = Depends(require_perm("work.catalog.manage")),
     session: AsyncSession = Depends(get_session),
 ):
+    await rbac.lock_org_tree(session, shared=True)
     target = await _target_org(session, user, body.get("orgId"))
     try:
-        row = await work_catalog.save_profession(session, body, target)
+        row = await work_catalog.save_profession(session, body, target, actor=user)
     except ValueError as error:
         raise _value_error(error) from error
     result = work_catalog.profession_api(row)
@@ -123,20 +125,30 @@ async def update_profession(
     user: models.User = Depends(require_perm("work.catalog.manage")),
     session: AsyncSession = Depends(get_session),
 ):
+    await rbac.lock_org_tree(session, shared=True)
     row = await session.get(models.Position, profession_id)
     if row is None:
         raise HTTPException(status_code=404, detail="职业画像不存在")
     if row.is_system or row.org_id is None:
         raise HTTPException(status_code=400, detail="平台职业是只读基线，请新建企业职业")
     await _target_org(session, user, row.org_id)
+    old_org = row.org_id
+    offered_org = body.get("orgId")
+    # Optional org transfer: validates existence and that the target org is within
+    # the operator's scope; without orgId the behavior is unchanged.
+    new_org = await _target_org(session, user, offered_org) if offered_org else old_org
     try:
         row = await work_catalog.save_profession(
-            session, body, row.org_id, row)
+            session, body, new_org, row, actor=user)
     except ValueError as error:
         raise _value_error(error) from error
     result = work_catalog.profession_api(row)
+    detail = {"fields": sorted(body)}
+    if new_org != old_org:
+        detail["orgFrom"] = old_org
+        detail["orgTo"] = new_org
     await audit.log(session, user, "profession.update", "position",
-                    row.id, row.name, {"fields": sorted(body)})
+                    row.id, row.name, detail)
     return result
 
 
@@ -168,6 +180,8 @@ async def create_scenario(
     target = await _target_org(session, user, body.get("orgId"))
     try:
         row = await work_catalog.save_scenario(session, body, target)
+    except work_catalog.ScenarioKeyConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
         raise _value_error(error) from error
     result = work_catalog.scenario_api(row)
@@ -189,14 +203,23 @@ async def update_scenario(
     if row.is_system or row.org_id is None:
         raise HTTPException(status_code=400, detail="平台场景是只读基线，请创建企业覆盖版本")
     await _target_org(session, user, row.org_id)
+    old_org = row.org_id
+    offered_org = body.get("orgId")
+    # Optional org transfer: same guard as professions; the scenario key-uniqueness
+    # check inside save_scenario runs against the target org.
+    new_org = await _target_org(session, user, offered_org) if offered_org else old_org
     try:
         row = await work_catalog.save_scenario(
-            session, body, row.org_id, row)
+            session, body, new_org, row)
     except ValueError as error:
         raise _value_error(error) from error
     result = work_catalog.scenario_api(row)
+    detail = {"fields": sorted(body)}
+    if new_org != old_org:
+        detail["orgFrom"] = old_org
+        detail["orgTo"] = new_org
     await audit.log(session, user, "work_scenario.update", "work_scenario",
-                    row.id, row.name, {"fields": sorted(body)})
+                    row.id, row.name, detail)
     return result
 
 

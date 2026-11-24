@@ -73,7 +73,7 @@ ok("importPlugin: (file) => upload('/admin/plugins/import', file)" in client
    and import_flow.count("api.importPlugin(file)") == 1 and "preflight" not in import_flow
    and '@router.post("/import")' in routes and "source_channel=\"admin-import\"" in routes
    and install_flow.index("plugin_packages.parse(data)") < install_flow.index("plugin_signatures.inspect(")
-       < install_flow.index("plugin_signatures.assert_importable(") < install_flow.index("plugin_packages.store(parsed)")
+       < install_flow.index("plugin_signatures.assert_importable(") < install_flow.index("plugin_packages.store(parsed,")
    and 'trust_state="quarantined", visibility=mode, enabled=False' in install_flow,
    "one-step import must validate package/signature before storing an immutable disabled review version")
 ok("导入并送审" in screen and "已提交企业审核，管理员通过后即可上架" in screen

@@ -68,6 +68,29 @@ function fixture() {
   };
 }
 
+test('first chat distinguishes an empty catalog, unknown Hub state and a working local or native choice', async () => {
+  const f = fixture();
+  f.start();
+  assert.equal(f.picker.modelReadiness(), 'checking');
+  f.requests[0].resolve({ usable: [] });
+  await f.picker.ready();
+  assert.equal(f.picker.modelReadiness(), 'empty');
+  assert.equal(f.picker.label(), '选择模型');
+  const offline = f.picker.refresh(true);
+  f.requests[1].resolve({ usable: [], managedCatalogUnavailable: true });
+  await offline;
+  assert.equal(f.picker.modelReadiness(), 'unknown');
+  const local = f.picker.refresh(true);
+  f.requests[2].resolve({ usable: [{ name: 'local:example', localOnly: true }], managedCatalogUnavailable: true });
+  await local;
+  assert.equal(f.picker.modelReadiness(), 'ready');
+  f.agent('codex');
+  const native = f.picker.refresh();
+  f.requests[3].resolve({ ok: true, models: [] });
+  await native;
+  assert.equal(f.picker.modelReadiness(), 'native');
+});
+
 test('cold composer redraws share the first delayed request and ready waits for that response', async () => {
   const f = fixture(); f.start();
   const original = f.picker.refresh();

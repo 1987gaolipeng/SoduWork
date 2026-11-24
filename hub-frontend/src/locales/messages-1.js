@@ -437,6 +437,7 @@ export default {
   "全部版本": "All versions",
   "按状态筛选": "Filter by state",
   "全部状态": "All states",
+  "升级动态加载失败": "Could not load update activity",
   "刷新升级动态": "Refresh update activity",
   "刷新中…": "Refreshing…",
   "错误 / 时间": "Error / time",

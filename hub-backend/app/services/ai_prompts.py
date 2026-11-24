@@ -120,6 +120,9 @@ def check(cfg: dict) -> str:
         return "截图要求只能是 auto / always / never。"
     if c.get("mr") and c["mr"] not in _MR_CHOICES:
         return "「建不建合并请求」只能是 none / create / required。"
+    extra = c.get("extra")
+    if extra is not None and not isinstance(extra, str):
+        return "「这个工程另外要求的（extra）」必须是文本。"
     steps = c.get("steps")
     if steps is not None:
         if not isinstance(steps, list):

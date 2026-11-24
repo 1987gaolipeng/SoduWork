@@ -101,8 +101,10 @@ export function PluginRunForm({ plugin, onClose, onStarted }) {
     setBusy(false)
   }
 
-  return <Modal scope="plugin-page" wide title={tx("让「{0}」处理需求", [plugin.name])} icon="send" onClose={onClose}
-    foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+  const dirty = bindingId !== (bindings[0]?.id || '') || Boolean(taskId && taskId !== availableTasks[0]?.id)
+    || defs.some(def => inputs[def.key] != null && String(inputs[def.key]) !== String(def.default ?? (def.type === 'boolean' ? false : '')))
+  return <Modal dirty={dirty} scope="plugin-page" wide title={tx("让「{0}」处理需求", [plugin.name])} icon="send" onClose={onClose}
+    foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
       <button className="btn btn-primary" disabled={busy || !!taskError || !selectedTask || !!selectedTask.blockedReason || !bindingId}
         onClick={start}>{busy ? tx("正在启动…") : tx("启动工作流")}</button></>}>
     {taskError && <LoadIssue message={taskError} onRetry={loadTasks} />}

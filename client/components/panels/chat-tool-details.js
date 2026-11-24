@@ -5,7 +5,7 @@
   const listeners = new WeakMap();
   const MAX_ENTRIES = 16, MAX_BYTES = 16 * 1024 * 1024;
   const keyOf = tool => JSON.stringify([String(tool.id), String(tool.detailVersion || '')]);
-  const scopeOf = ctx => JSON.stringify([ctx._ref, ctx._viewEpoch, ctx._draftScopeEpoch, ctx._draftOwnerScope?.()]);
+  const scopeOf = ctx => global.ChatTools.recordOwner(ctx);
   const current = (ctx, id) => ctx._snap?.tools?.find(tool => String(tool.id) === String(id));
   const nodeOf = (ctx, id) => global.ChatDomPatch?.findDataNode(ctx._mount?.(), 'data-tool-node', id);
   const loadingHtml = '<div class="nd-skip" role="status">正在读取详情…</div>';
@@ -112,6 +112,28 @@
     global.ChatDomPatch.patchHtml(status, html);
     node.setAttribute('aria-busy', String(html === loadingHtml));
   }
+  function openRecord(ctx, id, button) {
+    const tool = current(ctx, id), node = nodeOf(ctx, id);
+    if (!tool || !node?.contains(button) || button.dataset.commandOwner !== scopeOf(ctx) ||
+        !global.ChatTools.render(tool)?.recordAvailable) return false;
+    const state = stateFor(ctx), selection = ++state.selection;
+    const show = full => {
+      // Check the full receipt too: a compact projection can omit bridge arguments.
+      const shown = full && global.ChatTools.render(full)?.recordAvailable && global.ChatWorkbench?.openCommandRecord(full);
+      sideStatus(node, shown ? '' : '<div class="nd-skip" role="status">详情暂时无法读取</div>');
+    };
+    if (!tool.detailsDeferred) { show(tool); return true; }
+    sideStatus(node, loadingHtml, selection);
+    void load(ctx, tool, false).then(entry => {
+      if (!live(ctx, state, tool) || selection !== state.selection || !node.isConnected || !node.contains(button) ||
+          !global.ChatTools.render(current(ctx, id))?.recordAvailable) {
+        if (node.querySelector('[data-tool-detail-status]')?.dataset.detailSelection === String(selection)) sideStatus(node, '');
+        return;
+      }
+      show(entry.tool);
+    });
+    return true;
+  }
   function activate(ctx, id, retry = false) {
     const tool = current(ctx, id);
     if (!tool || !global.ChatTools) return false;
@@ -148,5 +170,5 @@
     const listener = listeners.get(ctx);
     listener?.root.removeEventListener('click', listener.cancel, true); listeners.delete(ctx);
   }
-  global.ChatToolDetails = Object.freeze({ bodyHtml, activate, reset });
+  global.ChatToolDetails = Object.freeze({ bodyHtml, activate, openRecord, reset });
 })(typeof window !== 'undefined' ? window : globalThis);

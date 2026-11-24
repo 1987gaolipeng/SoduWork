@@ -370,8 +370,73 @@ class NotesTests(unittest.TestCase):
             'event': 'release_notes_usage', 'model': 'fixture-model',
             'completion_tokens': 100, 'reasoning_tokens': 90}])
         self.assertIn('"reason": "invalid_output"', self.logged.getvalue())
+        self.assertIn('"error_code": "incomplete_response"', self.logged.getvalue())
+        self.assertIn('"finish_reason": "length"', self.logged.getvalue())
         self.assertNotIn('incomplete provider output', self.logged.getvalue())
         opener.open.assert_called_once()
+
+    def test_output_failures_log_specific_rules_paths_and_original_exception_chains(self):
+        valid = {key: copy.deepcopy(self.record[key]) for key in ['locales', 'sources']}
+        valid['sources'][0]['commits'] = ['c1']
+        unknown = copy.deepcopy(valid); unknown['sources'][0]['commits'] = ['unknown-alias']
+        languages = copy.deepcopy(valid); del languages['locales']['ko-KR']
+        translated = copy.deepcopy(valid)
+        translated['locales']['ja-JP']['sections'][0]['items'][0]['id'] = 'different'
+        unattributed = copy.deepcopy(valid); unattributed['sources'] = []
+        malformed = copy.deepcopy(valid); malformed['locales']['en-US']['sections'][0]['items'][0]['text'] = None
+        def reply(content):
+            return json.dumps({'choices': [{'finish_reason': 'stop', 'message': {'content': content}}]}).encode()
+        cases = [
+            (b'{broken', 'response_json', 'invalid_json', None),
+            (b'{}', 'response_envelope', 'missing_response_choice', 'choices[0]'),
+            (reply('{broken'), 'content_json', 'invalid_json', None),
+            (reply('[]'), 'model_schema', 'invalid_model_result_structure', 'record'),
+            (reply(json.dumps(unknown)), 'provenance', 'unknown_source_commit_alias', 'sources[0].commits'),
+            (reply(json.dumps(languages)), 'validation', 'all_four_release_note_languages_are_required', 'locales'),
+            (reply(json.dumps(translated)), 'validation', 'translation_structure_differs', 'record'),
+            (reply(json.dumps(unattributed)), 'validation', 'every_note_must_cite_source_commits', 'record'),
+            (reply(json.dumps(malformed)), 'validation', 'note_id_and_text_must_be_strings', 'locales.en-US.sections[0].items[0]'),
+        ]
+        for payload, stage, code, path in cases:
+            with self.subTest(stage=stage, code=code):
+                self.logged.seek(0); self.logged.truncate()
+                opener = unittest.mock.Mock()
+                opener.open.return_value = io.BytesIO(payload)
+                env = {'RELEASE_NOTES_API_KEY': 'fixture-model-key', 'RELEASE_NOTES_MODEL': 'fixture-model',
+                       'GITHUB_STEP_SUMMARY': str(self.root / 'summary.md')}
+                with patch.dict(os.environ, env, clear=True), \
+                        patch.object(notes.urllib.request, 'build_opener', return_value=opener):
+                    self.assert_blank_record(self.generate_with_fixture_evidence(wraps=notes.model_notes))
+                events = [json.loads(line) for line in self.logged.getvalue().splitlines() if line.startswith('{')]
+                failed = next(e for e in events if e['event'] == 'release_notes_completed')
+                self.assertEqual((failed['stage'], failed['error_code']), (stage, code))
+                self.assertIn('Traceback', failed['traceback'])
+                if code == 'invalid_json':
+                    self.assertEqual((failed['line'], failed['column']), (1, 2))
+                    self.assertIn('JSONDecodeError: Expecting property name', failed['traceback'])
+                if path:
+                    self.assertEqual(failed['path'], path)
+                self.assertIn(code, (self.root / 'summary.md').read_text())
+                self.assertNotIn('allow a replacement free model', self.logged.getvalue())
+                self.assertNotIn('fixture-model-key', self.logged.getvalue())
+                (self.root / notes.NAME).unlink()
+
+    def test_unexpected_errors_preserve_original_message_and_chain_with_secret_redaction(self):
+        def fail(*args):
+            try:
+                raise ValueError('original parse detail fixture-private-key https://private.example.test/path')
+            except ValueError as error:
+                raise RuntimeError('outer error retains context') from error
+        with patch.dict(os.environ, {'RELEASE_NOTES_API_KEY': 'fixture-private-key'}):
+            self.assert_blank_record(self.generate_with_fixture_evidence(side_effect=fail))
+        output = self.logged.getvalue()
+        self.assertIn('original parse detail', output)
+        self.assertIn('outer error retains context', output)
+        self.assertIn('ValueError', output)
+        self.assertIn('RuntimeError', output)
+        self.assertIn('Traceback', output)
+        self.assertNotIn('fixture-private-key', output)
+        self.assertNotIn('private.example.test', output)
 
     def test_model_request_uses_configured_limits_and_empty_defaults(self):
         result = {key: copy.deepcopy(self.record[key]) for key in ['locales', 'sources']}
@@ -495,7 +560,7 @@ class NotesTests(unittest.TestCase):
                 self.assert_blank_record(record)
                 self.assertEqual(opener.open.call_count, int(model.endswith(':free')))
                 (self.root / notes.NAME).unlink()
-        self.assertNotIn('fixture-private-error', self.logged.getvalue())
+        self.assertIn('TimeoutError: fixture-private-error', self.logged.getvalue())
 
     def test_provider_warning_is_actionable_and_does_not_log_private_response(self):
         rows = [{'id': 'fixture/model:free', 'pricing': {'prompt': '0', 'completion': '0'}}]
@@ -515,7 +580,7 @@ class NotesTests(unittest.TestCase):
         self.assertIn('HTTP 429', output)
         self.assertIn('RELEASE_NOTES_MODEL', output)
         self.assertNotIn('fixture-private-key', output)
-        self.assertNotIn('fixture-private-error', output)
+        self.assertIn('HTTP Error 503: fixture-private-error', output)
 
     def test_model_name_logging_is_safe_and_summary_failure_does_not_block(self):
         for model in ['fixture-private-key', 'model\n::error::injected', 'https://private.example.test/path']:

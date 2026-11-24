@@ -189,6 +189,7 @@ async def latest_artifact(session: AsyncSession, task_id: str, *,
     return (await session.execute(
         q
         .order_by(am.ArtifactVersion.seq.desc(), am.ArtifactVersion.created_at.desc()).limit(1)
+        .execution_options(populate_existing=True)
     )).scalar_one_or_none()
 
 
@@ -234,6 +235,8 @@ async def _new_artifact(session: AsyncSession, task: models.Task, *, kind: str,
     latest = await latest_artifact(session, task.id, stream=stream)
     # Idempotency applies only to repeated current content; reverting after an intervening version creates a new sequence number.
     # Thus v1 content after v2 becomes v3, keeping latest and approval bindings accurate.
+    if latest and latest.kind == "files" and latest.state == "rejected" and kind in {"files", "manual", "text"}:
+        artifact_version_guard.require_revised_files(latest, payload)
     if existing is not None and latest is not None and existing.id == latest.id:
         return existing, False
     await _cancel_old(session, task.id, stream)
@@ -441,6 +444,27 @@ async def ensure_current_output(session: AsyncSession, task: models.Task, *, sou
                                          automatic_round=automatic_round)
 
 
+async def preview_review_routing(session: AsyncSession, task: models.Task) -> dict:
+    """Read the same policy and delivery provenance used by a submission without creating a gate."""
+    policy = await session.get(am.ApprovalPolicy, POLICY_REVIEW)
+    artifact = await latest_artifact(session, task.id)
+    rules = (policy.rules if policy else {}) or {}
+    result = await approval_routing.preview_assignments(session, task, "review", rules, artifact=artifact)
+    if policy and not policy.enabled:
+        result.update(ok=False, reason="验收策略已停用，请联系管理员启用策略。")
+    return result
+
+
+async def _check_assignment_count(session, task, request):
+    assignments = await approval_routing.ensure_assignments(session, task, request)
+    if len(assignments) >= request.required_count:
+        return
+    if request.action == "review":
+        reason = await approval_routing.review_block_reason(session, task, request.required_count, len(assignments))
+        raise approval_routing.ReviewAssignmentUnavailable(reason)
+    raise ValueError(f"审批职责需要 {request.required_count} 人，但当前只能分配给 {len(assignments)} 人；请调整人员或会签人数")
+
+
 async def ensure_request(session: AsyncSession, task: models.Task, artifact: am.ArtifactVersion,
                          action: str, environment_id: str = "", context: dict | None = None
                          ) -> am.ApprovalRequest:
@@ -453,10 +477,17 @@ async def ensure_request(session: AsyncSession, task: models.Task, artifact: am.
     # withdrawn by an approver on purpose.  Either way a later round needs a fresh,
     # independently auditable request instead of resurrecting the dead one forever.
     if existing is not None and existing.status not in ("cancelled", "revoked"):
-        assignments = await approval_routing.ensure_assignments(session, task, existing)
-        if len(assignments) < existing.required_count:
-            raise ValueError(
-                f"审批职责需要 {existing.required_count} 人，但当前只能分配给 {len(assignments)} 人")
+        if (action == "review" and existing.status == "pending"
+                and await session.scalar(select(approval_routing.unassigned_review(existing.id, task.id)))):
+            # Automatic delivery preserves the candidate even if nobody could receive it.
+            # Retrying this unissued ticket must honor the policy the administrator repaired.
+            policy = await session.get(am.ApprovalPolicy, POLICY_REVIEW)
+            if policy is not None:
+                if not policy.enabled:
+                    raise ValueError("验收策略已停用，请联系管理员启用策略。")
+                existing.policy_snapshot = dict(policy.rules or {})
+                existing.required_count = max(1, int(existing.policy_snapshot.get("required") or 1))
+        await _check_assignment_count(session, task, existing)
         return existing
     pid = {"baseline": POLICY_BASELINE, "review": POLICY_REVIEW,
            "merge": POLICY_MERGE, "uat": POLICY_UAT,
@@ -487,10 +518,7 @@ async def ensure_request(session: AsyncSession, task: models.Task, artifact: am.
         policy_snapshot=rules, context=gate_context, created_by="system")
     session.add(row)
     await session.flush()
-    assignments = await approval_routing.ensure_assignments(session, task, row)
-    if len(assignments) < row.required_count:
-        raise ValueError(
-            f"审批职责需要 {row.required_count} 人，但当前只能分配给 {len(assignments)} 人；请调整人员或会签人数")
+    await _check_assignment_count(session, task, row)
     task_events.record(session, task.id, "release.approval_requested",
                        {"requestId": row.id, "versionId": artifact.id,
                         "action": action, "environmentId": environment_id or ""}, actor="SoduWork")
@@ -548,6 +576,12 @@ async def decide(session: AsyncSession, task: models.Task, actor, *, action: str
     note = str(note or "").strip()
     if decision == "reject" and not note:
         return {"ok": False, "reason": "note"}
+    if action == "deploy" or environment_id:
+        from . import deployments
+        if not await deployments.has_targets(session, task, environment_id=environment_id):
+            return {"ok": False, "reason": "invalid_environment",
+                    "errorCode": "hub.input.release_environment",
+                    "detail": "当前任务在所选环境中没有可用的部署目标，请检查发布链配置"}
     from . import artifact_version_guard
     await artifact_version_guard.lock_task(session, task.id)
     artifact = await session.get(am.ArtifactVersion, artifact_version_id) \
@@ -636,6 +670,8 @@ async def decide(session: AsyncSession, task: models.Task, actor, *, action: str
                     continue_existing_merge = True
                 elif artifact.kind == "code":
                     await ensure_request(session, task, artifact, "merge", context={
+                        **{key: req.context[key] for key in ("workflowRunId", "nodeRunId")
+                           if (req.context or {}).get(key)},
                         "summary": f"合并 {artifact.branch} → {artifact.target}",
                         "commit": artifact.commit_sha,
                     })

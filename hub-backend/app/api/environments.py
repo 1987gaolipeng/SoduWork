@@ -3,19 +3,31 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import automation_models as am, models
+from .. import automation_models as am
+from .. import models
 from ..db import get_session
 from ..deps import require_perm
 from ..models import User
-from ..services import (approval_policies as policy_svc, audit, catalog_names, deployments,
-                        environment_service as svc, project_setup, rbac,
-                        release_control, runner_hub)
+from ..services import approval_policies as policy_svc
+from ..services import (
+    audit,
+    catalog_names,
+    deployments,
+    project_setup,
+    rbac,
+    release_control,
+    runner_hub,
+)
+from ..services import environment_service as svc
+from ..services.environment_contracts import InvalidHealthCheck
 from .input_validation import parse_integer
 
 router = APIRouter(prefix="/api/v1/admin", tags=["environments"])
 
 
 def _bad(error: ValueError) -> HTTPException:
+    if isinstance(error, InvalidHealthCheck):
+        return HTTPException(status_code=400, detail=str(error))
     if isinstance(error, svc.InvalidRunnerSelector):
         return HTTPException(status_code=422, detail=str(error))
     if isinstance(error, svc.InvalidEnvironmentTier):
@@ -94,7 +106,8 @@ async def automation_overview(
     probes.
     """
     scope = await _scope(session, user)
-    project_q = select(models.Project)
+    from ..services.business_records import business_visible
+    project_q = select(models.Project).where(business_visible(models.Project))
     if scope is not None:
         project_q = project_q.where(
             models.Project.org_id.in_(scope or {"__none__"}) |
@@ -103,7 +116,7 @@ async def automation_overview(
         project_q.order_by(models.Project.created_at.desc()))).scalars().all())
     project_ids = {x.id for x in projects}
     repos = list((await session.execute(select(models.Repo).where(
-        models.Repo.project_id.in_(project_ids or {"__none__"})
+        business_visible(models.Repo), models.Repo.project_id.in_(project_ids or {"__none__"})
     ))).scalars().all())
     repo_ids = {x.id for x in repos}
     targets = list((await session.execute(select(am.DeploymentTarget).where(

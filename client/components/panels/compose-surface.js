@@ -81,7 +81,8 @@
       className: 'cp-box', inputId: 'cpInput', rows: 3,
       placeholder: '告诉 SoduWork 你想完成什么…',
       beforeInput: '<div class="cp-atts catt-tray" id="cpAtts"></div>',
-      afterInput: WorkComposer.syntaxHint() + intentSurface + '<div class="wc-execution-notice" role="status" hidden><span></span><button type="button" data-execution-configure>配置云端电脑</button></div>',
+      afterInput: WorkComposer.syntaxHint() + intentSurface + '<div class="wc-execution-notice" role="status" hidden><span></span><button type="button" data-execution-configure>配置云端电脑</button></div>' +
+        '<div class="wc-execution-notice cp-first-chat-notice" role="status" hidden><span></span><button type="button"></button></div>',
       tools: '<input type="file" id="cpFile" multiple hidden>' + intentTools,
       sendId: 'cpGo', sendClass: 'cp-go', sendTitle: '开始',
       context,
@@ -277,6 +278,7 @@
         api: ctx._setupApi,
         escape: ctx.esc,
         onChange: (selection) => {
+          global.FirstChatReadiness?.paint();
           const previousKey = ctx._capabilityKey();
           ctx._pickedModel = String(selection && selection.modelName || '');
           // The model picker also notifies when it repaints a cached

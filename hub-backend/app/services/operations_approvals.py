@@ -114,7 +114,8 @@ async def queue(session, user, visible_client_ids, page: Page):
         .options(load_only(request.id, request.action, request.created_at, request.expires_at,
                            request.created_by, request.policy_snapshot, request.artifact_version_id, request.environment_id),
                  load_only(task_model.id, task_model.title, task_model.created_by, task_model.owner_user_id,
-                           task_model.repo_id, task_model.project_id, task_model.assignee_user_id, task_model.requester_user_id),
+                           task_model.repo_id, task_model.project_id, task_model.assignee_user_id, task_model.requester_user_id,
+                           task_model.review_recipient_user_id, task_model.shared_org_id),
                  load_only(version_model.id, version_model.seq, version_model.created_by_kind, version_model.created_by_id))
         .order_by(request.created_at, request.id))
     rows = (await session.execute(page.window(query))).all()
@@ -127,7 +128,8 @@ async def queue(session, user, visible_client_ids, page: Page):
         due = release_control._ms(req.expires_at or req.created_at + REMIND_AFTER)
         manage = has_gate_permission(user, req.action)
         snapshot = assigned.get(req.id, {})
-        if (read_all or manage) and (not snapshot or req.action == "review" and set(snapshot) != {task.created_by}):
+        legacy_review = req.action == "review" and (req.policy_snapshot or {}).get("reviewRoutingVersion") != 2
+        if (read_all or manage) and (not snapshot or legacy_review):
             # Preview the same assignment repair used when a legacy request is opened or voted on.
             candidates, _ = await approval_routing._candidate_map(
                 session, task, req.action, req.policy_snapshot or {}, version)

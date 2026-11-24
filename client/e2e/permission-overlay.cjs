@@ -75,6 +75,7 @@ if (typeof electron === 'string') {
     win.webContents.on('console-message', event => { if (event.level === 'error') report.errors.push(event.message); });
     win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_request, callback) => callback({ cancel: true }));
     add('overlay-a'); add('overlay-b');
+    ipcMain.handle('pi-session-open-application', () => ({ ok: true, handled: false }));
     ipcMain.handle('pi-session-open', (_event, options) => {
       const ref = options.chatId, state = sessions.get(ref);
       return { ok: true, ref, sessionId: ref, adapterId: 'pi', displayName: 'Pi', cwd: root, workspaceName: 'Fixture', accessControl: support, model: { label: 'Fixture model' }, snapshot: state.snapshot() };
@@ -335,9 +336,7 @@ if (typeof electron === 'string') {
     const remembered = path.join(root, 'remembered-outside.txt');
     turn = fixture.send('write', { path: remembered, content: 'Scoped session grant' });
     await until(overlayVisible, 'real Pi write awaiting session decision');
-    assert.equal(await js('document.querySelector(".access-request [data-ui-value=session]")===null'), true);
-    const legacyRequest = fixture.access.broker.pending()[0];
-    await js('soduWorkAPI.conversationSession.answerUi("overlay-real",'+JSON.stringify({...legacyRequest,decision:'session'})+')'); await turn;
+    await click('.access-request [data-ui-value=session]'); await turn;
     assert.equal(fs.readFileSync(remembered, 'utf8'), 'Scoped session grant');
     await fixture.send('write', { path: remembered, content: 'Scoped session grant' });
     assert.equal(fixture.access.broker.pending().length, 0);

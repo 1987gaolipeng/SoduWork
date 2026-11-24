@@ -338,7 +338,7 @@ async def _check_locked(session: AsyncSession, t, repo, state: dict, who: str,
     release = await release_control.view(session, t.id)
     if created:
         await notify_reviewer(
-            session, t,
+            session, t, artifact.id,
             f"代码已提交到 {br}，候选版本 v{artifact.seq} 正等你审阅；尚未合并")
     return {**state, "stage": "committed", "delivered": False,
             "artifactVersionId": artifact.id, "release": release}
@@ -482,18 +482,18 @@ async def settle_delivered(session: AsyncSession, t, state: dict, who: str = "So
     await notify_owner(session, t, what)
 
 
-async def notify_reviewer(session: AsyncSession, t, what: str, *, publish=None) -> None:
-    """Notify the task creator to review new outputs or a new code candidate."""
-    from ..realtime import hub
-    cid = getattr(t, "created_by", None)
-    if not cid:
+async def notify_reviewer(session: AsyncSession, t, artifact_id: str, what: str, *, publish=None) -> None:
+    """Deliver the invitation to the assignees of this version's pending review."""
+    from . import requirement_review_access, task_access
+    from .task_requirements import public_content
+    assignments = await requirement_review_access.pending_assignments(session, [t.id], artifact_id=artifact_id)
+    if not assignments:
         return
-    box = (await session.execute(
-        select(models.Client.id).where(models.Client.user_ref == cid).limit(1))).scalar()
-    if box:
-        await (publish or hub.publish)(box, {"type": "notice",
-                                "text": f"AI 完成了「{t.title}」：{what}（可在需求详情里审核）",
-                                "taskId": t.id}, user_id=cid)
+    recipients = await session.execute(select(models.Client.id, models.Client.user_ref).where(
+        models.Client.user_ref.in_([uid for _, uid in assignments]), models.Client.auth_state == "active"))
+    title = public_content(t)["title"]
+    event = {"type": "notice", "text": f"AI 完成了「{title}」：{what}（可在需求详情里审核）", "taskId": t.id}
+    await task_access.publish_events([(device, event, uid) for device, uid in recipients], publish=publish)
 
 
 # Background delivery discovery.

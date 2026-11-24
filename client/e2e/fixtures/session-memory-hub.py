@@ -81,6 +81,8 @@ async def lifespan(instance):
 
 app.router.lifespan_context = lifespan
 sock = socket.socket()
+if os.name != "nt":
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 sock.bind(("127.0.0.1", int(sys.argv[2]) if len(sys.argv) > 2 else 0))
 PORT = sock.getsockname()[1]
 server = uvicorn.Server(uvicorn.Config(app, log_level="warning", access_log=False))

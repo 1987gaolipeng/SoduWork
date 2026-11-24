@@ -22,7 +22,7 @@ export function PluginRiskConfirm({ request, busy, onClose, onConfirm }) {
       : revoking
         ? tx("撤销后这个版本不能再启动新的执行，正在使用它的绑定会被停用；已经开始的运行和历史证据不会被删除。")
         : tx("当前版本没有代表性发布评测。启用后可以被需求和自动化调用，但平台无法证明它在典型场景下达到预期质量。")
-  return <Modal scope="plugin-page" title={title} icon="alert" onClose={onClose} foot={<><button className="btn btn-ghost" disabled={busy} onClick={onClose}>{tx("返回")}</button><button className={'btn ' + (dangerous ? 'btn-danger' : 'btn-primary')} disabled={busy || (requiresNote && !note.trim())} onClick={() => onConfirm(note.trim())}>{busy ? tx("正在处理…") : action}</button></>}>
+  return <Modal dirty={Boolean(note)} scope="plugin-page" title={title} icon="alert" onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("返回")}</button><button className={'btn ' + (dangerous ? 'btn-danger' : 'btn-primary')} disabled={busy || (requiresNote && !note.trim())} onClick={() => onConfirm(note.trim())}>{busy ? tx("正在处理…") : action}</button></>}>
     <section className={'plugin-risk-confirm ' + (dangerous ? 'is-danger' : 'is-warning')}>
       <span className="plugin-risk-mark"><Icon name="alert" /></span>
       <div className="plugin-risk-copy">
