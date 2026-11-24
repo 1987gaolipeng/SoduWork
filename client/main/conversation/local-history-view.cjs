@@ -4,12 +4,15 @@ const { project } = require('./history-message.cjs');
 
 // Passive history never constructs a runtime or imports source credentials.
 // Retain only message indexes and page cursors between bounded window reads.
-async function create({ row, read, historyPreview = false, allowContinuation = false, previewReason = '' }) {
+async function create({ row, read, historyPreview = false, allowContinuation = false, previewReason = '', choice }) {
   const MAX_BYTES = 8 * 1024 * 1024, MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
   let closed = false, pending, indexed = false;
   const entries = [], streams = new Map();
-  let value = { messages: [], tools: [], status: 'idle', adapterId: row.adapterId || 'pi',
-    displayName: row.displayName || row.adapterId || 'Pi', modelSelection: {},
+  const adapterId = choice?.adapterId || row.adapterId || 'pi';
+  let value = { messages: [], tools: [], status: 'idle', adapterId,
+    displayName: (adapterId === row.adapterId && row.displayName) ||
+      require('../agent-runtime/runtime-catalog').runtime(adapterId)?.displayName || adapterId,
+    modelSelection: choice?.name ? { name: choice.name, model: { id: choice.name, label: choice.label } } : {},
     accessControl: { mode: 'readonly', capabilities: [] },
     execution: { readOnly: true, localReplica: true, ...(historyPreview ? {
       canContinueOnDevice: allowContinuation && row.historyContentState === 'available' } : {}) }, localReplica: true };

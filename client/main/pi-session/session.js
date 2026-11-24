@@ -231,6 +231,12 @@ async function prewarmResources(app, options = {}) {
 const { createArchiveHistory } = require('./archive-history');
 const archiveState = require('./archive-state');
 const _historyIndexes = new Map();
+// Keep execution choices off sidebar rows shared with other local accounts.
+const _archiveModels = new WeakMap();
+async function archivedModelName(app, id) {
+  const { entry } = await historyEntry(app, id, { strict: true });
+  return _archiveModels.get(entry) || '';
+}
 function _historyIndex(app) {
   const root = path.resolve(modelConfig.agentDir(app));
   let index = _historyIndexes.get(root);
@@ -238,7 +244,7 @@ function _historyIndex(app) {
     index = createArchiveHistory({ root, project(s, entries) {
       const binding = _taskBindingFromEntries(entries);
       const archivedState = s.archivedTurnState || historyState.archivedTurnState(entries);
-      return {
+      const row = {
         id: s.id, path: s.path, cwd: s.cwd || '', usedHarnesses: s.usedHarnesses || [],
         title: s.workOwner ? s.name || '工作记录' : sessionHelpers.repairPersistedTitle(
           s.messageCount ? sessionHelpers.title(s) : binding.taskTitle || sessionHelpers.title(s),
@@ -253,6 +259,8 @@ function _historyIndex(app) {
         ...(archivedState !== 'idle' ? { state: archivedState === 'interrupted' ? 'interrupted'
           : historyState.presenceState(archivedState) } : {}),
       };
+      if (s.modelName) _archiveModels.set(row, s.modelName);
+      return row;
     } });
     _historyIndexes.set(root, index);
   }
@@ -459,7 +467,7 @@ async function probe(app) {
 
 module.exports = {
   open, get, list, findBySessionId, closeAll, probe, loadSdk, prewarm, prewarmResources,
-  sessionResources, history, archivedHistory, historyEntry, archiveHistory, restoreHistory,
+  sessionResources, history, archivedHistory, historyEntry, archivedModelName, archiveHistory, restoreHistory,
   permanentlyDeleteHistory, archiveRoot, isArchived, setArchived, archiveState,
   SCOPE_ENTRY_TYPE, TASK_BINDING_ENTRY_TYPE,
   _taskBindingFromEntries,

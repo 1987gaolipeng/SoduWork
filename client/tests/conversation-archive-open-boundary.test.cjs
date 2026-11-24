@@ -42,17 +42,16 @@ for(const code of ['ACCOUNT_HISTORY_UNAVAILABLE','SESSION_FORBIDDEN','OWNER_MISM
 test('desktop preview keeps its transcript, draft and handle across failed activation and only releases it after a writable reply', async () => {
   const preview = { ...opened('original'), ref: 'preview-original', localReplica: true,
     snapshot: { messages: [{ role: 'assistant', text: 'Retained reply' }], localReplica: true,
+      modelSelection: {name: 'glm', model: {id: 'glm', label: 'GLM'}},
       execution: { readOnly: true, canContinueOnDevice: true } } };
   const f = fixture((options, index) => index === 1 ? preview : index === 2 ? { ok: false, reason: 'Model unavailable' } : opened('original'));
   assert.equal(await f.controller._ensure('original'), true);
   assert.equal(f.opens[0].historyIntent, 'view');
-  f.ctx._sessionOptions.adapterId = 'pi';
-  f.ctx._sessionOptions.modelName = 'current-account-model';
   f.ctx._sessionOptions.taskRef = 'old-draft-task';
   assert.equal(await f.controller._ensure('original', preview.ref), false);
   assert.equal(f.opens[1].historyIntent, 'continue');
-  assert.equal(f.opens[1].adapterId, 'pi');
-  assert.equal(f.opens[1].modelName, 'current-account-model');
+  assert.equal(f.opens[1].adapterId, 'qwen');
+  assert.equal(f.opens[1].modelName, 'glm');
   assert.equal(Object.hasOwn(f.opens[1], 'accessDraftId'), false, 'An absent consent must not reserve a new-chat grant');
   assert.equal(Object.hasOwn(f.opens[1], 'accessConsentId'), false);
   assert.equal(f.opens[1].taskRef, undefined);

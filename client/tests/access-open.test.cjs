@@ -175,6 +175,55 @@ test('history navigation reads the authorized transcript before credentials and 
   assert.equal(original.calls[0].resumeAt, row.at);
 });
 
+test('sidebar previews restore the owner’s model from the selected Pi branch across A → B → A', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-preview-model-'));
+  const app = { getPath: () => root }, owner = automationIdentity();
+  let viewer = owner;
+  const dir = path.join(root, 'pi-agent', 'sessions', 'fixture');
+  fs.mkdirSync(dir, { recursive: true });
+  const rows = ['chat-a', 'chat-b'].map(id => ({ id, path: path.join(dir, id + '.jsonl'),
+    adapterId: 'pi', count: 2, at: 123456, cwd: root,
+    workOwner: require('../main/platform-connections/runtime.cjs').scope(owner), creator: { account: 'owner', hub: owner.hub } }));
+  for (const row of rows) {
+    const entries = [{ type: 'session', id: row.id },
+      { type: 'message', id: 'user', parentId: null, message: { role: 'user', content: 'hello' } }];
+    if (row.id === 'chat-a') entries.push(
+      { type: 'custom', customType: 'soduwork.model.selection', id: 'pick', parentId: 'user', data: { name: 'glm' } },
+      { type: 'custom', customType: 'soduwork.model.selection', id: 'abandoned', parentId: 'pick', data: { name: 'other-branch' } });
+    entries.push({ type: 'message', id: 'answer', parentId: row.id === 'chat-a' ? 'pick' : 'user',
+      message: { role: 'assistant', model: 'legacy-model', content: [{ type: 'text', text: 'reply' }] } });
+    fs.writeFileSync(row.path, entries.map(entry => JSON.stringify(entry)).join('\n'));
+  }
+  let live;
+  const session = { findBySessionId: id => id === live?.sessionId ? live : null,
+    historyEntry: require('../main/pi-session/session').historyEntry };
+  const history = require('../main/conversation/shared-history.cjs').create({ app, session, identityOf: () => viewer });
+  t.after(async () => { await history.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  t.mock.method(require('../main/conversation/requirement-context'), 'cachedIdentity', () => viewer);
+  await history.register(rows);
+  const f = fixture({ app, session, sharedHistory: history, cachedIdentity: () => viewer,
+    identityOf: async () => assert.fail('A history click cannot require model credentials'),
+    openReply: handle => ({ ok: true, snapshot: handle.uiSnapshot() }) });
+  for (const [id, name] of [['chat-a', 'glm'], ['chat-b', 'legacy-model'], ['chat-a', 'glm']]) {
+    const result = await f.open({ chatId: id, historyIntent: 'view' });
+    assert.equal(result.ok, true, result.reason);
+    assert.equal(result.snapshot.execution.canContinueOnDevice, true);
+    assert.equal(result.snapshot.modelSelection.name, name);
+    assert.equal(result.snapshot.adapterId, 'pi');
+  }
+  live = { sessionId: 'chat-a', adapterId: 'qwen', usageIdentity: { accountScope: rows[0].workOwner },
+    snapshot: () => ({ status: 'idle', modelSelection: { name: 'warm-model', model: { label: 'Warm model' } } }) };
+  const warm = await f.open({ chatId: live.sessionId, historyIntent: 'view' });
+  assert.equal(warm.ok, true, warm.reason);
+  assert.equal(warm.snapshot.adapterId, 'qwen');
+  assert.equal(warm.snapshot.modelSelection.model.label, 'Warm model');
+  viewer = automationIdentity('second');
+  const shared = await f.open({ chatId: rows[0].id, historyIntent: 'view' });
+  assert.equal(shared.ok, true, shared.reason);
+  assert.equal(shared.snapshot.modelSelection.name, undefined);
+  assert.equal(f.calls.length, 0);
+});
+
 test('a preview racing an account change is disposed before attachment and continuation cannot displace pending approval', async () => {
   const a = automationIdentity(), b = automationIdentity('next');
   const row = { id: 'switch-preview', adapterId: 'pi', localReplica: true,

@@ -306,6 +306,23 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
         ...(page.format === 'events' ? { streamId: parts[segment] + ':' + item.streamId, revision: segment * span + Number(item.id) } : {}) })),
       nextCursor: next != null ? segment * span + next : segment + 1 < parts.length ? (segment + 1) * span : null };
   }
+  async function previewChoice(row, actor, shared) {
+    const record = require('./runtime-segments').read(app, row.id);
+    if (record?.deviceShared ? record.executionOwner !== actor.owner : shared) return null;
+    const live = session.findBySessionId?.(row.id);
+    if (live && !live.localReplica && live.usageIdentity?.accountScope === actor.owner) {
+      const selection = live.snapshot().modelSelection;
+      if (selection?.name) return { adapterId: live.adapterId, name: selection.name,
+        label: selection.model?.label || selection.name };
+    }
+    const active = record?.active;
+    const adapterId = active?.adapterId || row.adapterId || 'pi';
+    const nativeId = active?.sessionId || row.id;
+    const name = active?.modelName || (adapterId === 'pi'
+      ? await require('../pi-session/session').archivedModelName(app, nativeId)
+      : require('./model-selection').preference(app, nativeId).read());
+    return { adapterId, name, label: name };
+  }
   async function open(id, { historyPreview = false, allowContinuation = false, previewReason = '' } = {}) {
     const captured = scoped.actor(), row = await resolve(id, captured);
     if (!row || row.deleted) return null;
@@ -315,18 +332,22 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
       catch (error) { if (error.code !== 'NATIVE_HISTORY_MISSING') throw error; bodyMissing = true; }
     }
     const nativeUnavailable = content?.nativeReadError && content.nativeReadError.code !== 'NATIVE_HISTORY_MISSING';
-    let openingBody = content && !row.cached && !content.historyProtection &&
-      !access.assertDeviceReadable(app, row.id, currentActor(captured), row)?.sharedOnDevice ? content : null;
-    const view = await require('./local-history-view.cjs').create({ historyPreview, allowContinuation:
-      allowContinuation && !row.cached && !content?.historyProtection && !nativeUnavailable &&
-      access.usesDeviceChatContext(app, { chatId: row.id }, row),
-      previewReason: content?.nativeReadError?.code === 'TRANSCRIPT_CHECKSUM_MISMATCH' ? content.nativeReadError.reason :
-        nativeUnavailable ? '可查看已有本机记录。原始档案暂时无法核验，请恢复后再继续' : previewReason,
-      row: { ...row,
+    const actor = currentActor(captured);
+    const shared = access.assertDeviceReadable(app, row.id, actor, row)?.sharedOnDevice;
+    let openingBody = content && !row.cached && !content.historyProtection && !shared ? content : null;
+    const previewRow = { ...row,
       ...(content ? { deviceHistory: true, historyContentState: !content.coverage?.complete ? 'partial' :
         require('./device-history-native.cjs').unresolvedTools(content.snapshot).length || content.coverage?.unresolvedTools?.length
           ? 'unresolved-tools' : 'available' } : {}),
-      ...(bodyMissing ? { historyContentState: 'missing' } : {}) },
+      ...(bodyMissing ? { historyContentState: 'missing' } : {}) };
+    const canContinue = allowContinuation && previewRow.historyContentState === 'available' &&
+      !row.cached && !content?.historyProtection && !nativeUnavailable &&
+      access.usesDeviceChatContext(app, { chatId: row.id }, row);
+    const choice = historyPreview && canContinue ? await previewChoice(row, actor, shared) : null;
+    const view = await require('./local-history-view.cjs').create({ historyPreview, allowContinuation: canContinue, choice,
+      previewReason: content?.nativeReadError?.code === 'TRANSCRIPT_CHECKSUM_MISMATCH' ? content.nativeReadError.reason :
+        nativeUnavailable ? '可查看已有本机记录。原始档案暂时无法核验，请恢复后再继续' : previewReason,
+      row: previewRow,
       read: bodyMissing ? async () => ({ items: [], nextCursor: null }) : (id, options) => read(id, options, captured, openingBody) });
     openingBody = null;
     scoped.guard(captured);
