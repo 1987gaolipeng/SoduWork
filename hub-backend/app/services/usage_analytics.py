@@ -12,7 +12,6 @@ from ..timestamps import iso_utc
 from .usage_ledger import chat_source_match, source_reference
 from .usage_values import MAX_REPORTED_COUNTER
 
-
 SOURCE_LABELS = {
     "chat": "\u5bf9\u8bdd",
     "task": "需求\u6267\u884c",

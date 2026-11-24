@@ -11,17 +11,23 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import automation_models as am, models
+from .. import automation_models as am
+from .. import models
 from ..account_conversation_models import AccountConversation
-
+from ..timestamps import iso_utc
+from .usage_values import (
+    _QUALITY_RANK,
+    _number,
+    normalize_usage,
+    validate_reported_usage,
+)
 
 _COUNTERS = (
     "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens",
     "reasoning_tokens", "total_tokens", "requests", "turns", "steps",
     "duration_ms", "cost_microusd",
 )
-from .usage_values import _QUALITY_RANK, _number, normalize_usage, validate_reported_usage
-from ..timestamps import iso_utc
+
 
 def _dt(value: Any) -> datetime:
     if isinstance(value, datetime):
