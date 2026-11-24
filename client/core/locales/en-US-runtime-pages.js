@@ -21,6 +21,7 @@
     '交付受阻': 'Delivery blocked',
     '验收受阻': 'Acceptance blocked',
     '待提交验收': 'Awaiting submission for acceptance',
+    '模型配置必须是 JSON 对象': 'Model configuration must be a JSON object.',
     "请先保存模型服务，再添加模型。": "Save the model service before adding a model.",
     "检测使用已保存的服务配置。": "This check uses the saved service settings.",
     "添加中…": "Adding…",
