@@ -68,7 +68,7 @@ async function soleModel(identity, fetchImpl, signal) {
   return names.size === 1 ? [...names][0] : '';
 }
 function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.fetch,
-  resolveModel = modelConfig.fetchModel, useModelOutputLimit = false, readCompletion = choice => ({
+  resolveModel = modelConfig.fetchModel, useModelOutputLimit = false, usageSource = 'app', readCompletion = choice => ({
     text: choice?.message?.content, finishReason: choice?.finish_reason === 'length' ? 'length' : 'stop',
   }) }) {
   const receipts = new WeakMap(), active = new Map();
@@ -173,7 +173,7 @@ function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.
           // Capture the receipt before interpreting the completion. Cached replies
           // above never reach this point; each real dispatch has its own identity.
           const requirement = item.appBridge?.appId === 'local-requirement-parser';
-          const record = require('./agent-runtime/local-call-usage.cjs').recorder(app, requirement ? 'requirement' : 'app',
+          const record = require('./agent-runtime/local-call-usage.cjs').recorder(app, requirement ? 'requirement' : usageSource,
             { hub: identity.hub, clientId: identity.clientId, accountScope: owner });
           record?.(model.modelRef || model.id, result.usage);
         }

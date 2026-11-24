@@ -71,6 +71,9 @@ test('tracks one-shot provider totals and equal-time repeated calls, omits proje
   const report = store.read(identity, 1);
   assert.deepEqual([report.summary.tokens, report.summary.cacheRead, report.summary.reasoning], [30, 6, 4]);
   assert.equal(report.byAgent[0].modelRef, require('../main/agent-runtime/local-usage.cjs').usageModelKey(model));
+  const { rank } = require('../core/usage-metrics');
+  assert.deepEqual(rank([report], 'agent'), []);
+  assert.equal(rank([report], 'model')[0].tokens, 30);
   assert.equal(report.bySource[0].key, 'requirement');
 });
 
@@ -150,4 +153,34 @@ test('Hub 100, device 40, Hub 60 retain separate totals across replay', async t 
   const local = createLocalUsage(app).read(scope, 7);
   assert.equal(local.summary.tokens, 40);
   assert.equal(local.summary.tokens + posted.at(-1).usage.total, 200);
+});
+
+test('recovers owned first-dispatch Kimi receipts before reopening a chat', t => {
+  const { root, app, identity } = fixture(t);
+  const crypto = require('node:crypto');
+  function archive(owner, hub, agent, localOnly, tokens) {
+    const ref = crypto.randomUUID();
+    const dir = path.join(root, 'runner/data/local-runs', ref);
+    const bindings = path.join(root, 'session-memory-bindings');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(bindings, { recursive: true });
+    const binding = crypto.createHash('sha256').update(ref).digest('hex') + '.json';
+    fs.writeFileSync(path.join(bindings, binding), JSON.stringify({ owner, hub, ids: [] }));
+    const receipt = { agent, localOnly, reportable: !localOnly, provider: '', at: Date.now(), usage: { total: tokens } };
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ ref, cli: agent, round: 1,
+      admissionKey: 'dispatch:' + ref, taskId: 'chat-sample', eventDestination: 'local', usageReceipts: [receipt] }));
+    return { ref, receipt };
+  }
+  const { ref, receipt } = archive(identity.accountScope, identity.hub, 'kimi', true, 120);
+  archive('different-owner', identity.hub, 'kimi', true, 200);
+  archive(identity.accountScope, 'https://other.invalid', 'kimi', true, 300);
+  archive(identity.accountScope, identity.hub, 'kimi', false, 400);
+  for (let i = 0; i < 2; i++) {
+    const reopened = createLocalUsage(app);
+    const report = reopened.read(identity, 7);
+    assert.equal(report.summary.tokens, 120);
+    assert.equal(report.byAgent[0].agent, 'kimi');
+    reopened.observe({ sessionId: ref, usageIdentity: identity }, { usageReceipts: [receipt] });
+    assert.equal(reopened.read(identity, 7).summary.tokens, 120);
+  }
 });
