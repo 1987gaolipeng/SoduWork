@@ -57,7 +57,8 @@ if (typeof electron === 'string') {
   }
   async function tabTo(selector, shift = false) {
     await key('Tab', shift);
-    assert.equal(await js(`document.activeElement === document.querySelector(${JSON.stringify(selector)})`), true, 'Tab focus: ' + selector);
+    assert.equal(await js(`document.activeElement === document.querySelector(${JSON.stringify(selector)})`), true,
+      'Expected tab focus on ' + selector + ', focused ' + await js('document.activeElement.id || document.activeElement.className'));
   }
   async function verifyAuthKeyboardOrder() {
     await loginReady();
@@ -70,13 +71,20 @@ if (typeof electron === 'string') {
     record('registration tabs directly to confirmation and keeps password visibility keyboard-accessible in both directions');
     await click('.ac-auth-back'); await click('[data-auth-mode="resetPassword"]');
     await fill('#soduWorkAuthPassword', 'Keyboard-input');
-    await tabTo('#acConfirmPassword'); await tabTo('[data-password-toggle]'); await tabTo('.soduwork-auth-submit');
-    await tabTo('.ac-auth-back'); await tabTo('.soduwork-auth-submit', true); await tabTo('[data-password-toggle]', true);
+    const retryVisible = await js('document.querySelector(".soduwork-auth-retry").getClientRects().length > 0');
+    await tabTo('#acConfirmPassword'); await tabTo('[data-password-toggle]');
+    if (retryVisible) await tabTo('.soduwork-auth-retry');
+    await tabTo('.soduwork-auth-submit'); await tabTo('.ac-auth-back'); await tabTo('.soduwork-auth-submit', true);
+    if (retryVisible) await tabTo('.soduwork-auth-retry', true);
+    await tabTo('[data-password-toggle]', true);
     await tabTo('#acConfirmPassword', true); await tabTo('#soduWorkAuthPassword', true);
     record('password recovery keeps confirmation first and permits tabbing out of the form');
     await click('.ac-auth-back'); await fill('#soduWorkAuthPassword', 'Keyboard-input');
-    await tabTo('[data-password-toggle]'); await tabTo('.soduwork-auth-submit');
-    record('password login retains its existing keyboard order');
+    await tabTo('[data-password-toggle]'); await tabTo('#soduWorkRememberAccount');
+    await tabTo('#soduWorkAutoLogin');
+    if (await js('document.querySelector(".soduwork-auth-retry").getClientRects().length > 0')) await tabTo('.soduwork-auth-retry');
+    await tabTo('.soduwork-auth-submit');
+    record('password login exposes both sign-in preferences in keyboard order');
   }
   async function deliveredCode(challengeId) {
     const deadline = Date.now() + 15000;
@@ -242,6 +250,7 @@ if (typeof electron === 'string') {
     await shot('registration-password-guidance');
     record('registration shows the password range and rejects seven characters before sending a registration request');
     const password = 'Register'; await fill('#soduWorkAuthPassword', password); await fill('#acConfirmPassword', password);
+    await click('#soduWorkRememberAccount');
     await submitAndReload();
     await until('ClientAuth.snapshot().user?.email === "password-e2e@example.test"');
     assert.equal(await js('ClientAuth.snapshot().user.hasPassword'), true); record('actual registration creates a verified email account with a password');
