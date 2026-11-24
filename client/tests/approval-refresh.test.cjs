@@ -50,6 +50,23 @@ test('current approval inbox rows open the requirement details with the acceptan
   assert.equal(x.shown(), false);
 });
 
+test('approval rows show escaped change summaries and keep the fallback for missing or invalid summaries', async () => {
+  const contexts = [{summary: '  Calendar & invoices <draft>  '}, {summary: 'Update receipt totals'},
+    undefined, {summary: '  '}, {summary: 84}];
+  const items = contexts.map((context, index) => ({
+    id: 'approval-' + index, taskId: 'task-' + index, action: 'merge', task: {title: 'Item ' + index}, context
+  }));
+  const x = runtime(async () => ({items}));
+  await x.ctx.TaskApprovalInbox.open(x.anchor);
+
+  const rows = x.list.innerHTML.split('</button>');
+  assert.match(rows[0], /合并确认 · <span data-user-content>Calendar &amp; invoices &lt;draft&gt;<\/span>/);
+  assert.match(rows[1], /合并确认 · <span data-user-content>Update receipt totals<\/span>/);
+  for (const row of rows.slice(2, 5)) {
+    assert.match(row, /合并确认 · 在需求详情里查看证据并处理<\/small>/);
+  }
+});
+
 test('empty inbox is a real empty state and close returns focus to the entry', async () => {
   const x = runtime(async () => ({pendingCount: 0, items: []}));
   await x.ctx.TaskApprovalInbox.open(x.anchor);

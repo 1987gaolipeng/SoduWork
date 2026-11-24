@@ -12,11 +12,13 @@ async function checkCapabilityCatalog({ win, js, waitFor, sleep, screenshot, cha
   }
   const ghost = 'removed-skill-with-a-long-unmatched-historical-policy-name'
   const owners = ['owner-device-A-12ab34', 'owner-device-B-12ab34', 'owner-device-C-90cd56']
+  const originalDescription = 'Original fixture instructions for designing agent products.'
   const skills = [
     { name: 'available-skill', description: 'Available company capability' },
     { name: 'second-skill', description: 'Another available company capability' },
     { name: 'optional-skill', description: 'Capability that can be enabled in a draft' },
-    ...Array.from({ length: 21 }, (_, index) => ({ name: 'fixture-skill-' + String(index + 1).padStart(2, '0'), description: 'Catalog capability ' + (index + 1) })),
+    { name: 'agent-product-design', description: originalDescription, sourceKey: 'builtin', builtIn: true },
+    ...Array.from({ length: 20 }, (_, index) => ({ name: 'fixture-skill-' + String(index + 1).padStart(2, '0'), description: 'Catalog capability ' + (index + 1) })),
   ].map(item => ({ ...item, scope: 'company', source: 'company', portable: true, inUse: 2 }))
   const personalSubmissions = [
     ...owners.map(ownerClientId => ({ key: 'personal:presales-style', ownerClientId, name: 'presales-style', description: 'Prepare a customer presentation using the same personal method.' })),
@@ -31,7 +33,7 @@ async function checkCapabilityCatalog({ win, js, waitFor, sleep, screenshot, cha
     const metric = root.querySelectorAll('.cap-admin-metric')[1]
     return {
       opened: Number(metric.querySelector('b').textContent), label: metric.querySelector('small').textContent.trim(),
-      selected: root.querySelectorAll('.cap-admin-card[aria-pressed="true"]').length,
+      selected: root.querySelectorAll('.cap-admin-card button[aria-pressed="true"]').length,
       cards: root.querySelectorAll('.cap-admin-card').length,
       dirty: Boolean(root.querySelector('.cap-admin-dirty')),
       saveDisabled: root.querySelector('.cap-admin-bar .btn-primary')?.disabled,
@@ -54,9 +56,9 @@ async function checkCapabilityCatalog({ win, js, waitFor, sleep, screenshot, cha
   }
   const clickSkill = async name => {
     await js('(' + function (name) {
-      const button = [...document.querySelectorAll('.cap-admin-card')].find(element => element.querySelector('.cap-admin-card-title > b')?.textContent === name)
-      if (!button) throw new Error('Capability card missing: ' + name)
-      button.click()
+      const card = [...document.querySelectorAll('.cap-admin-card')].find(element => element.querySelector('.cap-admin-card-title > b')?.textContent === name)
+      if (!card) throw new Error('Capability card missing: ' + name)
+      card.querySelector('button[aria-pressed]').click()
     }.toString() + ')(' + JSON.stringify(name) + ')')
   }
   const readGeometry = () => js('(' + function () {
@@ -132,13 +134,24 @@ async function checkCapabilityCatalog({ win, js, waitFor, sleep, screenshot, cha
       }.toString() + ')()')
       record('capability lists remain independently scrollable and keyboard focusable ' + locale, Object.values(scroll).every(Boolean), scroll)
 
+      await setSearch('agent-product-design')
+      await waitFor('document.querySelectorAll(".cap-admin-card").length === 1', 'bundled Skill found')
+      const summaryText = await js('document.querySelector(".cap-admin-card-desc").textContent.trim()')
+      languageEvidence[locale].skill = summaryText
+      await js('document.querySelector(".cap-admin-card summary").click()')
+      const original = await js('document.querySelector(".cap-admin-card details[open]").innerText')
+      const reading = await readState()
+      record('reading the original Skill description preserves the policy ' + locale,
+        original.includes(originalDescription) && summaryText && !summaryText.includes(originalDescription) &&
+        reading.opened === initial.opened && !reading.dirty && reading.saveDisabled, { summaryText, original })
+
       await setSearch('optional-skill')
       await waitFor('document.querySelectorAll(".cap-admin-card").length === 1', 'capability filtered to one card')
       const filtered = await readState()
       record('capability filtering does not change global opened count ' + locale,
         filtered.opened === 2 && filtered.selected === 0 && filtered.cards === 1 && filtered.origins.length === 16 && !filtered.dirty, filtered)
       await clickSkill('optional-skill')
-      await waitFor('document.querySelector(".cap-admin-card").getAttribute("aria-pressed") === "true"', 'filtered capability draft enabled')
+      await waitFor('!!document.querySelector(\'.cap-admin-card button[aria-pressed="true"]\')', 'filtered capability draft enabled')
       const draft = await readState()
       languageEvidence[locale].draft = draft.label
       record('capability draft count tracks the full catalog while filtered ' + locale,
@@ -151,7 +164,7 @@ async function checkCapabilityCatalog({ win, js, waitFor, sleep, screenshot, cha
       const restored = await readState()
       record('capability tab roundtrip preserves filtered policy draft ' + locale, restored.opened === 3 && restored.selected === 1 && restored.dirty, restored)
       await clickSkill('optional-skill')
-      await waitFor('document.querySelector(".cap-admin-card").getAttribute("aria-pressed") === "false"', 'capability draft reverted')
+      await waitFor('!!document.querySelector(\'.cap-admin-card button[aria-pressed="false"]\')', 'capability draft reverted')
       const reverted = await readState()
       record('reverting a capability toggle restores the saved effective count ' + locale,
         reverted.opened === 2 && reverted.label === initial.label && !reverted.dirty && reverted.saveDisabled, reverted)
@@ -176,8 +189,8 @@ async function checkCapabilityCatalog({ win, js, waitFor, sleep, screenshot, cha
       record('discarding capability cleanup restores the saved policy and effective count ' + locale,
         discarded.opened === 2 && discarded.selected === 2 && discarded.label === initial.label && discarded.saveDisabled && discarded.warning.includes(ghost), discarded)
     }
-    record('capability source warning and draft labels differ in all four locales',
-      ['source', 'unknown', 'warning', 'draft'].every(key => new Set(Object.values(languageEvidence).map(item => item[key])).size === 4), languageEvidence)
+    record('capability source, warning, draft and bundled Skill descriptions differ in all four locales',
+      ['source', 'unknown', 'warning', 'draft', 'skill'].every(key => new Set(Object.values(languageEvidence).map(item => item[key])).size === 4), languageEvidence)
     record('capability acceptance never submits policy or mutates server state',
       requests.slice(requestStart).every(request => request.method === 'GET'), requests.slice(requestStart))
   } finally {

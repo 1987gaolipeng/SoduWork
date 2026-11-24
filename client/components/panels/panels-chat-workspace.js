@@ -66,7 +66,7 @@
     autoPreviewed: false, autoPreviewKey: '',
     active: '', files: [], summaryFiles: [], changes: [], services: [], tabs: [], states: Object.create(null),
     signature: '', seq: 0, epoch: 0, previewKey: '', previewText: '', previewError: '', previewLoading: false,
-    fileChanges: null, editor: null, editorDrafts: Object.create(null), editorDirty: false,
+    fileChanges: null, editor: null, editorDrafts: Object.create(null),
     observer: null, visibilityObserver: null, unlisten: null, unlistenElement: null, nativeShown: '', nativePending: false, frame: 0, nativeRequest: 0,
   };
   const READ_IMAGE_CACHE_BYTES = 64 * 1024 * 1024, READ_IMAGE_CACHE_TABS = 4;
@@ -281,9 +281,8 @@
     // change links still use the editor/diff surface.
     const deliverablePreview = file.primary !== false && ['web', 'markdown', 'image', 'video', 'pdf'].includes(kind);
     const editorFile = !deliverablePreview && (isCodeFile(file) || (kind === 'markdown' && Boolean(change)));
-    const tabKind = editorFile && kind === 'markdown' ? 'text' : kind;
     return addTab({ key: 'file:' + workScope() + ':' + id,
-      kind: tabKind, label: kind === 'web' ? file.title || file.name : file.name, file,
+      kind, label: kind === 'web' ? file.title || file.name : file.name, file,
       // A newly created source file has no meaningful "before" side; open it
       // directly in CodeMirror. Existing edits still open in Diff by default.
       view: editorFile ? (change && change.action !== 'created' ? 'diff' : 'code') : 'preview' }, activate);
@@ -380,6 +379,24 @@
     paint();
     return true;
   }
+  function openCommandRecord(tool) {
+    if (!WB.root || !global.ChatTools?.render(tool)?.recordAvailable) return false;
+    const args = tool.args || {};
+    const raw = args.command ?? args.cmd ?? args.script ?? args.argv ?? args.code ?? args.chars;
+    // Keep both the beginning and the exit diagnostics, even for a single very long line.
+    const bound = value => {
+      const text = typeof value === 'string' ? value : '';
+      return text.length <= 32768 ? text : text.slice(0, 16384) + '\n…\n' + text.slice(-16384);
+    };
+    const input = Array.isArray(raw) ? raw.slice(0, 128).map(bound).join(' ') + (raw.length > 128 ? ' …' : '') : raw;
+    const record = { input: bound(input), output: bound(tool.result || tool.partial) };
+    WB.manualClosed = false;
+    if (!WB.open) resetSplit(WB.root);
+    addTab({ key: 'command:' + workScope() + ':' + tool.id, kind: 'command-record',
+      label: '执行记录', record, autoPreview: false }, true);
+    paint();
+    return true;
+  }
   function openService(item, activate) {
     // item.title is already the translated display string; the label source
     // must stay the original Chinese so a later switch back can re-translate.
@@ -392,7 +409,8 @@
       kind: 'browser', label: '新标签页', url: '' }, true);
   }
   function openFiles() {
-    if (!WB.files.length) return null;
+    if (!WB.files.length && !WB.changes.length) return null;
+    WB.manualClosed = false;
     return addTab({ key: 'files:' + workScope(), kind: 'files', label: '文件' }, true);
   }
   // A settled delivery can refresh its artifact index more than once (for
@@ -478,9 +496,8 @@
     WB.manualClosed = false;
     if (!WB.open) { resetSplit(WB.root); WB.open = true; }
     const change = fileChangeFor(file);
-    const editorFile = isCodeFile(file) || Boolean(change) || kind === 'text';
     addTab({ key: 'file:' + workScope() + ':' + fileKey(file),
-      kind: editorFile && kind === 'markdown' ? 'text' : kind, label: file.name, file,
+      kind, label: file.name, file,
       view: change && change.action !== 'created' ? 'diff' : 'code', autoPreview: false }, true);
     paint();
     return true;
@@ -587,13 +604,19 @@
   }
   function filesHtml() {
     const rows = WB.files.slice().sort((left, right) => Number(right.at || 0) - Number(left.at || 0));
-    return '<section class="ncw-files" aria-label="会话文件"><header><div><b>工作区文件</b><span>点击打开，或直接引用到对话</span></div><button type="button" data-wb-new title="新建浏览页签">＋ 浏览</button></header>' +
+    // The index may contain only historical files while this turn has tool receipts.
+    const fallbackChanges = WB.summaryFiles.length ? [] : WB.changes;
+    return '<section class="ncw-files" aria-label="会话文件"><header><div><b>工作区文件</b>' +
+      (rows.length ? '<span>点击打开，或直接引用到对话</span>' : '') +
+      '</div><button type="button" data-wb-new title="新建浏览页签">＋ 浏览</button></header>' +
       (rows.length ? '<div class="ncw-file-list">' + rows.map((file) => {
         const id = fileKey(file), name = file.name || baseName(file.path || file.relative) || '文件';
         return '<article class="ncw-file-row"><button type="button" data-wb-file="' + esc(id || file.path) + '" title="打开 ' + esc(name) + '">' + ICONS.file + '<span><b data-user-content>' + esc(name) + '</b><small>' + esc(size(file.size)) + '</small></span></button>' + libraryUploadButton(file) +
           '<button type="button" data-wb-reference-file="' + esc(id || file.path) + '" title="引用到对话">' + ICONS.quote + '</button>' +
           '<button type="button" data-wb-copy-file="' + esc(id || file.path) + '" title="复制文件位置">' + ICONS.copy + '</button></article>';
-      }).join('') + '</div>' : '<div class="ncw-files-empty">本次对话还没有可查看的文件。</div>') + '</section>';
+      }).join('') + '</div>' : '') +
+      (fallbackChanges.length ? '<div class="ncw-file-list ncw-change-list"><b>本轮修改</b>' + info.changeRows(fallbackChanges) + '</div>' : '') +
+      (!rows.length && !fallbackChanges.length ? '<div class="ncw-files-empty">本次对话还没有可查看的文件。</div>' : '') + '</section>';
   }
   function libraryUploadButton(file) {
     return global.LibraryTransfer?.button(file, context().ref, 'data-wb-library-upload') || '';
@@ -732,13 +755,14 @@
     }
     if (global.ChatChrome) ChatChrome.workbenchState({
       open: Boolean(WB.open), maximized: Boolean(WB.open && WB.maximized), count, has: Boolean(has),
+      canOpenFiles: Boolean(WB.files.length || WB.changes.length),
       summary: {
         // Pass the full file list; the overlay owns progressive display and its twelve-item initial limit.
         // This keeps list expansion consistent with the total badge.
         files: WB.summaryFiles.map((item) => ({ name: item.name, path: artifactKey(item), size: size(item.size),
           workspace: previewKind(item) !== 'external' })),
         services: WB.services.filter((item) => item.url),
-        changes: WB.changes.slice(-8),
+        changes: WB.changes,
       },
     });
     if (WB.open) scheduleNative(); else hideNative();
@@ -794,7 +818,7 @@
     const signature = scope + '::' + nextFiles.map((item) => artifactKey(item) + ':' + item.at + ':' + item.size + ':' + (item.title || '') + ':' + (item.change?.action || '')).join('|') + '::' +
       nextSummaryFiles.map(artifactKey).join('|') + '::' +
       selection.images.map(item => artifactKey(item) + ':' + Boolean(item.changedInTurn)).join('|') + '::' +
-      nextChanges.map((item) => item.id + ':' + item.state).join('|') + '::' +
+      JSON.stringify(nextChanges.map(item => [item.id, item.action, item.path, item.state])) + '::' +
       (WB.fileChanges?.capturedAt || 0) + '::' +
       nextServices.map((item) => item.id + ':' + item.state + ':' + item.url).join('|');
     if (signature === WB.signature) { scheduleNative(); return; }
@@ -914,7 +938,7 @@
       active: '', files: [], summaryFiles: [], changes: [], services: [],
       tabs: [], states: Object.create(null), signature: '', previewKey: '', previewText: '', previewError: '',
       previewRequest: null, cloudOpenRequest: null, openingTaskFiles: new Set(),
-      previewLoading: false, fileChanges: null, editor: null, editorDrafts: Object.create(null), editorDirty: false,
+      previewLoading: false, fileChanges: null, editor: null, editorDrafts: Object.create(null),
       nativeShown: '', nativePending: false, frame: 0, ...keep,
     });
     if (previousRoot) {
@@ -965,7 +989,7 @@
   }
   global.ChatWorkbench = { bind: bindWorkbench, render: renderWorkbench, reset: resetWorkbench,
                            toggle: toggleWorkbench, maximize: maximizeWorkbench,
-                           openOutput, openInput, openLink, openPath, openSavedDelivery, state: workbenchState, syncAnnotations };
+                           openOutput, openInput, openLink, openPath, openCommandRecord, openSavedDelivery, state: workbenchState, syncAnnotations };
   global.addEventListener?.('soduwork-data-scope-changed', resetWorkbench);
   // Re-translate the cached, protected labels when the client language changes
   // mid-session; the DOM adapter never touches them (user content).

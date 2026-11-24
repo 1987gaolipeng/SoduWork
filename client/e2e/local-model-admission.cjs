@@ -68,7 +68,9 @@ app.whenReady().then(async () => {
           assert.equal(body.model, 'private-image-wire');
           assert.equal(req.headers.authorization, 'Bearer ' + providerKey);
           imageRequests++;
-          return reply(res, { data: [{ b64_json: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z8WQAAAAASUVORK5CYII=' }] });
+          const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mPw01oLAAHvASadyK5SAAAAAElFTkSuQmCC', 'base64');
+          if (body.prompt === 'Generate an incomplete image.') png[42] ^= 1;
+          return reply(res, { data: [{ b64_json: png.toString('base64') }] });
         }
         assert.equal(req.url, '/private-admission/v1/chat/completions');
         const body = JSON.parse(raw);
@@ -217,6 +219,17 @@ app.whenReady().then(async () => {
   assert.ok(fs.readdirSync(path.join(cwd, 'outputs')).some(name => /^image-.*\.png$/.test(name)));
   await bridge.sync();
   mark('Production local image turn reaches only its provider, writes a local artifact and bypasses Hub quota');
+
+  const outputDir = path.join(cwd, 'outputs');
+  const priorNames = fs.readdirSync(outputDir).sort(), indexFile = path.join(outputDir, '.soduwork-media-index.json');
+  const priorIndex = fs.readFileSync(indexFile);
+  const invalid = await invoke('pi-session-send', imageOpened.ref, 'Generate an incomplete image.', [], { submissionId: 'invalid-image-turn' });
+  assert.equal(invalid.ok, true, invalid.reason);
+  await until(() => js('admissionEvents.some(row=>row.kind==="error" && row.submissionId==="invalid-image-turn" && /图片文件无效/.test(row.reason))'), 'invalid image error');
+  assert.equal(imageRequests, 2);
+  assert.deepEqual(fs.readdirSync(outputDir).sort(), priorNames);
+  assert.deepEqual(fs.readFileSync(indexFile), priorIndex);
+  mark('Corrupt pixels produce an error over renderer IPC and leave the existing output and index intact');
 
   assert.equal((await invoke('pi-session-select-model', opened.ref, localRef)).ok, true);
   store.save({ models: [] });

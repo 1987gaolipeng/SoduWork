@@ -681,6 +681,18 @@ def status_sync(ctx: dict, ref: str) -> dict:
     return p.status_sync(_cfg_of(ctx, p), ref)
 
 
+def preview_status_sync(ctx: dict, ref: str, dispatch: dict, *, detailed: bool = True) -> dict:
+    """Use only a known route: cold Runner discovery may reclaim and restart an archived job."""
+    from . import ai_remote
+    runner_id = str(dispatch.get("runnerId") or "")
+    provider = dispatch.get("provider")
+    if runner_id == "backend-local" or not runner_id and (
+            provider == "local" or not provider and ref in _ai_local._RUNS):
+        cfg = _cfg_of(ctx, _ai_local)
+        return _ai_local.status_sync(cfg, ref, read_only=True) if detailed else _ai_local.runner_info_sync(cfg, ref)
+    return ai_remote.preview_status_sync(ref, runner_id=runner_id, detailed=detailed)
+
+
 def fetch_attachment_for_sync(ctx: dict, ref: str, attachment_id: str) -> bytes | None:
     """Fetch an artifact from the exact execution, avoiding cross-run filename ambiguity."""
     p = _by_ref(ref) or _p(ctx)

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 from functools import lru_cache
+import math
 import os
 from pathlib import Path
 import shutil
@@ -40,6 +41,31 @@ class StartupError(RuntimeError):
 
 class DiskFullError(StartupError):
     """A storage failure that must not be replaced with download advice."""
+
+
+def electron_download_timeout() -> float:
+    """Electron download deadline in seconds; honor ELECTRON_DOWNLOAD_TIMEOUT.
+
+    docs/getting-started.md documents this variable as a way for slow
+    connections to raise the 600-second deadline, so read it at use time
+    instead of relying on the module constant. Invalid values fail loudly
+    rather than being silently ignored.
+    """
+    raw = os.environ.get('ELECTRON_DOWNLOAD_TIMEOUT', '').strip()
+    if not raw:
+        return float(ELECTRON_DOWNLOAD_TIMEOUT)
+    try:
+        value = float(raw)
+    except ValueError:
+        raise StartupError(
+            'ELECTRON_DOWNLOAD_TIMEOUT must be a positive number of seconds; '
+            'got a non-numeric value'
+        ) from None
+    if not math.isfinite(value) or value <= 0:
+        raise StartupError(
+            'ELECTRON_DOWNLOAD_TIMEOUT must be a positive, finite number of seconds'
+        )
+    return value
 
 
 def command_failure(message: str, log: Path, offset: int) -> StartupError:
@@ -442,7 +468,7 @@ def prepare(state: Path, log: Path) -> tuple[Path, Path]:
         if (source / name).is_dir():
             files.extend(source_files(source / name))
     files.extend((ROOT / "client" / name) for name in (
-        "core/connector-brand.js", "components/panels/connector-config.js",
+        "core/connector-brand.js", "core/locales/builtin-skills.js", "components/panels/connector-config.js",
         "components/client-auth/legal-html.js", "components/client-auth/legal-html.css"))
     files.extend(source_files(ROOT / "client/assets/connector-brands"))
     wanted = digest_files(files, ROOT)
@@ -492,13 +518,13 @@ def prepare_desktop(state: Path, log: Path) -> Path:
         # npm versions differ in install-script policy. Download the locked Electron
         # runtime explicitly without enabling unrelated dependencies' lifecycle scripts.
         if not electron_binary(client).is_file():
-            print("桌面运行环境下载最多等待 10 分钟 / Electron download allows up to 10 minutes. "
+            print(f"桌面运行环境下载最多等待 {electron_download_timeout():.0f} 秒 / Electron download allows up to {electron_download_timeout():.0f} seconds. "
                   "If GitHub is unreachable, configure ELECTRON_MIRROR or your proxy and retry.", flush=True)
             try:
                 run([node, str(client / 'scripts/install-electron.cjs')], cwd=client, log=log,
                     label='[Desktop] 下载桌面运行环境 / Downloading the Electron runtime',
                     env=electron_install_environment(cache_env),
-                    timeout=ELECTRON_DOWNLOAD_TIMEOUT)
+                    timeout=electron_download_timeout())
             except DiskFullError:
                 raise
             except StartupError as exc:

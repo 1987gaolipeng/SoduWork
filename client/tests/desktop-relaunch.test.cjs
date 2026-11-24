@@ -7,6 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 const { create: createWorkspaceState } = require('../main/workspace-state.cjs');
+const firstChatLinks = require('../main/first-chat-links.cjs');
 
 const source = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8').replace(/\r\n/g, '\n');
 function section(startMarker, endMarker) {
@@ -60,7 +61,7 @@ function fixture({ platform = 'win32', workspace = 'minimized', overlay = 'norma
     isDestroyed: () => false, isMinimized: () => false, isVisible: () => true,
     show: () => calls.push('overlay.show'), focus: () => calls.push('overlay.focus'),
   };
-  let secondInstance;
+  let secondInstance, deskReady;
   const context = {
     __dirname: path.join(__dirname, '..'), path,
     process: { platform },
@@ -69,6 +70,10 @@ function fixture({ platform = 'win32', workspace = 'minimized', overlay = 'norma
       assert.equal(name, 'second-instance'); secondInstance = callback;
     } },
     _quitRelaunch: { deferLaunch: () => false },
+    _firstChatLinks: firstChatLinks,
+    desktopStarted: true,
+    pendingSetupLink: '',
+    ipcMain: { on(name, listener) { assert.equal(name, 'desk-content-ready'); deskReady = listener; } },
     BrowserWindow: Window,
     _workWindows: workWindows,
     _WORK_SPEC: require('../main/window-specs'),
@@ -97,16 +102,57 @@ function fixture({ platform = 'win32', workspace = 'minimized', overlay = 'norma
     setTimeout(callback) { timers.add(callback); return callback; },
     clearTimeout(callback) { timers.delete(callback); },
   };
-  vm.runInNewContext(windowsSource + '\n' + relaunchSource, context);
+  const openSettings = section('function openFirstChatSettings(link) {', 'const _workWindows');
+  Window.fromWebContents = contents => [...workWindows.values()].find(win => win.webContents === contents);
+  const contentReady = section("ipcMain.on('desk-content-ready',", '\n/*');
+  vm.runInNewContext([windowsSource, openSettings, relaunchSource, contentReady].join('\n'), context);
   const argv = ['SoduWork.exe'], additionalData = { files };
   return { created, calls, errors, preferences, workWindows, original, navigation, timers,
-    launch() { secondInstance({}, argv, 'test-working-directory', additionalData); },
+    pendingLink: () => context.pendingSetupLink,
+    ready(win) { deskReady({ sender: win.webContents }); },
+    launch(link) { secondInstance({}, link ? [...argv, link] : argv, 'test-working-directory', additionalData); },
     assertFileArguments() {
       assert.deepEqual(calls.find(row => row[0] === 'files.parse'),
         ['files.parse', argv, 'test-working-directory', true, additionalData]);
     },
   };
 }
+
+test('first-chat links open only the requested settings page and preserve ordinary relaunch', () => {
+  for (const [link, view] of [['soduwork://first-chat/runtime', 'agents'], ['soduwork://first-chat/model', 'models']]) {
+    const f = fixture();
+    f.launch(link);
+    const [[event, payload]] = f.original.sent;
+    assert.equal(event, 'desk-open');
+    assert.equal(payload.view, view);
+    assert.equal(payload.panel, 'workspace');
+  }
+  for (const link of ['soduwork://first-chat/model?other=1', 'soduwork://unknown/view']) {
+    const f = fixture();
+    f.launch(link);
+    assert.deepEqual(f.original.sent, []);
+  }
+});
+
+test('the last settings link received during workspace startup opens after its renderer is ready', () => {
+  const f = fixture({ workspace: 'missing' });
+  f.launch();
+  const [win] = f.created;
+  f.launch('soduwork://first-chat/runtime');
+  f.launch('soduwork://first-chat/model');
+  assert.deepEqual(win.sent, []);
+  f.ready(win);
+  assert.deepEqual(win.sent.map(([event, payload]) => [event, payload.view]), [['desk-open', 'models']]);
+  f.ready(win);
+  assert.equal(win.sent.length, 1);
+});
+
+test('a settings link received during Linux startup recovery is kept until desktop startup', () => {
+  const f = fixture({ platform: 'linux', recovery: true });
+  f.launch('soduwork://first-chat/runtime');
+  assert.equal(f.pendingLink(), 'soduwork://first-chat/runtime');
+  assert.deepEqual(f.calls, ['recovery.check']);
+});
 
 for (const platform of ['win32', 'darwin', 'linux']) {
   for (const workspace of ['minimized', 'hidden', 'destroyed', 'missing']) {

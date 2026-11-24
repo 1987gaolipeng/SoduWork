@@ -266,8 +266,8 @@ function IntForm({ initial, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={editing ? tx("编辑集成源") : tx("新建集成源")} icon="plug" onClose={onClose}
-      foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : (editing ? tx("保存配置") : tx("创建"))}</button></>}>
+    <Modal draft={{ name, type, config }} title={editing ? tx("编辑集成源") : tx("新建集成源")} icon="plug" onClose={onClose}
+      foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : (editing ? tx("保存配置") : tx("创建"))}</button></>}>
       <div><label className="f-lbl">{tx("名称")}</label>
         <input className="f-in" value={name} onChange={(e) => setName(e.target.value)} disabled={editing} placeholder={tx("如：研发工单 / 产品需求池 / 客服工单")} autoFocus /></div>
       <div><label className="f-lbl">{tx("类型")}{editing && <span className="muted">{tx(" · 已创建不可改")}</span>}</label>

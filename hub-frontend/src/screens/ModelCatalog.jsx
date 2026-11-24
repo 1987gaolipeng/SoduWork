@@ -2,9 +2,10 @@ import { translateText as tx, localeMap, useLocale, serverMessage } from '../i18
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useId } from 'react'
 import { api } from '../api.js'
 import { useViewportHeight } from '../viewport-height.js'
-import { Loading, ErrorState, Icon, Modal, Confirm, toast, SelectMenu } from '../ui.jsx'
+import { Loading, ErrorState, Icon, Modal, Confirm, toast, SelectMenu, takeNav, navTo } from '../ui.jsx'
 import LlmSettings from './LlmSettings.jsx'
 import ModelRuntime from './ModelRuntime.jsx'
+import ModelProviderDeletion from './ModelProviderDeletion.jsx'
 import './model-catalog-actions.css'
 import { CAPABILITY_LABELS, CAPABILITY_STATES, CapabilityBadges, ModelCapabilityStatus } from './ModelCapabilities.jsx'
 import './model-capabilities.css'
@@ -47,7 +48,7 @@ function checkRevision(provider, model) {
   return JSON.stringify([provider.revision, model.revision, model.configRevision])
 }
 
-export default function ModelCatalog() {
+export default function ModelCatalog({ me }) {
   const viewportRef = useViewportHeight()
   const listRef = useRef(null)
   const bindList = useCallback(element => {
@@ -56,11 +57,17 @@ export default function ModelCatalog() {
   }, [viewportRef])
   const uiLocale = useLocale();
   const [d, setD] = useState(null)
+  const [guide] = useState(() => {
+    const nav = takeNav('models')
+    return me?.id && nav?.accountId === me.id ? nav : null
+  })
+  const openedGuide = useRef(false)
   const [editP, setEditP] = useState(null)     // provider | 'new'
   const [addM, setAddM] = useState(null)       // {providerId, model?}
   const [del, setDel] = useState(null)         // {kind:'p'|'m', id, name}
   const [discover, setDiscover] = useState(null)  // provider whose upstream list to import
   const [defaultOpen, setDefaultOpen] = useState(false)
+  const [defaultDirty, setDefaultDirty] = useState(false)
   // Details do not resize or reorder the service grid.
   const [viewProviderId, setViewProviderId] = useState(null)
   const [capabilityTargets, setCapabilityTargets] = useState({})
@@ -79,6 +86,19 @@ export default function ModelCatalog() {
   const activeLoad = useRef(null)
   const firstChecks = useRef(new Map())
   const checkQueue = useRef(Promise.resolve())
+  useEffect(() => {
+    if (!guide || openedGuide.current || me?.id !== guide.accountId) return
+    if (guide.firstChat === 'provider') {
+      openedGuide.current = true
+      setEditP('new')
+    } else if (d && ['model', 'discover'].includes(guide.firstChat)) {
+      openedGuide.current = true
+      const p = d.providers.find(p => p.id === guide.providerId && p.enabled && p.baseUrl && p.keySet)
+      if (!p) toast(tx('所选服务已停用或配置不完整，请重新选择。'))
+      else if (guide.firstChat === 'model') setAddM({ providerId: p.id, provider: p })
+      else setDiscover(p)
+    }
+  }, [d, guide, me?.id])
   const load = () => {
     setError(null)
     const request = api.modelCatalog()
@@ -171,7 +191,8 @@ export default function ModelCatalog() {
   }
 
   const dialogs = <>
-      {defaultOpen && <Modal title={tx("组织默认调用（旧版兼容）")} icon="key" wide onClose={() => setDefaultOpen(false)}><LlmSettings embedded /></Modal>}
+      {defaultOpen && <Modal title={tx("组织默认调用（旧版兼容）")} icon="key" wide dirty={defaultDirty}
+        onClose={() => { setDefaultOpen(false); setDefaultDirty(false) }}><LlmSettings embedded onDirtyChange={setDefaultDirty} /></Modal>}
       {editP && <ProviderForm initial={editP === 'new' ? null : editP}
         onClose={() => setEditP(null)} onSaved={(providerId) => {
           if (editP === 'new') { setNewProviderId(providerId); pendingProviderFocus.current = providerId }
@@ -181,15 +202,14 @@ export default function ModelCatalog() {
         onClose={closeAddModel} onSaved={receipts => { closeAddModel(); modelsSaved(addM.provider, receipts) }} />}
       {discover && <DiscoverForm provider={discover}
         onClose={closeDiscovery} onSaved={receipts => { closeDiscovery(); modelsSaved(discover, receipts) }} />}
-      {del && <Confirm title={del.kind === 'p' ? tx("删除模型服务") : tx("删除模型")} danger confirmText={tx("删除")}
-        text={del.kind === 'p'
-          ? tx("确定删除「{0}」？它底下的模型会一起删掉，正在用这些模型的人会挑不到。", [del.name])
-          : tx("确定删除「{0}」？正在用它的人会挑不到。", [del.name])}
+      {del?.kind === 'p' && <ModelProviderDeletion key={del.id} providerId={del.id}
+        onClose={() => setDel(null)} onDeleted={() => { setDel(null); toast(tx("已删除")); load() }} />}
+      {del?.kind === 'm' && <Confirm title={tx("删除模型")} danger confirmText={tx("删除")}
+        text={tx("确定删除「{0}」？正在用它的人会挑不到。", [del.name])}
         onClose={() => setDel(null)}
         onConfirm={async () => {
           try {
-            if (del.kind === 'p') await api.deleteModelProvider(del.id, del.revision)
-            else await api.deleteModelDef(del.id, del.revision)
+            await api.deleteModelDef(del.id, del.revision)
             toast(tx("已删除"))
           } catch (e) { toast(tx("删不掉：") + (e.message || e)) }
           setDel(null); load()
@@ -198,6 +218,7 @@ export default function ModelCatalog() {
 
   return (
     <div className="model-catalog">
+      {guide && <button type="button" className="btn first-chat-reopen" onClick={() => navTo('overview')}>{tx('返回首次对话清单')}</button>}
       <ModelRuntime providers={providers} models={models}
         catalogCounts={d ? { providers: providers.length, models: models.length } : null} catalogSummary={
         <section className="model-catalog-summary model-runtime-dimension" aria-label={tx("目录配置")} aria-busy={!d && !error}>
@@ -431,8 +452,8 @@ function ProviderForm({ initial, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={editing ? tx("配置「{0}」", [initial.name]) : tx("接一个模型服务")} icon="plug" onClose={onClose}
-      foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+    <Modal draft={{ id, name, kind, baseUrl, note, apiKey }} title={editing ? tx("配置「{0}」", [initial.name]) : tx("接一个模型服务")} icon="plug" onClose={onClose}
+      foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
         <button className="btn" disabled={busy || connection?.pending} onClick={testConnection}>
           {connection?.pending ? tx("测试中…") : tx("测试连接")}</button>
         <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : tx("保存")}</button></>}>
@@ -597,9 +618,10 @@ function ModelForm({ providerId, initial, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={editing ? tx("配置模型") : tx("加一个模型")} icon={editing ? 'pencil' : 'plus'}
+    <Modal draft={{ name, label, modality, endpointPath, statusPath, resultPath, defaultsText, thinkingMode,
+        thinkingFormat, imageRouting, capabilities, ctxWindow, maxOutputTokens, supportsReasoningEffort }} title={editing ? tx("配置模型") : tx("加一个模型")} icon={editing ? 'pencil' : 'plus'}
       wide onClose={onClose}
-      foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+      foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
         <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : tx("保存")}</button></>}>
       <div className="model-config-form"><div><label className="f-lbl">{tx("模型标识（发给网关的那个名字）")}</label>
         <input className="f-in" value={name} disabled={editing}
@@ -730,8 +752,8 @@ function DiscoverForm({ provider, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={tx("从服务发现模型")} icon="search" onClose={onClose}
-      foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("关闭")}</button>
+    <Modal dirty={rows.some(row => row.checked)} title={tx("从服务发现模型")} icon="search" onClose={onClose}
+      foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("关闭")}</button>
         {phase === 'ready' && <button className="btn btn-primary" disabled={busy || checkedCount === 0}
           onClick={importSelected}>{busy ? tx("添加中…") : tx("添加选中的 {0} 个", [checkedCount])}</button>}</>}>
       <div className="model-config-form">

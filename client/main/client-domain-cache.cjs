@@ -126,7 +126,7 @@ function create({ identityOf, fetch = fetchWithDeviceAuthRetry, discovery = requ
     }
     finally { if (entry.running === work) entry.running = null; schedule(domain, entry, captured); }
   }
-  async function read(domain, expected, report = () => {}) {
+  async function read(domain, expected, report = () => {}, fresh = false) {
     if (!Object.hasOwn(DOMAINS, domain)) throw Error('不支持的同步目录');
     const captured = await capture(expected);
     const confirmed = discovery.confirmed(captured.identity, DOMAINS[domain].topic || domain);
@@ -140,7 +140,7 @@ function create({ identityOf, fetch = fetchWithDeviceAuthRetry, discovery = requ
     // Revalidate explicit message reads before their revision is used to prune
     // company-scoped notices; keep shared in-flight reads and bounded backoff.
     const cached = entry.value !== undefined && (entry.retryAt > now() ||
-      !DOMAINS[domain].revalidate && entry.loadedVersion === entry.version && now() - entry.at < ttl);
+      !fresh && !DOMAINS[domain].revalidate && entry.loadedVersion === entry.version && now() - entry.at < ttl);
     try {
       const value = cached ? entry.value : await load(domain, entry, captured);
       await guard(captured);
@@ -190,10 +190,10 @@ function install({ app, ipcMain, webContents, deviceAuth, modelsChanged = () => 
       try { if (isTrusted({ sender, senderFrame: sender.mainFrame })) sender.send('client-domain-changed', { domain, scope }); } catch (_) {}
     }
   } });
-  for (const action of ['read', 'invalidate']) ipcMain.handle('client-domain-' + action, async (event, domain, expected) => {
+  for (const action of ['read', 'invalidate']) ipcMain.handle('client-domain-' + action, async (event, domain, expected, fresh) => {
     if (!isTrusted(event)) return { ok: false, reason: '不允许的读取来源' };
     let online;
-    try { const value = await cache[action](domain, expected, value => { online = value; }); return { ok: true, value, online }; }
+    try { const value = await cache[action](domain, expected, value => { online = value; }, domain === 'models' && fresh === true); return { ok: true, value, online }; }
     catch (error) { return { ok: false, reason: error.message, status: error.status, code: error.code, body: error.httpBody, online }; }
   });
   app.once('will-quit', () => cache.close());

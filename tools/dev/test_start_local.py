@@ -1655,6 +1655,35 @@ class LocalStartupTests(unittest.TestCase):
         self.assertEqual(calls[-1][0], ['node', str(client / 'scripts/install-electron.cjs')])
         self.assertFalse((self.state / 'desktop-dependencies.sha256').exists())
 
+    def test_desktop_download_honors_timeout_environment_override(self):
+        client = self.state / 'application/client'
+        client.mkdir(parents=True)
+        (client / 'package-lock.json').write_text('{}')
+        calls = []
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            if command[0] == 'node':
+                raise build.StartupError('Download fixture timed out')
+        with patch.object(build, 'check_dependencies', return_value=('node', 'npm')), \
+                patch.object(build, 'run', side_effect=run), patch.dict(os.environ, {
+                    'DISPLAY': ':fixture', 'ELECTRON_DOWNLOAD_TIMEOUT': '123',
+                }), redirect_stdout(io.StringIO()):
+            with self.assertRaises(build.StartupError):
+                build.prepare_desktop(self.state, self.state / 'startup.log')
+        self.assertEqual(calls[-1][1]['timeout'], 123.0)
+
+    def test_electron_download_timeout_rejects_invalid_values(self):
+        with patch.dict(os.environ, {'ELECTRON_DOWNLOAD_TIMEOUT': 'not-a-number'}):
+            with self.assertRaisesRegex(build.StartupError, 'positive number'):
+                build.electron_download_timeout()
+        for invalid in ('0', '-5', 'nan', 'inf'):
+            with self.subTest(invalid=invalid), \
+                    patch.dict(os.environ, {'ELECTRON_DOWNLOAD_TIMEOUT': invalid}):
+                with self.assertRaisesRegex(build.StartupError, 'positive, finite'):
+                    build.electron_download_timeout()
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(build.electron_download_timeout(), build.ELECTRON_DOWNLOAD_TIMEOUT)
+
     def test_desktop_failure_is_reported_and_a_normal_quit_returns(self):
         from unittest.mock import Mock
         server = Mock(); server.poll.return_value = None
@@ -1702,7 +1731,7 @@ class LocalStartupTests(unittest.TestCase):
         for name in build.BACKEND_FILES:
             put("hub-backend/" + name)
         for name in ("hub-backend/app/api.py", "tools/dev/local_server.py", "skills/example/SKILL.md",
-                     "client/core/connector-brand.js", "client/components/panels/connector-config.js",
+                     "client/core/connector-brand.js", "client/core/locales/builtin-skills.js", "client/components/panels/connector-config.js",
                      "client/components/client-auth/legal-html.js", "client/components/client-auth/legal-html.css",
                      "client/assets/connector-brands/fixture.svg", "third-party/manifest.json", "LICENSE",
                      "hub-frontend/src/index.jsx", "hub-frontend/package.json", "hub-frontend/package-lock.json",
@@ -1748,17 +1777,18 @@ class LocalStartupTests(unittest.TestCase):
             self.assertEqual((self.state / "application/client/assets/connector-brands/fixture.svg").read_text(), "updated artwork")
             for file in generated:
                 self.assertEqual(file.read_bytes(), b'generated runtime fixture')
-            for relative in ('client/components/client-auth/legal-html.js',
+            for relative in ('client/core/locales/builtin-skills.js',
+                             'client/components/client-auth/legal-html.js',
                              'client/components/client-auth/legal-html.css'):
                 with self.subTest(shared_frontend_source=relative):
                     calls.clear()
-                    put(relative, 'updated shared legal document resource')
+                    put(relative, 'updated shared frontend resource')
                     build.prepare(self.state, self.state / 'startup.log')
                     self.assertEqual(calls, [
                         '[Runner] 检查本地运行环境 / Checking the local Runner environment',
                         '[4/4] 构建管理页面 / Building the management UI'])
                     self.assertEqual((self.state / 'application' / relative).read_text(),
-                                     'updated shared legal document resource')
+                                     'updated shared frontend resource')
             calls.clear()
             build.prepare(self.state, self.state / 'startup.log')
             self.assertEqual(calls, ['[Runner] 检查本地运行环境 / Checking the local Runner environment'])

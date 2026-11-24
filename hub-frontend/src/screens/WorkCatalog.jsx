@@ -1,9 +1,10 @@
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { api } from '../api.js'
+import { api, can } from '../api.js'
 import { FilterInput, FilterSelect } from '../FilterControls.jsx'
+import { RecordSource, SourceField, useBusinessRecords } from '../BusinessRecords.jsx'
 import { useViewportHeight } from '../viewport-height.js'
-import { Confirm, Icon, Loading, Modal, toast, SelectMenu } from '../ui.jsx'
+import { Confirm, Icon, Loading, Modal, navTo, toast, SelectMenu } from '../ui.jsx'
 import './work-catalog.css'
 
 const CAP_LABEL = localeMap(() => ({
@@ -58,6 +59,15 @@ function sourceLabel(item, targetOrgId) {
   return { text: tx("上级继承"), tone: 'inherited' }
 }
 
+function WorkflowGuide({ workflow, inEditor = false }) {
+  if (!can('plugin.manage')) return <small>{tx('请联系插件管理员启用流程。')}</small>
+  function openPlugins() {
+    if (inEditor && !window.confirm(tx('前往插件与应用？未保存的场景修改将丢失。'))) return
+    navTo('plugins', { workflowPluginId: workflow?.id })
+  }
+  return <button type="button" className="admin-text-action" onClick={openPlugins}>{tx('前往插件与应用配置流程')}</button>
+}
+
 function Empty({ tab }) {
   const uiLocale = useLocale();
   return (
@@ -76,7 +86,7 @@ export default function WorkCatalog({ me }) {
   const uiLocale = useLocale();
   const [orgs, setOrgs] = useState([])
   const [orgId, setOrgId] = useState((me && me.orgId) || '')
-  const [catalog, setCatalog] = useState(null)
+  const [loadedCatalog, setCatalog] = useState(null)
   const [tab, setTab] = useState('scenarios')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -85,8 +95,8 @@ export default function WorkCatalog({ me }) {
   const requestSeq = useRef(0)
 
   useEffect(() => {
-    api.orgs().then((rows) => {
-      const list = rows || []
+    api.orgs(true).then((rows) => {
+      const list = (rows || []).filter(org => !org.isArchived)
       setOrgs(list)
       if (!orgId && list[0]) setOrgId(list[0].id)
     }).catch((error) => toast(tx("组织读取失败：") + error.message))
@@ -98,7 +108,7 @@ export default function WorkCatalog({ me }) {
     setLoading(true)
     try {
       const next = await api.workCatalog(target)
-      if (seq === requestSeq.current) setCatalog(next)
+      if (seq === requestSeq.current) setCatalog({ ...next, targetOrgId: target })
     } catch (error) {
       if (seq === requestSeq.current) toast(tx("职业场景读取失败：") + error.message)
     } finally {
@@ -111,17 +121,25 @@ export default function WorkCatalog({ me }) {
     return () => { requestSeq.current += 1 }
   }, [orgId])
 
+  const catalog = loadedCatalog?.targetOrgId === orgId ? loadedCatalog : null
   const professions = (catalog && catalog.professions) || []
+  const keyword = query.trim().toLowerCase()
+  const matchingProfessions = professions.filter(item => !keyword ||
+    [item.name, item.category, item.description, ...(item.competencies || [])]
+      .join(' ').toLowerCase().includes(keyword))
+  const records = useBusinessRecords({
+    kind: 'professions', rows: matchingProfessions, reload: load, canManage: can('work.catalog.manage'), scopeKey: orgId,
+    canSelect: row => row.orgId === orgId && !row.isSystem,
+  })
+  const filteredProfessions = professions.filter(records.matches)
   const scenarios = (catalog && catalog.scenarios) || []
   const workflows = (catalog && catalog.workflows) || []
+  const enabledWorkflowCount = workflows.filter((item) => item.enabled).length
   const professionName = useMemo(
     () => Object.fromEntries(professions.map((item) => [item.id, item.name])),
     [professions, uiLocale],
   )
-  const keyword = query.trim().toLowerCase()
-  const visibleProfessions = professions.filter((item) => !keyword ||
-    [item.name, item.category, item.description, ...(item.competencies || [])]
-      .join(' ').toLowerCase().includes(keyword))
+  const visibleProfessions = matchingProfessions.filter(records.matches)
   const visibleScenarios = scenarios.filter((item) => !keyword ||
     [item.name, item.category, item.description, ...(item.intentHints || [])]
       .join(' ').toLowerCase().includes(keyword))
@@ -149,11 +167,12 @@ export default function WorkCatalog({ me }) {
           <span className="wc-eyebrow">{tx("企业工作语言")}</span>
           <h2>{tx("让一句需求，稳定走到可验收的结果")}</h2>
           <p>{tx("职业画像描述员工长期擅长什么；工作场景描述一类需求应该用哪些能力、流程和交付标准。它们都不等于权限，也不绑定 Pi、OpenCode 或 Codex。")}</p>
+          {catalog && !enabledWorkflowCount && <WorkflowGuide />}
         </div>
         <div className="wc-intro-metrics">
-          <span><b>{professions.length}</b>{tx(" 个职业画像")}</span>
+          <span><b>{filteredProfessions.length}</b>{tx(" 个职业画像")}</span>
           <span><b>{scenarios.filter((item) => item.enabled).length}</b>{tx(" 个可用场景")}</span>
-          <span><b>{workflows.filter((item) => item.enabled).length}</b>{tx(" 条可用流程")}</span>
+          <span><b>{catalog ? enabledWorkflowCount : '—'}</b>{tx(" 条可用流程")}</span>
         </div>
       </section>
 
@@ -179,7 +198,7 @@ export default function WorkCatalog({ me }) {
           <div className="admin-segmented" role="group" aria-label={tx("工作目录类型")}>
             <button aria-pressed={tab === 'scenarios'} onClick={() => setTab('scenarios')}>{tx("工作场景 ")}<span>{scenarios.length}</span>
             </button>
-            <button aria-pressed={tab === 'professions'} onClick={() => setTab('professions')}>{tx("职业画像 ")}<span>{professions.length}</span>
+            <button aria-pressed={tab === 'professions'} onClick={() => setTab('professions')}>{tx("职业画像 ")}<span>{filteredProfessions.length}</span>
             </button>
           </div>
           {orgs.length > 1 && <FilterSelect className="f-sel wc-org" value={orgId}
@@ -196,6 +215,7 @@ export default function WorkCatalog({ me }) {
         </div>
       </div>
 
+      {tab === 'professions' && records.toolbar}
       {loading && !catalog ? <Loading /> : tab === 'scenarios' ? (
         <section ref={listRef} className="wc-list admin-viewport-list" tabIndex={0} aria-label={tx("工作场景")}>
           <div className="wc-list-head wc-scenario-grid">
@@ -222,11 +242,12 @@ export default function WorkCatalog({ me }) {
                 <div className="wc-method">
                   <div>{(item.requiredCapabilities || []).map((capability) =>
                     <span key={capability}>{CAP_LABEL[capability] || capability}</span>)}</div>
-                  <small className={flow && flow.enabled ? 'ready' : 'missing'}>
+                  <small className={item.defaultPluginKey ? (flow?.enabled ? 'ready' : 'missing') : undefined}>
                     {item.defaultPluginKey
-                      ? (flow && flow.enabled ? tx("默认流程 · ") + flow.name : tx("默认流程尚未启用"))
+                      ? (flow && flow.enabled ? tx("默认流程 · ") + flow.name : tx('默认流程不可用'))
                       : tx("不指定默认流程")}
                   </small>
+                  {item.defaultPluginKey && !flow?.enabled && <WorkflowGuide workflow={flow} />}
                 </div>
                 <div className="wc-contract">
                   <b>{(item.outputContract || {}).summary || tx("暂未定义交付摘要")}</b>
@@ -257,7 +278,7 @@ export default function WorkCatalog({ me }) {
             return (
               <div className="wc-row wc-profession-grid" key={item.id}>
                 <div className="wc-primary">
-                  <div><b>{item.name}</b><span className={'wc-source ' + source.tone}>{source.text}</span></div>
+                  <div>{records.checkbox(item)}<b>{item.name}</b><span className={'wc-source ' + source.tone}>{source.text}</span><RecordSource row={item} /></div>
                   <small>{item.category || tx("未分类")} · {item.description || tx("暂未填写说明")}</small>
                 </div>
                 <div className="wc-token-list">
@@ -278,10 +299,12 @@ export default function WorkCatalog({ me }) {
         </section>
       )}
 
-      {edit && edit.kind === 'profession' && <ProfessionEditor row={edit.row} orgId={orgId}
+      {edit && edit.kind === 'profession' && <ProfessionEditor row={edit.row} orgId={orgId} orgs={orgs}
         onClose={() => setEdit(null)} onDone={async () => { setEdit(null); await load() }} />}
       {edit && edit.kind === 'scenario' && <ScenarioEditor row={edit.row} copy={edit.copy}
-        orgId={orgId} professions={professions} workflows={workflows}
+        orgId={orgId} orgs={orgs} professions={professions.filter(item =>
+          (!item.isArchived && item.dataSource !== 'test') || (!edit.copy && edit.row?.positionIds?.includes(item.id)))}
+        workflows={workflows} noEnabledWorkflows={!!catalog && !enabledWorkflowCount}
         onClose={() => setEdit(null)} onDone={async () => { setEdit(null); await load() }} />}
       {pendingDelete && <Confirm danger title={pendingDelete.kind === 'scenario' ? tx("删除工作场景") : tx("删除职业画像")}
         text={tx("确定删除「") + pendingDelete.row.name + tx("」？正在使用的职业画像会被保护，无法误删。")}
@@ -290,20 +313,23 @@ export default function WorkCatalog({ me }) {
   )
 }
 
-function ProfessionEditor({ row, orgId, onClose, onDone }) {
+function ProfessionEditor({ row, orgId, orgs, onClose, onDone }) {
   const uiLocale = useLocale();
   const [name, setName] = useState(row ? row.name : '')
   const [category, setCategory] = useState(row ? row.category : '')
   const [description, setDescription] = useState(row ? row.description : '')
   const [competencies, setCompetencies] = useState(joinLines(row && row.competencies))
+  const [dataSource, setDataSource] = useState('')
+  const [targetOrgId, setTargetOrgId] = useState(row ? (row.orgId || orgId) : orgId)
   const [busy, setBusy] = useState(false)
 
   async function save() {
     if (!name.trim()) { toast(tx("请填写职业名称")); return }
     setBusy(true)
     try {
-      const body = { orgId, name: name.trim(), category: category.trim(),
+      const body = { orgId: targetOrgId, name: name.trim(), category: category.trim(),
         description: description.trim(), competencies: lines(competencies) }
+      if (!row && dataSource) body.dataSource = dataSource
       if (row) await api.updateProfession(row.id, body)
       else await api.createProfession(body)
       toast(tx("职业画像已保存"))
@@ -313,10 +339,15 @@ function ProfessionEditor({ row, orgId, onClose, onDone }) {
   }
 
   return (
-    <Modal title={row ? tx("编辑职业画像") : tx("新建职业画像")} icon="users" onClose={onClose} wide
-      foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+    <Modal draft={{ name, category, description, competencies, dataSource, targetOrgId }} title={row ? tx("编辑职业画像") : tx("新建职业画像")} icon="users" onClose={onClose} wide
+      foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
         <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : tx("保存职业")}</button></>}>
       <div className="wc-form-note">{tx("职业画像回答“这个员工长期擅长什么”，不改变他的系统权限。一个员工可以选择多个职业。")}</div>
+      {(orgs || []).length > 1 && <label className="wc-field"><span>{tx("所属组织")}</span>
+        <SelectMenu className="f-in" value={targetOrgId} onChange={(event) => setTargetOrgId(event.target.value)}>
+          {orgs.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </SelectMenu></label>}
+      {!row && <SourceField value={dataSource} onChange={setDataSource} />}
       <div className="wc-form-two">
         <label><span>{tx("职业名称")}</span><input className="f-in" value={name} onChange={(event) => setName(event.target.value)} placeholder={tx("例如：解决方案顾问")} /></label>
         <label><span>{tx("职业类别")}</span><input className="f-in" value={category} onChange={(event) => setCategory(event.target.value)} placeholder={tx("例如：方案与咨询")} /></label>
@@ -329,14 +360,15 @@ function ProfessionEditor({ row, orgId, onClose, onDone }) {
   )
 }
 
-function ScenarioEditor({ row, copy, orgId, professions, workflows, onClose, onDone }) {
+function ScenarioEditor({ row, copy, orgId, orgs, professions, workflows, noEnabledWorkflows, onClose, onDone }) {
   const uiLocale = useLocale();
   const source = row || {}
   const [name, setName] = useState(source.name || '')
   const [key] = useState(copy ? (source.key || '') : (source.key || ('scene-' + Date.now().toString(36))))
   const [category, setCategory] = useState(source.category || '')
   const [description, setDescription] = useState(source.description || '')
-  const [positionIds, setPositionIds] = useState(source.positionIds || [])
+  const [positionIds, setPositionIds] = useState(() => (source.positionIds || []).filter(id =>
+    !copy || professions.some(item => item.id === id)))
   const [hints, setHints] = useState(joinLines(source.intentHints))
   const [capabilities, setCapabilities] = useState(joinLines(source.requiredCapabilities))
   const [pluginKey, setPluginKey] = useState(source.defaultPluginKey || '')
@@ -346,14 +378,16 @@ function ScenarioEditor({ row, copy, orgId, professions, workflows, onClose, onD
   const [deliverables, setDeliverables] = useState(joinLines(contract.deliverables))
   const [acceptance, setAcceptance] = useState(joinLines(contract.acceptance))
   const [enabled, setEnabled] = useState(source.enabled !== false)
+  const [targetOrgId, setTargetOrgId] = useState(row && !copy ? (source.orgId || orgId) : orgId)
   const [busy, setBusy] = useState(false)
   const editing = !!row && !copy && row.orgId === orgId && !row.isSystem
   const workflow = workflows.find((item) => item.key === pluginKey)
+  const unavailable = !!pluginKey && !workflow?.enabled
   const checks = [
     [!!name.trim(), tx("已说明这类工作叫什么")],
     [lines(hints).length > 0 || positionIds.length > 0, tx("有识别关键词或适用职业")],
     [lines(capabilities).length > 0, tx("声明了 Agent 所需能力（可选）")],
-    [!pluginKey || !!(workflow && workflow.enabled), tx("默认流程当前可用")],
+    ...(pluginKey ? [[!unavailable, unavailable ? tx('默认流程不可用') : tx("默认流程当前可用")]] : []),
     [!!summary.trim() && lines(deliverables).length > 0 && lines(acceptance).length > 0, tx("交付物与验收标准完整")],
   ]
 
@@ -365,8 +399,8 @@ function ScenarioEditor({ row, copy, orgId, professions, workflows, onClose, onD
     if (enabled && !lines(hints).length && !positionIds.length) {
       toast(tx("启用场景前，请配置识别关键词或适用职业")); return
     }
-    if (pluginKey && !(workflow && workflow.enabled)) {
-      toast(tx("默认工作流尚未启用，请先启用或选择“不指定”")); return
+    if (unavailable) {
+      toast(tx('请选择可用流程或“不指定”，也可以在「插件与应用」配置流程。')); return
     }
     if (enabled && (!summary.trim() || !lines(deliverables).length || !lines(acceptance).length)) {
       toast(tx("启用场景前，请把交付摘要、成果物和验收标准补完整")); return
@@ -374,7 +408,7 @@ function ScenarioEditor({ row, copy, orgId, professions, workflows, onClose, onD
     setBusy(true)
     try {
       const body = {
-        orgId, key, name: name.trim(), category: category.trim(),
+        orgId: targetOrgId, key, name: name.trim(), category: category.trim(),
         description: description.trim(), positionIds,
         intentHints: lines(hints), requiredCapabilities: lines(capabilities),
         defaultPluginKey: pluginKey, enabled,
@@ -390,11 +424,16 @@ function ScenarioEditor({ row, copy, orgId, professions, workflows, onClose, onD
   }
 
   return (
-    <Modal title={copy ? tx("按企业调整场景") : (editing ? tx("编辑工作场景") : tx("新建工作场景"))}
+    <Modal draft={{ name, category, description, positionIds: [...positionIds].sort(), hints, capabilities,
+        pluginKey, kind, summary, deliverables, acceptance, enabled, targetOrgId }} title={copy ? tx("按企业调整场景") : (editing ? tx("编辑工作场景") : tx("新建工作场景"))}
       icon="sitemap" onClose={onClose} wide
-      foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+      foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
         <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : tx("保存场景")}</button></>}>
       <div className="wc-form-note">{tx("场景描述“一类工作怎样才算交付”。需求创建时会自动匹配，人仍可在确认卡中改选。")}</div>
+      {(orgs || []).length > 1 && <label className="wc-field"><span>{tx("所属组织")}</span>
+        <SelectMenu className="f-in" value={targetOrgId} onChange={(event) => setTargetOrgId(event.target.value)}>
+          {orgs.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </SelectMenu></label>}
       <div className="wc-form-two">
         <label><span>{tx("场景名称")}</span><input className="f-in" value={name} onChange={(event) => setName(event.target.value)} placeholder={tx("例如：客户方案编制")} /></label>
         <label><span>{tx("场景类别")}</span><input className="f-in" value={category} onChange={(event) => setCategory(event.target.value)} placeholder={tx("例如：方案与咨询")} /></label>
@@ -418,6 +457,7 @@ function ScenarioEditor({ row, copy, orgId, professions, workflows, onClose, onD
       <div className="wc-form-two">
         <label><span>{tx("默认工作流")}</span><SelectMenu className="f-in" value={pluginKey} onChange={(event) => setPluginKey(event.target.value)}>
           <option value="">{tx("不指定，直接交给 AI")}</option>
+          {pluginKey && !workflow && <option value={pluginKey} disabled>{tx('不可用的流程：{0}', [pluginKey])}</option>}
           {workflows.map((item) => <option key={item.key} value={item.key} disabled={!item.enabled}>
             {item.name}{item.enabled ? '' : tx("（未启用）")}</option>)}
         </SelectMenu></label>
@@ -425,6 +465,8 @@ function ScenarioEditor({ row, copy, orgId, professions, workflows, onClose, onD
           {KIND_OPTIONS.map((item) => <option key={item[0]} value={item[0]}>{item[1]}</option>)}
         </SelectMenu></label>
       </div>
+
+      {(noEnabledWorkflows || unavailable) && <div className="wc-form-note"><WorkflowGuide workflow={workflow} inEditor /></div>}
 
       <label className="wc-field"><span>{tx("交付摘要")}</span><input className="f-in" value={summary}
         onChange={(event) => setSummary(event.target.value)} placeholder={tx("一句话说明最终应该交回什么")} /></label>

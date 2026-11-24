@@ -154,15 +154,14 @@ ${EndIf}
 Delete "$soduWorkRoot\.soduwork-update-details.json"
 !insertmacro soduworkLog "verifying $soduworkStageName"
 !insertmacro soduworkPhase "verifying"
-!insertmacro soduworkLog "verification-policy=bootstrap-existence-only"
 ; Incomplete DLL/runtime/Runner extraction cannot be mistaken for a successful install.
 System::Call 'kernel32::SetEnvironmentVariableW(w "ELECTRON_RUN_AS_NODE", w "1")'
-nsExec::ExecToStack '"$soduworkStage\${APP_EXECUTABLE_FILENAME}" "$soduworkStage\.soduwork-verify.cjs" "$soduworkStage" "$soduWorkRoot\.soduwork-update-details.json" --installation --progress-file "$soduWorkRoot\.soduwork-update-progress"'
+nsExec::ExecToStack '"$soduworkStage\${APP_EXECUTABLE_FILENAME}" "$soduworkStage\.soduwork-verify.cjs" "$soduworkStage" "$soduWorkRoot\.soduwork-update-details.json" --installation --progress-file "$soduWorkRoot\.soduwork-update-progress" --result-log "$soduWorkRoot\.soduwork-update.log"'
 Pop $0
 Pop $1
 System::Call 'kernel32::SetEnvironmentVariableW(w "ELECTRON_RUN_AS_NODE", p 0)'
 ${If} $0 != 0
-  !insertmacro soduworkLog "payload-verification-failed"
+  !insertmacro soduworkLog "payload-verification-failed details=.soduwork-update-details.json"
   DetailPrint "$1"
   FileOpen $9 "$soduWorkRoot\.soduwork-update.log" a
   FileSeek $9 0 END
@@ -172,6 +171,7 @@ ${If} $0 != 0
   MessageBox MB_OK|MB_ICONEXCLAMATION "$(soduworkVerificationFailed)$\r$\n$soduWorkRoot\.soduwork-update.log$\r$\n$soduWorkRoot\.soduwork-update-details.json" /SD IDOK
   Quit
 ${EndIf}
+!insertmacro soduworkLog "payload-verification-passed details=.soduwork-update-details.json"
 FileOpen $0 "$soduworkStage\.soduwork-release" w
 FileWrite $0 "${VERSION}"
 FileClose $0

@@ -12,29 +12,83 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .api import admin, agents, ai_proxy, aidesk, approvals, attachments, capabilities, client_updates, client_release_notes, clients, delivery, download, environments, evolution, identity, ingest, library, repomap, updates
-from .api import admin_cloud_runners, client_auth, cloud_environments, cloud_conversations, conversation_handoffs, deliveries, memory_records, session_memory
-from .api import account_profile, admin_mail, client_email_auth, quotas, legal_documents
-from .api import remote_screen
-from .api import conversation_projects
-from .api import account_conversations
-from .api import conversation_content_migrations
-from .api import cloud_execution_sync, personal_conversation_relay
-from .api import model_runtime as model_runtime_api
-from .api import model_capabilities as model_capabilities_api
-from .api import jiyong_data
+from .api import (
+    account_conversations,
+    account_profile,
+    admin,
+    admin_cloud_runners,
+    admin_mail,
+    agents,
+    ai_proxy,
+    aidesk,
+    approvals,
+    attachments,
+    business_records,
+    capabilities,
+    client_auth,
+    client_email_auth,
+    client_release_notes,
+    client_updates,
+    clients,
+    cloud_conversations,
+    cloud_environments,
+    cloud_execution_sync,
+    conversation_content_migrations,
+    conversation_handoffs,
+    conversation_projects,
+    deliveries,
+    delivery,
+    download,
+    environments,
+    evolution,
+    first_chat,
+    identity,
+    ingest,
+    jiyong_data,
+    legal_documents,
+    library,
+    memory_records,
+    operations,
+    personal_conversation_relay,
+    plugin_activity,
+    plugin_client_catalog,
+    plugin_client_runs,
+    plugin_permissions,
+    plugin_publishers,
+    plugins,
+    quotas,
+    release,
+    remote_screen,
+    repomap,
+    reports,
+    repositories,
+    repository_issues,
+    retired_endpoints,
+    runner_ws,
+    session_memory,
+    task_mcp,
+    task_options,
+    tasks,
+    term,
+    trace,
+    updates,
+    usage,
+    ws,
+)
 from .api import config as config_api
-from .api import retired_endpoints, operations, plugin_activity, plugin_client_catalog, plugin_client_runs, plugin_permissions, plugin_publishers, plugins, release, reports, repositories, repository_issues, runner_ws, task_mcp, task_options, tasks, term, trace, usage, ws
-from .api import work_catalog as work_catalog_api
 from .api import im as im_api
+from .api import model_capabilities as model_capabilities_api
+from .api import model_runtime as model_runtime_api
+from .api import work_catalog as work_catalog_api
 from .config import get_settings
 from .db import SessionLocal, init_db
 from .log_safety import install_log_redaction
 from .models import TaskOwnershipChanged
-from .services import rbac, work_catalog as work_catalog_service
+from .services import rbac
+from .services import work_catalog as work_catalog_service
 from .services.database_telemetry import DatabaseTimingMiddleware
-from .services.shared_auth_cache import AuthCacheUnavailable
 from .services.poller import poller_loop
+from .services.shared_auth_cache import AuthCacheUnavailable
 
 settings = get_settings()
 install_log_redaction()
@@ -127,7 +181,8 @@ async def lifespan(app: FastAPI):
     # Use an event-loop watchdog to capture stacks during prolonged blocking.
     # Event-loop stalls can disrupt Runner heartbeats and desktop connectivity.
     # Runtime stack evidence identifies blocking work that static inspection may miss.
-    await cluster_runtime.start()
+    from .services import queued_dispatch_lease
+    await cluster_runtime.start(on_runner_connected=queued_dispatch_lease.runner_connected)
     from .services import automation_inbox_events, cloud_sync_notifications, client_domain_events
     automation_inbox_events.start()
     cloud_sync_notifications.start()
@@ -135,7 +190,15 @@ async def lifespan(app: FastAPI):
     from .services import loop_watch
     watch = loop_watch.start()
 
-    from .services import cloud_recovery, cloud_message_recovery, dispatch_reconcile, pty_term, repository_catalog, repository_issue_worker
+    from .services import (
+        cloud_message_recovery,
+        cloud_recovery,
+        dispatch_reconcile,
+        pty_term,
+        repository_catalog,
+        repository_issue_worker,
+    )
+
     term_sweep = _spawn_bg(pty_term.sweep_loop(), "term_sweep")  # Reap idle terminals.
     # Periodic report generation can be disabled while manual generation remains available.
     # REPORT_AUTO=false disables scheduling without disabling generation endpoints.
@@ -162,6 +225,7 @@ async def lifespan(app: FastAPI):
         ("repository_catalog", repository_catalog.sync_loop),
         ("repository_issues", repository_issue_worker.tick_loop),
         ("dispatch_reconcile", dispatch_reconcile.tick_loop),
+        ("queued_dispatch_lease", queued_dispatch_lease.tick_loop),
         ("cloud_recovery", cloud_recovery.tick_loop),
         ("cloud_messages", cloud_message_recovery.tick_loop),
         ("rework_retry", task_rework.retry_loop),
@@ -366,7 +430,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 for _r in (cloud_execution_sync.router, legal_documents.router, legal_documents.admin_router, account_profile.router, account_profile.admin_router, admin_mail.router, client_email_auth.router, account_conversations.router, conversation_projects.router, remote_screen.router, im_api.router, admin_cloud_runners.router, cloud_environments.router, cloud_conversations.router, conversation_handoffs.router, session_memory.router, memory_records.router, memory_records.admin_router, client_auth.router, clients.router, tasks.router, retired_endpoints.router, task_options.router, approvals.router, delivery.router, aidesk.router, config_api.router,
-           admin.router, quotas.router, model_runtime_api.router, model_capabilities_api.router, work_catalog_api.router, work_catalog_api.admin_router,
+           admin.router, business_records.router, quotas.router, model_runtime_api.router, model_capabilities_api.router, work_catalog_api.router, work_catalog_api.admin_router,
            release.router, environments.router, repomap.router, repositories.router, repository_issues.router, attachments.router, ingest.router,
            library.router, deliveries.router,
            plugins.router, plugins.run_router, plugin_publishers.router, plugin_client_catalog.router, plugin_client_runs.router, plugin_activity.router, plugin_permissions.router, plugin_permissions.admin_router, updates.router, download.router,
@@ -378,6 +442,7 @@ for _r in (cloud_execution_sync.router, legal_documents.router, legal_documents.
            capabilities.router, capabilities.admin_router, jiyong_data.router):
     app.include_router(_r)
 app.include_router(personal_conversation_relay.router)
+app.include_router(first_chat.router)
 app.include_router(conversation_content_migrations.router)
 from .api import desktop_capabilities
 app.include_router(desktop_capabilities.router)

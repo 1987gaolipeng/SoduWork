@@ -147,7 +147,9 @@ def _safe_name(value: str, fallback: str = "未命名资料") -> str:
         raise HTTPException(status_code=400, detail="名称必须是字符串")
     name = (value or "").replace("\\", "/").rsplit("/", 1)[-1]
     name = re.sub(r"[\x00-\x1f\x7f]", "", name).strip()
-    return name[:240] or fallback
+    if len(name) > 240:
+        raise HTTPException(status_code=422, detail="名称过长，不能超过 240 个字符")
+    return name or fallback
 
 
 def _validate_metadata(body):
@@ -704,7 +706,10 @@ async def create_folder(body: dict = Body(default_factory=dict), client: Client 
 async def _create_folder(body, client, session):
     owner = _owner_key(client)
     selected_backend = _select_storage(body.get("storage") or body.get("backend"))
-    name = _safe_name(body.get("name"), "新建文件夹")[:160]
+    name = _safe_name(body.get("name"), "新建文件夹")
+    if len(name) > 160:
+        raise HTTPException(status_code=422, detail="文件夹名称不能超过 160 个字符")
+    name = name[:160]
     parent_id = str(body.get("parentId") or "").strip() or None
     selected_backend = await _destination_backend(session, owner, parent_id, selected_backend)
     await _ensure_storage(selected_backend)
@@ -736,7 +741,10 @@ async def _update_folder(folder_id, body, client, session):
         raw_name = body.get("name")
         if not isinstance(raw_name, str) or not raw_name.strip():
             raise HTTPException(400, "文件夹名称不能为空")
-        name = _safe_name(raw_name, "")[:160]
+        name = _safe_name(raw_name, "")
+        if len(name) > 160:
+            raise HTTPException(status_code=422, detail="文件夹名称不能超过 160 个字符")
+        name = name[:160]
         if not name:
             raise HTTPException(400, "文件夹名称不能为空")
         await library_names.ensure_folder_available(session, owner, folder.backend, folder.parent_id, name, folder.id)

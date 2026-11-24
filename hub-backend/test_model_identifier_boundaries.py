@@ -21,6 +21,8 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import models
+from app.automation_models import ExecutionSession, PluginVersion, WorkflowRun
+from app.conversation_handoff_models import ConversationHandoff
 from app.api import admin
 from app.auth import hash_password, sign_token
 from app.db import Base, get_session
@@ -185,6 +187,89 @@ class ModelIdentifierBoundaryTests(unittest.IsolatedAsyncioTestCase):
         response = await self.http.put("/api/v1/admin/model-providers/no-auth", json={"expectedRevision": "new"})
         self.assertEqual(response.status_code, 401, response.text)
 
+    async def test_deletion_impact_scopes_and_deduplicates_current_shared_model_choices(self):
+        async with self.sessions() as session:
+            session.add_all([
+                models.OrgUnit(id="home", name="Home"), models.OrgUnit(id="away", name="Away"),
+                models.Role(id="manager", name="Manager", permissions=["user.manage", "task.view", "integration.manage"]),
+                models.Role(id="catalog", name="Catalog", permissions=["integration.manage"]),
+                models.User(id="manager", username="manager", org_id="home", role_id="manager"),
+                models.User(id="catalog", username="catalog", org_id="home", role_id="catalog"),
+                models.User(id="home", username="home", display_name="Home member", org_id="home"),
+                models.User(id="away", username="away", display_name="Hidden member", org_id="away"),
+                models.ModelProvider(id="test-provider", name="Test provider"),
+                models.ModelDef(id="test-provider:shared", name="shared", provider_id="test-provider"),
+                models.ModelDef(id="test-provider:picture", name="picture", provider_id="test-provider", modality="image"),
+                models.Client(id="first", user_ref="home", agent_models={"pi": "shared"}, auth_state="active"),
+                models.Client(id="second", user_ref="home", agent_models={"opencode": "shared"}, auth_state="active"),
+                models.Client(id="outside", user_ref="away", agent_models={"pi": "shared"}, auth_state="active"),
+                models.Client(id="owned", user_ref="catalog", agent_models={"codex": "shared", "pi": "local:shared"}, auth_state="active"),
+            ])
+            for tid, owner in (("stage", "first"), ("workflow", "second"), ("session", "first"), ("cloud", "first"),
+                               ("historical", "first"), ("foreign", "outside"), ("native", "owned")):
+                session.add(models.Task(id=tid, title=tid, owner_client_id=owner,
+                                        work_routing={"selectedAgentKind": "codex", "selectedModel": "shared"}))
+            session.add_all([
+                models.Milestone(task_id="stage", agent_id="local:pi", model="shared"),
+                models.Milestone(task_id="stage", agent_id="runner:example:opencode", model="shared"),
+                models.Milestone(task_id="historical", agent_id="local:pi", model="shared", status="done"),
+                models.Milestone(task_id="foreign", agent_id="local:pi", model="shared"),
+                ExecutionSession(task_id="session", ref="active", engine="pi", model="shared", state="running"),
+                ExecutionSession(task_id="historical", ref="finished", engine="pi", model="shared", state="done"),
+                ConversationHandoff(id="h", transfer_id="h", task_id="cloud", owner_client_id="first", owner_user_id="home",
+                                    phase="committed", options={"agentId": "codex", "model": "shared"},
+                                    receipt={"activeExecutionSelection": {"agentId": "pi", "modelName": "shared"}}),
+                PluginVersion(id="v", plugin_id="p", checksum="fixture", version="1", workflow={"nodes": [
+                    {"type": "ai", "key": "write", "config": {"agentKind": "local:codex", "model": "shared"}}]}),
+                WorkflowRun(task_id="workflow", plugin_id="p", plugin_version_id="v", current_nodes=["write"],
+                            state="running", context={"executionOverrides": {"write": {"agentKind": "local:pi"}}}),
+            ])
+            await session.commit()
+        path = "/api/v1/admin/model-providers/test-provider"
+        async def as_user(uid, method="GET", **kwargs):
+            headers = {"Authorization": "Bearer " + sign_token(uid, 1)}
+            return await self.http.request(method, path + ("/deletion-impact" if method == "GET" else ""),
+                                           headers=headers, **kwargs)
+
+        forbidden = await as_user("away")
+        self.assertEqual(forbidden.status_code, 403)
+        redacted = (await as_user("catalog")).json()
+        self.assertFalse(redacted["canListMembers"] or redacted["canListTasks"])
+        self.assertEqual((redacted["members"], redacted["tasks"]), ([], []))
+        scoped = (await as_user("manager")).json()
+        self.assertEqual([row["id"] for row in scoped["members"]], ["home"])
+        self.assertEqual([row["id"] for row in scoped["tasks"]], ["cloud", "session", "stage", "workflow"])
+        self.assertTrue(scoped["scoped"])
+        self.assertNotIn("Hidden member", str(scoped))
+        full = (await as_user("admin")).json()
+        self.assertEqual([row["id"] for row in full["members"]], ["away", "home"])
+        self.assertIn("foreign", [row["id"] for row in full["tasks"]])
+        # A new matching saved preference changes impact even with the same provider/models.
+        async with self.sessions() as session:
+            (await session.get(models.Client, "owned")).agent_models = {"pi": "shared"}
+            await session.commit()
+        response = await as_user("manager", "DELETE", params={
+            "confirmId": "test-provider", "expectedRevision": scoped["providerRevision"],
+            "expectedImpact": scoped["impactRevision"],
+        })
+        self.assertEqual(response.status_code, 409, response.text)
+
+    async def test_deletion_preview_distinguishes_pinned_providers_with_the_same_model(self):
+        async with self.sessions.begin() as session:
+            for provider in ("first", "second"):
+                session.add(models.ModelProvider(id=provider, name=provider))
+                session.add(models.ModelDef(id=provider + ":shared", provider_id=provider, name="shared"))
+            for member, saved in (("one", {"name": "shared", "providerId": "first"}),
+                                  ("two", {"name": "shared", "providerId": "second"}),
+                                  ("legacy", "shared")):
+                session.add(models.User(id=member, username=member, is_active=True))
+                session.add(models.Client(id="device-" + member, user_ref=member,
+                                          auth_state="active", agent_models={"qwen": saved}))
+        for provider, members in (("first", ["legacy", "one"]), ("second", ["legacy", "two"])):
+            response = await self.request("GET", f"/model-providers/{provider}/deletion-impact")
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual([row["id"] for row in response.json()["members"]], members)
+
     async def test_wellformed_provider_and_model_round_trip(self):
         created = await self.request("PUT", "/model-providers/good", json={
             "expectedRevision": "new", "name": "Good", "kind": "openai-compat",
@@ -201,7 +286,23 @@ class ModelIdentifierBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("good:gpt-mini", [m["id"] for m in catalog.json()["models"]])
 
         row = next(p for p in catalog.json()["providers"] if p["id"] == "good")
-        deleted = await self.request("DELETE", f"/model-providers/good?expectedRevision={row['revision']}")
+        preview = await self.request("GET", "/model-providers/good/deletion-impact")
+        self.assertEqual(preview.status_code, 200, preview.text)
+        impact = preview.json()
+        self.assertEqual([model["id"] for model in impact["models"]], ["good:gpt-mini"])
+        url = "/model-providers/good"
+        args = {"expectedRevision": row["revision"]}
+        self.assertEqual((await self.request("DELETE", url, params=args)).status_code, 428)
+        args.update(expectedImpact=impact["impactRevision"], confirmId="other")
+        self.assertEqual((await self.request("DELETE", url, params=args)).status_code, 400)
+        args["confirmId"] = "good"
+        await self.request("PUT", "/model-defs", json={
+            "expectedRevision": "new", "providerId": "good", "name": "added-after-preview"})
+        self.assertEqual((await self.request("DELETE", url, params=args)).status_code, 409)
+        fresh = (await self.request("GET", url + "/deletion-impact")).json()
+        self.assertEqual(len(fresh["models"]), 2)
+        args["expectedImpact"] = fresh["impactRevision"]
+        deleted = await self.request("DELETE", url, params=args)
         self.assertEqual(deleted.status_code, 200, deleted.text)
 
 

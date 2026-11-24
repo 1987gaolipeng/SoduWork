@@ -6,7 +6,7 @@ from . import model_catalog, runner_hub
 
 
 async def models(session, client):
-    return [{"name": item["name"], "label": item.get("label") or item["name"]}
+    return [{"name": item["name"], "providerId": item.get("providerId", ""), "label": item.get("label") or item["name"]}
             for item in await model_catalog.usable(session, client)]
 
 
@@ -24,8 +24,9 @@ def agents(client, runner, choices):
         if managed and not choices:
             continue
         seen.add(key)
-        selected = model_catalog.agent_model(client, key)
-        effective = selected if any(row["name"] == selected for row in choices) else (choices[0]["name"] if choices else "")
+        selected, provider = model_catalog.agent_choice(client, key)
+        hit = model_catalog.agent_choice_row(choices, selected, provider)
+        effective = selected if hit else (choices[0]["name"] if choices and not provider else "")
         result.append({"id": key, "name": declaration["displayName"], "modelPick": managed,
                        "models": choices if managed else [], "modelEffective": effective if managed else ""})
     return result

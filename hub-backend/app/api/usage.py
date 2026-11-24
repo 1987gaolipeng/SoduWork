@@ -1,6 +1,7 @@
 """Read-only usage APIs for Runner load, tokens, duration, and task accounting. Administrators
 follow visibility scope; clients see only their own tasks.
 """
+from datetime import datetime, timezone
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -9,9 +10,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_session
 from ..deps import authenticated_client, current_client, require_perm
 from ..models import Client, Task, User
-from ..services import client_access, device_connections, rbac, task_access, usage_analytics, usage_ledger, usage_stats
+from ..services import (
+    client_access,
+    quota_usage,
+    rbac,
+    task_access,
+    usage_analytics,
+    usage_ledger,
+    usage_stats,
+)
+from ..services import (
+    device_connections as device_connections,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["usage"])
+
+
+def _validate_event_time(event: dict) -> dict:
+    if "occurredAt" not in event:
+        return event
+    try:
+        instant = datetime.fromisoformat(event["occurredAt"])
+        if instant.tzinfo is None:
+            instant = instant.replace(tzinfo=timezone.utc)
+        instant = instant.astimezone(timezone.utc)
+        # Both the stored instant and the ledger's calendar day must be representable.
+        instant.astimezone(quota_usage.CHINA_TZ)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise HTTPException(422, "occurredAt must be a valid ISO 8601 timestamp") from exc
+    return {**event, "occurredAt": instant}
 
 
 @router.post("/usage/events")
@@ -24,10 +51,15 @@ async def report_usage(
     incoming = body.get("events") if isinstance(body.get("events"), list) else [body]
     if not incoming or len(incoming) > 100 or any(not isinstance(item, dict) for item in incoming):
         raise HTTPException(status_code=400, detail="没有可上报的用量")
-    rows = []
+    incoming = [_validate_event_time(item) for item in incoming]
+    receipts = []
     try:
-        for item in incoming:
-            rows.append(await usage_ledger.from_client(session, client, item))
+        prepared = [await usage_ledger.prepare_client_event(session, client, item) for item in incoming]
+        for key, values in prepared:
+            row, status = await usage_ledger.record_cumulative(session, key, values)
+            receipts.append({**usage_ledger.to_api(row), "status": status})
+    except usage_ledger.InvalidUsageSource as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
@@ -35,8 +67,7 @@ async def report_usage(
     quota = await client_access.quota_status(
         session, str(client.user_ref or ""))
     # Exhaustion changes AI admission, not identity or business connectivity.
-    return {"ok": True, "accepted": len(rows),
-            "events": [usage_ledger.to_api(row) for row in rows],
+    return {"ok": True, "accepted": len(receipts), "events": receipts,
             "quota": quota}
 
 
@@ -82,11 +113,12 @@ async def admin_runner_usage(
     """Return per-Runner availability, active sessions, and windowed session, token, and duration
     totals by CLI.
     """
-    from .admin import _visible_client_ids
     from ..services import runner_admin_scope
-    return {"days": max(1, min(365, int(days or 30))),
+    from .admin import _visible_client_ids
+    window = max(1, min(365, int(days or 30)))
+    return {"days": window,
             "runners": await usage_stats.runner_usage(
-                session, days=days,
+                session, days=window,
                 task_client_ids=await _visible_client_ids(session, user),
                 runner_client_ids=await runner_admin_scope.admin_allowed(session, user),
                 runner_org_ids=await runner_admin_scope.admin_orgs(session, user))}

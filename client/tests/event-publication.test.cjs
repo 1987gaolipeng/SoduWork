@@ -147,3 +147,25 @@ test('pi-session IPC forwards only bounded plugin authorization metadata', () =>
       pluginAuthorization: { missing: ['browser'], grant: 'private' } }, {}, true);
   assert.deepEqual(sent.pluginAuthorization, { missing: ['browser'] });
 });
+
+test('pi-session IPC forwards null presence when handle.historyRow returns null', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(require.resolve('../main/pi-session/ipc'), 'utf8');
+  const decoratedInputs = [];
+  const context = {
+    require: () => require('../core/token-quota'),
+    eventPublication: { fields, pluginAuthorization },
+    conversationTitles: { decorate: (_app, row) => { decoratedInputs.push(row); return row; } },
+    _contextSnapshot: (_handle, snapshot) => snapshot,
+    _app: {},
+  };
+  vm.runInNewContext(source.slice(source.indexOf('function _send('), source.indexOf('function _publish(')), context);
+  let sent;
+  context._send(
+    { isDestroyed: () => false, webContents: { send: (_channel, value) => { sent = value; } } },
+    { ref: 'chat-empty', sessionId: 'sess-empty', requirementContext: { projectId: 'p1' }, historyRow: () => null },
+    { kind: 'thinking-level' }, {}, true,
+  );
+  assert.equal(decoratedInputs.at(-1), null);
+  assert.equal(sent.presence, null);
+});

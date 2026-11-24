@@ -3,7 +3,7 @@ identities.
 """
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["AUTH_SECRET"] = "usage-privacy-fixture-signing-key-for-isolated-tests"
@@ -57,6 +57,9 @@ async def main():
             session.add(am.ExecutionSession(
                 ref=ref, runner_id=runner, task_id=task, host=runner + "-host",
                 state="done", started_at=now, metadata_={"usage": {"total": tokens}}))
+        session.add(am.ExecutionSession(
+            ref="outside-maximum-window", runner_id="runner-a", task_id="task-a",
+            state="done", started_at=now - timedelta(days=400), metadata_={"usage": {"total": 50}}))
         await session.commit()
 
     app = FastAPI()
@@ -95,6 +98,12 @@ async def main():
         checks += 2
         rows = {row["runnerId"]: row for row in (await get(runners, "super")).json()["runners"]}
         assert rows["runner-a"]["usage"]["total"] == 910
+        for requested_days in (401, 1000000):
+            result = (await get(f"{runners}?days={requested_days}", "super")).json()
+            assert result["days"] == 365
+            runner_a = next(row for row in result["runners"] if row["runnerId"] == "runner-a")
+            assert runner_a["usage"]["total"] == 910
+            checks += 2
         assert rows["backend-local"]["usage"]["total"] == 730
         assert "runner-b" in rows
         assert (await get(detail + "task-b", "super")).status_code == 200
