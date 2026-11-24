@@ -1183,7 +1183,8 @@ class LocalStartupTests(unittest.TestCase):
                     legacy.mkdir(parents=True, exist_ok=True)
                     (legacy / 'auth.json').write_text('{}', encoding='utf-8')
                 with patch.object(sys, 'platform', 'win32'), patch.object(Path, 'home', return_value=user_home), \
-                        patch.dict(os.environ, {'CODEX_HOME': override}), patch.object(start.subprocess, 'Popen') as popen:
+                        patch.dict(os.environ, {'CODEX_HOME': override}), patch('shutil.which', return_value='node'), \
+                        patch.object(start.subprocess, 'Popen') as popen:
                     service = start.runtime_environment(self.state, {'adminUser': 'test', 'authSecret': 'fixture'},
                                                         'fixture', '127.0.0.1', 18989)
                     start.launch_desktop(self.state, self.state / 'application/client', service,
