@@ -63,13 +63,13 @@ test('offline legacy import preserves Hub selection and other identities and rej
   assert.equal(fs.readFileSync(file + '.bak', 'utf8'), 'unreadable backup');
 });
 
-function accountTransitionFixture(t) {
+function accountTransitionFixture(t, options = {}) {
   const f = fixture();
   t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
   const file = require.resolve('../main/device-auth');
   delete require.cache[file];
   const deviceAuth = require(file);
-  deviceAuth.install({ ...f });
+  deviceAuth.install({ ...f, ...options });
   const hub = 'https://account-transition.fixture.invalid';
   const invoke = (action, payload = {}) => f.handlers.get('device-auth-' + action)({ sender: { id: 1 } }, { hub, ...payload });
   const login = (payload = {}) => invoke('login', { account: 'fixture-owner', password: 'fixture-only', ...payload });
@@ -78,6 +78,76 @@ function accountTransitionFixture(t) {
     enrolled: () => response({ authState: 'pending', activationRequired: true }),
     session: token => response({ session: token, expiresIn: 300, user: { id: 'fixture-owner' } }) };
 }
+
+test('explicit device pairing copies only to the clipboard for the current desktop identity', async t => {
+  const copied = [];
+  const f = accountTransitionFixture(t, { copyText: value => copied.push(value) });
+  const frame = {}, sender = { mainFrame: frame, isDestroyed: () => false,
+    getURL: () => require('node:url').pathToFileURL(path.resolve(__dirname, '../desk.html')).href };
+  const event = { sender, senderFrame: frame };
+  const handler = f.handlers.get('device-auth-copy-pairing');
+  const token = 'fixture-pairing-code', requests = [];
+  let owner = '', pending = null;
+  t.mock.method(global, 'fetch', async (url, options) => {
+    requests.push({ url, options });
+    if (url.endsWith('/client-auth/login')) return f.session('account-session');
+    const data = { pairingToken: token, authState: owner ? 'active' : 'pending',
+      activationRequired: !owner, ...(owner ? { session: 'renewed-session', user: { id: owner } } : {}) };
+    if (pending) await pending;
+    return f.response(data);
+  });
+  const boot = await f.invoke('bootstrap');
+  const scope = { hub: f.hub, clientId: boot.clientId, userId: '' };
+  assert.equal(boot.pairingToken, undefined);
+  assert.equal(requests[0].url.endsWith('/clients/enroll'), true);
+  assert.equal((await handler({}, scope)).ok, false);
+  assert.equal((await handler(event, { ...scope, hub: 'https://other.invalid' })).ok, false);
+  assert.deepEqual(copied, []);
+  assert.deepEqual(await handler(event, scope), { ok: true });
+  assert.equal(requests.at(-1).url, f.hub + '/api/v1/clients/enroll?pairing=true');
+  assert.equal(JSON.parse(requests.at(-1).options.body).platform, process.platform + '/' + process.arch);
+  assert.equal(requests.at(-1).options.redirect, 'error');
+  assert.deepEqual(copied, [token]);
+  // Admin activation can reach the Hub before the local login screen refreshes.
+  owner = 'fixture-owner';
+  assert.equal((await handler(event, scope)).ok, false);
+  assert.deepEqual(copied, [token]);
+  const file = require.resolve('../main/device-auth');
+  delete require.cache[file];
+  const restarted = require(file);
+  restarted.install({ ...f, ipcMain: { handle() {} } });
+  const beforeRestart = requests.length;
+  assert.equal((await restarted.enroll(f.app, { hub: f.hub, recheckAuth: true })).activationRequired, true);
+  assert.equal((await f.invoke('bootstrap')).activationRequired, true);
+  assert.equal(requests.length, beforeRestart);
+  assert.equal((await f.invoke('bootstrap', { recheckAuth: true })).session, 'renewed-session');
+  assert.equal((await restarted.enroll(f.app, { hub: f.hub })).session, undefined);
+  assert.equal((await f.login()).ok, true);
+  assert.equal((await handler(event, scope)).ok, false);
+  scope.userId = owner;
+  assert.deepEqual(await handler(event, scope), { ok: true });
+  assert.equal(f.deviceAuth.session(f.app), 'account-session');
+  let release;
+  pending = new Promise(resolve => { release = resolve; });
+  const stale = handler(event, scope);
+  f.deviceAuth.selectHub(f.app, 'https://next.invalid');
+  release();
+  assert.equal((await stale).ok, false);
+  assert.deepEqual(copied, [token, token]);
+  assert.ok(!fs.readFileSync(path.join(f.root, 'device-auth.json'), 'utf8').includes(token));
+  f.deviceAuth.selectHub(f.app, f.hub);
+  assert.equal((await f.invoke('logout')).ok, true);
+  owner = scope.userId = '';
+  const before = fs.readFileSync(path.join(f.root, 'device-auth.json'), 'utf8');
+  assert.equal(f.deviceAuth.identity(f.app), null);
+  assert.deepEqual(await handler(event, scope), { ok: true });
+  assert.equal(f.deviceAuth.identity(f.app), null);
+  assert.equal(f.deviceAuth.session(f.app), '');
+  assert.equal(fs.readFileSync(path.join(f.root, 'device-auth.json'), 'utf8'), before);
+  const beforeRetry = requests.length;
+  assert.equal((await f.invoke('bootstrap', { recheckAuth: true })).activationRequired, true);
+  assert.equal(requests.length, beforeRetry);
+});
 
 test('auto sign-in is scoped to a Hub and manual sign-in lasts for this desktop process', async t => {
   const f = accountTransitionFixture(t);

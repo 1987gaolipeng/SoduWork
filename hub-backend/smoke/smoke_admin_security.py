@@ -8,6 +8,7 @@ import inspect
 import json
 import os
 from pathlib import Path
+import secrets
 import tempfile
 import textwrap
 from types import SimpleNamespace
@@ -230,6 +231,38 @@ async def approval_audits(client, actor, headers):
                            "action": "baseline", "note": action,
                            **(body if route == "transfer" else {})})
         check(f"approval {action} commits one attributed audit for the selected request", audited, response.text)
+        if audited:
+            verified.add(("POST", path))
+    return verified
+
+
+async def device_pairing_audits(client, actor, headers, first_owner, second_owner):
+    """Credit delegated device routes only after their state and audit are committed."""
+    device = "audit-pairing-desktop"
+    key_headers = {"X-Device-Key": secrets.token_urlsafe(32)}
+    verified = set()
+    for action, path, owner in (
+        ("pair", "/api/v1/admin/clients/pair", first_owner),
+        ("assign", "/api/v1/admin/clients/{cid}/assign", second_owner),
+        ("activate", "/api/v1/admin/clients/{cid}/activate", first_owner),
+    ):
+        enrollment = await client.post("/api/v1/clients/enroll?pairing=true",
+                                       headers=key_headers, json={"device": device})
+        proof = enrollment.json().get("pairingToken")
+        if enrollment.status_code != 200 or not proof:
+            check(f"device can request proof for {action}", False, enrollment.status_code)
+            break
+        response = await client.post(path.format(cid=device), headers=headers,
+                                     json={"userId": owner, "pairingToken": proof})
+        async with SessionLocal() as session:
+            bound = await session.get(models.Client, device)
+            rows = (await session.scalars(select(models.AuditLog).where(
+                models.AuditLog.target_id == device, models.AuditLog.action == "client." + action))).all()
+            audited = (response.status_code == 200 and bound is not None
+                       and bound.auth_state == "active" and bound.user_ref == owner
+                       and len(rows) == 1 and rows[0].actor_id == actor
+                       and rows[0].target_type == "client" and rows[0].detail == {"ownerUserId": owner})
+        check(f"device {action} commits ownership and one attributed audit", audited, response.status_code)
         if audited:
             verified.add(("POST", path))
     return verified
@@ -693,6 +726,7 @@ async def main() -> None:
 
 
     async with httpx.AsyncClient(transport=transport, base_url="http://soduwork.test") as client:
+        verified.update(await device_pairing_audits(client, super_user.id, super_headers, ordinary.id, outsider.id))
         verified.update(await catalog_batch_audits(client, super_user.id, super_headers))
     audit_contract(verified)
 

@@ -410,6 +410,12 @@ class UserBatchUpdate(BaseModel):
 class AssignUserBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
     userId: Optional[str] = None         # An empty user ID unassigns the client.
+    pairingToken: str | None = Field(default=None, max_length=2048)
+
+
+class ClientPairBody(BaseModel):
+    userId: str = Field(min_length=1, max_length=64)
+    pairingToken: str = Field(min_length=1, max_length=2048)
 
 
 # Legacy WorkflowCreate and FlowTemplate contracts are retired.

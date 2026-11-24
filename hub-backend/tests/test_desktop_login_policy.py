@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app.db import Base
-from app.models import Client, User
+from app.models import AuditLog, Client, User
 from app.automation_models import RunnerNode
 from app.services import desktop_login_policy as policy
 
@@ -25,7 +25,7 @@ class DesktopLoginTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as connection:
-            await connection.run_sync(lambda db: Base.metadata.create_all(db, tables=[User.__table__, Client.__table__, RunnerNode.__table__]))
+            await connection.run_sync(lambda db: Base.metadata.create_all(db, tables=[User.__table__, Client.__table__, RunnerNode.__table__, AuditLog.__table__]))
         async with self.sessions() as session:
             session.add_all([User(id="one", username="one", is_active=True), User(id="two", username="two", is_active=True)])
             for identity, platform, owner in [("new", "win32", "one"), ("old", "Windows", "one"),
@@ -110,21 +110,39 @@ class DesktopLoginTests(unittest.IsolatedAsyncioTestCase):
             async with self.sessions() as session:
                 user = await session.get(User, "one")
                 current = await session.get(Client, "new")
-                current.secret_hash = "isolated-existing-key-hash"
+                current.secret_hash = admin.device_auth.hash_secret("desktop replacement fixture")
+                current.auth_state = "pending"
                 old = await session.get(Client, "old")
                 old.auth_state = "active"
                 await session.commit()
                 with patch.object(admin, "_assert_client_in_scope", AsyncMock()), \
                      patch.object(admin, "_assert_user_in_scope", AsyncMock()), \
-                     patch.object(admin.audit, "log", AsyncMock()), \
                      patch.object(admin.device_connections, "disconnect", AsyncMock()) as disconnect:
-                    response = await endpoint("new", SimpleNamespace(userId="one"), user, session)
+                    ticket = admin.device_auth.issue_pairing_token("new", current.secret_hash, current.auth_version)
+                    response = await endpoint("new", SimpleNamespace(userId="one", pairingToken=ticket), user, session)
                     self.assertTrue(response["ok"])
                     disconnect.assert_any_await("old", 4401)
                 await session.refresh(old)
                 self.assertEqual((old.auth_state, old.user_ref), ("pending", "one"))
                 for identity in ("phone", "cloud", "foreign"):
                     self.assertEqual((await session.get(Client, identity)).auth_state, "active")
+
+    async def test_delegated_assignment_excludes_superuser_owners(self):
+        from fastapi import HTTPException
+        from app.api import admin
+        async with self.sessions() as session:
+            actor = await session.get(User, "one")
+            target = await session.get(User, "two")
+            target.is_super = True
+            await session.commit()
+            with patch.object(admin.rbac, "scope_org_ids", AsyncMock(return_value=None)):
+                options = await admin.client_owner_options(actor, session)
+                self.assertEqual([row["id"] for row in options], [actor.id])
+                with self.assertRaises(HTTPException) as error:
+                    await admin.assign_client("new", SimpleNamespace(userId=target.id, pairingToken=None),
+                                              actor, session)
+                self.assertEqual((error.exception.status_code, error.exception.detail), (403, "无权管理该用户"))
+                self.assertEqual((await session.get(Client, "new")).user_ref, actor.id)
 
     async def assert_platform_replacement(self, old_platform, new_platform, expected):
         """Use a fresh transaction for each pair and read both devices back from the database."""

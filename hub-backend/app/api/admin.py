@@ -25,7 +25,7 @@ from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
-from ..auth import sign_token, verify_password
+from ..auth import sign_token, verify_claims, verify_password
 from ..config import get_settings
 from ..csv_export import csv_chunks
 from ..db import get_session
@@ -39,6 +39,7 @@ from ..schemas import (
     AssignBody,
     AssignUserBody,
     BindingCreate,
+    ClientPairBody,
     DispatchCreate,
     IntegrationCreate,
     IntegrationUpdate,
@@ -899,84 +900,117 @@ async def export_client_inventory(
     })
 
 
-@router.post("/clients/{cid}/assign")
-async def assign_client(
-    cid: str,
-    body: AssignUserBody,
-    user: User = Depends(require_perm("client.assign")),
-    session: AsyncSession = Depends(get_session),
-):
-    """Assign a client to Client.user_ref; an empty userId returns it to the unassigned pool."""
-    c = await session.get(Client, cid)
-    if c is None:
-        raise HTTPException(status_code=404, detail="SoduWork 不存在")
-    await _assert_client_in_scope(session, user, c)
-    connection_changed = False
-    replaced_desktops = []
-    if body.userId:
-        target = await session.get(User, body.userId)
-        if target is None or not target.is_active:
-            raise HTTPException(status_code=400, detail="目标用户不存在")
-        await _assert_user_in_scope(session, user, target)
-        from ..services import desktop_login_policy
-        await desktop_login_policy.lock_assignment(session, c, target)
-        await _assert_client_in_scope(session, user, c)
-        await _assert_user_in_scope(session, user, target)
-        if not target.is_active or target.account_deleted_at:
-            raise HTTPException(status_code=400, detail="目标用户不存在")
-        if not c.secret_hash:
-            raise HTTPException(status_code=409, detail="这台 SoduWork 还没有提交设备密钥")
-        if c.user_ref != target.id or c.auth_state != "active":
-            connection_changed = True
-            device_auth.activate(c, target)
-        replaced_desktops = await desktop_login_policy.replace_previous(session, c, target)
-    else:
-        connection_changed = bool(c.user_ref or c.auth_state == "active")
-        if c.auth_state == "active":
-            device_auth.revoke(c)
-        c.user_ref = None
-    await session.commit()
-    if connection_changed:
-        await device_connections.disconnect(cid)
-    for previous_id in replaced_desktops:
-        await device_connections.disconnect(previous_id, 4401)
-    await audit.log(session, user, "client.assign", "client", cid, c.name or cid,
-                    {"ownerUserId": c.user_ref})
-    return {"ok": True, "ownerUserId": c.user_ref, "authState": c.auth_state}
+@router.get("/client-owner-options")
+async def client_owner_options(user: User = Depends(require_perm("client.assign")),
+                               session: AsyncSession = Depends(get_session)):
+    query = select(User.id, User.username, User.display_name).where(
+        User.is_active.is_(True), User.account_deleted_at.is_(None))
+    scope = await rbac.scope_org_ids(session, user)
+    if scope is not None:
+        query = query.where(User.org_id.in_(scope))
+    if not user.is_super:
+        query = query.where(User.is_super.is_(False))
+    rows = await session.execute(query.order_by(User.username, User.id))
+    return [{"id": uid, "username": name, "displayName": display} for uid, name, display in rows]
 
 
-@router.post("/clients/{cid}/activate")
-async def activate_client(
-    cid: str,
-    body: AssignUserBody,
-    user: User = Depends(require_perm("client.assign")),
-    session: AsyncSession = Depends(get_session),
-):
-    c = await session.get(Client, cid)
-    if c is None:
-        raise HTTPException(status_code=404, detail="SoduWork 不存在")
-    await _assert_client_in_scope(session, user, c)
-    if not c.secret_hash:
-        raise HTTPException(status_code=409, detail="这台 SoduWork 还没有提交设备密钥，请先让客户端连接一次")
-    target = await session.get(User, body.userId) if body.userId else None
-    if target is None or not target.is_active:
-        raise HTTPException(status_code=400, detail="请选择一个可用的归属用户")
-    await _assert_user_in_scope(session, user, target)
+def _pairing_claims(token: str | None, cid: str | None = None) -> dict:
+    claims = verify_claims(token or "", token_type="device-pairing")
+    if not claims or (cid is not None and claims["cid"] != cid):
+        raise HTTPException(403, "请向设备使用者索取这台设备的新配对凭据")
+    return claims
+
+
+async def _assign_client_owner(session, user, cid, target_id, token, *, action, create=False):
     from ..services import desktop_login_policy
+    target = await session.get(User, target_id, with_for_update=True) if target_id else None
+    if target is None or not target.is_active or target.account_deleted_at:
+        raise HTTPException(400, "请选择一个可用的归属用户")
+    await _assert_user_in_scope(session, user, target)
+    c = await session.get(Client, cid)
+    new = c is None
+    if new:
+        if not create:
+            raise HTTPException(404, "SoduWork 不存在")
+        claims = _pairing_claims(token, cid)
+        if claims["ver"] is not None:
+            raise HTTPException(409, "设备登记已变化，请重新配对")
+        c = await device_auth.insert_new_device(session, cid, claims["digest"], platform=claims["platform"])
+        if c is None:
+            raise HTTPException(409, "设备登记已变化，请重新配对")
+
     await desktop_login_policy.lock_assignment(session, c, target)
     await _assert_client_in_scope(session, user, c)
     await _assert_user_in_scope(session, user, target)
-    if not target.is_active or target.account_deleted_at or not c.secret_hash:
-        raise HTTPException(status_code=409, detail="设备或账号授权已变化，请刷新后重试")
-    device_auth.activate(c, target)
-    replaced_desktops = await desktop_login_policy.replace_previous(session, c, target)
+    if not target.is_active or target.account_deleted_at:
+        raise HTTPException(409, "账号授权已变化，请刷新后重试")
+    if target.is_super and not user.is_super:
+        raise HTTPException(403, "无权管理该用户")
+    if c.auth_state == "revoked":
+        raise HTTPException(409, "请先重新登记已停用的设备")
+    changed = action != "client.assign" or c.user_ref != target.id or c.auth_state != "active"
+    if changed:
+        if not new:
+            claims = _pairing_claims(token, cid)
+            digest = claims["digest"]
+            bound_digest = c.secret_hash or (device_auth.hash_secret(c.secret) if c.secret else None)
+            if claims["ver"] != c.auth_version or (bound_digest and bound_digest != digest):
+                raise HTTPException(409, "设备登记已变化，请重新配对")
+            # On SQLite SELECT FOR UPDATE is a no-op. A conditional write also
+            # fences a simultaneous approval or reset before consuming this proof.
+            matched = await session.execute(update(Client).where(
+                Client.id == cid, Client.auth_version == claims["ver"],
+                Client.secret_hash == c.secret_hash, Client.secret == c.secret, Client.auth_state != "revoked",
+            ).values(secret_hash=digest, secret=None))
+            if matched.rowcount != 1:
+                raise HTTPException(409, "设备登记已变化，请重新配对")
+            if not bound_digest and claims["platform"]:
+                c.platform = claims["platform"]
+        device_auth.activate(c, target)
+    replaced = await desktop_login_policy.replace_previous(session, c, target)
+    audit.add(session, user, action, "client", cid, c.name or cid, {"ownerUserId": target.id})
     await session.commit()
-    await device_connections.disconnect(cid)
-    for previous_id in replaced_desktops:
+    if changed:
+        await device_connections.disconnect(cid)
+    for previous_id in replaced:
         await device_connections.disconnect(previous_id, 4401)
-    await audit.log(session, user, "client.activate", "client", cid, c.name or cid,
-                    {"ownerUserId": target.id})
     return {"ok": True, "ownerUserId": target.id, "authState": c.auth_state}
+
+
+@router.post("/clients/pair")
+async def pair_client(body: ClientPairBody, user: User = Depends(require_perm("client.assign")),
+                      session: AsyncSession = Depends(get_session)):
+    cid = _pairing_claims(body.pairingToken)["cid"]
+    return await _assign_client_owner(session, user, cid, body.userId, body.pairingToken,
+                                     action="client.pair", create=True)
+
+
+@router.post("/clients/{cid}/assign")
+async def assign_client(cid: str, body: AssignUserBody, user: User = Depends(require_perm("client.assign")),
+                        session: AsyncSession = Depends(get_session)):
+    if body.userId:
+        return await _assign_client_owner(session, user, cid, body.userId, body.pairingToken,
+                                         action="client.assign")
+    c = await session.get(Client, cid, with_for_update=True)
+    if c is None:
+        raise HTTPException(404, "SoduWork 不存在")
+    await _assert_client_in_scope(session, user, c)
+    changed = bool(c.user_ref or c.auth_state == "active")
+    if c.auth_state == "active":
+        device_auth.revoke(c)
+    c.user_ref = None
+    await session.commit()
+    if changed:
+        await device_connections.disconnect(cid)
+    await audit.log(session, user, "client.assign", "client", cid, c.name or cid, {"ownerUserId": None})
+    return {"ok": True, "ownerUserId": None, "authState": c.auth_state}
+
+
+@router.post("/clients/{cid}/activate")
+async def activate_client(cid: str, body: AssignUserBody, user: User = Depends(require_perm("client.assign")),
+                          session: AsyncSession = Depends(get_session)):
+    return await _assign_client_owner(session, user, cid, body.userId, body.pairingToken,
+                                     action="client.activate")
 
 
 @router.post("/clients/{cid}/revoke")

@@ -10,6 +10,7 @@ let _activeHub = '';
 let _selectionVersion = 0;
 const _sessions = new Map();
 const _enrollments = new Map();
+const _pairingRetries = new Set();
 const _authVersions = new Map();
 const _authChanges = new Map();
 const _logouts = new Set();
@@ -83,6 +84,7 @@ function _activate(hub, previousHub) {
     // Old requests keep their own completion, but cannot refill a newer cache
     // or be reused after switching back to the same environment.
     _enrollments.clear();
+    _pairingRetries.clear();
     _authChanges.clear();
     for (const slot of _requestLifetimes.keys()) _cancelRequests(slot);
   }
@@ -102,6 +104,7 @@ function _invalidate(id) {
   _authVersions.set(slot, (_authVersions.get(slot) || 0) + 1);
   _sessions.delete(slot);
   _enrollments.delete(slot);
+  _pairingRetries.delete(slot);
   _authChanges.delete(slot);
   return _generation(id);
 }
@@ -517,7 +520,7 @@ function _failure(data, status) {
   };
 }
 
-async function _requestEnrollment(id, raw, app = null, generation = _generation(id), cache = true, restoreAccount) {
+async function _requestEnrollment(id, raw, app, generation = _generation(id), { cache = true, restoreAccount, copyPairingToken } = {}) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 8000);
   try {
@@ -526,8 +529,8 @@ async function _requestEnrollment(id, raw, app = null, generation = _generation(
       const value = String(raw && raw[field] || '').trim();
       if (value) body[field] = value.slice(0, field === 'workRoot' ? 400 : 64);
     }
-    const res = await fetch(id.hub + '/api/v1/clients/enroll', {
-      method: 'POST', signal: ctl.signal,
+    const res = await fetch(id.hub + '/api/v1/clients/enroll' + (copyPairingToken ? '?pairing=true' : ''), {
+      method: 'POST', signal: ctl.signal, redirect: 'error',
       headers: { 'Content-Type': 'application/json', 'X-Device-Key': id.secret },
       body: JSON.stringify(body),
     });
@@ -545,6 +548,11 @@ async function _requestEnrollment(id, raw, app = null, generation = _generation(
         _anonymous.set(_sessionSlot(id.hub, id.clientId), failure);
       }
       return failure;
+    }
+    if (copyPairingToken) {
+      if (typeof data.pairingToken !== 'string' || !data.pairingToken) return { ok: false, error: '当前服务未提供设备配对码' };
+      copyPairingToken(data.pairingToken, data.user?.id);
+      return { ok: true };
     }
     const safe = {
       ok: true, stored: true, hub: id.hub, clientId: id.clientId,
@@ -569,7 +577,10 @@ async function _requestEnrollment(id, raw, app = null, generation = _generation(
       const nextAccount = safe.user?.id || accountId({ ...id, session: safe.session });
       if (cache && oldAccount && nextAccount && oldAccount !== nextAccount)
         _cancelRequests(_sessionSlot(id.hub, id.clientId));
-      if (cache) _anonymous.delete(_sessionSlot(id.hub, id.clientId));
+      if (cache) {
+        _anonymous.delete(generation.slot);
+        _pairingRetries.delete(generation.slot);
+      }
       if (cache) _sessions.set(_sessionSlot(id.hub, id.clientId), {
         token: safe.session, expiresAt: Date.now() + safe.expiresIn * 1000,
         localOwner: _advanceOwner(app, _sessions.get(_sessionSlot(id.hub, id.clientId)), id, safe.session),
@@ -597,7 +608,8 @@ async function enroll(app, raw = {}) {
   const slot = _sessionSlot(id.hub, id.clientId);
   if (_authChanges.has(slot) || _logouts.has(slot)) return _transitionPending(id);
   const profile = _readDoc(app).profiles[_slot(id.hub)];
-  if (!profile || _needsLogin(profile)) return _pending(id);
+  const pairingRetry = raw.recheckAuth === true && _pairingRetries.has(slot);
+  if (!profile || profile.signedOut || (_needsLogin(profile) && !pairingRetry)) return _pending(id);
   if (raw.recheckAuth === true) _anonymous.delete(slot);
   if (_anonymous.has(slot)) return _anonymous.get(slot);
   const current = _validSessionRow(app, id.hub, id.clientId);
@@ -616,7 +628,7 @@ async function enroll(app, raw = {}) {
   const running = _enrollments.get(slot);
   if (running) return running;
   const restoreAccount = profile.autoLoginAccountId === '' ? _sessions.get(slot)?.user?.id : profile.autoLoginAccountId;
-  const job = _requestEnrollment(id, raw, app, _generation(id), true, restoreAccount).finally(() => {
+  const job = _requestEnrollment(id, raw, app, _generation(id), { restoreAccount }).finally(() => {
     if (_enrollments.get(slot) === job) _enrollments.delete(slot);
   });
   _enrollments.set(slot, job);
@@ -639,7 +651,7 @@ async function login(app, raw = {}, action = 'legacy') {
     if (typeof raw.autoLogin === 'boolean') _setLoginState(app, id, true);
     // Enrollment may still report the previous account. Never expose that
     // intermediate session while an explicit account change is in flight.
-    const enrolled = await _requestEnrollment(id, raw, app, generation, false);
+    const enrolled = await _requestEnrollment(id, raw, app, generation, { cache: false });
     if (!enrolled.ok && !enrolled.status) return enrolled;
     if (!_current(generation)) return _changed(id);
     timer = setTimeout(() => ctl.abort(), 12000);
@@ -711,7 +723,7 @@ async function accountAction(app, raw = {}) {
   let timer;
   try {
     if (spec.method !== 'GET') {
-      const enrolled = await _requestEnrollment(id, raw, app, generation, false);
+      const enrolled = await _requestEnrollment(id, raw, app, generation, { cache: false });
       if (!enrolled.ok && !enrolled.status) return enrolled;
     }
     if (!_current(generation)) return _changed(id);
@@ -873,7 +885,7 @@ function requestAdmission(app, previous) {
   return { identity: { ...id, session: row.token }, signal: _requestLifetimes.get(slot).signal };
 }
 
-function install({ app, ipcMain, safeStorage, credentials, onAuthUnavailable }) {
+function install({ app, ipcMain, safeStorage, credentials, onAuthUnavailable, copyText = value => require('electron').clipboard.writeText(value) }) {
   _onAuthUnavailable = onAuthUnavailable || (() => {});
   _credentials = credentials || require('./device-credential-store.cjs').create({ safeStorage, app });
   require('./device-auth-request').setRequestAdmission(previous => requestAdmission(app, previous));
@@ -888,6 +900,31 @@ function install({ app, ipcMain, safeStorage, credentials, onAuthUnavailable }) 
   });
   ipcMain.handle('device-auth-select-hub', (_event, hub) => selectHub(app, hub));
   ipcMain.handle('device-auth-bootstrap', (_event, raw) => enroll(app, raw || {}));
+  ipcMain.handle('device-auth-copy-pairing', (event, scope) => {
+    const trusted = () => require('./access-control/preferences').isTrusted(event);
+    if (!trusted()) return { ok: false };
+    const id = _storedIdentity(app, '', '', true);
+    if (!id || id.hub !== scope?.hub || id.clientId !== scope?.clientId) return { ok: false, error: TEXT.authChanged };
+    const generation = _generation(id);
+    const matchesOwner = () => (_sessions.get(generation.slot)?.user?.id || '') === scope.userId;
+    if (!matchesOwner() || _authChanges.has(generation.slot) || _logouts.has(generation.slot)) return _changed(id);
+    return _requestEnrollment(id, { platform: process.platform + '/' + process.arch }, app, generation, {
+      cache: false,
+      copyPairingToken(token, owner) {
+        if (!trusted() || !matchesOwner() || (owner || '') !== scope.userId) throw new Error(TEXT.authChanged);
+        const profile = _readDoc(app).profiles[_slot(id.hub)];
+        if (!owner && profile && !profile.signedOut && !profile.autoLoginAccountId) {
+          // Pairing allows an explicit Retry here. It does not opt into restoring
+          // an administrator-assigned account when the application restarts.
+          _setLoginState(app, id, false, false);
+          copyText(token);
+          _pairingRetries.add(generation.slot);
+          return;
+        }
+        copyText(token);
+      },
+    });
+  });
   ipcMain.handle('device-auth-migrate-legacy', (event, raw) => require('./access-control/preferences').isTrusted(event)
     ? migrateLegacy(app, raw) : {stored:false});
   ipcMain.handle('device-auth-login', async (event, raw) => { const result = await login(app, raw || {}); notifySessionChanged(app, event?.sender, result); return result; });

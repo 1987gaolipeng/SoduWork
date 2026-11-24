@@ -1,6 +1,10 @@
 /* System-authored capability and requirement copy, shared by renderer and main process. */
 (function (global) {
   const rows = {
+    '复制设备配对码': ['Copy device pairing code', '端末のペアリングコードをコピー', '기기 페어링 코드 복사'],
+    '设备配对码已复制。请在 10 分钟内通过可信渠道发给管理员。': ['Device pairing code copied. Share it with your administrator through a trusted channel within 10 minutes.', '端末のペアリングコードをコピーしました。10 分以内に信頼できる連絡手段で管理者に伝えてください。', '기기 페어링 코드를 복사했습니다. 10분 안에 신뢰할 수 있는 채널을 통해 관리자에게 전달하세요.'],
+    '当前服务未提供设备配对码': ['This server did not provide a device pairing code.', 'このサーバーから端末のペアリングコードを取得できませんでした。', '이 서버에서 기기 페어링 코드를 제공하지 않았습니다.'],
+    '无法复制设备配对码': ['Could not copy the device pairing code.', '端末のペアリングコードをコピーできませんでした。', '기기 페어링 코드를 복사할 수 없습니다.'],
     '整理需求，补充信息': ['Organize and clarify', '要件を整理・補足', '요구사항 정리 및 보완'],
     '安排人员或 AI 执行': ['Assign to people or AI', '担当者または AI に割当', '담당자 또는 AI에 배정'],
     '跟进进展，处理确认': ['Track progress and decisions', '進捗確認・承認対応', '진행 상황 및 확인 사항 처리'],
