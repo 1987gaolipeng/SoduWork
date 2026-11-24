@@ -60,7 +60,7 @@ function resumeOptions(options) {
     // recover an unavailable saved model from the current default instead of
     // treating the stale selection as a new-chat explicit choice.
     resumedConversation: true, sessionTitle: segments.title(row),
-    modelName: row.active.modelName,
+    modelName: row.active.modelName || undefined,
     reasoningEffort: row.active.reasoningEffort ?? options.reasoningEffort,
     accessPolicy: row.accessPolicy, readOnly: row.readOnly, activePluginIds: row.activePluginIds,
     contextPrompts: [...(options.contextPrompts || []), row.deviceHistoryComplete
@@ -211,7 +211,8 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
         accessPolicy: policy, readOnly: options.readOnly,
         activePluginIds: before.activePlugins || [],
         segments: [...(record?.segments || []), oldDescriptor],
-        active: { ...descriptor(next), modelName, ...(record?.deviceShared ? { executionOwner: owner } : {}),
+        active: { ...descriptor(next), modelName: next.snapshot()?.modelSelection?.name ?? modelName,
+          ...(record?.deviceShared ? { executionOwner: owner } : {}),
           ...(agentId === 'codex' ? { reasoningEffort: next.snapshot()?.thinking?.level || '' } : {}),
           started: false, usedHarnesses: [] } };
       if (closed) throw Error('会话已关闭，本次切换已取消');

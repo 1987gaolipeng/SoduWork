@@ -63,7 +63,7 @@ function create({ name = '', model, resolve, apply, persist = () => {}, changed 
           reason: require('../../core/token-quota').detail(resolved)
             ? '当前 AI 使用额度暂不可用，请查看额度详情' : '该模型当前不可用，请刷新模型列表后重试',
           ...require('../../core/token-quota').fields(resolved) };
-        name = canonicalName(name, resolved.model);
+        name = canonicalName(name || resolved.model.id || '', resolved.model);
         await persist(name);
         selected = name; selectedModel = resolved.model; changed();
         return { ok: true, selection: this.view() };

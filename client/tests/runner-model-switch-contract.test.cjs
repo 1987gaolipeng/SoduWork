@@ -37,6 +37,27 @@ for (const agentId of ['qwen', 'codex']) test(agentId + ' sends provider model I
   await send('Same new model'); assert.equal(calls.filter(x => x.op === 'job.comment').at(-1).input.executionSelection, undefined);
 });
 
+test('an older Runner archive restores its model even when the first transcript read is still pending', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-old-selection-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 4 }));
+  const adapter = createRunnerRuntimeAdapter({ app: { getPath: () => root }, runtimeSpec: catalog.runtime('qwen'),
+    runnerRuntime: { async rpc(op) {
+      if (op === 'job.session') return new Promise(() => {});
+      if (op === 'runtime.sessions') return { ok: true, data: { runs: [
+        { ref: 'other-chat', cli: 'qwen', model: 'other-model', _modelMetadataPrivate: false },
+        { ref: 'legacy-chat', cli: 'qwen', model: 'original-model', _modelMetadataPrivate: false },
+      ] } };
+      return { ok: true, data: {} };
+    } },
+    modelConfig: { fetchModel: async (_, name) => ({ ok: true, model: { id: name || 'current-default' } }) },
+  });
+  const session = await adapter.resumeSession({ runtimeId: 'test', identity: {}, native: {
+    runner: { openOptions: { cwd: root, resumePath: 'legacy-chat' } },
+  } });
+  try { assert.equal(session.snapshot().modelSelection.name, 'original-model'); }
+  finally { await session.dispose(); }
+});
+
 test('resumed Runner history without saved model selection bypasses a stale Agent preference', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-model-recovery-'));
   const fetches = [];

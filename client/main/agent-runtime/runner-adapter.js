@@ -477,7 +477,18 @@ async function createRunnerHandle(request, defaults, initialSession) {
   const modelPreference = selectionModule.preference(app, runnerRef);
   const savedSelection = modelPreference.readSelection();
   const explicitModel = typeof opts.modelName === 'string';
-  let modelName = explicitModel ? opts.modelName : modelPreference.read() || '';
+  let modelName = explicitModel ? opts.modelName : savedSelection.name || '';
+  if (resumeNative && !explicitModel && !modelName) {
+    // Older chats may only name their model in the Runner journal. When its first
+    // page is still polling, the same Runner exposes that metadata in its inventory.
+    const history = initialSession?.data;
+    const row = history?.ref === resumedRef ? history : (await _runnerInventory(runtime).catch(() => []))
+      .find(item => item.ref === resumedRef && item.cli === adapterId);
+    if (row?._modelMetadataPrivate === false) {
+      const choice = row.activeExecutionSelection;
+      modelName = (choice?.agentId === adapterId ? choice.modelName : row.model) || '';
+    }
+  }
   if (accountModel && (String(modelName).startsWith('local:') ||
       require('../../core/model-choice').imageChoice(modelName)?.name.startsWith('local:'))) {
     throw new RuntimeContractError('RUNNER_MODEL_UNAVAILABLE', '账号型底座不能使用本地模型，请选择账号模型');
@@ -533,10 +544,10 @@ async function createRunnerHandle(request, defaults, initialSession) {
     throw new RuntimeContractError('RUNNER_MODEL_UNAVAILABLE',
       String(prepared && prepared.reason || displayName + ' 没有可用模型'));
   }
-  // Capture a device default as the conversation's actual immutable choice.
-  // A later default edit must not retarget an archive that originally passed an empty name.
+  // A default is resolved once for this conversation. Future chats still use their own default.
   if (prepared.model.localOnly) modelName = require('../pi-session/local-model-runtime-privacy.cjs').reference(prepared.model);
-  if (explicitModel || resetSavedModel || prepared.model.localOnly) {
+  else if (!modelName) modelName = prepared.model.id;
+  if (explicitModel || resetSavedModel || modelName && savedSelection.name !== modelName) {
     try { modelPreference.write(modelName, initialThinking?.level); }
     catch (error) {
       // Clearing a retired historical choice is a best-effort repair. A

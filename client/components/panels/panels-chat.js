@@ -748,6 +748,8 @@
     // Navigation must preserve both a live handle and a work-only archive's
     // pending execution choices. Another archive has been reset above.
     const retainedWorkDraft = chatId && String(chatId) === _sessionId && _snap?.workOnly === true;
+    // Bind the history target before mounting controls or waiting for its work cards.
+    if (chatId) _sessionId = String(chatId);
     if (!_ref && !retainedWorkDraft) {
       _sessionOptions = launchOptions;
       _pendingLibraryIds = chatId ? [] : libraryItemIds;
