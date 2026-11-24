@@ -153,7 +153,7 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then python=.venv/Scripts/python.exe; fi
           "$python" -m unittest -v test_attachment_storage_names
           "$python" -m unittest -v test_cloud_conversations.CloudConversationTests.test_concurrent_submissions_keep_one_input_object
-          "$python" -m unittest -v tests.test_requirement_maintenance.RequirementMaintenanceTests.test_single_and_bulk_task_deletion_release_handoff_archives
+          "$python" -m unittest -v test_requirement_maintenance
           "$python" tests/local_storage_upgrade_http.py
       - run: npm ci
         working-directory: client

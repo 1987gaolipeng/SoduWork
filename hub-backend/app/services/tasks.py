@@ -809,11 +809,10 @@ async def purge_task_children(
         if handoff.storage_key:
             storage_refs.append((handoff.storage_key, handoff.backend))
             handoff.storage_key, handoff.backend = "", ""
-        options = handoff.options or {}
-        pending = options.get("legacyBlob")
+        pending = (handoff.options or {}).get("legacyBlob")
         if isinstance(pending, dict) and pending.get("key") and pending.get("backend"):
+            # Content migration keeps this receipt until it completes post-commit cleanup.
             storage_refs.append((pending["key"], pending["backend"]))
-            handoff.options = {key: value for key, value in options.items() if key != "legacyBlob"}
     run_ids = list((await session.execute(
         select(am.WorkflowRun.id).where(am.WorkflowRun.task_id.in_(task_ids))
     )).scalars().all())

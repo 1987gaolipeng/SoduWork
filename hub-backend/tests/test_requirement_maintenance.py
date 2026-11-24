@@ -248,9 +248,42 @@ class RequirementMaintenanceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(await session.get(models.Task, tid))
                 handoff = await session.get(ConversationHandoff, tid)
                 self.assertEqual((handoff.storage_key, handoff.backend), ("", ""))
-                self.assertEqual(handoff.options, {"other": tid})
+                expected = {"other": tid}
+                if tid == "private":
+                    expected["legacyBlob"] = {"key": pending, "backend": "local"}
+                self.assertEqual(handoff.options, expected)
                 self.assertEqual((handoff.phase, handoff.request_hash, handoff.receipt),
                                  ("committed", "fingerprint", {"ref": tid}))
+
+    async def test_pending_archive_cleanup_can_resume_after_task_deletion_commits(self):
+        from app.conversation_handoff_models import ConversationHandoff
+        from app.services import conversation_content_inventory, storage
+
+        self.enterContext(patch.multiple(storage, _LOCAL_DIR=self.temp.name, backend_name=lambda: "local"))
+        key, neighbor = "handoffs/old/archive.zip", "att/other/notes.txt"
+        pending = {"key": key, "backend": "local"}
+        for name in (key, neighbor):
+            storage.put(name, name.encode(), "text/plain")
+        async with self.sessions() as session:
+            session.add(ConversationHandoff(id="legacy", task_id="private", transfer_id="legacy",
+                owner_user_id="owner", owner_client_id="owner", options={"legacyBlob": pending}))
+            session.add(models.Attachment(task_id="legacy", filename="notes.txt", storage_key=neighbor, backend="local"))
+            await session.commit()
+
+        with patch.object(storage, "delete_unreferenced_objects", side_effect=OSError("interrupted cleanup")):
+            removed = await self.call("DELETE", "tasks/private")
+        self.assertEqual(removed.status_code, 200, removed.text)
+        async with self.sessions() as session:
+            self.assertIsNone(await session.get(models.Task, "private"))
+            _, pending_handoffs = conversation_content_inventory.query("handoff", "owner")
+            self.assertIn("legacy", await session.scalars(pending_handoffs))
+            handoff = await session.get(ConversationHandoff, "legacy")
+            self.assertEqual(handoff.options["legacyBlob"], pending)
+            self.assertEqual(storage.get(key, "local"), key.encode())
+            self.assertTrue(await storage.delete_unreferenced(session, **pending))
+        with self.assertRaises(FileNotFoundError):
+            storage.get(key, "local")
+        self.assertEqual(storage.get(neighbor, "local"), neighbor.encode())
 
     async def test_bulk_delete_checks_every_task_before_deleting_any(self):
         async with self.sessions() as session:
