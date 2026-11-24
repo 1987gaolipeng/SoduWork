@@ -1748,7 +1748,7 @@ async def discover_model_provider(
     come back for review; importing them stays an explicit model-defs write.
     """
     from ..models import ModelDef, ModelProvider
-    from ..services import model_catalog, model_discovery
+    from ..services import model_discovery
     p = await session.get(ModelProvider, pid)
     if p is None:
         raise HTTPException(status_code=404, detail="这个模型服务不存在")
@@ -1762,6 +1762,8 @@ async def discover_model_provider(
     known = set(existing)
     result["known"] = sorted(known)
     result["models"] = [name for name in result["models"] if name not in known]
+    if "candidates" in result:
+        result["candidates"] = [row for row in result["candidates"] if row["id"] not in known]
     await audit.log(session, user, "model.discover", "setting", pid, p.name,
                     {"ok": result["ok"], "count": len(result["models"])})
     return result
