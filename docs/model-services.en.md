@@ -40,6 +40,12 @@ Changing the endpoint, credential, model ID, protocol or request policy invalida
 
 The runtime uses the resulting native-image route, output limit and supported compatibility options. Pi requires streaming, and operations that explicitly require tools reject models declared or verified as lacking that capability. Unknown capabilities retain the existing execution behavior. A change applies to later model selections or turns, without changing an already running request. Provider and runtime acceptance should still be verified with the intended deployment before rollout.
 
+## When a tool finishes and the model rejects the next request
+
+In a Pi conversation using an OpenAI-compatible chat completions service, the model can accept an ordinary message and return HTTP 403 when it receives a tool result. Open the failed request details in the conversation to check which model and request stage were involved. A capability check for the saved model tests ordinary text, streaming and a synthetic tool exchange. For a company model, ask the administrator to run the check if you lack access.
+
+If the conversation offers **Switch model and summarize results**, select another chat model and use that action to summarize the confirmed outputs and remaining work. The summary runs without tools. Files already written and the original task outcome are preserved. For a Hub-routed request, this action requires a Hub version that identifies generic upstream rejections. Explicit permission and policy refusals remain blocked.
+
 ## Zhipu GLM endpoints and error 1113
 
 Zhipu documents separate endpoints and credentials for its standard API and Coding Plan. The [official configuration guide](https://zcode.z.ai/cn/docs/configuration) lists:

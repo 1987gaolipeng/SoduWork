@@ -29,7 +29,7 @@ from app.schema_migrations import (
 
 OLD_MERGE = "0067_merge_release_account_ownership"
 CANONICAL_MERGE = "0067_merge_account_ownership"
-CURRENT_HEAD = "0092_task_text_storage"
+CURRENT_HEAD = "0095_business_record_source"
 
 
 class IntegratedMigrationHistoryTests(unittest.TestCase):
@@ -108,6 +108,9 @@ class IntegratedMigrationHistoryTests(unittest.TestCase):
         script = ScriptDirectory.from_config(_config())
         self.assertEqual(script.get_heads(), [CURRENT_HEAD])
         expected = {
+            "0095_business_record_source": "0094_review_recipient",
+            "0094_review_recipient": "0093_user_test_account",
+            "0093_user_test_account": "0092_task_text_storage",
             "0092_task_text_storage": "0091_domain_sort_validation",
             "0091_domain_sort_validation": "0090_requirement_creator",
             "0090_requirement_creator": "0089_schedule_model_source",
@@ -321,7 +324,8 @@ class IntegratedMigrationHistoryTests(unittest.TestCase):
                                 self.assertEqual(json.loads(row.pop("source_requirement")),
                                                  expected_source if row["id"] == "schedule-enabled" else {})
                             self.assertEqual(actual, old_schedules)
-                            self.assertEqual([dict(row) for row in connection.execute("SELECT * FROM task")], old_tasks)
+                            self.assertEqual([dict(row) for row in connection.execute("SELECT * FROM task")],
+                                             [{**row, "review_recipient_user_id": None} for row in old_tasks])
 
                     command.upgrade(_config(), "head")
                     assert_preserved({})

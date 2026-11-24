@@ -341,14 +341,27 @@
     return [...unique.values()];
   }
 
+  const CHANGE_STATES = { running: '进行中', error: '失败', failed: '失败', cancelled: '已取消',
+    done: '已完成', completed: '已完成', success: '已完成', pending: '待开始', preparing: '准备中' };
   function changes(input) {
     return (input || []).map((tool) => ({ tool, meta: toolMeta(tool) }))
       .filter((item) => item.meta.kind === 'write' || item.meta.kind === 'edit')
       .map(({ tool, meta }) => ({
         id: tool.id, action: meta.kind === 'write' ? '新建' : '修改',
         name: baseName(meta.target) || '文件', path: meta.target || '',
-        state: tool.state === 'running' ? '进行中' : tool.state === 'error' ? '失败' : '已完成',
+        state: tool.isError && tool.state !== 'cancelled' ? '失败' : CHANGE_STATES[tool.state] || '未知',
       }));
+  }
+
+  function changeRows(items) {
+    return items.map(item => {
+      const path = item.path || item.name || '', name = baseName(path);
+      const directory = path.slice(0, path.length - name.length);
+      return '<button type="button" class="ncw-change-row" ' +
+        (item.id ? 'data-wb-tool="' + esc(item.id) + '"' : 'disabled') + '><span>' + esc(item.action) + '</span>' +
+        '<b data-user-content title="' + esc(path) + '"><span>' + esc(directory) + '</span><strong>' + esc(name) +
+        '</strong></b><small>' + esc(item.state) + '</small></button>';
+    }).join('');
   }
 
   // Self-contained SVGs also render in document headers without inherited SVG CSS.
@@ -446,7 +459,7 @@
       '<button type="button" data-wb-copy-location title="复制页面地址" aria-label="复制页面地址">' + ICONS.copy + '</button></div>';
   }
 
-  const api = { toolMeta, status, services, serviceCandidates, changes, currentTurnTools, currentWorkFiles, currentWorkSelection, currentDeliveryFiles, currentWorkJournal, baseName, normalizeUrl, stripAnsi, isServerCommand, ICONS, documentToolbar, browserToolbar, mediaToolbar, displayAddress, buttonStatus, copied };
+  const api = { toolMeta, status, services, serviceCandidates, changes, changeRows, currentTurnTools, currentWorkFiles, currentWorkSelection, currentDeliveryFiles, currentWorkJournal, baseName, normalizeUrl, stripAnsi, isServerCommand, ICONS, documentToolbar, browserToolbar, mediaToolbar, displayAddress, buttonStatus, copied };
   Object.assign(tools, { status, _toolMeta: toolMeta, _services: services, _serviceCandidates: serviceCandidates, _changes: changes, _currentTurnTools: currentTurnTools });
   global.ChatWorkspaceInfo = api;
   global.ChatWorkbenchIcons = ICONS;

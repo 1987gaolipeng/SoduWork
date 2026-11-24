@@ -76,11 +76,19 @@ async def main():
             "sourceTitle": "  周报整理与今日同步  ",
             "model": "office-model", "occurredAt": chat_start.isoformat(),
             "usage": {"input": 80, "output": 20}})
+        try:
+            await usage_ledger.from_client(session, client, {
+                "idempotencyKey": "chat-1", "sourceId": "chat-1",
+                "conversationId": "chat-1", "agent": "pi", "sourceType": "task",
+                "taskId": foreign_task.id,
+                "model": "office-model", "occurredAt": chat_retry.isoformat(),
+                "usage": {"input": 40, "output": 10}})
+        except usage_ledger.InvalidUsageSource:
+            pass
+        else:
+            raise AssertionError("Task reports require a task visible to the reporting device")
         await usage_ledger.from_client(session, client, {
-            "idempotencyKey": "chat-1", "sourceId": "chat-1",
-            "conversationId": "chat-1", "agent": "pi", "sourceType": "task",
-            "taskId": foreign_task.id,
-            "model": "office-model", "occurredAt": chat_retry.isoformat(),
+            "sourceId": "chat-1", "model": "office-model", "occurredAt": chat_retry.isoformat(),
             "usage": {"input": 40, "output": 10}})
         beijing = timezone(timedelta(hours=8))
         today_report = datetime.now(beijing).astimezone(timezone.utc)
@@ -110,7 +118,7 @@ async def main():
         ok(chat.total_tokens == 100, "stale cumulative retry cannot reduce counters")
         ok(chat.billing_user_id == user.id, "device identity owns chat usage")
         ok(chat.task_id == "", "device cannot link usage to another user's task")
-        ok(chat.source_type == "chat", "invalid task attribution falls back to chat")
+        ok(chat.source_type == "chat", "rejected task attribution preserves the original source")
         ok(chat.source_title == "周报整理与今日同步", "conversation title stored trimmed")
         chat_time = chat.occurred_at if chat.occurred_at.tzinfo else chat.occurred_at.replace(tzinfo=timezone.utc)
         ok(chat_time == chat_start,

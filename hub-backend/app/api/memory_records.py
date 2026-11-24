@@ -7,8 +7,9 @@ from fastapi import APIRouter, Body, Depends, Query, Response
 
 from .. import models
 from ..db import get_session
-from ..deps import current_client, require_perm
-from ..services import audit, memory_records as svc
+from ..deps import current_client, require_perm, without_device_heartbeat
+from ..services import audit
+from ..services import memory_records as svc
 
 router = APIRouter(prefix="/api/v1/memories", tags=["memory-records"])
 admin_router = APIRouter(prefix="/api/v1/admin/org-memory", tags=["admin-org-memory"])
@@ -32,13 +33,17 @@ async def create(body: svc.MemoryWrite, client=Depends(current_client), session=
 
 
 @router.get("/organization-context")
+@without_device_heartbeat
 async def organization_context(response: Response, client=Depends(current_client), session=Depends(get_session)):
     from ..services import org_memory
+    # Keep no-store: this response reflects the bound user's current
+    # organization, which is resolved from server-side session state rather
+    # than request headers. Vary alone cannot isolate org/role changes, so
+    # any caching here risks serving one identity's context to another.
+    # See issue #1084 before changing either directive.
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["Vary"] = "Authorization"
-    value = await org_memory.for_client(session, client)
-    await session.commit()
-    return value
+    return await org_memory.for_client(session, client)
 
 
 @router.get("/{rid}")
@@ -52,8 +57,11 @@ async def edit(rid: str, body: svc.MemoryPatch, client=Depends(current_client), 
 
 
 @router.delete("/{rid}")
-async def delete(rid: str, client=Depends(current_client), session=Depends(get_session)):
-    return await svc.delete(session, client, rid)
+async def delete(
+    rid: str, revision: int | None = Query(None, ge=1, le=2**31 - 1),
+    client=Depends(current_client), session=Depends(get_session),
+):
+    return await svc.delete(session, client, rid, revision)
 
 
 @router.post("/{rid}/archive")

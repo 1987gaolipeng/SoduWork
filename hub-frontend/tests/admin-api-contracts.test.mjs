@@ -185,7 +185,7 @@ test('department and role deletion errors use the selected locale and preserve u
   const previous = getLocale()
   t.after(() => setLocale(previous))
   const cases = [
-    [f.api.deleteOrg, 'org.delete.has_children', '该部门下还有子部门', 'This department still has subdepartments.'],
+    [f.api.deleteOrg, 'org.delete.has_children', '该部门下还有子部门，请先删除或移动子部门后再删除该部门', 'This department still has subdepartments. Move or delete them before deleting this department.'],
     [f.api.deleteRole, 'role.delete.in_use', '仍有用户在用该角色', 'This role is still assigned to users.'],
   ]
   for (const [remove, code, detail, english] of cases) {

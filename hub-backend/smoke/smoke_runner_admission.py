@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from unittest.mock import patch
 
 sys.path.insert(0, ".")
 
@@ -94,24 +95,59 @@ def test_priority_serial_and_reserved_slot() -> None:
         and unrelated and unrelated.key == "other-task")
 
 
-def test_resource_budget_pause_and_recovery() -> None:
-    sample = {
-        "cpuCount": 16, "cpuPercent": 96,
-        "memoryAvailableBytes": 8 * 1024 ** 3,
-        "memoryTotalBytes": 16 * 1024 ** 3,
-    }
-    budget = admission.AdaptiveResourceBudget(
-        ceiling=20, sampler=lambda: dict(sample), cache_seconds=0)
-    critical = budget.snapshot(force=True)
-    sample.update(cpuPercent=25, memoryAvailableBytes=12 * 1024 ** 3)
-    recovered = budget.snapshot(force=True)
-    chk("资源·CPU 或内存压力过高时暂停拉起新进程",
-        critical.pressure == "critical" and not critical.can_start
-        and critical.limit == 1, critical.public())
-    chk("资源·压力恢复后自动恢复并发且始终限制在 1–20",
-        recovered.can_start and recovered.pressure == "normal"
-        and 1 <= recovered.limit <= 20 and recovered.limit > critical.limit,
-        recovered.public())
+def test_resource_budget_and_queue_recovery() -> None:
+    gib = 1024 ** 3
+    floor = 768 * 1024 ** 2
+    sample = {"cpuCount": 16}
+    budget = admission.AdaptiveResourceBudget(sampler=lambda: sample)
+    now = 100.0
+
+    def snapshot(cpu, available, total, elapsed=1.0, force=True):
+        nonlocal now
+        now += elapsed
+        sample.update(cpuPercent=cpu, memoryAvailableBytes=available, memoryTotalBytes=total)
+        with patch.object(admission.time, "monotonic", return_value=now):
+            return budget.snapshot(force=force)
+
+    queue = admission.AdmissionQueue()
+    first = submit(queue, "first", "one", admission.MANUAL)[2]
+    second = submit(queue, "second", "two", admission.MANUAL)[2]
+    busy = snapshot(94.9, 8 * gib, 16 * gib)
+    chk("资源·CPU 低于 95% 时保留原有的自适应并发", busy.pressure == "busy" and busy.can_start
+        and busy.limit > 1, busy.public())
+    spike = snapshot(95, 8 * gib, 16 * gib)
+    cached = snapshot(95, 8 * gib, 16 * gib, elapsed=0.25, force=False)
+    early = snapshot(100, 8 * gib, 16 * gib, elapsed=0.25)
+    chk("资源·单次 CPU 峰值和一秒内的重复采样均暂停启动",
+        spike.pressure == "critical" and not spike.can_start and not cached.can_start and not early.can_start)
+    serial = snapshot(95, 8 * gib, 16 * gib, elapsed=0.5)
+    chk("资源·CPU 持续达到 95% 时只启动一项，其余等待执行槽",
+        serial.pressure == "critical" and serial.limit == 1 and serial.can_start
+        and queue.claim_next(0, serial.limit, serial.can_start) is first
+        and queue.claim_next(1, serial.limit, serial.can_start) is None
+        and queue.wait_reason(second, 1, serial.limit, serial.can_start) == "execution_slot",
+        serial.public())
+    for cpu in (100, 20):
+        for label, available, total in (("内存占用达到 92%", 2 * gib, 25 * gib),
+                                        ("可用内存低于 768 MiB", floor - 1, 4 * gib)):
+            blocked = snapshot(cpu, available, total)
+            chk(f"资源·CPU {cpu}% 且{label}时阻止启动并报告等待原因",
+                blocked.pressure == "critical" and blocked.limit == 1 and not blocked.can_start
+                and queue.claim_next(0, blocked.limit, blocked.can_start) is None
+                and queue.wait_reason(second, 0, blocked.limit, blocked.can_start) == "resource_pressure",
+                blocked.public())
+        if cpu == 100:
+            chk("资源·持续高 CPU 时缺少可用内存读数仍暂停启动", not snapshot(cpu, 0, 0).can_start)
+            chk("资源·内存恢复且 CPU 仍饱和时重新允许串行启动",
+                snapshot(cpu, floor, 4 * gib).can_start)
+    chk("资源·内存刚好脱离任一临界阈值时允许启动",
+        snapshot(20, 2 * gib + 1, 25 * gib).can_start and snapshot(20, floor, 4 * gib).can_start)
+    chk("资源·CPU 降至阈值以下后需重新观察下一次峰值", not snapshot(100, 8 * gib, 16 * gib).can_start)
+    recovered = snapshot(25, 12 * gib, 16 * gib)
+    chk("资源·压力恢复后清除等待原因并启动下一项",
+        recovered.can_start and recovered.pressure == "normal" and 1 < recovered.limit <= 20
+        and not queue.wait_reason(second, 1, recovered.limit, recovered.can_start)
+        and queue.claim_next(1, recovered.limit, recovered.can_start) is second, recovered.public())
 
 
 def test_cancel_idempotency_and_substrates() -> None:
@@ -151,7 +187,7 @@ def test_cancel_idempotency_and_substrates() -> None:
 def main() -> int:
     test_unlimited_conversations_and_task_boundary()
     test_priority_serial_and_reserved_slot()
-    test_resource_budget_pause_and_recovery()
+    test_resource_budget_and_queue_recovery()
     test_cancel_idempotency_and_substrates()
     print("\n".join(lines))
     print("\nRunner admission: %d passed, %d failed" % (passed, failed))

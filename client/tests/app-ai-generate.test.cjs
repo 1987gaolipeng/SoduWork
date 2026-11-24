@@ -294,6 +294,17 @@ for (const source of ['local', 'Hub']) test('an app without a configured default
   assert.doesNotMatch(JSON.stringify(publicRequests), /local:model-|sole-private-wire/);
 });
 
+test('a missing pinned Hub provider stops before catalog fallback or inference', async () => {
+  const requests = [];
+  const f = fixture({
+    resolveModel: async () => ({ ok: false, providerPinned: true }),
+    fetchImpl: async url => { requests.push(String(url)); return Response.json({ usable: [] }); },
+  });
+  const result = await f.generate(f.item, defaults);
+  assert.equal(result.code, 'APP_AI_MODEL_UNAVAILABLE');
+  assert.deepEqual(requests, []);
+});
+
 test('deleted scoped defaults and explicit local references stop before catalog fallback or inference', async t => {
   const agentDefaults = require('../main/local-agent-model-store.cjs'), models = require('../main/local-model-store.cjs');
   const missing = 'local:model-' + 'd'.repeat(32);

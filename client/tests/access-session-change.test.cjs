@@ -33,6 +33,26 @@ test('permission change IPC enforces owner, revision, full consent and cancellat
   assert.equal((await change({ sender: { id: 2 } }, 'chat', 'full', 3)).ok, false);
 });
 
+test('a full-access confirmation cannot outlive the approval card it came from', async () => {
+  const accessPolicy = rules.create('standard', process.cwd());
+  const request = { requestId: 'request-a', policyRevision: accessPolicy.revision };
+  const sender = { id: 2 };
+  let pending = [request], confirmations = 0;
+  const handle = { attachedWindow: { webContents: sender }, cwd: process.cwd(),
+    snapshot: () => ({ accessPolicy, pendingPermissions: pending,
+      accessControl: { supported: true, canChangeDuringSession: true, modes: ['standard', 'full'] } }),
+    setAccessPolicy() { assert.fail('stale approval should not change policy'); } };
+  const change = require('../main/access-control/ipc').changeHandler({
+    session: { get: () => handle }, BrowserWindow: { fromWebContents: () => ({}) },
+    confirmFullAccess: async () => { confirmations++; pending = []; return true; },
+  });
+  const submit = expiresAt => change({ sender }, 'chat', 'full', accessPolicy.revision, { approval: { ...request, expiresAt } });
+  assert.equal((await submit(Date.now() - 1)).ok, false);
+  assert.equal(confirmations, 0);
+  assert.equal((await submit(Date.now() + 60000)).ok, false);
+  assert.equal(confirmations, 1);
+});
+
 test('real Pi SDK transitions keep history, defer an active turn, enforce downgrade and retire old approvals', { timeout: 40000 }, async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-access-transition-'));
   const fixture = await require('../e2e/fixtures/access-sdk.cjs').create(root, 'standard', () => {}, { persist: true });

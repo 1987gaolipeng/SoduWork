@@ -267,6 +267,8 @@ app.whenReady().then(async()=>{
   assert.equal(await js('fixtureCalls.some(c=>c[0]==="submit-review")'),false,'running work cannot submit a premature review');
   await js('Object.assign(tasks.find(t=>t.id==="delivering-0"),{canSubmitReview:true,ai:{state:"stopped"}});RequirementsBoard.render(true)');
   await js('RequirementsBoard.move("delivering-0","reviewing")');
+  assert.equal(await js('fixtureCalls.some(c=>c[0]==="submit-review")'),false);
+  await click('[data-rq-submit-review]');
   assert.deepEqual(await js('fixtureCalls.filter(c=>c[0]==="submit-review").at(-1)'),['submit-review','delivering-0']);
   assert.equal(await js('tasks.find(t=>t.id==="delivering-0").requirementStage'),'reviewing','in-progress work can be submitted for verification');
   await js('RequirementsBoard.move("approval-only","delivered")');

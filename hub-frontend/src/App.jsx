@@ -1,5 +1,5 @@
 import { translateText as tx, localeMap, useLocale } from './i18n.js'
-import React, { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react'
+import React, { lazy, Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { api, getToken, getUser, setUser, setToken, can } from './api.js'
 import Login from './Login.jsx'
 import LocaleSettings from './LocaleSettings.jsx'
@@ -7,6 +7,7 @@ import Landing from './Landing.jsx'
 import { Icon, Loading, ThemeToggle, ToastHost } from './ui.jsx'
 import { getLocale, t } from './i18n.js'
 import { healthReleaseLabel } from './health-version.js'
+import { createAdminHistory } from './admin-history.js'
 import { MAX_STEP, MIN_STEP, readScaleStep, stepScale, subscribeScale } from './enlarge-theme.js'
 
 // Lazy-load management pages so the login introduction does not bundle all plugin, automation, and organization code.
@@ -34,13 +35,26 @@ const MailSettings = lazy(() => import('./screens/MailSettings.jsx'))
 const WorkCatalog = lazy(() => import('./screens/WorkCatalog.jsx'))
 const OrgMemory = lazy(() => import('./screens/OrgMemory.jsx'))
 
+const savedScreenKey = 'soduwork-hub-screen'
+function savedScreen() {
+  try {
+    const id = sessionStorage.getItem(savedScreenKey)
+    return /^[a-z][a-z0-9-]*$/.test(id || '') ? id : 'overview'
+  } catch { return 'overview' }
+}
+function rememberScreen(id) {
+  try { sessionStorage.setItem(savedScreenKey, id) } catch { /* Storage may be disabled. */ }
+}
+const screenHash = id => '#/' + id
+const adminHash = hash => hash.startsWith('#/')
+
 let SSO_ERROR = ''
 try {
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
   const oidcToken = hash.get('sso')
   SSO_ERROR = hash.get('sso_error') || ''
-  if (oidcToken) setToken(oidcToken)
-  if (oidcToken || SSO_ERROR) window.history.replaceState({}, document.title, window.location.pathname + window.location.search)
+  if (oidcToken) { setToken(oidcToken); setUser(null) }
+  if (oidcToken || SSO_ERROR) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + screenHash(savedScreen()))
 } catch (_e) { /* old embedded browser: keep normal login */ }
 
 /*
@@ -78,7 +92,8 @@ const LEGACY_SCREEN = {
   flows: 'plugins', automation: 'plugins', skills: 'capabilities', mcp: 'capabilities', schedules: 'plugins',
   tasks: 'overview', inbox: 'overview', subs: 'overview',
 }
-const normalizeScreen = (id) => LEGACY_SCREEN[id] || id
+const normalizeScreen = id => Object.hasOwn(LEGACY_SCREEN, id) ? LEGACY_SCREEN[id] : id
+const navLabel = item => t('nav.' + item.id, item.label)
 const canLeavePage = proceed => {
   let resumed = false
   return window.dispatchEvent(new CustomEvent('soduwork-before-admin-leave', {
@@ -91,6 +106,7 @@ export default function App() {
   const [authed, setAuthed] = useState(!!getToken())
   const [showLogin, setShowLogin] = useState(!!SSO_ERROR)   // Explain SSO callback failures directly.
   const [me, setMe] = useState(getUser())
+  const [permissionsReady, setPermissionsReady] = useState(false)
   const [health, setHealth] = useState({ state: 'checking', version: '' })
   const healthRef = useRef(null)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -104,22 +120,25 @@ export default function App() {
   const profileRef = useRef(null)
   const profileTriggerRef = useRef(null)
   const [locale, setLocaleState] = useState(getLocale())
-  const [active, setActive] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem('soduwork-hub-screen') || 'overview'
-      return normalizeScreen(saved)
-    } catch (_e) { return 'overview' }
-  })
+  const [hash, setHash] = useState(() => window.location.hash)
+  const active = normalizeScreen(adminHash(hash) ? hash.slice(2) : savedScreen())
+  const visible = useMemo(() => NAV.filter(n => (!n.perm || can(n.perm)) &&
+    (!n.perms || n.perms.some(can)) && (!n.superOnly || me?.isSuper)), [me, uiLocale])
+  const cur = visible.find(n => n.id === active) || visible[0]
 
   const closeHealth = useCallback(() => {
     if (healthRef.current) healthRef.current.open = false
   }, [])
+  const [routes] = useState(() => createAdminHistory(next => { closeHealth(); setHash(next) }, canLeavePage))
+  useEffect(() => routes.listen(), [routes])
   const navigate = useCallback((screen) => {
     // Navigation to the current screen can still change that page's filters.
     closeHealth()
-    const next = screen && normalizeScreen(screen)
-    if (next && next !== active && canLeavePage(() => setActive(next))) setActive(next)
-  }, [active, closeHealth])
+    const next = visible.find(n => n.id === normalizeScreen(screen)) || visible[0]
+    if (!authed || !permissionsReady || !next || next.id === cur?.id) return
+    const proceed = () => routes.push(screenHash(next.id))
+    if (canLeavePage(proceed)) proceed()
+  }, [authed, permissionsReady, visible, cur, closeHealth, routes])
 
   useEffect(() => {
     if (!authed) return undefined
@@ -146,7 +165,7 @@ export default function App() {
   }, [authed, closeHealth])
 
   useEffect(() => {
-    const h = () => { setAuthed(false); setMe(null) }
+    const h = () => { setAuthed(false); setMe(null); setPermissionsReady(false); setShowLogin(true) }
     window.addEventListener('soduwork-hub-unauth', h)
     return () => window.removeEventListener('soduwork-hub-unauth', h)
   }, [])
@@ -170,7 +189,10 @@ export default function App() {
   // Refresh /me after login to obtain current permissions.
   useEffect(() => {
     if (!authed) return
-    api.me().then((u) => { setUser(u); setMe(u) }).catch(() => {})
+    let alive = true
+    api.me().then(u => { if (alive) { setUser(u); setMe(u) } }).catch(() => {})
+      .finally(() => { if (alive) setPermissionsReady(true) })
+    return () => { alive = false }
   }, [authed])
 
   useEffect(() => {
@@ -192,10 +214,24 @@ export default function App() {
     return () => { alive = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', check) }
   }, [authed])
 
+  const loginVisible = showLogin || adminHash(hash)
   useEffect(() => {
-    try { sessionStorage.setItem('soduwork-hub-screen', active) } catch (_e) {}
-    window.scrollTo(0, 0)
-  }, [active])
+    if (!authed) {
+      // OIDC returns with its own fragment. Remember the requested page in this tab.
+      if (adminHash(hash)) rememberScreen(NAV.some(n => n.id === active) ? active : 'overview')
+      return
+    }
+    if (!permissionsReady) return
+    if (cur) rememberScreen(cur.id)
+    routes.replace(cur ? screenHash(cur.id) : '')
+  }, [hash, active, authed, permissionsReady, cur?.id, routes])
+
+  useEffect(() => {
+    const adminTitle = t('brand.admin')
+    document.title = authed ? (permissionsReady && cur ? navLabel(cur) + ' · ' + adminTitle : adminTitle)
+      : loginVisible ? t('brand.login') : t('brand.title')
+  }, [authed, permissionsReady, cur?.id, loginVisible, uiLocale])
+  useEffect(() => { if (authed) window.scrollTo(0, 0) }, [authed, hash])
 
   useEffect(() => {
     if (!profileOpen) return undefined
@@ -212,8 +248,8 @@ export default function App() {
   if (!authed) {
     return (
       <>
-        {showLogin
-          ? <Login initialError={SSO_ERROR} onLogin={() => { SSO_ERROR = ''; setAuthed(true); setMe(getUser()) }} onBack={() => { SSO_ERROR = ''; setShowLogin(false) }} />
+        {loginVisible
+          ? <Login initialError={SSO_ERROR} onLogin={() => { SSO_ERROR = ''; setAuthed(true); setMe(getUser()); setShowLogin(false) }} onBack={() => { SSO_ERROR = ''; routes.replace(''); setShowLogin(false) }} />
           : <Landing onLogin={() => setShowLogin(true)} />}
         <LocaleSettings floating />
         <ToastHost />
@@ -221,9 +257,8 @@ export default function App() {
     )
   }
 
-  const visible = NAV.filter((n) => (!n.perm || can(n.perm)) && (!n.perms || n.perms.some(can)) && (!n.superOnly || (me && me.isSuper)))
+  if (!permissionsReady) return <Loading />
   const groups = [...new Set(visible.map((n) => n.group))]
-  const cur = visible.find((n) => n.id === active) || visible[0]
   const Comp = (cur && cur.Comp) || Overview
   const healthOk = health.state === 'ok'
   const healthTitle = healthOk ? t('health.ok') : health.state === 'checking' ? t('health.checking') : t('health.error')
@@ -232,7 +267,6 @@ export default function App() {
     health.state === 'checking' ? tx("正在读取真实健康状态") :
       tx("请检查后台地址或网络")
 
-  const navLabel = (item) => t('nav.' + item.id, item.label)
   const groupLabel = (value) => {
     const key = value === '总览' ? 'group.overview' : value === 'AI 运行' ? 'group.aiRun' :
       value === '能力配置' ? 'group.capabilities' : value === '组织治理' ? 'group.org' : ''
@@ -243,7 +277,7 @@ export default function App() {
   const query = navQuery.trim().toLocaleLowerCase()
   const matchingItems = visible.filter(item => navLabel(item).toLocaleLowerCase().includes(query))
   const logout = () => {
-    const proceed = () => { setProfileOpen(false); setToken(''); setUser(''); setAuthed(false); setMe(null); setShowLogin(false) }
+    const proceed = () => { setProfileOpen(false); setToken(''); setUser(null); setAuthed(false); setMe(null); setPermissionsReady(false); setShowLogin(false); routes.replace('') }
     if (canLeavePage(proceed)) proceed()
   }
 
@@ -255,7 +289,7 @@ export default function App() {
           <img src="/soduwork.png" alt="" className="logo-box" style={{ width: 44, height: 44 }} />
           <h2>{tx("SoduWork 管理端是管理端")}</h2>
           <p>{tx("你好，")}{(me && (me.displayName || me.username)) || tx("同事")}{tx("。日常需求、收件箱认领和工作日报都在")}<b>{tx("桌面端「SoduWork」")}</b>{tx("里完成；")}<br />{tx("这里是负责人与管理员使用的管理控制台。如需管理权限，请联系管理员为你的角色开通。")}</p>
-          <button className="btn btn-ghost" onClick={() => { setToken(''); setUser(''); setAuthed(false); setMe(null); setShowLogin(false) }}>{tx("退出登录")}</button>
+          <button className="btn btn-ghost" onClick={logout}>{tx("退出登录")}</button>
         </div>
         <ToastHost />
       </div>
@@ -297,27 +331,36 @@ export default function App() {
                 onClick={() => setCollapsedGroups(old => ({ ...old, [g]: old[g] !== true }))}>{groupLabel(g)}</button>
               <div id={id} hidden={!expanded}>
                 {items.map(n => (
-                  <button key={n.id} title={navLabel(n) + ' · ' + t('sub.' + n.id, n.sub)} aria-current={cur && n.id === cur.id ? 'page' : undefined}
-                    className={'nav-item' + (cur && n.id === cur.id ? ' active' : '')} onClick={() => {
+                  <a key={n.id} href={screenHash(n.id)} title={navLabel(n) + ' · ' + t('sub.' + n.id, n.sub)} aria-current={cur && n.id === cur.id ? 'page' : undefined}
+                    className={'nav-item' + (cur && n.id === cur.id ? ' active' : '')} onClick={event => {
+                      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+                      event.preventDefault()
                       navigate(n.id)
                       setMenuOpen(false)
                       setNavQuery('')
                       if (menuOpen) menuButton.current?.focus()
                     }}>
                     <span className="ico"><Icon name={n.icon} /></span><span className="nav-copy">{navLabel(n)}</span>
-                  </button>
+                  </a>
                 ))}
               </div>
             </section>
           })}
         </nav>
-        <div className="side-foot-wrap" ref={profileRef}>
-          {profileOpen && <div id="profile-settings" className="profile-menu" role="dialog" aria-label={t('account.settings')}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape' && !event.defaultPrevented) {
-                event.stopPropagation(); setProfileOpen(false); profileTriggerRef.current?.focus()
-              }
-            }}>
+        <div className="side-foot-wrap" ref={profileRef} onBlur={(event) => {
+          if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setProfileOpen(false)
+        }} onKeyDown={(event) => {
+          if (profileOpen && event.key === 'Escape' && !event.defaultPrevented) {
+            event.stopPropagation(); setProfileOpen(false); profileTriggerRef.current?.focus()
+          }
+        }}>
+          <button ref={profileTriggerRef} type="button" className="side-foot" aria-expanded={profileOpen}
+            aria-label={t('account.settings')} aria-controls={profileOpen ? 'profile-settings' : undefined} onClick={() => setProfileOpen((open) => !open)}>
+            <span className="avatar" aria-hidden="true">{accountName.slice(0, 1)}</span>
+            <span className="u"><b>{accountName}</b><span>{accountRole === accountName ? tx("企业内网") : accountRole + tx(" · 内网")}</span></span>
+            <Icon name="settings" className="profile-trigger-icon" />
+          </button>
+          {profileOpen && <div id="profile-settings" className="profile-menu" role="region" aria-label={t('account.settings')}>
             <div className="profile-menu-head"><div className="avatar" aria-hidden="true">{accountName.slice(0, 1)}</div>
               <div><b>{accountName}</b>{accountRole !== accountName && <span>{accountRole}</span>}</div></div>
             <div className="profile-menu-meta"><span>{tx("登录环境")}</span><b>{tx("企业内网")}</b></div>
@@ -339,12 +382,6 @@ export default function App() {
             <LocaleSettings inline />
             <button type="button" className="profile-logout" onClick={logout}><Icon name="logout" />{t("account.logout")}</button>
           </div>}
-          <button ref={profileTriggerRef} type="button" className="side-foot" aria-expanded={profileOpen}
-            aria-label={t('account.settings')} aria-haspopup="dialog" aria-controls={profileOpen ? 'profile-settings' : undefined} onClick={() => setProfileOpen((open) => !open)}>
-            <span className="avatar" aria-hidden="true">{accountName.slice(0, 1)}</span>
-            <span className="u"><b>{accountName}</b><span>{accountRole === accountName ? tx("企业内网") : accountRole + tx(" · 内网")}</span></span>
-            <Icon name="settings" className="profile-trigger-icon" />
-          </button>
         </div>
       </aside>
       <div className="main">

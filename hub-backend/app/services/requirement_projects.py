@@ -3,16 +3,18 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select, update
 
 from .. import models
+from .business_records import business_visible
 
 
 async def visible_query(session, client, *, repo_id=None):
     from . import inbox
     _, scope = await inbox._me_scope(session, client) if client is not None else (None, set())
-    query = select(models.Project).where(models.Project.status == "active",
+    query = select(models.Project).where(models.Project.status == "active", business_visible(models.Project),
         or_(models.Project.org_id.in_(scope), models.Project.org_id.is_(None)))
     if repo_id:
         query = query.join(models.Repo, models.Repo.project_id == models.Project.id).where(
-            models.Repo.id == repo_id, or_(models.Repo.org_id.in_(scope), models.Repo.org_id.is_(None)))
+            models.Repo.id == repo_id, business_visible(models.Repo),
+            or_(models.Repo.org_id.in_(scope), models.Repo.org_id.is_(None)))
     return query
 
 

@@ -41,6 +41,13 @@ if (typeof electron === 'string') {
     return { status: response.status, data: await response.json() }
   }
   const state = async kind => (await request('GET', 'admin/legal-documents/' + kind)).data
+  async function checkImpact(selector, names, scheduled = false) {
+    const warning = await js(`document.querySelector(${JSON.stringify(selector + ' .legal-language-impact')})?.textContent || ''`)
+    if (!names.length) { assert.equal(warning, ''); return }
+    assert.ok(warning.includes('移除 ' + names.length + ' 个语言版本'), warning)
+    for (const name of names) assert.ok(warning.includes(name), warning)
+    assert.equal(warning.includes('定时发布生效前'), scheduled)
+  }
   async function shot(name) { await sleep(100); fs.writeFileSync(path.join(out, name + '.png'), (await win.webContents.capturePage()).toPNG()) }
   async function reviewed() { await js("document.querySelector('.legal-check input').click()"); await sleep(50) }
   async function key(keyCode, modifiers = []) {
@@ -203,6 +210,7 @@ if (typeof electron === 'string') {
     await click('发布设置')
     assert.equal(await js("document.querySelector('.legal-checklist').textContent.includes('本语言更新说明')"), true)
     assert.equal(await js("document.querySelector('.legal-auto-version input')===null"), true)
+    await checkImpact('.legal-manager', ['English', '日本語', '한국어'])
     await shot('publication-missing-summary')
     await click('补全内容')
     await importFile('zh-CN')
@@ -219,6 +227,7 @@ if (typeof electron === 'string') {
     assert.deepEqual((await request('GET', 'client-auth/legal-documents')).data, baseline)
     assert.equal((await state('terms')).draft.version, '')
     assert.equal(await js("document.querySelector('.legal-tabs .active').textContent"), '用户端预览')
+    await checkImpact('.legal-manager', ['日本語', '한국어'])
     record('saved draft stays private and publication requires language review')
     await click('用户端预览'); await reviewed(); await field('正文语言', 'en-US'); await reviewed()
     assert.equal(await js("document.querySelector('.legal-preview strong').textContent"), 'Exact source')
@@ -231,6 +240,11 @@ if (typeof electron === 'string') {
     assert.equal(publishRequests, 0)
     assert.equal(await js("document.querySelector('.legal-error').textContent"), '生效时间不能早于当前时间')
     await field('生效时间', '')
+    await click('核对发布')
+    await checkImpact('.legal-dialog', ['日本語', '한국어'])
+    await click('取消')
+    assert.equal(publishRequests, 0)
+    assert.deepEqual((await request('GET', 'client-auth/legal-documents')).data, baseline)
     await click('核对发布'); await shot('publish-review')
     await js("(()=>{const b=[...document.querySelectorAll('.legal-dialog button')].find(b=>b.textContent==='确认发布');b.click();b.click()})()")
     await until("!!document.querySelector('.legal-history article')", 'published version')
@@ -241,7 +255,7 @@ if (typeof electron === 'string') {
     assert.equal(first.currentId, version.id)
     assert.equal((await request('GET', 'client-auth/me/legal-status', undefined, true)).data.acceptanceRequired, true)
     const live = (await request('GET', 'client-auth/legal-documents')).data
-    assert.equal(live.documents.filter(row => row.key === 'terms').length, 2)
+    assert.deepEqual(live.documents.filter(row => row.key === 'terms').map(row => row.locale).sort(), ['en-US', 'zh-CN'])
     record('reviewed publication appears through the real client API with exact translations and acceptance requirement')
     await click('查看'); await until("!!document.querySelector('.legal-preview')", 'history snapshot'); await shot('history')
     await click('以此版本创建草稿'); await click('发布设置')
@@ -270,7 +284,9 @@ if (typeof electron === 'string') {
     const future = new Date(Date.now() + 86400000)
     await field('生效时间', new Date(future.getTime() - future.getTimezoneOffset() * 60000).toISOString().slice(0, 16))
     await click('保存草稿'); await until("document.querySelector('.legal-fields')?.disabled===false", 'scheduled draft')
-    await click('核对正文'); await click('确认本语言并继续'); await click('核对发布'); await click('确认发布')
+    await click('核对正文'); await click('确认本语言并继续'); await click('核对发布')
+    await checkImpact('.legal-dialog', ['简体中文', '日本語', '한국어'], true)
+    await click('确认发布')
     await until("!!document.querySelector('.legal-history article')", 'scheduled history')
     assert.equal((await request('GET', 'client-auth/legal-documents')).data.requiredConsentVersions.privacy, baseline.requiredConsentVersions.privacy)
     await click('取消定时发布'); await shot('cancel-publication-dialog'); await click('确认取消发布'); await until("document.querySelector('.legal-fields')?.disabled===false", 'cancel schedule')
@@ -323,7 +339,9 @@ if (typeof electron === 'string') {
     assert.equal(await js("document.querySelector('.legal-html-editor details').open"), false)
     await click('发布设置'); await click('保存并继续核对')
     await until("document.querySelector('.legal-fields')?.disabled===false", 'HTML draft saved')
-    await click('确认本语言并继续'); await click('确认本语言并继续'); await click('核对发布'); await click('确认发布')
+    await click('确认本语言并继续'); await click('确认本语言并继续'); await click('核对发布')
+    await checkImpact('.legal-dialog', [])
+    await click('确认发布')
     await until("!!document.querySelector('.legal-history article')", 'HTML publication')
     const htmlPublication = (await request('GET', 'client-auth/legal-documents')).data.documents.find(row => row.key === 'terms' && row.locale === 'zh-CN')
     assert.equal(htmlPublication.format, 'html')
@@ -333,6 +351,19 @@ if (typeof electron === 'string') {
     assert.match(htmlPublication.content, /1\.&nbsp;原文第一项/)
     assert.ok(!htmlPublication.content.includes('class=') && !htmlPublication.content.includes('sw_legal_paragraph_'))
     record('Word HTML survives draft save, reviewed publication and public API retrieval with its exact source metrics')
+    await click('用户端预览'); await click('确认本语言并继续'); await click('确认本语言并继续')
+    await checkImpact('.legal-manager', [])
+    // Publish another language in a second admin session and verify that confirmation refreshes the active languages.
+    const before = await state('terms')
+    const translations = { ...before.draft.translations, 'fr-FR': { ...before.draft.translations['zh-CN'], title: '测试法文版' } }
+    const extra = await request('PUT', 'admin/legal-documents/terms/draft', { revision: before.revision, draft: { ...before.draft, translations } })
+    assert.equal(extra.status, 200)
+    assert.equal((await request('POST', 'admin/legal-documents/terms/publish', { revision: extra.data.revision })).status, 200)
+    const french = await js("new Intl.DisplayNames(['zh-CN'], { type: 'language' }).of('fr-FR')")
+    await click('核对发布'); await checkImpact('.legal-dialog', [french]); await click('取消')
+    const afterCancel = (await request('GET', 'client-auth/legal-documents')).data
+    assert.deepEqual(afterCancel.documents.filter(row => row.key === 'terms').map(row => row.locale).sort(), ['en-US', 'fr-FR', 'zh-CN'])
+    record('Verified first and scheduled publications, complete language coverage, and a new language added before confirmation against the public client response')
     fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ ok: true, results, performanceResults }, null, 2))
   }).catch(error => { errors.push(String(error.stack || error)); process.stderr.write(errors.at(-1) + '\n'); fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ ok: false, results, errors }, null, 2)) })
     .finally(() => { win?.destroy(); server?.close(); backend?.kill(); app.exit(errors.length ? 1 : 0) })

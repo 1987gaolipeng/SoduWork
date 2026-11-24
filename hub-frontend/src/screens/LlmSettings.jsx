@@ -7,7 +7,7 @@ import { Loading, ErrorState, Icon, toast } from '../ui.jsx'
  * Retain organization defaults for reports and compatibility execution without maintaining
  * a second model catalog.
  */
-export default function LlmSettings({ embedded = false }) {
+export default function LlmSettings({ embedded = false, onDirtyChange }) {
   const uiLocale = useLocale();
   const [d, setD] = useState(null)
   const [baseUrl, setBaseUrl] = useState('')
@@ -23,6 +23,8 @@ export default function LlmSettings({ embedded = false }) {
     }).catch(setError)
   }
   useEffect(() => { load() }, [])
+  const dirty = Boolean(d && (baseUrl !== (d.baseUrl || '') || model !== (d.model || '') || apiKey))
+  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
 
   async function save() {
     if (baseUrl && !/^https?:\/\//.test(baseUrl.trim())) { toast(tx("接口地址要以 http(s):// 开头")); return }

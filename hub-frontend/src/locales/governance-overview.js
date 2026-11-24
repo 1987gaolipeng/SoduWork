@@ -1,5 +1,8 @@
 // Authored governance and shared-shell copy. Business names remain unchanged.
 export default {
+  "请输入完整的 HTTP 或 HTTPS Issuer 地址，不含账号、查询参数或片段。": "Enter a full HTTP or HTTPS issuer URL without credentials, a query, or a fragment.",
+  "Client ID 不能为空。": "Enter a client ID.",
+  "权限范围用空格或逗号分隔，最多 12 个自定义项；每项最多 80 个可打印 ASCII 字符，不能包含双引号或反斜杠。": "Separate scopes with spaces or commas. Use up to 12 custom scopes, each up to 80 printable ASCII characters without double quotes or backslashes.",
   "在身份平台创建 Web 应用，登记下方回调地址。": "Create a web application in your identity provider and register the callback URL below.",
   "填写该应用的 Issuer 和 Client ID，保存并测试后再启用。": "Enter the issuer and client ID. Save and test the connection before enabling it.",
   "身份平台模板": "Identity provider template",
@@ -8,6 +11,7 @@ export default {
   "企业单点登录账号请在身份平台找回密码。其他账号请联系有成员管理权限的管理员，在成员列表中编辑账号并重置密码。": "For single sign-on, recover your password with your identity provider. For other accounts, ask a member administrator to edit your account in the member list and reset the password.",
   "打开网页版": "Open web app",
   "查看其他平台": "See other platforms",
+  "查看各平台发布状态": "View release status by platform",
   "此设备可使用网页版。": "The web app is available on this device.",
   "此服务尚未提供 iOS 客户端或网页版入口。": "This Hub has no iOS client or web app link configured.",
   "需求风险": "Issue risks",
@@ -105,6 +109,9 @@ export default {
 }
 
 export const ja = {
+  "请输入完整的 HTTP 或 HTTPS Issuer 地址，不含账号、查询参数或片段。": "認証情報、クエリ、フラグメントを含まない完全な HTTP または HTTPS の Issuer URL を入力してください。",
+  "Client ID 不能为空。": "Client ID を入力してください。",
+  "权限范围用空格或逗号分隔，最多 12 个自定义项；每项最多 80 个可打印 ASCII 字符，不能包含双引号或反斜杠。": "スコープは空白またはコンマで区切ってください。カスタムスコープは最大 12 件で、各項目は二重引用符とバックスラッシュを除く表示可能な ASCII 文字 80 字までです。",
   "在身份平台创建 Web 应用，登记下方回调地址。": "ID プロバイダーで Web アプリを作成し、下記のコールバック URL を登録します。",
   "填写该应用的 Issuer 和 Client ID，保存并测试后再启用。": "Issuer と Client ID を入力し、保存して接続をテストしてから有効にします。",
   "身份平台模板": "ID プロバイダーのテンプレート",
@@ -113,6 +120,7 @@ export const ja = {
   "企业单点登录账号请在身份平台找回密码。其他账号请联系有成员管理权限的管理员，在成员列表中编辑账号并重置密码。": "シングルサインオンの場合は ID プロバイダーで再設定してください。それ以外はメンバー管理者にアカウントのパスワード再設定を依頼してください。",
   "打开网页版": "Web 版を開く",
   "查看其他平台": "他のプラットフォームを見る",
+  "查看各平台发布状态": "プラットフォーム別の配信状況を見る",
   "此设备可使用网页版。": "この端末では Web 版を利用できます。",
   "此服务尚未提供 iOS 客户端或网页版入口。": "この Hub には iOS アプリまたは Web 版へのリンクがありません。",
   "需求风险": "課題のリスク",
@@ -210,6 +218,9 @@ export const ja = {
 }
 
 export const ko = {
+  "请输入完整的 HTTP 或 HTTPS Issuer 地址，不含账号、查询参数或片段。": "인증 정보, 쿼리 또는 프래그먼트가 없는 전체 HTTP 또는 HTTPS 발급자 URL을 입력하세요.",
+  "Client ID 不能为空。": "클라이언트 ID를 입력하세요.",
+  "权限范围用空格或逗号分隔，最多 12 个自定义项；每项最多 80 个可打印 ASCII 字符，不能包含双引号或反斜杠。": "범위는 공백 또는 쉼표로 구분하세요. 사용자 지정 범위는 최대 12개이며, 각 범위에는 큰따옴표와 역슬래시를 제외한 출력 가능한 ASCII 문자를 최대 80자까지 사용할 수 있습니다.",
   "在身份平台创建 Web 应用，登记下方回调地址。": "ID 공급자에서 웹 앱을 만들고 아래 콜백 URL을 등록하세요.",
   "填写该应用的 Issuer 和 Client ID，保存并测试后再启用。": "Issuer 및 Client ID를 입력한 후 저장하고 연결을 테스트한 다음 활성화하세요.",
   "身份平台模板": "ID 공급자 템플릿",
@@ -218,6 +229,7 @@ export const ko = {
   "企业单点登录账号请在身份平台找回密码。其他账号请联系有成员管理权限的管理员，在成员列表中编辑账号并重置密码。": "SSO 계정은 ID 공급자에서 복구하세요. 그 외에는 구성원 관리자에게 구성원 목록에서 비밀번호를 재설정해 달라고 요청하세요.",
   "打开网页版": "웹 앱 열기",
   "查看其他平台": "다른 플랫폼 보기",
+  "查看各平台发布状态": "플랫폼별 배포 현황 보기",
   "此设备可使用网页版。": "이 기기에서는 웹 앱을 이용할 수 있습니다.",
   "此服务尚未提供 iOS 客户端或网页版入口。": "이 Hub에는 iOS 앱 또는 웹 앱 링크가 없습니다.",
   "需求风险": "이슈 위험",

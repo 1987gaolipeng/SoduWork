@@ -56,15 +56,10 @@ class AttachmentOwnershipCompatibilityTests(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(org_id="org")
         session = SimpleNamespace(get=AsyncMock(side_effect=lambda model, ident: task if model is models.Task else user),
                                   scalar=AsyncMock(return_value=None))
-        with patch.object(usage_ledger, "upsert_cumulative", new=AsyncMock(return_value="saved")) as upsert:
+        with self.assertRaisesRegex(usage_ledger.InvalidUsageSource, "taskId"):
             await usage_ledger.from_client(session, client, {
                 "sourceType": "task", "sourceId": "private-session", "taskId": "old-task",
                 "workflowRunId": "old-workflow", "nodeRunId": "old-node", "usage": {"totalTokens": 4}})
-            values = upsert.await_args.args[2]
-            self.assertEqual(values["task_id"], "")
-            self.assertEqual(values["source_type"], "chat")
-            self.assertEqual(values["workflow_run_id"], "")
-            self.assertEqual(values["billing_user_id"], "second")
 
 
 if __name__ == "__main__":

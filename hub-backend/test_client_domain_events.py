@@ -104,7 +104,10 @@ class ClientDomainEventsTests(IsolatedDatabase):
                 model = await session.get(ModelDef, "provider:model")
                 await admin.put_model_def({"providerId": "provider", "name": "model", "expectedRevision": model_config_guard.revision(model), "label": "Updated"}, None, session)
                 await admin.del_model_def("provider:model", model_config_guard.revision(model), None, session)
-                await admin.del_model_provider("provider", model_config_guard.revision(provider), None, session)
+                actor = await session.get(User, "alice")
+                preview = await admin.model_provider_deletion_impact("provider", actor, session)
+                await admin.del_model_provider("provider", model_config_guard.revision(provider), actor, session,
+                                               confirmId="provider", expectedImpact=preview["impactRevision"])
             wake.assert_not_awaited()
             await events.flush_for_test(self.sessions)
             self.assertEqual({call.args for call in wake.await_args_list},
