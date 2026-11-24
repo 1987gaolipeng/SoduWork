@@ -3,6 +3,7 @@
 const path = require('node:path');
 const access = require('./history-access');
 const { accountId } = require('../device-auth-request');
+const { conversationTranscriptEntries } = require('./conversation-transcript.cjs');
 const executionOutcome = require('./execution-outcome.cjs');
 const { mergeNativeEvidence } = require('./history-evidence.cjs');
 const { capturedCopyId, automaticAccountCache } = require('./history-cache-policy.cjs');
@@ -24,8 +25,9 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
   const observed = new Map();
   let closed = false, closing;
   const scoped = require('./history-scope.cjs').create({ app, store, identityOf });
-  const allowsArtifacts = row => !row.cached && !row.historyProtection && access.usesDeviceChatContext(app, { chatId: row.id }, row);
-  const deviceHistory = require('./device-history.cjs').create({ app, session, store, resolve, identityOf, register, workRoot, allowsArtifacts,
+  const ordinaryDeviceChat = row => !row.cached && !row.historyProtection && access.usesDeviceChatContext(app, { chatId: row.id }, row);
+  const deviceHistory = require('./device-history.cjs').create({ app, session, store, resolve, identityOf, register, workRoot,
+    allowsArtifacts: ordinaryDeviceChat, usesDeviceDialogue: ordinaryDeviceChat,
     authorize: row => access.assertOwner(app, row.id, scoped.actor(), row),
     authorizeContinuation: row => {
       const captured = scoped.actor();
@@ -244,7 +246,7 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     }
     return [...states.values()];
   }
-  async function read(id, options = {}, captured = scoped.actor()) {
+  async function read(id, options = {}, captured = scoped.actor(), openingBody) {
     const row = await resolve(id, captured);
     if (!row || row.deleted) throw Error('这条会话已经不存在了');
     access.assertLocalCurrent(app, captured, row, identityOf());
@@ -270,7 +272,7 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
       await verifyCurrent();
       return { ...page, nextCursor: page.next == null ? null : page.next + 1, cursor: page.items.at(-1)?.position + 1 || after };
     }
-    const saved = await deviceHistory.saved(row.id, { refresh: after === 0, verify });
+    const saved = openingBody || await deviceHistory.saved(row.id, { refresh: after === 0, verify });
     scoped.guard(captured);
     verify?.();
     if (saved) {
@@ -309,46 +311,50 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     if (!row || row.deleted) return null;
     let content = null, bodyMissing = false;
     if (!row.cached) {
-      try { content = await deviceHistory.saved(row.id, { refresh: true }); }
+      try { content = await deviceHistory.saved(row.id, { refresh: true, preferRecorded: true }); }
       catch (error) { if (error.code !== 'NATIVE_HISTORY_MISSING') throw error; bodyMissing = true; }
     }
     const nativeUnavailable = content?.nativeReadError && content.nativeReadError.code !== 'NATIVE_HISTORY_MISSING';
+    let openingBody = content && !row.cached && !content.historyProtection &&
+      !access.assertDeviceReadable(app, row.id, currentActor(captured), row)?.sharedOnDevice ? content : null;
     const view = await require('./local-history-view.cjs').create({ historyPreview, allowContinuation:
       allowContinuation && !row.cached && !content?.historyProtection && !nativeUnavailable &&
       access.usesDeviceChatContext(app, { chatId: row.id }, row),
-      previewReason: nativeUnavailable ? '可查看已有本机记录。原始档案暂时无法核验，请恢复后再继续' : previewReason,
+      previewReason: content?.nativeReadError?.code === 'TRANSCRIPT_CHECKSUM_MISMATCH' ? content.nativeReadError.reason :
+        nativeUnavailable ? '可查看已有本机记录。原始档案暂时无法核验，请恢复后再继续' : previewReason,
       row: { ...row,
       ...(content ? { deviceHistory: true, historyContentState: !content.coverage?.complete ? 'partial' :
         require('./device-history-native.cjs').unresolvedTools(content.snapshot).length || content.coverage?.unresolvedTools?.length
           ? 'unresolved-tools' : 'available' } : {}),
       ...(bodyMissing ? { historyContentState: 'missing' } : {}) },
-      read: bodyMissing ? async () => ({ items: [], nextCursor: null }) : (id, options) => read(id, options, captured) });
+      read: bodyMissing ? async () => ({ items: [], nextCursor: null }) : (id, options) => read(id, options, captured, openingBody) });
+    openingBody = null;
     scoped.guard(captured);
     for (const name of ['snapshot', 'uiSnapshot', 'historyRow']) {
       const original = view[name];
       view[name] = (...args) => { access.assertDeviceReadable(app, row.id, currentActor(captured), row); return original(...args); };
     }
-    if (historyPreview && content?.localArtifactHistory && !content.imported && !content.historyProtection && allowsArtifacts(row)) {
+    if (historyPreview && content?.localArtifactHistory && !content.imported && !content.historyProtection && ordinaryDeviceChat(row)) {
       let disposed = false;
       const close = view.close;
       view.close = async () => { disposed = true; return close(); };
       const guard = () => {
         if (disposed) throw Error('会话已关闭，请重新打开成果');
         access.assertDeviceReadable(app, row.id, currentActor(captured), row);
-        if (!allowsArtifacts(row)) throw Error('会话归属已变化，请重新打开成果');
+        if (!ordinaryDeviceChat(row)) throw Error('会话归属已变化，请重新打开成果');
       };
       const authorize = async () => {
         const latest = await resolve(row.id, captured);
-        if (!latest || latest.deleted || latest.cwd !== row.cwd || !allowsArtifacts(latest) ||
+        if (!latest || latest.deleted || latest.cwd !== row.cwd || !ordinaryDeviceChat(latest) ||
             await store.deviceHistoryVersion(row.id) !== content.digest)
           throw Error('会话归属或历史版本已变化，请重新打开成果');
         if (row.adapterId === 'pi') await require('./device-history-native.cjs').probe({ app, session, row: latest,
           guard: evidence => {
             guard();
-            if (!allowsArtifacts(mergeNativeEvidence(latest, evidence))) throw Error('会话归属已变化，请重新打开成果');
+            if (!ordinaryDeviceChat(mergeNativeEvidence(latest, evidence))) throw Error('会话归属已变化，请重新打开成果');
           } });
         guard();
-        if (!allowsArtifacts(latest))
+        if (!ordinaryDeviceChat(latest))
           throw Error('会话归属已变化，请重新打开成果');
       };
       view.historyArtifacts = require('./device-history-artifacts.cjs').view(row.cwd, content.localArtifactHistory, guard, authorize);
@@ -381,7 +387,32 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     await save();
     if (job.body.deleted) await store.lifecycle(id, 'delete', { account: accountId(identity), hub: job.hub });
   }
-  async function capture(handle, identity, { initialReplay = false } = {}) {
+  async function recordDialogue(row, snapshot, original, identity, retry = true) {
+    if (!identity || row?.id !== original.id || row.deleted || row.cached || row.deviceTransferId) return;
+    const evidence = mergeNativeEvidence(row, original.taskProjectionId ? { ...original, taskId: original.taskProjectionId } : original);
+    const actor = access.actor(app, identity);
+    // The registry may still deliver a closing handle after a profile switch.
+    try {
+      access.assertCurrent(app, actor, identityOf());
+    } catch (_) { return; }
+    if (evidence.historyProtection) {
+      if (!row.historyProtection) await register([{ ...row, historyProtection: evidence.historyProtection }],
+        { expectedRevision: row.revision });
+      return;
+    }
+    if (!ordinaryDeviceChat(evidence) || snapshot.history?.truncated || Number(snapshot.history?.messageStart || 0) !== 0) return;
+    try { access.assertDeviceReadable(app, row.id, actor, evidence); } catch (_) { return; }
+    const messages = conversationTranscriptEntries(snapshot.messages);
+    if (!messages.length) return;
+    const result = await store.saveConversationTranscript(row.id, messages, {
+      expectedRevision: row.replicaRevision, expectedCatalogRevision: row.revision, expectedTransferId: '',
+    });
+    // Native capture can advance the catalog while the worker is saving text.
+    // Reauthorize the new row before retrying the same append once.
+    if (result?.stale && retry)
+      await recordDialogue(await store.get(row.id), snapshot, original, identity, false);
+  }
+  async function capture(handle, identity, { initialReplay = false, onRegistered } = {}) {
     if (closed || handle.localReplica || typeof handle.snapshot !== 'function') return;
     const snapshot = handle.snapshot(), original = handle.historyRow?.(snapshot);
     if (!original?.id) return;
@@ -397,7 +428,7 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     if (!remote) {
       let retainedFailure = false;
       if (initialReplay) {
-        const previous = await store.get(id);
+        const previous = previousImport;
         // An older successful answer cannot disprove a later preflight failure.
         if (previous?.state === 'failed' && executionOutcome.recover(previous)?.state !== 'completed' && displayed.state === 'completed') {
           displayed = { ...displayed, state: previous.state, status: previous.status };
@@ -411,22 +442,34 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
         runtimeFailure: original.runtimeUnavailable ? original.runtimeFailure : null,
         executionOutcome: outcome ? { ...outcome, owner: accountId(identity), hub: identity?.hub } : null };
     }
+    // Some runtime rows omit task fields once the binding is no longer active.
+    // A later snapshot cannot downgrade an already protected conversation.
+    const protection = remote ? 'account' : mergeNativeEvidence(previousImport?.id === id ? previousImport : { id }, displayed).historyProtection;
     const [row] = await register([{ ...displayed, id, cloud: false, accountProjection: false,
       accountConversation: false,
-      ...(remote ? { historyProtection: 'account' } : {}),
+      ...(protection ? { historyProtection: protection } : {}),
       ...(original.taskProjectionId && !original.taskId ? { taskId: original.taskProjectionId } : {}),
       remoteProjection: false, cached: !!remote, source: remote ? { hub: identity?.hub, id: original.id, account: accountId(identity) } : null,
       creator: { account: accountId(identity), hub: identity?.hub }, historyAliasIds: remote ? [] : original.historyAliasIds || [] }]);
+    onRegistered?.(row);
     if (row.deleted) return;
     if (!remote) {
+      // Commit user-visible dialogue before any potentially slow native replay.
+      if (!initialReplay && !onRegistered) {
+        try { await recordDialogue(row, snapshot, displayed, identity); }
+        catch (failure) { handle.localHistoryError = failure.message; }
+      }
       try { await deviceHistory.refresh(row.id, { journal: handle.fileChanges || snapshot.fileChanges }); }
       catch (error) {
         // A failed native read keeps the previous complete copy. The runtime
         // snapshot is still useful as explicitly partial crash-recovery data.
+        if (error.historyAccessFailure || error.code === 'HISTORY_CONCURRENT_UPDATE') {
+          handle.localHistoryError = error.message; return;
+        }
         if (!await store.deviceHistory(row.id)) await store.saveDeviceHistory(row.id, {
           snapshot: require('./device-history-native.cjs').publicSnapshot(snapshot),
           coverage: { complete: false }, nativeReadError: { code: error.code || 'NATIVE_HISTORY_UNAVAILABLE', reason: error.message },
-        }, { expectedRevision: row.replicaRevision, expectedTransferId: row.deviceTransferId || '' });
+        }, { expectedRevision: row.replicaRevision, expectedTransferId: row.deviceTransferId || '', expectedHistoryDigest: null });
         handle.localHistoryError = String(error.message || error);
       }
       return;
@@ -451,6 +494,27 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
   function observe(handle, identity) {
     if (!handle || observed.has(handle) || handle.localReplica) return;
     let pending, timer, disposed = false, error = '', dirty = false, executionObserved = false;
+    let dialogueId, writing, dialogueDirty = false;
+    const checkpoint = () => {
+      if (!dialogueId || !executionObserved) return;
+      dialogueDirty = true;
+      if (writing) return;
+      writing = (async () => {
+        while (dialogueDirty) {
+          dialogueDirty = false;
+          const snapshot = handle.snapshot(), original = handle.historyRow?.(snapshot);
+          if (original?.id !== dialogueId || original.cloud || original.accountProjection || original.remoteProjection) continue;
+          const row = await store.get(original.id);
+          if (row) await recordDialogue(row, snapshot, original, identity);
+        }
+      })().catch(failure => { handle.localHistoryError = failure.message; }).finally(() => { writing = null; });
+    };
+    const onRegistered = row => {
+      dialogueId = !row.deleted && !row.cached && !row.historyProtection && !row.deviceTransferId ? row.id : null;
+      // An accepted turn may arrive before the first index commit or while
+      // native replay is waiting. Persist the latest display independently.
+      checkpoint();
+    };
     const flush = () => {
       if (timer) clearTimeout(timer); timer = null;
       dirty = true;
@@ -458,18 +522,26 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
       pending = (async () => {
         while (dirty) {
           dirty = false;
-          try { await capture(handle, identity, { initialReplay: !executionObserved }); error = ''; }
+          try { await capture(handle, identity, { initialReplay: !executionObserved, onRegistered }); error = ''; }
           catch (failure) { error = failure.message; handle.localHistoryError = error; }
         }
       })().finally(() => { pending = null; });
       return pending;
     };
     const dispose = handle.on?.(event => {
-      if (['run', 'turn-queued', 'turn-dequeued', 'turn-finished'].includes(event?.kind)) executionObserved = true;
-      if (disposed || timer) return;
-      timer = setTimeout(() => { timer = null; void flush(); }, 1000); timer.unref?.();
+      if (disposed) return;
+      if (['user', 'message', 'run', 'started', 'settled', 'turn-queued', 'turn-dequeued', 'turn-finished'].includes(event?.kind)) {
+        executionObserved = true;
+        checkpoint();
+      }
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        if (pending) checkpoint();
+        void flush();
+      }, 1000); timer.unref?.();
     });
-    const entry = { flush, error: () => error, dispose: () => { disposed = true; clearTimeout(timer); dispose?.(); } };
+    const entry = { flush: async () => { await flush(); await writing; }, error: () => error, dispose: () => { disposed = true; clearTimeout(timer); dispose?.(); } };
     observed.set(handle, entry);
     // Registry facades intercept close; decorating that facade would make the
     // native close await its own registry disposal and deadlock shutdown.
@@ -477,7 +549,7 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     const originalClose = native.close;
     if (typeof originalClose === 'function') native.close = async function (...args) {
       const result = await originalClose.apply(this, args);
-      if (result !== false) { entry.dispose(); await flush(); observed.delete(handle); }
+      if (result !== false) { entry.dispose(); await entry.flush(); observed.delete(handle); }
       return result;
     };
     void flush();

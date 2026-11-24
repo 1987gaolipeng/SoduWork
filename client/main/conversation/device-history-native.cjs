@@ -163,11 +163,45 @@ async function pi(app, session, id, guard, previous) {
   }
   return { snapshot, source: { id, adapterId: 'pi', revision, byteLength: bytes.length } };
 }
-async function runner(runtime, id, adapterId, guard, previousToolReceipts) {
+function canonicalJson(value) {
+  return JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
+}
+function runnerConflict() {
+  return failure('NATIVE_HISTORY_DIVERGED', '执行记录与已保存的完整历史不一致，已保留本机副本。请恢复原档后继续');
+}
+function matchesLegacyRunner(id, snapshot, messages, tools, candidates) {
+  // Old replicas have only a cursor. Compare the public events at that exact
+  // boundary, before a later delta or terminal event can modify the projection.
+  const prefix = id + ':', oldMessages = snapshot.messages.filter(item => typeof item.id === 'string' && item.id.startsWith(prefix));
+  const oldTools = snapshot.tools.filter(item => typeof item.id === 'string' && item.id.startsWith(prefix + prefix));
+  if (messages.length !== oldMessages.length || tools.length !== oldTools.length ||
+      messages.some((item, i) => canonicalJson(item) !== canonicalJson(oldMessages[i]))) return false;
+  const offset = oldMessages.length ? snapshot.messages.indexOf(oldMessages[0]) : oldTools[0]?.after || 0;
+  for (const [index, item] of tools.entries()) {
+    const old = { ...oldTools[index] }, current = { ...item, id: prefix + item.id, after: offset + item.after };
+    // Projection can supplement these exact pending tools with independent
+    // image / cancelled-write receipts. The current read verifies those anew.
+    if (item.state === 'running' && candidates.get(item.callId) &&
+        (old.state === 'done' || old.state === 'cancelled' && old.cancelReason === 'access-change')) {
+      old.state = 'running'; delete old.cancelReason; delete old.isError;
+    }
+    if (canonicalJson(old) !== canonicalJson(current)) return false;
+  }
+  return true;
+}
+async function runner(runtime, id, adapterId, guard, previousToolReceipts, previousSource, previousSnapshot) {
   const messages = [], tools = [], streams = new Map(), pendingCalls = new Map();
   const candidates = new Map(), localToolReceipts = [];
   const qwen = adapterId === 'qwen';
   const journal = (adapterId === 'codex-harness' || qwen) ? crypto.createHash('sha256') : null;
+  const evidence = crypto.createHash('sha256');
+  const checkpoint = previousSource ? Number(previousSource.revision) : -1;
+  let prefixMatches = true;
+  function compareCheckpoint() {
+    prefixMatches = previousSource.journalDigest ? evidence.copy().digest('hex') === previousSource.journalDigest
+      : previousSnapshot && matchesLegacyRunner(id, previousSnapshot, messages, tools, candidates);
+  }
   let after = 0, size = 0, target, localWorkspace;
   while (true) {
     const reply = await runtime.rpc('job.session', { ref: id, since: after, limit: 200, historyRead: true }, 15000); guard();
@@ -177,6 +211,11 @@ async function runner(runtime, id, adapterId, guard, previousToolReceipts) {
     if (!reply?.ok || reply.data?.ok === false || !Array.isArray(reply.data?.items))
       throw failure('NATIVE_HISTORY_UNAVAILABLE', '执行底座暂时无法读取完整历史');
     const data = reply.data, events = data.items;
+    if (data.ref !== undefined && data.ref !== id) throw failure('NATIVE_HISTORY_UNAVAILABLE', '执行底座历史标识不匹配');
+    // Admission status can briefly stand in for an existing journal before
+    // launch. A queue receipt cannot establish truncation of the archive.
+    if (checkpoint > 0 && data.admissionKey && data.seq === 0 && !events.length)
+      throw failure('NATIVE_HISTORY_UNAVAILABLE', '执行记录正在等待队列恢复，请稍后再试');
     // Runner metadata binds this directory to the original desktop allocation.
     // Omit the receipt when pages disagree or the run has no terminal window.
     const workspace = data.ref === id && data.workDir && data.ended && ['done', 'failed', 'stopped', 'interrupted'].includes(data.status)
@@ -192,11 +231,13 @@ async function runner(runtime, id, adapterId, guard, previousToolReceipts) {
     if (highWater !== target) throw failure('NATIVE_HISTORY_CHANGED', '会话正在更新，请稍后重试');
     const previous = after;
     for (const item of events) {
+      if (after === checkpoint) compareCheckpoint();
       if (!item || !Number.isSafeInteger(item.seq) || item.seq !== after + 1 || item.seq > latest)
         throw failure('NATIVE_HISTORY_UNAVAILABLE', '执行底座历史事件游标无效');
-      const serialized = JSON.stringify(item);
+      const serialized = canonicalJson(item);
       after = item.seq; size += Buffer.byteLength(serialized);
-      journal?.update(serialized).update('\n');
+      journal?.update(JSON.stringify(item)).update('\n');
+      evidence.update(serialized).update('\n');
       if (size > MAX_BYTES) throw failure('HISTORY_TOO_LARGE', '历史超过本机完整保存上限');
       const text = String(item.full ?? item.text ?? '');
       const callId = typeof item.callId === 'string' ? item.callId : '';
@@ -247,6 +288,9 @@ async function runner(runtime, id, adapterId, guard, previousToolReceipts) {
     if (target === null && after === latest && events.length === 0) break;
     if (after === previous) throw failure('NATIVE_HISTORY_UNAVAILABLE', '执行底座历史分页未前进');
   }
+  if (after === checkpoint) compareCheckpoint();
+  // Only a stable, completely paged journal can establish divergence.
+  if (after < checkpoint || !prefixMatches) throw runnerConflict();
   const unresolved = tools.filter(tool => tool.state === 'running' && candidates.get(tool.callId));
   const journalDigest = unresolved.length ? journal.digest('hex') : '';
   for (let start = 0; start < unresolved.length; start += 1024) {
@@ -275,9 +319,11 @@ async function runner(runtime, id, adapterId, guard, previousToolReceipts) {
       }
     }
   }
-  return { snapshot: { messages, tools }, source: { id, adapterId, revision: String(after) }, localToolReceipts, localWorkspace };
+  return { snapshot: { messages, tools }, source: { id, adapterId, revision: String(after), journalDigest: evidence.digest('hex') },
+    localToolReceipts, localWorkspace };
 }
-async function read({ app, session, row, guard, previousToolReceipts = [], previousSources = [], runtime = require('../runner-runtime') }) {
+async function read({ app, session, row, guard, previousToolReceipts = [], previousSources = [], previousSnapshot,
+  runtime = require('../runner-runtime') }) {
   const record = require('./runtime-segments').read(app, row.id);
   const parts = record ? [...record.segments, record.active] : [{ sessionId: row.id, adapterId: row.adapterId || 'pi' }];
   const snapshot = { messages: [], tools: [] }, sources = [], localToolReceipts = [];
@@ -287,10 +333,17 @@ async function read({ app, session, row, guard, previousToolReceipts = [], previ
     Object.assign(snapshot, publicSnapshot(record.prefix));
     parts.splice(0, parts.length - 1);
   }
-  const piSources = new Map(previousSources.filter(source => source.adapterId === 'pi').map(source => [source.id, source]));
-  for (const part of [...new Map(parts.map(value => [value.sessionId, value])).values()]) {
-    const saved = part.adapterId === 'pi' ? await pi(app, session, part.sessionId, guard, piSources.get(part.sessionId))
-      : await runner(runtime, part.sessionId, part.adapterId, guard, previous);
+  const prior = new Map(previousSources.map(source => [source.id, source]));
+  const nativeParts = [...new Map(parts.map(value => [value.sessionId, value])).values()];
+  // Recovered transcripts freeze retired segments in the trusted prefix. An
+  // ordinary manifest must still reference all saved sources in their order.
+  if (!record?.deviceHistoryComplete && previousSources.some((source, index) => nativeParts[index]?.sessionId !== source.id))
+    throw failure('NATIVE_HISTORY_DIVERGED', '原生会话缺少已保存的执行段，已保留本机副本。请恢复原档后继续');
+  for (const part of nativeParts) {
+    const source = prior.get(part.sessionId);
+    if (source && source.adapterId !== part.adapterId) throw runnerConflict();
+    const saved = part.adapterId === 'pi' ? await pi(app, session, part.sessionId, guard, source)
+      : await runner(runtime, part.sessionId, part.adapterId, guard, previous, source, previousSnapshot);
     for (const proof of saved.localToolReceipts || []) localToolReceipts.push(proof);
     const offset = snapshot.messages.length;
     snapshot.messages.push(...saved.snapshot.messages);
@@ -298,10 +351,6 @@ async function read({ app, session, row, guard, previousToolReceipts = [], previ
     sources.push(saved.source);
     if (saved.localWorkspace && saved.source.id === row.id) localWorkspace = saved.localWorkspace;
   }
-  // A recovery manifest freezes the retired segments in its trusted prefix.
-  // Without that handover, losing a previously verified segment loses history.
-  if (!record?.deviceHistoryComplete && [...piSources.keys()].some(id => !sources.some(source => source.adapterId === 'pi' && source.id === id)))
-    throw failure('NATIVE_HISTORY_DIVERGED', '原生会话缺少已保存的执行段，已保留本机副本。请恢复原档后继续');
   return { snapshot, ...(localWorkspace ? { localWorkspace } : {}), coverage: { complete: true, sources, unresolvedTools: unresolvedTools(snapshot) },
     ...(localToolReceipts.length ? { localToolReceipts } : {}) };
 }
