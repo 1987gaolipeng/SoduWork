@@ -4,13 +4,17 @@ One atomic record per operation; no second scheduler or replay engine. Payloads
 may contain provider credentials, so Windows seals them to the current user with
 DPAPI; POSIX uses an owner-only directory and files. Corruption fails closed.
 """
-from dataclasses import asdict
 import ctypes
-from ctypes import wintypes
+import errno
 import hashlib
 import json
 import os
+import re
+import uuid
+from ctypes import wintypes
+from dataclasses import asdict
 from pathlib import Path
+
 from . import durable_file
 
 
@@ -49,8 +53,62 @@ def _storage_root(root):
     return Path("\\\\?\\" + absolute)
 
 
+def acquire_owner_lock(path: Path, boot_id: str):
+    """Keep the original Windows byte-zero/POSIX flock interoperable with old Runners."""
+    if not re.fullmatch(r"[0-9a-f]{32}", boot_id):
+        raise ValueError("Invalid Runner boot ID")
+    if path.is_symlink():
+        raise OSError("Runner lock must not be a symlink")
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    handle = os.fdopen(fd, "r+b", buffering=0)
+    try:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                # Windows can lock byte zero even when a legacy file is empty.
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                raise
+            # Only report a bounded, well-formed registration after OS contention.
+            # A crash may leave the last registration on disk until takeover.
+            try:
+                handle.seek(1)
+                record = handle.read(128)
+            except OSError:
+                record = b""
+            owner = re.fullmatch(rb"pid=[1-9][0-9]{0,9} bootId=[0-9a-f]{32}\n", record)
+            detail = "; last registered " + record.decode("ascii").strip() if owner else ""
+            raise BlockingIOError("Runner lock is already held" + detail) from exc
+        handle.owner_pid = os.getpid()
+        record = f" pid={handle.owner_pid} bootId={boot_id}\n".encode("ascii")
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)  # Older per-Runner-ID locks used the process umask.
+        handle.truncate(1)
+        handle.seek(0)
+        if handle.write(record) != len(record):
+            raise OSError("Incomplete Runner lock registration")
+        return handle
+    except BaseException:
+        handle.close()
+        raise
+
+
+def release_owner_lock(handle):
+    try:
+        # Clear our registration before releasing the OS lock. Never unlink the
+        # inode: another process may already have it open for its next attempt.
+        if os.getpid() == handle.owner_pid:
+            handle.truncate(1)
+    finally:
+        handle.close()
+
+
 class Journal:
-    def __init__(self, root, identity: str, *, exclusive=False):
+    def __init__(self, root, identity: str, *, exclusive=False, boot_id: str = ""):
         self.root = _storage_root(root) / hashlib.sha256(identity.encode()).hexdigest()
         if self.root.is_symlink():
             raise OSError("Runner queue directory must not be a symlink")
@@ -59,34 +117,12 @@ class Journal:
             os.chmod(self.root, 0o700)
         self._lease = None
         if exclusive:
-            self._acquire()
-
-    def _acquire(self):
-        """A replacement Runner must not drain the same queue beside its owner."""
-        path = self.root / "owner.lock"
-        if path.is_symlink():
-            raise OSError("Runner queue lock must not be a symlink")
-        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-        handle = os.fdopen(fd, "r+b", buffering=0)
-        try:
-            if os.name == "nt":
-                import msvcrt
-                if path.stat().st_size == 0:
-                    handle.write(b"0")
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            self._lease = handle
-        except OSError as exc:
-            handle.close()
-            raise OSError("这台执行机的队列已由另一个 Runner 接管，请先停止旧进程") from exc
+            self._lease = acquire_owner_lock(self.root / "owner.lock", boot_id or uuid.uuid4().hex)
 
     def close(self):
         if self._lease is not None:
-            self._lease.close()
-            self._lease = None
+            lease, self._lease = self._lease, None
+            release_owner_lock(lease)
 
     def path(self, key):
         return self.root / (hashlib.sha256(key.encode()).hexdigest() + ".queue")

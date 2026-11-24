@@ -65,3 +65,33 @@ test('SDK retry progress is truthful and exhaustion keeps transcript/tool result
  assert.match(acc.snapshot().statusText,/已自动重试 2 次/);assert.equal(acc.snapshot().tools.length,1);
  assert.equal(acc.snapshot().modelRetry.active,false);assert.equal(acc.status(),'unreachable');
 });
+
+test('summary cancellation and ticket denial preserve evidence without invoking the replacement model', async () => {
+  for (const cancel of [false, true]) {
+    const events = [];
+    let releaseTicket, calls = 0;
+    const ticket = new Promise(resolve => { releaseTicket = resolve; });
+    const ctx = {
+      piSession: { messages: [{ role: 'toolResult', toolCallId: 'saved', content: [{ type: 'text', text: 'Saved output' }] }],
+        model: { id: 'b' } },
+      prep: { model: { id: 'b' } }, acc: { push: event => events.push(event) },
+      _endGoalTurn() {}, _emit() {}, turnQueue: { size: () => 0 },
+      refreshModelTicketIfNeeded: () => ticket, runtime: { completeSimple() { calls++; } },
+    };
+    const run = recovery.create().summarize(ctx, { options: { summaryReceipt: {
+      toolId: 'saved', modelRef: 'a', messageFrom: 0, request: 'Original request',
+    } } });
+    if (cancel) ctx.directModelController.abort();
+    releaseTicket(cancel ? { ok: true } : { ok: false, reason: 'Ticket unavailable' });
+    const result = await run;
+    if (cancel) assert.equal(result.cancelled, true);
+    else {
+      assert.equal(result.ok, false);
+      assert.equal(events.find(e => e.type === 'message_end').message.stopReason, 'error');
+    }
+    assert.equal(calls, 0);
+    assert.equal(ctx.inFlight, false);
+    assert.equal(ctx.directModelController, null);
+    assert.equal(ctx.piSession.messages.length, 1);
+  }
+});

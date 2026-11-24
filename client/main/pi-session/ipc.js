@@ -71,6 +71,7 @@ function _send(win, handle, touched, snapshot, includeSnapshot, presenceSnapshot
   const safePluginAuthorization = includeSnapshot && typeof eventPublication.pluginAuthorization === 'function'
     ? eventPublication.pluginAuthorization(touched?.pluginAuthorization) : undefined;
   try {
+    const presenceRow = typeof handle.historyRow === 'function' ? handle.historyRow(presenceSnapshot || snapshot) : null;
     win.webContents.send('pi-session-event', {
       ref: handle.ref, sessionId: handle.sessionId,
       kind: touched && touched.kind,
@@ -81,8 +82,8 @@ function _send(win, handle, touched, snapshot, includeSnapshot, presenceSnapshot
       ...(includeSnapshot ? require('../../core/token-quota').fields(touched) : {}),
       ...(safePluginAuthorization ? { pluginAuthorization: safePluginAuthorization } : {}),
       snapshot: includeSnapshot ? _contextSnapshot(handle, snapshot) : null,
-      presence: conversationTitles.decorate(_app, typeof handle.historyRow === 'function'
-        ? { ...handle.historyRow(presenceSnapshot || snapshot), ...(handle.requirementContext ? { requirementContext: handle.requirementContext } : {}) } : null),
+      presence: conversationTitles.decorate(_app, presenceRow
+        ? { ...presenceRow, ...(handle.requirementContext ? { requirementContext: handle.requirementContext } : {}) } : null),
       ...(handle.requirementContext ? { requirementContext: handle.requirementContext } : {}),
       taskId: String(touched && touched.taskId || snapshot && snapshot.execution && snapshot.execution.turnQueue && snapshot.execution.turnQueue.activeTaskId || ''),
       taskTitle: String(handle.taskTitle || ''),

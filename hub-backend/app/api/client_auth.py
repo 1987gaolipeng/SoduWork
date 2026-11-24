@@ -350,8 +350,8 @@ async def authorize_ai(response: Response, model: str = "", agent: str = "",
     conf = {}
     runtime = model_quota.managed_runtime(agent)
     if runtime:
-        want = model.strip() or model_catalog.agent_model(client, runtime)
-        conf = await model_catalog.resolve(session, client, want)
+        want, provider = model_catalog.agent_choice(client, runtime, model)
+        conf = await model_catalog.resolve(session, client, want, provider_id=provider)
         if not conf:
             raise HTTPException(400, "所选模型不可用，请刷新模型列表后重试")
         conf["quotaScope"] = conf.get("fundingScope", "platform")

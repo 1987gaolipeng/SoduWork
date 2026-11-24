@@ -1,4 +1,4 @@
-"""Requirement-pool delivery review is owned by the requirement creator only."""
+"""Primary and fallback responsibilities for requirement-pool delivery reviews."""
 
 import unittest
 
@@ -76,8 +76,8 @@ class ReviewCreatorOnlyTests(unittest.IsolatedAsyncioTestCase):
         self.task.assignee_user_id = self.creator.id
         self.request.policy_snapshot = {"separationOfDuties": True}
         await self.session.flush()
-        self.assertTrue(await approval_routing.can_decide(
-            self.session, self.task, self.request, self.creator))
+        allowed, reason = await approval_routing.can_decide(self.session, self.task, self.request, self.creator)
+        self.assertTrue(allowed, reason)
 
     async def test_preview_and_policy_candidates_are_creator_only(self):
         preview = await approval_routing.preview_assignments(
@@ -103,6 +103,66 @@ class ReviewCreatorOnlyTests(unittest.IsolatedAsyncioTestCase):
                 self.request.id, {"decision": "approve"},
                 self.executor_client, self.session)
         self.assertEqual(caught.exception.status_code, 403)
+
+    async def test_fallback_uses_first_eligible_responsibility_and_excludes_executor(self):
+        requester = models.User(id="requester", username="requester")
+        lead = models.User(id="leader", username="leader")
+        policy_user = models.User(id="policy-user", username="policy-user")
+        self.session.add_all([requester, lead, policy_user,
+                              models.Project(id="project", name="Project", owner_user_id=lead.id)])
+        self.task.project_id = "project"
+        self.task.created_by = None
+        self.task.requester_user_id = requester.id
+        rules = {"approvers": [{"type": "user", "ids": [self.executor.id, policy_user.id]}]}
+        for expected in (requester, lead, policy_user):
+            preview = await approval_routing.preview_assignments(self.session, self.task, "review", rules)
+            self.assertEqual([p["userId"] for p in preview["candidates"]], [expected.id])
+            self.assertTrue(preview["ok"])
+            expected.is_active = False
+        self.task.created_by = self.creator.id
+        self.creator.is_active = False
+        preview = await approval_routing.preview_assignments(self.session, self.task, "review", rules)
+        self.assertFalse(preview["ok"])
+        self.assertIn("已停用", preview["reason"])
+        self.assertIn(self.creator.display_name, preview["reason"])
+        self.assertIn("管理员", preview["reason"])
+
+    async def test_submitted_fallback_snapshot_survives_creator_reactivation(self):
+        self.creator.is_active = False
+        reviewer = models.User(id="reviewer", username="reviewer")
+        self.session.add(reviewer)
+        self.task.requester_user_id = reviewer.id
+        self.request.required_count = 1
+        self.request.policy_snapshot = {"required": 1}
+        assigned = await approval_routing.ensure_assignments(self.session, self.task, self.request)
+        self.assertEqual([row.user_id for row in assigned], [reviewer.id])
+        self.assertEqual(assigned[0].sources[0]["type"], "requester")
+        self.creator.is_active = True
+        self.assertTrue(await approval_routing.preview_can_decide(
+            self.session, self.task, self.request, reviewer, self.artifact))
+        self.assertFalse(await approval_routing.preview_can_decide(
+            self.session, self.task, self.request, self.creator, self.artifact))
+        allowed, reason = await approval_routing.can_decide(self.session, self.task, self.request, reviewer)
+        self.assertTrue(allowed, reason)
+
+    async def test_designated_reviewer_cannot_be_the_executor_or_artifact_author(self):
+        reviewer = models.User(id="reviewer", username="reviewer")
+        self.session.add(reviewer)
+        self.task.review_recipient_user_id = reviewer.id
+        await self.session.flush()
+        self.assertTrue(await approval_routing.can_designate_reviewer(self.session, self.task, reviewer))
+        self.assertFalse(await approval_routing.can_designate_reviewer(self.session, self.task, self.executor))
+        self.session.add(models.OrgUnit(id="foreign", name="Foreign"))
+        reviewer.org_id = "foreign"
+        self.assertFalse(await approval_routing.can_designate_reviewer(self.session, self.task, reviewer))
+        reviewer.org_id = None
+        preview = await approval_routing.preview_assignments(self.session, self.task, "review", {}, artifact=self.artifact)
+        self.assertEqual([p["userId"] for p in preview["candidates"]], [reviewer.id])
+        self.artifact.created_by_kind, self.artifact.created_by_id = "user", reviewer.id
+        self.assertFalse(await approval_routing.can_designate_reviewer(self.session, self.task, reviewer))
+        preview = await approval_routing.preview_assignments(self.session, self.task, "review", {}, artifact=self.artifact)
+        self.assertFalse(preview["ok"])
+        self.assertEqual(preview["candidates"], [])
 
     async def test_other_approval_actions_keep_their_assignment_policy(self):
         request = am.ApprovalRequest(

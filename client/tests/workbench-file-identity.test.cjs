@@ -62,6 +62,95 @@ const journal = (name = 'report.md', cwd = 'C:/project', at = 1200) => ({
 const artifact = (relative = 'report.md', extra = {}) => ({ artifactId: 'published-' + relative, relative,
   name: relative.split('/').pop(), size: 20, at: 1200, primary: true, changedInTurn: true, ...extra });
 
+test('a Git delivery previews the same Markdown draft that source, copy and save use', async () => {
+  const f = fixture(), snapshot = journal(), file = artifact('report.md', { primary: false });
+  Object.assign(snapshot.fileChanges.files[0], { action: 'modified', before: { text: 'Earlier draft' } });
+  f.window.marked = require('../vendor/markdown/marked.umd.js');
+  const sanitized = [];
+  f.window.DOMPurify = { sanitize(html, policy) { sanitized.push(policy); return html; } };
+  const writes = [], copied = [];
+  f.window.navigator = { clipboard: { writeText: async text => copied.push(text) } };
+  f.window.soduWorkAPI.conversationSession.writeOutput = async (ref, target, text) => {
+    writes.push([ref, target, text]); return { ok: true };
+  };
+  f.render(snapshot, [file]); f.wb.openOutput(file.artifactId); await f.flush();
+  const setView = async view => { f.click('data-wb-code-view', { wbCodeView: view }); await f.flush(); };
+  assert.match(f.body.innerHTML, /data-wb-code-view="diff" aria-pressed="true"/);
+  assert.match(f.body.innerHTML, /ncw-diff-surface/);
+  await setView('preview');
+  assert.match(f.body.innerHTML, /data-wb-code-view="preview" aria-pressed="true"/);
+  assert.match(f.body.innerHTML, /<h1>Original<\/h1>/);
+  assert.ok(sanitized.at(-1).FORBID_TAGS.includes('style'), 'uses the existing document rendering policy');
+  assert.equal(f.reads.length, 0, 'the change journal already contains the source');
+  await setView('code');
+  const draft = '# Unsaved\n\n**Revision**';
+  f.editors.at(-1).edit(draft);
+  await setView('diff'); await setView('preview');
+  assert.match(f.body.innerHTML, /<h1>Unsaved<\/h1>/);
+  assert.match(f.body.innerHTML, /<strong>Revision<\/strong>/);
+  f.click('data-wb-code-copy'); await f.flush();
+  assert.deepEqual(copied, [draft]);
+  assert.doesNotMatch(f.body.innerHTML, /data-wb-code-save disabled/);
+  f.click('data-wb-code-save'); await f.flush();
+  assert.deepEqual(writes, [['chat-a', 'report.md', draft]]);
+  await setView('code');
+  assert.equal(f.editors.at(-1).getValue(), draft, 'the stale journal cannot replace the saved revision');
+  assert.match(f.body.innerHTML, /data-wb-code-save disabled/);
+  f.render({ messages: [], tools: [] }, [{ ...file, size: 80 }]); await f.flush();
+  assert.equal(f.reads.at(-1).file.artifactId, file.artifactId);
+  f.reads.at(-1).resolve({ ok: true, text: '# Updated on disk' }); await f.flush();
+  await setView('preview');
+  assert.match(f.body.innerHTML, /<h1>Updated on disk<\/h1>/);
+});
+
+test('created Markdown opens in source while ordinary code and read snapshots keep their original tools', async () => {
+  const f = fixture(), name = 'guide.md', file = artifact(name, { primary: false });
+  f.render(journal(name), [file]); f.wb.openOutput(file.artifactId); await f.flush();
+  assert.match(f.body.innerHTML, /data-wb-code-view="code" aria-pressed="true"/);
+  assert.match(f.body.innerHTML, /data-wb-code-view="preview"/);
+  assert.equal(f.editors.at(-1).getValue(), '# Original');
+  const script = artifact('app.js', { primary: false });
+  f.render(journal('app.js'), [script]); f.wb.openOutput(script.artifactId); await f.flush();
+  assert.doesNotMatch(f.body.innerHTML, /data-wb-code-view="preview"/);
+  f.wb.openPath(name, { readSnapshot: { id: 'transcript-read', text: '# Snapshot' } }); await f.flush();
+  assert.match(f.body.innerHTML, /data-read-snapshot/);
+  assert.doesNotMatch(f.body.innerHTML, /data-wb-code-view|data-wb-code-save/);
+});
+
+test('a truncated Markdown journal loads the file and keeps a partial file preview read-only', async () => {
+  const f = fixture('C:/project', false), snapshot = journal(), file = artifact('report.md', { primary: false });
+  Object.assign(snapshot.fileChanges.files[0].after, { text: 'Journal prefix', textTruncated: true });
+  f.render(snapshot, [file]); f.wb.openOutput(file.artifactId); await f.flush();
+  assert.equal(f.reads.length, 1);
+  assert.equal(f.reads[0].file.artifactId, file.artifactId);
+  f.reads[0].resolve({ ok: true, text: '# Actual file prefix', tooBig: true }); await f.flush();
+  assert.equal(f.textarea.value, '# Actual file prefix');
+  assert.equal(f.textarea.readOnly, true);
+  f.click('data-wb-code-view', { wbCodeView: 'preview' }); await f.flush();
+  assert.match(f.body.innerHTML, /ncw-truncated/);
+  assert.match(f.body.innerHTML, /Actual file prefix/);
+  assert.doesNotMatch(f.body.innerHTML, /Journal prefix/);
+});
+
+test('a delayed Markdown save preserves later edits and leaves another conversation untouched', async () => {
+  const f = fixture(), file = artifact('report.md', { primary: false }), writes = [], notices = [];
+  f.window.soduWorkAPI.conversationSession.writeOutput = (ref, target, text) =>
+    new Promise((resolve, reject) => writes.push({ ref, target, text, resolve, reject }));
+  f.window.petSay = notice => notices.push(notice);
+  f.render(journal(), [file]); f.wb.openOutput(file.artifactId); await f.flush();
+  f.editors.at(-1).edit('First draft'); f.click('data-wb-code-save');
+  f.editors.at(-1).edit('Next draft');
+  f.click('data-wb-code-view', { wbCodeView: 'preview' }); await f.flush();
+  assert.match(f.body.innerHTML, /Next draft/);
+  f.click('data-wb-code-save');
+  assert.equal(writes.length, 1, 'switching modes cannot submit a concurrent save');
+  writes[0].resolve({ ok: true }); await f.flush();
+  assert.equal(f.save.disabled, false, 'a newer draft still needs saving');
+  f.click('data-wb-code-save'); assert.equal(writes[1].text, 'Next draft');
+  f.setRef('other-session'); writes[1].reject(Error('Previous save failed')); await f.flush();
+  assert.deepEqual(notices, ['文件已保存']);
+});
+
 test('journal then published artifact keeps one tab; two turns produce two tabs', () => {
   const f = fixture(), first = journal(); f.render(first, []); const original = f.tabs();
   f.render(first, [artifact()]); assert.deepEqual(f.tabs(), original);

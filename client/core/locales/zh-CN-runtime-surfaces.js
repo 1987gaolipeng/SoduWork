@@ -1,9 +1,18 @@
 (function (global) {
   const messages = {
+    "task.attachment.downloadWarning": "此文件可能包含可执行内容。下载后请先核实来源，勿直接运行。",
+    "还没有可用于对话的模型。": "还没有可用于对话的模型。",
+    "打开模型目录": "打开模型目录",
+    "当前模型不可用，请选择可用模型。": "当前模型不可用，请选择可用模型。",
+    "当前执行底座不可用。": "当前执行底座不可用。",
+    "设置执行底座": "设置执行底座",
+    "暂时无法确认对话配置。": "暂时无法确认对话配置。",
+    "重新检查": "重新检查",
     "hub.input.pages": "请选择一种分页方式：limit/offset 或 page/pageSize",
     "hub.input.inbox": "团队收件箱任务不指定接收人；要交给个人，请使用成员指派",
     "hub.input.tier": "环境层级不受支持",
     "hub.input.host_type": "主机名必须是字符串",
+    "hub.input.release_environment": "当前任务在所选环境中没有可用的部署目标，请检查发布链配置",
     "hub.input.host_required": "请填写主机名，否则无法识别这台执行节点",
     "hub.input.comment_type": "评论正文必须是文本",
     "hub.input.comment_length": "评论正文不能超过 4000 字",

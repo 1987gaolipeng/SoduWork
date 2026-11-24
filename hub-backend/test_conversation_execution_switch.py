@@ -19,7 +19,8 @@ class ExecutionSwitchTests(unittest.IsolatedAsyncioTestCase):
         self.fx.runner.caps.append("executionSelection1")
         self.fx.runner.agents = [{"key": a, "name": a, "auth": "authed"}
                                  for a in ("pi", "opencode", "qwen", "codex")]
-        async def model(_session, _client, name=""):
+        async def model(_session, _client, name="", *, provider_id=""):
+            self.assertEqual(provider_id, "")  # Legacy name-only selections have no provider pin.
             if name == "unavailable":
                 raise ValueError("model unavailable")
             return {"base": "http://127.0.0.1:1/v1", "key": "fixture-only", "model": name or "default-model"}

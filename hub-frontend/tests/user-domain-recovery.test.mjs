@@ -15,18 +15,18 @@ const user = { id: 'legacy-user', username: 'legacy-user', displayName: 'Origina
 const textOf = node => React.Children.toArray(node?.props?.children)
   .map(child => React.isValidElement(child) ? textOf(child) : String(child)).join('')
 
-async function editor(t, { saved = user, domains = async () => [retained], update, onClose } = {}) {
+async function editor(t, { saved = user, domains = async () => [retained], positions = async () => [], update, onClose } = {}) {
   const calls = [], notices = []
   let completed = 0
   const api = {
-    positions: async () => [], domains,
+    positions, domains,
     updateUser: async (id, body) => {
       calls.push({ id, body: structuredClone(body) })
       return update?.(id, body)
     },
     createUser: async body => calls.push({ body: structuredClone(body) }),
   }
-  const props = { user: saved, orgs: [{ id: 'team', name: 'Synthetic team' }],
+  const props = { user: saved, orgs: [{ id: 'team', name: 'Synthetic team' }, { id: 'other', name: 'Other team' }],
     roles: [{ id: 'member', name: 'Synthetic member' }],
     onClose: onClose || (() => {}), onDone: () => completed++ }
   const page = await createComponentHarness(source, {
@@ -77,6 +77,33 @@ test('a user saved before domain deletion can explicitly remove the obsolete ref
   assert.deepEqual(f.calls[1].body.domains, [retained.id])
   assert.equal(f.calls[1].body.displayName, user.displayName)
   assert.equal(f.calls[1].body.roleId, user.roleId)
+})
+
+test('historical profession assignments survive unrelated edits and can be explicitly removed', async t => {
+  const f = await editor(t, { saved: { ...user, positions: ['archived'] } })
+  await f.save()
+  assert.equal('positions' in f.calls[0].body, false)
+  const unavailable = selectedButton(f.page, tx('已分配但不可选：{0}', ['archived']))
+  f.page.act(() => unavailable.props.onClick())
+  await f.save()
+  assert.deepEqual(f.calls[1].body.positions, [])
+})
+
+test('department changes discard stale catalog responses and incompatible assignments', async t => {
+  const pending = new Map()
+  const f = await editor(t, { saved: { ...user, positions: ['former'] },
+    positions: id => new Promise(resolve => pending.set(id, resolve)) })
+  const org = f.page.nodes(node => node.type === 'SelectMenu' && node.props.id?.endsWith('-org'))[0]
+  f.page.act(() => org.props.onChange({ target: { value: 'other' } }))
+  pending.get('other')([{ id: 'new', name: 'New team only' }])
+  await f.page.flush()
+  pending.get('team')([{ id: 'former', name: 'Previous team only' }])
+  await f.page.flush()
+  assert.equal(f.page.nodes(node => node.type === 'button' && textOf(node) === 'Previous team only').length, 0)
+  const choice = f.page.nodes(node => node.type === 'button' && textOf(node) === 'New team only')[0]
+  f.page.act(() => choice.props.onClick())
+  await f.save()
+  assert.deepEqual(f.calls[0].body.positions, ['new'])
 })
 
 test('missing-domain guidance and controls translate in all shipped locales while preserving the saved identifier', async t => {

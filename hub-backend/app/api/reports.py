@@ -128,7 +128,8 @@ async def generate_reports(
     await audit.log(session, user, "report.generate", "team_report", focus or None,
                     info["label"], {"period": info["type"], "made": made,
                                     "skipped": skipped, "teams": len(teams), "via": "client"})
-    return {"ok": True, "made": made, "skipped": skipped, "teamReports": len(teams)}
+    return {"ok": True, "made": made, "skipped": skipped, "teamReports": len(teams),
+            "details": [team_reports.to_api(report) for report in teams]}
 
 
 @router.post("/team/{report_id}/confirm")

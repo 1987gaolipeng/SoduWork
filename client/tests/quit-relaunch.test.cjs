@@ -41,8 +41,8 @@ test('main.js marks user quits and checks them before reopening a window', () =>
   assert.match(quit.slice(0, quit.indexOf('\n}')), /_quitRelaunch\.markQuitting\(\)/);
   const handler = source.slice(source.indexOf("app.on('second-instance'"));
   const body = handler.slice(0, handler.indexOf('openDeskWindow'));
-  assert.ok(body.indexOf('_quitRelaunch.deferLaunch(files)') >= 0, 'second-instance must defer during quit');
-  assert.ok(body.indexOf('_quitRelaunch.deferLaunch(files)') < body.indexOf('_fileOpen.enqueue'),
+  assert.ok(body.indexOf('_quitRelaunch.deferLaunch(files, setupLink)') >= 0, 'second-instance must defer during quit');
+  assert.ok(body.indexOf('_quitRelaunch.deferLaunch(files, setupLink)') < body.indexOf('_fileOpen.enqueue'),
     'files from a launch during quit must not be queued into the exiting process');
 });
 
@@ -50,6 +50,16 @@ test('confirmed quit without another launch never schedules a restart', () => {
   const app = fakeApp(), state = quitRelaunch.create(app);
   state.markQuitting(); app.emit('will-quit');
   assert.deepEqual(app.relaunches, []);
+});
+
+test('a link received during shutdown replaces the original launch destination', () => {
+  const app = fakeApp();
+  const state = quitRelaunch.create(app, { argv: ['app', 'soduwork://first-chat/runtime'] });
+  state.markQuitting();
+  state.deferLaunch([], 'soduwork://first-chat/model');
+  app.emit('will-quit');
+  const links = app.relaunches[0].args.filter(arg => arg.startsWith('soduwork://'));
+  assert.deepEqual(links, ['soduwork://first-chat/model']);
 });
 
 test('multiple launches retain distinct files once and preserve source/profile arguments', () => {
@@ -94,6 +104,7 @@ test('real second-instance handler passes trusted file requests into the deferre
   const state = quitRelaunch.create(app);
   let queued = 0, opened = 0;
   vm.runInNewContext(handler, { app, _quitRelaunch: state, _fileOpenModule: fileOpen,
+    _firstChatLinks: require('../main/first-chat-links.cjs'),
     _linuxStartup: { focusRecovery: () => false }, _fileOpen: { enqueue: files => { queued += files.length; return files.length; } },
     openDeskWindow: () => opened++, console });
   const file = path.resolve('new.txt');

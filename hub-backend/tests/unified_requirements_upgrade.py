@@ -15,6 +15,7 @@ def check():
     sys.path.insert(0, str(BACKEND))
     from alembic import command
     from alembic.config import Config
+    from alembic.script import ScriptDirectory
     import sqlalchemy as sa
     from sqlalchemy.ext.asyncio import create_async_engine
     from sqlalchemy.engine import make_url
@@ -26,6 +27,7 @@ def check():
         assert "soduwork-requirement-upgrade-" in parsed.database
     config = Config(str(BACKEND / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND / "migrations"))
+    expected_head = ScriptDirectory.from_config(config).get_current_head()
     command.upgrade(config, "0052_org_memory_singleton")
 
     async def seed():
@@ -86,7 +88,7 @@ def check():
                     assert {row["source_id"] for row in grants} == {"old-requirement", "new-task"}
                     assert all(row["principal_kind"] == "client" and row["principal_id"] == "upgrade-owner" for row in grants)
                     assert len(connection.execute(sa.select(task.c.id).where(sa.func.json_array_length(task.c.legacy_requirements) > 0)).all()) == 2
-                    assert connection.scalar(sa.text("SELECT version_num FROM alembic_version")) == "0053_unified_requirements"
+                    assert connection.scalar(sa.text("SELECT version_num FROM alembic_version")) == expected_head
                 await conn.run_sync(inspect)
         finally:
             await engine.dispose()

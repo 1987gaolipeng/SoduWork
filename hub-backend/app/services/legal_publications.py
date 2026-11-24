@@ -140,6 +140,7 @@ async def active_versions(session):
 
 
 async def admin_state(session, kind):
+    from .account_legal import LOCALES
     kind_check(kind)
     row = await session.get(LegalDraft, kind)
     versions = (await session.scalars(select(LegalVersion).where(LegalVersion.kind == kind)
@@ -149,6 +150,7 @@ async def admin_state(session, kind):
             "draft": {**row.payload, "version": ""} if row else normalize(kind, {}),
             "updatedAt": aware(row.updated_at).isoformat() if row else None,
             "currentId": current.id if current else None,
+            "currentLocales": list(current.payload["translations"]) if current else list(LOCALES),
             "history": [version_info(item) for item in versions]}
 
 

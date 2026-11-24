@@ -1065,16 +1065,27 @@ function createPiSessionBridge(options) {
       const wanted = String(id || '');
       if (!wanted) return null;
       const switched = runtimeSegments.read(app || opts.app, wanted);
-      const normalize = row => options.nativeOnly ? { ...row, cloud: false, remoteProjection: false } : normalizeHistoryRow(row);
-      if (switched) return normalize(runtimeSegments.row(switched));
+      const normalize = row => {
+        if (switched) row = { ...row, id: wanted, runtimeConversationId: wanted };
+        return options.nativeOnly ? { ...row, cloud: false, remoteProjection: false } : normalizeHistoryRow(row);
+      };
+      if (runtimeSegments.hasHistory(switched)) return normalize(runtimeSegments.row(switched));
+      // Native storage can already contain a first turn when the manifest still describes a draft.
+      const nativeId = switched?.active.sessionId || wanted;
       // The sidebar is capped at 50 items; opening by identity is not.
       let unreadable = null;
-      if (typeof sessionModule.historyEntry === 'function') {
-        const found = await sessionModule.historyEntry(app || opts.app, wanted, { strict: options.strict === true });
-        if (found && found.ok && found.entry) return normalize({ ...found.entry, adapterId: 'pi' });
+      if ((!switched || switched.active.adapterId === 'pi') && typeof sessionModule.historyEntry === 'function') {
+        const found = await sessionModule.historyEntry(app || opts.app, nativeId, { strict: options.strict === true });
+        if (found?.ok && found.entry) {
+          if (switched && found.entry.id !== nativeId)
+            throw new RuntimeContractError('HISTORY_ID_MISMATCH', '会话记录不匹配，请重新打开');
+          if (!switched || found.entry.count || found.entry.taskId || found.entry.workOwner)
+            return normalize({ ...found.entry, adapterId: 'pi' });
+        }
         if (found && found.ok === false && !found.notFound) unreadable = found;
       }
-      const runner = await findRunnerRow(wanted, options);
+      const runner = switched?.active.adapterId === 'pi' ? null
+        : await findRunnerRow(nativeId, switched ? { ...options, nativeOnly: true } : options);
       if (runner) return normalize(runner);
       if (unreadable) throw new RuntimeContractError('HISTORY_UNAVAILABLE',
         String(unreadable.reason || '暂时无法读取会话存档'));

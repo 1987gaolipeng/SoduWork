@@ -124,7 +124,8 @@ async def save(session: AsyncSession, body: dict, row: am.ApprovalPolicy | None 
         am.ApprovalPolicy.key == key, am.ApprovalPolicy.org_id == org_id,
         am.ApprovalPolicy.id != (row.id if row else "__new__")))
     if duplicate:
-        raise ValueError("策略标识已经存在")
+        from .catalog_names import DuplicateName
+        raise DuplicateName("策略标识已经存在")
     name = _text(body.get("name"), 100)
     if not creating and "name" in body and (not isinstance(body["name"], str) or not name):
         raise InvalidPolicyInput("审批职责名称必须是非空文本")

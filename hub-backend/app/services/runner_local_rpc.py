@@ -93,6 +93,7 @@ def rejected(code, message):
 
 @dataclass
 class NetworkRequest(Request):
+    operation: str = ""
     previous: tuple = ()
     completion: object = None
     finished: bool = False
@@ -119,7 +120,7 @@ class WorkerLanes:
         previous = ([self.tails.get(key), self.tails.get(("control", key))]
                     if lane == "work" else [self.tails.get(("control", key))]
                     if lane == "control" else [])
-        request = NetworkRequest(self, lane, key, previous=tuple(task for task in previous if task),
+        request = NetworkRequest(self, lane, key, operation=op, previous=tuple(task for task in previous if task),
                                  completion=asyncio.get_running_loop().create_future())
         if op == "job.stop":
             for other in self.pending.values():

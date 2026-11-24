@@ -66,7 +66,22 @@ async def main():
             row['versionId'] == vid for row in governance.json()['queues']['review']))
         denied = await client.post('/api/v1/admin/plugins/versions/' + vid + '/trust', headers=employee, json={'enabled': True})
         check('device user cannot bypass admin review', denied.status_code in (401, 403))
-        accepted = await client.post('/api/v1/admin/plugins/versions/' + vid + '/trust', headers=reviewer, json={'enabled': True})
+        trust_url = '/api/v1/admin/plugins/versions/' + vid + '/trust'
+        for invalid in ({}, {'trusted': 'yes'}, {'trusted': 1}, {'trusted': []},
+                        {'trusted': True, 'reason': 123}, {'trusted': False, 'reason': []},
+                        {'trusted': True, 'reason': {}}, {'enabled': 'false'},
+                        {'enabled': False, 'note': {}}, {'enabled': True, 'confirmWithoutEvaluation': 'false'},
+                        {'trusted': True, 'enabled': False}, {'trusted': True, 'reason': 'one', 'note': 'two'}):
+            response = await client.post(trust_url, headers=reviewer, json=invalid)
+            check(f'invalid trust body returns 422: {invalid}', response.status_code == 422)
+        async with SessionLocal() as session:
+            pending = await session.get(am.PluginVersion, vid)
+            check('invalid trust bodies preserve quarantine', pending.trust_state == 'quarantined' and not pending.enabled)
+            review = await session.scalar(select(models.AuditLog.id).where(
+                models.AuditLog.target_id == vid,
+                models.AuditLog.action.in_(['plugin.approve', 'plugin.reject', 'plugin.revoke'])))
+            check('invalid trust bodies do not record a decision', review is None)
+        accepted = await client.post(trust_url, headers=reviewer, json={'trusted': True, 'reason': None})
         check('enterprise app uses existing lightweight admin approval', accepted.status_code == 200 and accepted.json()['trustState'] == 'approved')
         published = next(row for row in (await catalog())['items'] if row['pluginId'] == pid)
         check('approved app reaches catalog with its app identity and page', published.get('template') == 'app' and bool(published.get('ui')))
@@ -96,7 +111,7 @@ async def main():
         check('new app version returns to quarantine', response.status_code == 200 and response.json()['plugin']['latestVersion']['trustState'] == 'quarantined')
         new_vid = response.json()['plugin']['latestVersion']['id']
         rejected = await client.post('/api/v1/admin/plugins/versions/' + new_vid + '/trust', headers=reviewer,
-                                     json={'enabled': False, 'note': 'Clarify app permissions'})
+                                     json={'trusted': False, 'reason': 'Clarify app permissions'})
         check('app rejection uses the same review endpoint', rejected.status_code == 200 and rejected.json()['trustState'] == 'revoked')
         # SQLite timestamps have second precision; submission feedback must use
         # the same deterministic ordering as management and governance views.

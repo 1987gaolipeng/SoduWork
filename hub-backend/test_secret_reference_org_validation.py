@@ -152,7 +152,7 @@ class SecretReferenceOrgValidationTests(unittest.IsolatedAsyncioTestCase):
     async def test_unrelated_validation_retains_existing_error_status(self):
         for fields in ({"provider": "unsupported"}, {"locator": "invalid-name"}):
             response = await self.request("POST", json=self.body(orgId="own-org", **fields))
-            self.assertEqual(response.status_code, 409, response.text)
+            self.assertEqual(response.status_code, 422, response.text)
         await self.assert_counts(0, 0)
 
 
