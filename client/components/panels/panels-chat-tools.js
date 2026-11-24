@@ -525,11 +525,12 @@
     // the normal send/stop state instead of exposing a third retry action.
     const showStop = Boolean(canStop || stopping);
     const transient = Boolean(sending || stopping);
+    const modelBlocked = !showStop && root.dataset?.modelCatalogBlocked === 'true';
     const title = stopping ? '\u505c\u6b62\u4e2d\u2026' : sending ? '\u53d1\u9001\u4e2d\u2026' :
-      showStop ? '\u505c\u6b62\u751f\u6210' : '\u53d1\u9001';
+      showStop ? '\u505c\u6b62\u751f\u6210' : modelBlocked ? root.dataset.modelCatalogReason : '\u53d1\u9001';
     send.classList.toggle('stop', showStop && !transient);
     send.classList.toggle('stop-pending', transient);
-    send.disabled = transient;
+    send.disabled = transient || modelBlocked;
     send.setAttribute('aria-busy', String(transient));
     send.title = title;
     send.setAttribute('aria-label', title);

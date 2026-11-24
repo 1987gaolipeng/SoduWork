@@ -428,6 +428,11 @@ function _bind(el) {
         cloudHandoff: ctx._snap?.cloudHandoff, busy: ctx._runtimeBusy(), runtimeSwitching: ctx._snap?.runtimeSwitching,
         recoveryRequired: ctx._snap?.execution?.recoveryRequired, recoveryReason: ctx._snap?.statusText, ...draftControls.state() }),
       say: message => { if (typeof petSay === 'function') petSay(message); },
+      catalogChanged: state => {
+        el.dataset.modelCatalogBlocked = String(state.blocked);
+        el.dataset.modelCatalogReason = state.reason || '';
+        ChatTools.paintSendButton(el, ctx._runtimeBusy(), ctx._messageAttachments, ctx._stopState, _canStop(), ctx._sendState);
+      },
       accessChanged: result => {
         const value = result.snapshot || result;
         if (ctx._snap) ctx._snap = { ...ctx._snap, accessPolicy: value.accessPolicy, nextAccessPolicy: value.nextAccessPolicy || null,
