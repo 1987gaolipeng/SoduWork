@@ -458,6 +458,13 @@ async function _sendCore(textOverride, sendOptions) {
     if (ctx._snap?.openBlocked) return false;
     const el = ctx._mount();
     if (!el) return false;
+    // Keyboard and shortcut submissions follow the same catalog gate as the button.
+    // Programmatic tasks still use the authoritative preflight below.
+    const catalog = ctx._composerControls?.modelCatalogState?.();
+    if (textOverride == null && catalog?.blocked) {
+      global.petSay?.(catalog.reason);
+      return false;
+    }
     const accessEpoch = ctx._viewEpoch, sendScopeEpoch = ctx._draftScopeEpoch, sendOwnerScope = ctx._draftOwnerScope();
     const previousPreflight = ctx._sendPreflight;
     const composerPreflight = textOverride == null ? { view: accessEpoch, scope: sendScopeEpoch, owner: sendOwnerScope } : null;

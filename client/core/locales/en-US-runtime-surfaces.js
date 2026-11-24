@@ -1,5 +1,14 @@
 (function (global) {
   const messages = {
+    "正在重试读取模型列表…": "Retrying the model list…",
+    "模型列表暂时无法读取，请检查连接或模型配置后重试；输入已保留。": "The model list is unavailable. Check the connection or model settings and retry. Your draft has been kept.",
+    "读取模型列表超时，请检查连接后重试；输入已保留。": "Loading the model list timed out. Check the connection and retry. Your draft has been kept.",
+    "模型切换尚未确认，请稍候重试；当前请求仍在确认中，输入已保留。": "The model switch is still awaiting confirmation. Wait a moment and retry. Your draft has been kept.",
+    "模型切换未能确认，请重新选择模型后重试；输入已保留。": "The model switch could not be confirmed. Select a model again and retry. Your draft has been kept.",
+    "暂无可用模型，请检查模型配置后重试；输入已保留。": "No models are available. Check the model settings and retry. Your draft has been kept.",
+    "执行选项尚未确认，请稍候重试；输入已保留。": "Execution options have not been confirmed. Wait a moment and retry. Your draft has been kept.",
+    "暂无可用模型，请检查模型配置": "No models are available. Check the model settings",
+    "云端 Agent 暂未提供模型列表。": "The cloud Agent has not provided a model list yet.",
     "task.attachment.downloadWarning": "This file may contain executable content. Verify its source before opening or running the download.",
     "文件读取记录": "File read history",
     "按路径筛选": "Filter by path",

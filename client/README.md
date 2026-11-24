@@ -8,6 +8,8 @@ The desktop uses Electron and native HTML/CSS/JavaScript. The React management U
 
 Before your first message, the composer checks the selected runtime and chat model. Use the action beside a missing setting, then return to your draft. The Hub overview can open runtime and model settings in the installed desktop app. While the composer is open, it reports whether those selections are ready for the signed-in account.
 
+The chat model picker retries a timed-out catalog read once and shows a reload action if loading fails or no models are available. A send timeout preserves your input; a later catalog response can update the picker but never sends the message automatically. Reload the list, select an available model, and send again.
+
 ## Build a different default Hub
 
 Normal builds still default to `https://service.soduwork.ai`. To build for another
