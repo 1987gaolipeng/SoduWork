@@ -203,7 +203,7 @@ _personalPlugins.install({ app, ipcMain, dialog: require('electron').dialog, saf
 _runnerRuntime.setMobileCapabilities(require('./main/mobile-capabilities.cjs').create({
   app, identityOf: _deviceAuth.authenticatedIdentity, conversation: _ordinaryConversations }));
 const _platformConnections = require('./main/platform-connections/index.cjs').install({ app, ipcMain, identityOf: _sessionIdentity, safeStorage, shell });
-require('./main/automation-conversations').install({ app, ipcMain, identityOf: _sessionIdentity, conversation: _ordinaryConversations, platformConnections: _platformConnections });
+require('./main/automation-conversations').install({ app, ipcMain, identityOf: _sessionIdentity, conversation: _ordinaryConversations, platformConnections: _platformConnections, safeStorage: _modelSafeStorage });
 
 // Allow notification audio triggered by WebSocket events without a user gesture.
 // Set autoplay policy before app readiness so Web Audio can resume for application notifications.

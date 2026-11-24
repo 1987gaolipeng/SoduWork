@@ -13,9 +13,10 @@ function _humanErr(e, fallback) {
   if (/\b404\b|not.?found/i.test(m)) return fallback || '没找到，可能已被改动';
   if (/\b413\b|too large/i.test(m)) return '文件太大了';
   if (detail) return detail.slice(0, 240);
-  const message = e && typeof e.message === 'string' ? e.message.trim() : '';
+  const rawMessage = e && typeof e.message === 'string' ? e.message.trim() : '';
+  const message = rawMessage.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/i, '').trim();
   if (message && !/^HTTP\s+\d+$/i.test(message) &&
-      ((e && e.status) || /系统安全存储不可用|本地模型配置/.test(message))) {
+      ((e && e.status) || /系统安全存储不可用|本地模型配置|本地 Agent 默认模型存储|自动化本地模型选择|能力检测记录/.test(message))) {
     return message.slice(0, 240);
   }
   return fallback || '操作没成功，稍后再试';
