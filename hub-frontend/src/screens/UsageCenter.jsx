@@ -241,6 +241,8 @@ function RecentLedger({ rows, detailPage, onPage }) {
         <thead><tr><th>{tx("工作内容 / 场景")}</th><th>{tx("成员")}</th><th>{tx("Agent / 模型")}</th><th className="num">{tx("Token 用量")}</th><th className="num">{tx("已知成本")}</th><th className="num">{tx("时间")}</th></tr></thead>
         <tbody>{visible.map((row) => <tr key={row.id}>
           <td><b className="ugc-record-title" title={row.title}>{row.title || tx("AI 使用")}</b><small>{sceneLabel(row.sourceType, row.sourceLabel)}</small>
+            {row.sourceVerification === "unverified" && <small>{tx("会话来源未核验")}</small>}
+            {row.sourceVerification === "verified" && <small>{tx("会话来源已核验")}</small>}
             {detailPage && <div className="ugc-record-ids"><span>{tx("记录 ID：{0}", [row.id])}</span><span>{tx("事件 ID：{0}", [row.eventId])}</span>
               {row.sourceId && <span>{tx("来源 ID：{0}", [row.sourceId])}</span>}</div>}</td>
           <td><span className="ugc-record-user" title={row.user}>{row.user || tx("未绑定用户")}</span></td>

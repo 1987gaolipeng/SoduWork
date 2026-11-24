@@ -217,6 +217,7 @@ RELEASE_SMOKES = tuple(sorted((
     "smoke/smoke_identity.py",
     "smoke/smoke_inactive_team_members.py",
     "test_inbox_count.py",
+    "test_inbox_claim_permission.py",
     "test_team_task_input_validation.py",
     "test_database_telemetry.py",
     "smoke/smoke_live_view_cache.py",
