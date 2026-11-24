@@ -1,6 +1,7 @@
 """Competing model editors must never silently overwrite each other."""
 import asyncio
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
@@ -17,12 +18,12 @@ class ModelConfigTests(IsolatedDatabase):
         async with self.sessions() as session:
             original = await admin.get_llm_config(session)
             await admin.put_llm_config({"expectedRevision": original["revision"],
-                "baseUrl": "https://fresh.invalid/v1", "model": "fresh", "apiKey": "new-key"}, None, session)
+                "baseUrl": "https://fresh.invalid/v1", "model": "fresh", "apiKey": "new-key"}, self.editor, session)
         async with self.sessions() as session:
             with patch.object(llm, "_cache", {"llm_model": "old-worker-value"}):
                 self.assertEqual((await llm.load(session))["llm_model"], "fresh")
             with self.assertRaises(HTTPException) as error:
-                await admin.put_llm_config({"expectedRevision": original["revision"], "model": "stale"}, None, session)
+                await admin.put_llm_config({"expectedRevision": original["revision"], "model": "stale"}, self.editor, session)
             self.assertEqual(error.exception.status_code, 409)
 
     async def asyncSetUp(self):
@@ -37,6 +38,8 @@ class ModelConfigTests(IsolatedDatabase):
                 ModelDef(id="provider:model", provider_id="provider", name="model"),
             ])
         self.audit = patch.object(admin.audit, "log", new=AsyncMock())
+        # LLM config is platform-level (#1026): only superusers may edit it.
+        self.editor = SimpleNamespace(is_super=True, id="fixture")
         self.audit.start()
         self.addCleanup(self.audit.stop)
 
