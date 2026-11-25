@@ -53,6 +53,18 @@ test('the native discovery source, completed empty list and temporary failure re
   assert.equal((await catalogFor({ source: 'codex-account-cache', catalogAvailable: true, retryable: true })).retryable, true);
 });
 
+test('only an explicit bound Runner proof enables the native default without a model catalog', async () => {
+  const answer = data => catalog.list('codex', {
+    async rpc() { return { ok: true, data: { ok: true, models: [], catalogAvailable: false, ...data } }; },
+  }, 'bound-session');
+  assert.equal((await answer({ nativeDefaultAvailable: true })).nativeDefaultAvailable, true);
+  for (const data of [{}, { nativeDefaultAvailable: 'true' }, { nativeDefaultAvailable: true, catalogAvailable: true },
+    { nativeDefaultAvailable: true, models: [{ id: 'hidden', hidden: true }] },
+    { nativeDefaultAvailable: true, upgradeState: 'updating' }]) {
+    assert.notEqual((await answer(data)).nativeDefaultAvailable, true);
+  }
+});
+
 test('native options and picker retain viewport placement and reasoning controls', () => {
 
   const spec = sessionSpec.build({

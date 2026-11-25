@@ -52,7 +52,17 @@ async function downloadFile(url, target, { environment = process.env, timeoutMs 
   // It never allows a caller to disable peer or hostname verification.
   if (Object.keys(tls).some(key => key !== 'ca')) throw new DownloadError('Only a trusted CA may configure download TLS');
   const { EnvHttpProxyAgent, Client, request } = require('undici');
-  const certificate = tls.ca ? { ca: tls.ca } : {};
+  const certificate = {
+    ...(tls.ca ? { ca: tls.ca } : {}),
+    checkServerIdentity(host, cert) {
+      const tlsCheck = require('node:tls').checkServerIdentity;
+      if (isIP(host) !== 6) return tlsCheck(host, cert);
+      // Node releases that apply IDNA to an IPv6 literal lose the comparison
+      // name. OpenSSL checks the binary IP SAN directly, independently of SNI.
+      if (new (require('node:crypto').X509Certificate)(cert.raw).checkIP(host)) return undefined;
+      return Object.assign(Error('Certificate does not match the destination IPv6 address'), { code: 'ERR_TLS_CERT_ALTNAME_INVALID' });
+    },
+  };
   const dispatcher = new EnvHttpProxyAgent({ ...proxyOptions(environment),
     connect: certificate, requestTls: certificate, proxyTls: certificate,
     clientFactory: (origin, options) => new Client(origin, { ...options,

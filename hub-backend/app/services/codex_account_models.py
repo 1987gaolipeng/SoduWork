@@ -56,16 +56,20 @@ def list_models(data_root: str, ref: str = "", *, ensure_compatible: bool = Fals
                     return {**result, "cliVersion": _last_upgrade.version, "upgradeState": "updating"}
         executable = agent_setup._bin_of("codex")
         try:
-            rows, source = codex_model_catalog.discover(executable, home)
+            rows, source = codex_model_catalog.discover(executable, home, check_default=True)
         except codex_model_catalog.UpgradeRequired as exc:
             if (codex_account_home.model_catalog_home(root, ref) == home
                     and agent_setup._bin_of("codex") == executable):
                 result.update(_upgrade_status(root, executable, str(exc), ensure_compatible))
             return result
-        if (rows is None or codex_account_home.model_catalog_home(root, ref) != home
+        if (codex_account_home.model_catalog_home(root, ref) != home
                 or agent_setup._bin_of("codex") != executable):
             return result
     except (OSError, ValueError, RuntimeError):
+        return result
+    if rows is None:
+        if source == "codex-native-default":
+            result["nativeDefaultAvailable"] = True
         return result
     result.update(source=source, catalogAvailable=True, retryable=source != "codex-native")
     seen = set()

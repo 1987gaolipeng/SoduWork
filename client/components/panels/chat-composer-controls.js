@@ -11,7 +11,7 @@
     const thinkingDot = wrap.querySelector('.nmodel-thinking-dot');
     let drag = null, generation = 0, rows = [], selecting = false, thinkingBusy = false, lastAdapter = '', lastIdentity = '';
     let nativeModels = [], nativeView = 'effort', effortEpoch = 0, pendingEffort = null, effortPreview = null, effortRequest = null, modelRequest = null;
-    let nativeReason = '', nativeRetryable = false;
+    let nativeReason = '', nativeRetryable = false, nativeDefaultAvailable = false;
     const effortView = () => global.ComposeModelPicker?.nativeEffort;
     const nativeMode = state => state.adapterId === 'codex' && !state.cloudHandoff && Boolean(effortView());
     let catalogScope = '', lastScope = '', catalogLoads = 0, catalogFlight = null, catalogVersion = 0;
@@ -134,7 +134,7 @@
       const scope = modelScope();
       if (lastScope !== scope && historyReadScope) { historyReadScope = ''; supersedeCatalog(); }
       if (lastScope !== scope || lastIdentity !== identity || lastAdapter !== state.adapterId || state.runtimeSwitching) {
-        close(false); rows = []; nativeModels = []; nativeReason = ''; nativeRetryable = false; nativeView = 'effort'; effortEpoch++; pendingEffort = null; effortPreview = null; effortRequest = null; modelRequest = null; selecting = false;
+        close(false); rows = []; nativeModels = []; nativeReason = ''; nativeRetryable = false; nativeDefaultAvailable = false; nativeView = 'effort'; effortEpoch++; pendingEffort = null; effortPreview = null; effortRequest = null; modelRequest = null; selecting = false;
         pop.removeAttribute('aria-busy');
       }
       lastScope = scope;
@@ -143,7 +143,7 @@
       const selectedName = selection.name || selection.model?.id || state.model?.id || '';
       const updated = catalogScope === modelScope() && rows.find(row => row.name === selectedName || row.historyAlias === selectedName);
       const selectedModel = selection.model || (!selection.name || selection.name === state.model?.id ? state.model : null);
-      let label = nativeMode(state) && !selectedName && !state.restoringHistory ? '选择模型' :
+      let label = nativeMode(state) && !selectedName && !state.restoringHistory ? (nativeDefaultAvailable ? 'Codex 默认' : '选择模型') :
         (selectedModel?.unavailable ? selectedModel.label : updated?.label) || selectedModel?.label ||
         selectedName || (state.restoringHistory ? '正在加载…' : '选择模型');
       if (savedChoice(state) && selectedModel?.unavailable && !localChoice(state))
@@ -188,7 +188,7 @@
         list();
       } else {
         const selected = nativeSelection(state), model = nativeModels.find(row => row.id === selected.modelName);
-        pop.innerHTML = (nativeReason ? '<p class="cp-native-note is-warning" role="status">' + esc(nativeReason) + '</p>' : '') + effortView().html(selected, model);
+        pop.innerHTML = (nativeReason ? '<p class="cp-native-note is-warning" role="status">' + esc(nativeReason) + '</p>' : '') + effortView().html(selected, model, nativeDefaultAvailable && !selected.modelName);
         paintNativeEffort(state);
       }
       positionModels();
@@ -296,7 +296,8 @@
         if (native) {
           const localCodex = adapter === 'codex' && !current.cloudHandoff;
           const failed = response?.ok === false || !Array.isArray(response?.models);
-          nativeModels = failed ? [] : response.models;
+          nativeModels = failed || localCodex && response.catalogAvailable === false ? [] : response.models;
+          nativeDefaultAvailable = localCodex && global.SoduWorkModelChoice?.codexDefaultAvailable?.(response) === true;
           nativeRetryable = localCodex && (failed || response.catalogAvailable === false || response.retryable === true);
           nativeReason = localCodex && !nativeModels.length ? response?.reason || (nativeRetryable
             ? '本机 Codex 模型目录暂时无法读取，请刷新重试。' : '该 Agent 暂未提供可切换的模型。') : '';
@@ -406,7 +407,7 @@
         if (!lifecycle.signal.aborted && scope === modelScope() && flight.version === catalogVersion &&
             flight.stage === 'read' && nativeMode(options.state())) {
           nativeReason = '本机 Codex 模型目录暂时无法读取，请刷新重试。';
-          nativeRetryable = true;
+          nativeRetryable = true; nativeDefaultAvailable = false;
           nativeModels = []; rows = []; catalogScope = scope;
           render();
           if (!pop.hidden) renderNativeEffort();
@@ -618,7 +619,14 @@
         if (failed) throw failed;
         return false;
       }
-      if (options.state().adapterId === 'codex' && (options.state().cloudHandoff || nativeSelection(options.state()).modelName)) return true;
+      const state = options.state();
+      if (state.adapterId === 'codex') {
+        if (state.cloudHandoff) return true;
+        const selected = nativeSelection(state).modelName;
+        const model = state.selection?.model || (state.model?.id === selected ? state.model : null);
+        if (model?.unavailable) throw modelError('MODEL_UNAVAILABLE', '原模型已不可用，请重新选择');
+        if (selected) return true;
+      }
       // A confirmed Agent switch may change the adapter while preserving the conversation.
       const scope = modelScope();
       // Recheck at send time and share an in-flight read. A model-change push
@@ -635,7 +643,7 @@
         }
         if (flight.error) throw flight.error;
         if (result && !flight.invalidated) {
-          if (nativeMode(options.state()) && !nativeSelection(options.state()).modelName)
+          if (nativeMode(options.state()) && !nativeSelection(options.state()).modelName && !nativeDefaultAvailable)
             throw modelError('MODEL_UNAVAILABLE', nativeReason || '请选择可用的 Codex 模型后再发送。');
           return true;
         }

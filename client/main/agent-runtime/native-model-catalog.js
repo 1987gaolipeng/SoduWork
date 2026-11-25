@@ -25,6 +25,8 @@ async function list(adapterId, runtime, ref, ensureCompatible = false) {
         'update-failed': 'Codex CLI 更新后仍无法读取模型目录，请到 Agent 管理检查并重试。',
       }[upgradeState];
       return { ok: true, adapterId, models, catalogAvailable: available, retryable: reply.data.retryable === true || !available,
+        ...(reply.data.catalogAvailable === false && !upgradeState && !reply.data.models.length && reply.data.nativeDefaultAvailable === true
+          ? { nativeDefaultAvailable: true } : {}),
         ...(upgradeReason ? { upgradeState, cliVersion: reply.data.cliVersion } : {}),
         source: reply.data.source === 'codex-native' ? 'codex-native' : 'codex-account-cache',
         reason: models.length ? '' : upgradeReason || (available ? '该 Agent 暂未提供可切换的模型。' : '本机 Codex 模型目录暂时无法读取，请刷新重试。') };

@@ -504,16 +504,27 @@ async function createRunnerHandle(request, defaults, initialSession) {
       require('../../core/model-choice').imageChoice(modelName)?.name.startsWith('local:'))) {
     throw new RuntimeContractError('RUNNER_MODEL_UNAVAILABLE', '账号型底座不能使用本地模型，请选择账号模型');
   }
-  let nativeModels = [];
+  let nativeModels = [], nativeDefaultAvailable = false, catalogRequest;
   const rejectedModels = new Set();
   async function accountCatalog(ensureCompatible = false) {
-    const catalog = await require('./native-model-catalog').list(adapterId, runtime, runnerRef, ensureCompatible);
-    if (!Array.isArray(catalog.models) || catalog.ok === false) return catalog;
-    nativeModels = catalog.models.filter(row => !rejectedModels.has(row.id));
-    return { ...catalog, models: nativeModels };
+    if (catalogRequest) {
+      if (!ensureCompatible || catalogRequest.ensureCompatible) return catalogRequest.result;
+      await catalogRequest.result;
+      return accountCatalog(true);
+    }
+    const result = require('./native-model-catalog').list(adapterId, runtime, runnerRef, ensureCompatible);
+    const read = Promise.resolve(result).then(catalog => {
+      nativeDefaultAvailable = !rejectedModels.size && catalog.ok === true && catalog.catalogAvailable === false &&
+        catalog.nativeDefaultAvailable === true && !catalog.upgradeState && !catalog.models?.length;
+      if (!Array.isArray(catalog.models) || catalog.ok === false) return { ...catalog, nativeDefaultAvailable: false };
+      nativeModels = catalog.models.filter(row => !rejectedModels.has(row.id));
+      return { ...catalog, models: nativeModels, nativeDefaultAvailable };
+    }).finally(() => { catalogRequest = undefined; });
+    catalogRequest = { result: read, ensureCompatible };
+    return read;
   }
   const previousRejection = initialSession?.ok && initialSession.data?.ok !== false && rejectedAccountModel(adapterId, initialSession.data);
-  if (previousRejection) rejectedModels.add(previousRejection);
+  if (typeof previousRejection === 'string') rejectedModels.add(previousRejection);
   const initialCatalog = adapterId === 'codex' ? await accountCatalog(true) : null;
   if (!modelName && nativeModels.length) modelName = nativeModels[0].id;
   const absentAccountModel = modelName && (rejectedModels.has(modelName) || initialCatalog?.catalogAvailable === true && !nativeModels.some(row => row.id === modelName));
@@ -646,7 +657,9 @@ async function createRunnerHandle(request, defaults, initialSession) {
       if (adapterId !== 'codex') return { ok: false };
       const catalog = await accountCatalog(true);
       const row = name ? catalog.models?.find(model => model.id === name) : catalog.models?.[0];
-      return row ? { ok: true, model: { id: row.id, label: row.label || row.id } } : { ok: false };
+      if (row) return { ok: true, model: { id: row.id, label: row.label || row.id } };
+      if (!name && catalog.nativeDefaultAvailable) return { ok: true, model: { id: '', label: 'Codex 默认' } };
+      return { ok: false };
     },
     persist: name => {
       if (state.disposed) throw Error('会话已关闭');
@@ -1241,7 +1254,8 @@ async function createRunnerHandle(request, defaults, initialSession) {
       } else if (data.error && !stopped) {
         const rejected = rejectedAccountModel(adapterId, data);
         if (rejected !== null) {
-          if (rejected) rejectedModels.add(rejected);
+          rejectedModels.add(rejected);
+          nativeDefaultAvailable = false;
           state.runtimeError = ACCOUNT_MODEL_UNAVAILABLE;
         } else state.runtimeError = _text(redact(require('../access-control/errors').message(data.error)), 1000);
         state.status = 'unreachable';
@@ -1783,9 +1797,25 @@ async function createRunnerHandle(request, defaults, initialSession) {
         conversationPrompt: _conversationPrompt, skillRows: _skillRows, TURN_SKILLS,
         onSkillFailure: value => { skillSelectionFailure = value; },
       });
-      if (state.modelSelection.needsApply(next.options.modelName))
-        return state.modelSelection.applyForTurn(next.options.modelName).then(send);
-      return send();
+      const applyAndSend = () => state.modelSelection.needsApply(next.options.modelName)
+        ? state.modelSelection.applyForTurn(next.options.modelName).then(send) : send();
+      if (adapterId === 'codex' && !next.options.modelName) {
+        // Recheck the bound Runner before consuming a queued native-default turn.
+        return accountCatalog().then(async catalog => {
+          const first = catalog.ok && catalog.catalogAvailable === true && catalog.models[0];
+          if (first) {
+            next.options.modelName = first.id;
+            if (!state.modelSelection.capture() && !state.modelChoicePending) {
+              const selected = await handle.selectModel(first.id);
+              if (!selected.ok) throw Error(selected.reason);
+            }
+          } else if (!catalog.nativeDefaultAvailable) {
+            throw Error(catalog.reason || '请选择可用的 Codex 模型后再发送。');
+          }
+          return applyAndSend();
+        });
+      }
+      return applyAndSend();
     });
     Promise.resolve(completion).then(
       (result) => turnQueue.complete(next, result),
@@ -2062,7 +2092,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
       {
         const taskModelOverride = options?.taskId && !options.controlled && typeof options.modelName === 'string';
         const modelName = taskModelOverride ? options.modelName : state.modelSelection.capture();
-        if (adapterId === 'codex' && !modelName && !options?.controlled) return { accepted: false, result: { ok: false,
+        if (adapterId === 'codex' && !modelName && !nativeDefaultAvailable && !options?.controlled) return { accepted: false, result: { ok: false,
           reason: initialCatalog?.reason || '请选择可用的 Codex 模型后再发送。' } };
         if (rejectedModels.has(modelName)) return { accepted: false, result: { ok: false, reason: ACCOUNT_MODEL_UNAVAILABLE } };
         const item = turnQueue.add({ text: value, attachments, options: { ...options, modelName,

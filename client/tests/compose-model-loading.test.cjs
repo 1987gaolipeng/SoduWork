@@ -707,3 +707,34 @@ test('a cold Codex picker retries on entering the model list and selects the fir
   assert.doesNotMatch(f.nodes.cpModelPop.innerHTML, /data-native-refresh/);
   assert.equal(f.picker.value().modelName, 'discovered-model');
 });
+
+test('a switched Codex draft rechecks its account default and a reopened directory resolves the saved selection', async () => {
+  const f = fixture();
+  f.start(); f.reply(0, 'hub-model'); await f.picker.ready(); f.choose('hub-model');
+  const switched = f.picker.prepareRuntimeSwitch({ id: 'codex', modelMode: 'account' }, () => true);
+  const verified = { ok: true, catalogAvailable: false, models: [], nativeDefaultAvailable: true };
+  f.requests.at(-1).resolve(verified);
+  const selection = await switched;
+  assert.equal(selection.preservesModel, false);
+  f.agent('codex'); selection.apply(); await f.picker.refresh();
+  assert.equal(await f.picker.ready(), true);
+  assert.equal(f.picker.label(), 'Codex 默认');
+
+  for (const status of [{ catalogAvailable: true }, { upgradeState: 'updating' }, { nativeDefaultAvailable: false }]) {
+    const refresh = f.picker.refresh(true);
+    f.requests.at(-1).resolve({ ...verified, ...status }); await refresh;
+    assert.equal(await f.picker.ready(), false);
+    assert.equal(f.picker.value().modelName, '');
+  }
+
+  const reopened = fixture();
+  reopened.agent('codex'); reopened.start(); reopened.reply(0, 'first');
+  await reopened.picker.restoreSelection({ adapterId: 'codex', ...f.picker.value() });
+  assert.equal(reopened.picker.value().modelName, 'first');
+  reopened.choose('first', true);
+  const removed = reopened.picker.refresh(true); reopened.reply(1, 'other'); await removed;
+  const retry = reopened.picker.refresh(true);
+  reopened.requests.at(-1).resolve(verified); await retry;
+  assert.equal(reopened.picker.value().modelName, 'first');
+  assert.equal(await reopened.picker.ready(), false, 'a missing explicit selection cannot turn into a native default');
+});

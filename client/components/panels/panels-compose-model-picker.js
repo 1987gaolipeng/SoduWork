@@ -15,7 +15,7 @@
   let loadPromise = null;
   let loadChanged, signalLoadChange;
   let imageModels = [];
-  let nativeModels = [], nativeCatalogAvailable = false;
+  let nativeModels = [], nativeCatalogAvailable = false, nativeDefaultAvailable = false;
   let nativeReason = '', nativeRetryable = false, updateTimer;
   let activeRuntime = '';
   let activeScope = '';
@@ -140,6 +140,11 @@
     }
   }
 
+  function usingCodexDefault(selected) {
+    return !selected.modelName && (nativeDefaultAvailable ||
+      selected.choice?.source === 'codex' && selected.choice.name === '' && nativeCatalogAvailable && nativeModels.length > 0);
+  }
+
   function currentLabel(row, selected) {
     if (selected.catalogUnavailable) return selected.modelName;
     if (selected.unavailable) return tx(deviceLocal({ name: selected.modelName }) ||
@@ -147,7 +152,7 @@
       ? '原本地模型已删除或不可用，请重新选择' : '原模型已不可用，请重新选择');
     if (row.id === 'codex') {
       const model = modelById(selected.modelName);
-      const modelLabel = model?.label || selected.modelName || tx('选择模型');
+      const modelLabel = model?.label || selected.modelName || tx(usingCodexDefault(selected) ? 'Codex 默认' : '选择模型');
       const effortLabel = selected.reasoningEffort
         ? EFFORT_LABELS[selected.reasoningEffort] || selected.reasoningEffort : '';
       return modelLabel + (effortLabel ? ' · ' + effortLabel : '');
@@ -311,16 +316,16 @@
           '" aria-pressed="' + (item.id === selected.modelName) + '" data-native-model="' + escape(item.id) + '">' + check() +
           '<span class="cp-mtxt"><b>' + escape(item.label) + '</b></span></button>').join('') +
       emptyList() + '</div>' + reason;
-    return reason + effortCard(selected, selectedModel);
+    return reason + effortCard(selected, selectedModel, usingCodexDefault(selected));
   }
 
   // Both composers use the same native account model and effort surface.
-  function effortCard(selected, selectedModel) {
+  function effortCard(selected, selectedModel, nativeDefault = false) {
     const efforts = effortChoices(selectedModel);
     return '<div class="cp-effort-card' + (!efforts.length ? ' is-unavailable' : '') + '">' +
         '<div class="cp-effort-heading"><span aria-hidden="true"></span>' +
           '<button type="button" class="cp-native-model-trigger" data-native-list aria-label="' + escape(tx('选择 Codex 模型')) + '" aria-haspopup="dialog"><b data-effort-label>' + escape(tx(EFFORT_LABELS[selected.reasoningEffort] || '选择模型')) + '</b>' +
-          '<small>' + escape(selectedModel?.label || selected.modelName || tx('选择模型')) + '<span aria-hidden="true"> ›</span></small></button>' +
+          '<small>' + escape(selectedModel?.label || selected.modelName || tx(nativeDefault ? 'Codex 默认' : '选择模型')) + '<span aria-hidden="true"> ›</span></small></button>' +
           '<button type="button" data-effort-reset aria-label="重置推理强度" title="重置推理强度"' + (!efforts.length ? ' disabled' : '') + '><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 7a6.5 6.5 0 1 1-.3 5M4 3v4h4"/></svg></button></div>' +
         '<div class="cp-effort-track"><div class="cp-effort-fill" aria-hidden="true"><div class="cp-effort-sparks">' +
           [8, 22, 39, 55, 72, 88].map((left, index) => '<span style="--spark-x:' + left + '%;--spark-y:' + (index % 2 ? 68 : 30) + '%;--spark-delay:-' + (index * .21) + 's"></span>').join('') +
@@ -497,12 +502,14 @@
         const response = prepared || await bridge?.runtimeModels?.(row.id, undefined, true);
         if (!current()) return;
         if (!response?.ok || !Array.isArray(response.models)) throw Error('模型目录暂时不可用');
-        nativeModels = response.models;
         nativeCatalogAvailable = response.catalogAvailable !== false;
+        nativeModels = nativeCatalogAvailable ? response.models : [];
+        nativeDefaultAvailable = global.SoduWorkModelChoice?.codexDefaultAvailable?.(response) === true;
         const selected = state(row.id);
         const protectedChoice = selected.modelChosen || protectedSelection(selected);
         if (nativeCatalogAvailable) {
-          if (!selected.modelName || (!protectedChoice && !modelById(selected.modelName))) selected.modelName = nativeModels[0]?.id || '';
+          if (!usingCodexDefault(selected) && (!selected.modelName || (!protectedChoice && !modelById(selected.modelName))))
+            selected.modelName = nativeModels[0]?.id || '';
           selected.unavailable = Boolean(protectedChoice && selected.modelName && !modelById(selected.modelName));
           reconcileEffort(selected);
         }
@@ -517,7 +524,7 @@
         }, 2500);
       } catch (error) {
         if (!current()) return;
-        nativeModels = []; nativeCatalogAvailable = false; nativeRetryable = true;
+        nativeModels = []; nativeCatalogAvailable = false; nativeDefaultAvailable = false; nativeRetryable = true;
         nativeReason = '本机 Codex 模型目录暂时无法读取，请刷新重试。';
       }
       render();
@@ -576,7 +583,7 @@
     } else if (target.id === 'codex' && !cloud()) {
       response = await api()?.runtimeModels?.(target.id, undefined, true);
       if (!response?.ok || !Array.isArray(response.models)) return null;
-      candidates = response.models.map(model => ({ source: target.id, name: model.id, label: model.label || model.id }));
+      candidates = (response.catalogAvailable === false ? [] : response.models).map(model => ({ source: target.id, name: model.id, label: model.label || model.id }));
     }
     if (!candidates) {
       candidates = [{ source: 'account', name: '', label: tx('使用底座账号默认模型') }];
@@ -597,8 +604,9 @@
     const { candidates } = catalog;
     let next = candidates.find(candidate => matchesChoice(choice, candidate));
     const preservesModel = Boolean(next);
-    if (!next && target.id === 'codex' && target.modelMode === 'account' && !cloud()) {
-      next = candidates.find(candidate => candidate.name === '');
+    if (!next && target.id === 'codex' && target.modelMode === 'account' && !cloud() &&
+        (candidates.length || global.SoduWorkModelChoice?.codexDefaultAvailable?.(catalog.response))) {
+      next = { source: 'codex', name: '' };
     }
     if (!next) {
       if (!candidates.length) { say(tx(catalog.response?.reason || '目标底座没有可明确选择的可用模型')); return false; }
@@ -798,7 +806,7 @@
       enterpriseModels = [];
       enterpriseDefaultErrors = {}; managedCatalogUnavailable = false; imageModels = []; enterpriseLoaded = false;
       global.clearTimeout?.(updateTimer);
-      nativeModels = []; nativeCatalogAvailable = false; nativeReason = ''; nativeRetryable = false; nativeLoaded = '';
+      nativeModels = []; nativeCatalogAvailable = false; nativeDefaultAvailable = false; nativeReason = ''; nativeRetryable = false; nativeLoaded = '';
       nativeView = 'effort';
       close();
     }
@@ -833,7 +841,9 @@
     } while (pending !== loadPromise);
     if (runtime().modelMode === 'managed' && !enterpriseLoaded) return false;
     const selected = state(runtime().id);
-    return !selected.unavailable && !selected.catalogUnavailable && Boolean(selected.modelName || (cloud() || runtime().id !== 'codex') && !enterpriseDefaultErrors[runtime().id]);
+    if (selected.unavailable || selected.catalogUnavailable) return false;
+    if (runtime().id === 'codex' && !cloud()) return Boolean(selected.modelName || usingCodexDefault(selected));
+    return Boolean(selected.modelName || !enterpriseDefaultErrors[runtime().id]);
   }
 
   function value() {

@@ -174,6 +174,56 @@ class CodexModelCatalogTests(unittest.TestCase):
                     else:
                         self.assertEqual(catalog.discover("codex.exe", home), (None, ""))
 
+    def test_cold_catalog_can_report_native_default_only_for_the_bound_signed_in_cli(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = str(Path(temp).resolve())
+            cli = "codex.exe"
+            signed_in = True
+
+            def native(executable, args, env, *unused, **kwargs):
+                self.assertEqual(executable, cli)
+                self.assertEqual(env["CODEX_HOME"], home)
+                if args == ["--version"]:
+                    return b"codex-cli 1.0.0"
+                if args == ["debug", "models"]:
+                    return b'{"models":[{"slug":"bundled"}]}'
+                self.assertEqual(args, ["login", "status"])
+                self.assertNotIn("OPENAI_API_KEY", env)
+                return b"Logged in using ChatGPT" if signed_in else b"Not logged in"
+
+            with patch.object(codex_account_models.codex_account_home, "model_catalog_home", return_value=home), \
+                    patch.object(agent_setup, "_bin_of", return_value=cli), patch.object(catalog, "_run", side_effect=native):
+                signed = codex_account_models.list_models(home, "chat")
+                self.assertTrue(signed.get("nativeDefaultAvailable"))
+                self.assertFalse(signed["catalogAvailable"])
+                self.assertEqual(signed["models"], [])
+                signed_in = False
+                self.assertFalse(codex_account_models.list_models(home, "chat").get("nativeDefaultAvailable"))
+                signed_in = True
+                with patch.object(codex_account_models.codex_account_home, "model_catalog_home",
+                                  side_effect=[home, "different"]):
+                    self.assertFalse(codex_account_models.list_models(home, "chat").get("nativeDefaultAvailable"))
+
+    def test_cold_native_default_reads_status_from_stderr_without_forwarding_api_credentials(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp).resolve()
+            peer = home / "codex.py"
+            peer.write_text("import os, sys\n"
+                            "assert 'OPENAI_API_KEY' not in os.environ\n"
+                            "if sys.argv[1:] == ['--version']: print('codex-cli 1.0.0')\n"
+                            "elif sys.argv[1:] == ['debug', 'models']: print('{\"models\":[]}')\n"
+                            "elif sys.argv[1:] == ['login', 'status']: print('Logged in using ChatGPT', file=sys.stderr)\n"
+                            "else: sys.exit(2)\n")
+            launch = catalog._run
+
+            def native(executable, args, *rest, **kwargs):
+                return launch(executable, [str(peer), *args], *rest, **kwargs)
+
+            with patch.dict(os.environ, OPENAI_API_KEY="synthetic"), patch.object(catalog, "_run", side_effect=native):
+                self.assertEqual(catalog.discover(sys.executable, str(home), check_default=True),
+                                 (None, "codex-native-default"))
+            self.assertFalse((home / "models_cache.json").exists())
+
     def test_explicit_upgrade_is_shared_by_readers_and_reloads_the_new_catalog(self):
         with patch.object(codex_account_models, "_last_upgrade", None), \
                 patch.object(codex_account_models.codex_account_home, "model_catalog_home", return_value="home"), \

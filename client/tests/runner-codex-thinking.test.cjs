@@ -178,3 +178,43 @@ test('missing catalog evidence preserves a saved model and a verified empty cata
   assert.equal(removed.session.send({ text: 'No models available' }).accepted, false);
   assert.equal(f.requests().length, 0);
 });
+
+test('an authenticated native default is rechecked at dispatch and cannot replay a rejected default', async t => {
+  const f = await fixture(t);
+  await f.session.dispose();
+  let proof = true;
+  t.mock.method(native, 'list', () => ({ ok: true, catalogAvailable: false, nativeDefaultAvailable: proof, models: [] }));
+  const { session } = await f.open(false, { modelName: '' });
+  assert.equal(session.snapshot().modelSelection.name, '');
+  proof = false;
+  const stale = session.send({ text: 'Expired account proof' });
+  assert.equal((await stale.completion).ok, false);
+  assert.equal(f.requests().length, 0);
+  proof = true;
+  await getRunnerSessionDetails(session).handle.accountCatalog();
+  f.reject({ status: 'failed', failureKind: 'native_model_unavailable', error: 'Native model unavailable' });
+  const first = session.send({ text: 'Use the signed-in CLI default' });
+  assert.equal(first.accepted, true);
+  assert.equal((await first.completion).ok, false);
+  assert.equal(f.requests().length, 1);
+  assert.ok(!f.requests()[0].input.cfg.codex_model);
+  assert.ok(!f.requests()[0].input.cfg.codex_reasoning_effort);
+  assert.equal(session.send({ text: 'Do not repeat the rejected default' }).accepted, false);
+  assert.equal(f.requests().length, 1);
+});
+
+test('a recovered bound catalog resolves a pending native default to its first visible model', async t => {
+  const f = await fixture(t);
+  await f.session.dispose();
+  let nativeCatalog = { ok: true, catalogAvailable: false, nativeDefaultAvailable: true, models: [] };
+  t.mock.method(native, 'list', () => nativeCatalog);
+  const { session } = await f.open(false, { modelName: '' });
+  nativeCatalog = { ok: true, catalogAvailable: true, models: f.rows };
+  const result = session.send({ text: 'Continue after the catalog recovered' });
+  assert.equal(result.accepted, true);
+  assert.equal((await result.completion).ok, true);
+  assert.equal(f.requests().length, 1);
+  assert.equal(f.requests()[0].input.cfg.codex_model, 'balanced');
+  assert.equal(f.requests()[0].input.cfg.codex_reasoning_effort, 'medium');
+  assert.equal(session.snapshot().modelSelection.name, 'balanced');
+});
