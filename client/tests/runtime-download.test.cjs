@@ -179,6 +179,17 @@ test('trusted IPv6 HTTPS proxies connect without sending an IP literal as SNI', 
   assert.equal(fs.readFileSync(target, 'utf8'), 'IPv6 proxy fixture');
 });
 
+test('an IPv6 HTTPS proxy with only a DNS name and a different IP SAN fails verification', async t => {
+  const source = await origin(t, (_request, response) => response.end('unexpected'));
+  const wrong = certificate('127.0.0.2');
+  const tunnel = await proxy(t, source.port, { secure: true, host: '::1', tlsMaterial: wrong });
+  const target = directory(t);
+  await assert.rejects(downloadFile(source.remote, target, options({ https_proxy: tunnel.url },
+    { tls: { ca: [certificate().cert, wrong.cert] } })), /ERR_TLS_CERT_ALTNAME_INVALID/);
+  assert.equal(source.received.length, 0);
+  assert.equal(fs.existsSync(target), false);
+});
+
 test('a trusted HTTPS proxy certificate with the wrong IP is rejected before reaching the origin', async t => {
   const source = await origin(t, (_request, response) => response.end('must not arrive'));
   const wrong = certificate('127.0.0.2');
