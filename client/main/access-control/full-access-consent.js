@@ -37,7 +37,10 @@ function content(scope) {
 
 // The confirmation renderer is a dedicated sandbox, never a workspace preview
 // or a normal chat renderer. There is no renderer-supplied "consent" flag.
-function create({ BrowserWindow, ipcMain, screen, timeoutMs = 180000, themeSource = require('../native-theme.cjs') }) {
+function create({ app, BrowserWindow, ipcMain, screen, platform = process.platform,
+  linuxSession = process.env.XDG_SESSION_TYPE, timeoutMs = 180000, themeSource = require('../native-theme.cjs') }) {
+  const ozone = platform === 'linux' && app?.commandLine?.getSwitchValue('ozone-platform');
+  const x11 = ozone === 'x11' || ((!ozone || ozone === 'auto') && linuxSession === 'x11');
   const pending = new Map(), owners = new Map();
   const validOwner = parent => parent && !parent.isDestroyed() &&
     parent.webContents && !parent.webContents.isDestroyed();
@@ -68,6 +71,7 @@ function create({ BrowserWindow, ipcMain, screen, timeoutMs = 180000, themeSourc
     const item = entry(event);
     const natural = Math.round(Number(value));
     if (!item || item.window.isDestroyed() || !Number.isFinite(natural) || natural <= 0) return { ok: false };
+    if (!item.position) return { ok: true };
     try {
       item.naturalHeight = natural;
       item.window.setBounds(item.position(natural));
@@ -86,11 +90,14 @@ function create({ BrowserWindow, ipcMain, screen, timeoutMs = 180000, themeSourc
     return new Promise(resolve => {
       const ownerContents = parent.webContents, ownerURL = ownerContents.getURL();
       const source = options.source, sourceURL = source?.getURL();
+      const embedded = !!source && source !== ownerContents;
+      const systemPlacement = platform === 'linux' && !embedded && !x11;
       const disposers = [];
       let window, timer, done = false;
       const item = { id: randomUUID(), presented: false, window: null, parent, scope: options.scope === 'default' ? 'default' : 'session',
         ownerValid: () => validOwner(parent) && parent.webContents === ownerContents && ownerContents.getURL() === ownerURL &&
-          (!source || (!source.isDestroyed() && source.getURL() === sourceURL && !!placement.sourceBounds(parent, source))),
+          (!source || (systemPlacement && source === ownerContents) ||
+            (!source.isDestroyed() && source.getURL() === sourceURL && !!placement.sourceBounds(parent, source))),
         finish(approved) {
           if (done) return;
           done = true;
@@ -107,11 +114,18 @@ function create({ BrowserWindow, ipcMain, screen, timeoutMs = 180000, themeSourc
       };
       const cancel = () => item.finish(false);
       try {
-        item.position = placement.create(parent, options, screen); item.naturalHeight = 360;
+        item.naturalHeight = 360;
+        // Wayland controls top-level placement. X11 supports positioning near the trigger.
+        // Embedded chat panels still need to stay within their originating view.
+        if (!systemPlacement) item.position = placement.create(parent, options, screen);
+        const [ownerWidth, ownerHeight] = systemPlacement ? parent.getContentSize() : [];
+        const bounds = item.position ? item.position(item.naturalHeight)
+          : { width: Math.min(384, ownerWidth), height: Math.min(item.naturalHeight, ownerHeight) };
         window = new BrowserWindow({
-          parent, modal: true, ...item.position(item.naturalHeight),
-          show: false, frame: false, transparent: true, backgroundColor: '#00000000',
-          title: locale.translate('允许完全访问？'), resizable: false, minimizable: false,
+          parent, modal: true, ...bounds,
+          show: false, frame: systemPlacement, useContentSize: systemPlacement,
+          transparent: platform !== 'linux', backgroundColor: platform === 'linux' ? '#ffffff' : '#00000000',
+          title: locale.translate('允许完全访问？'), resizable: systemPlacement, minimizable: false,
           maximizable: false, fullscreenable: false, skipTaskbar: true, hasShadow: true,
           autoHideMenuBar: true,
           webPreferences: { preload: path.join(__dirname, 'full-access-consent-preload.cjs'),
@@ -147,7 +161,7 @@ function create({ BrowserWindow, ipcMain, screen, timeoutMs = 180000, themeSourc
         on(window, 'closed', cancel);
         on(parent, 'closed', cancel);
         const reposition = () => { try { window.setBounds(item.position(item.naturalHeight)); } catch (_) { cancel(); } };
-        on(parent, 'move', reposition); on(parent, 'resize', reposition);
+        if (item.position) { on(parent, 'move', reposition); on(parent, 'resize', reposition); }
         if (source && source !== ownerContents) {
           on(source, 'destroyed', cancel); on(source, 'render-process-gone', cancel);
           on(source, 'did-start-navigation', (_event, _url, _inPlace, isMainFrame) => { if (isMainFrame) cancel(); });
@@ -155,9 +169,16 @@ function create({ BrowserWindow, ipcMain, screen, timeoutMs = 180000, themeSourc
         on(ownerContents, 'destroyed', cancel);
         on(ownerContents, 'did-start-navigation', (_event, _url, _inPlace, isMainFrame) => { if (isMainFrame) cancel(); });
         on(wc, 'before-input-event', (event, input) => { if (input.key === 'Escape') { event.preventDefault(); cancel(); } });
-        on(window, 'ready-to-show', () => { if (!done && item.ownerValid()) { window.show(); window.focus(); } else cancel(); });
+        const reveal = () => {
+          if (done || !item.ownerValid()) return cancel();
+          window.show();
+          window.focus();
+        };
+        if (platform !== 'linux') on(window, 'ready-to-show', reveal);
         timer = setTimeout(cancel, timeoutMs);
         Promise.resolve(window.loadFile(PAGE)).catch(cancel);
+        // A hidden surface may not receive a first paint on a Linux desktop.
+        if (platform === 'linux') reveal();
       } catch (_) { cancel(); }
     });
   };
