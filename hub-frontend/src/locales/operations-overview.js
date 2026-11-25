@@ -6,6 +6,14 @@
 // translation pass. The native file-picker captions of the client release upload
 // dialog live here too because they are the same class of host-locale leakage.
 const failureCopy = [
+  ["点右上角「上传发布」，选择一个安装包，后台会自动解析、签名并登记。", "Choose Upload release and select one installer. The server inspects, signs and registers it automatically.", "「リリースをアップロード」でインストーラーを1つ選ぶと、サーバーが自動で解析、署名、登録します。", "배포 업로드에서 설치 파일 하나를 선택하면 서버가 자동으로 분석, 서명 및 등록합니다."],
+  ["只需上传安装包，后台自动解析版本与平台、签名并登记。新登记的安装包默认停用，确认后再启用。", "Upload only the installer. The server reads its version and platform, signs it and registers it. New releases stay disabled until you enable them.", "インストーラーだけをアップロードしてください。サーバーがバージョンとプラットフォームを解析し、署名して登録します。新規登録は確認後に有効化してください。", "설치 파일만 업로드하세요. 서버가 버전과 플랫폼을 분석하고 서명하여 등록합니다. 새 배포는 확인 후 활성화하세요."],
+  ["发布通道", "Release channel", "リリースチャンネル", "배포 채널"],
+  ["使用当前环境默认通道", "Use this environment’s default channel", "この環境の既定チャンネルを使用", "현재 환경의 기본 채널 사용"],
+  ["选择 beta 通道不会更改安装包版本；无 beta 后缀的包仅供手动安装。", "The beta channel does not change the package version. Packages without a beta suffix require manual installation.", "beta チャンネルを選んでもパッケージのバージョンは変わりません。beta 接尾辞のないパッケージは手動でインストールしてください。", "beta 채널을 선택해도 패키지 버전은 바뀌지 않습니다. beta 접미사가 없는 패키지는 수동으로 설치해야 합니다."],
+  ["文件已传输，后台正在解析、签名并登记…", "File transferred. The server is inspecting, signing and registering it…", "転送完了。サーバーで解析、署名、登録しています…", "파일 전송 완료. 서버에서 분석, 서명 및 등록 중…"],
+  ["该安装包已登记，保留原有发布状态。", "This installer is already registered. Its release state is unchanged.", "このインストーラーは登録済みです。公開状態は変更されていません。", "이미 등록된 설치 파일입니다. 기존 배포 상태가 유지됩니다."],
+
   ['查看运行日志', 'View run logs', '実行ログを表示', '실행 로그 보기'],
   ['需求已不存在', 'This issue no longer exists', 'この課題は既に削除されています', '요구사항이 더 이상 존재하지 않습니다'],
   ['请联系有插件运行权限的管理员处理。', 'Ask an administrator with plugin run access to investigate.', 'プラグイン実行権限のある管理者に調査を依頼してください。', '플러그인 실행 권한이 있는 관리자에게 조사를 요청하세요.'],

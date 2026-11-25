@@ -60,9 +60,19 @@ async function fixture(t) {
 const authenticatedOperations = {
   json: api => api.orgs(),
   upload: api => api.importPlugin(new Blob(['synthetic package'])),
-  form: api => api.uploadClientRelease(new Blob(['synthetic bundle']), new Blob(['synthetic installer'])),
+  form: api => api.uploadClientRelease(new Blob(['synthetic installer']), { channel: 'beta' }),
   download: api => api.downloadClientRelease('synthetic-release', 'fixture.bin'),
 }
+
+test('client release upload sends one installer and channel without a signing manifest', async t => {
+  const f = await fixture(t)
+  f.respond(200, { ok: true, created: true })
+  await f.api.uploadClientRelease(new Blob(['synthetic installer']), { channel: 'beta' })
+  assert.equal(f.requests[0].path, '/api/v1/admin/client-releases/upload')
+  assert.match(f.requests[0].body, /name="installer"/)
+  assert.match(f.requests[0].body, /name="channel"\r\n\r\nbeta/)
+  assert.doesNotMatch(f.requests[0].body, /name="bundle"/)
+})
 
 test('promotion policy validation identifies the requires field in every admin locale', async t => {
   const f = await fixture(t)

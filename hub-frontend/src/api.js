@@ -301,10 +301,10 @@ export const api = {
   },
   setClientReleaseEnabled: (id, enabled) => call(
     'PATCH', '/admin/client-releases/' + encodeURIComponent(id), { enabled }),
-  uploadClientRelease: (bundleFile, installerFile, { onProgress, signal } = {}) => {
+  uploadClientRelease: (installerFile, { channel = '', onProgress, signal } = {}) => {
     const form = new FormData()
-    form.append('bundle', bundleFile)
     form.append('installer', installerFile)
+    if (channel) form.append('channel', channel)
     return authenticatedData('/admin/client-releases/upload', { method: 'POST', body: form, signal }, 900000, responseData,
       onProgress ? uploadTransport(onProgress) : fetchSafe)
   },

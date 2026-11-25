@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
        > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update && apt-get install -y --no-install-recommends git openssh-client \
-       chromium fonts-noto-cjk postgresql-client-16 \
+       chromium fonts-noto-cjk postgresql-client-16 7zip aapt \
     && apt-get purge -y --auto-remove curl gnupg && rm -rf /var/lib/apt/lists/*
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
@@ -50,6 +50,9 @@ ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /srv/app/hub-backend
 COPY hub-backend/requirements.txt hub-backend/requirements-image.txt ./
 RUN python -m pip install --no-cache-dir -r requirements.txt
+# Refuse outdated dependency images that cannot inspect uploaded installers.
+RUN { command -v 7zz || command -v 7z; } && command -v aapt \
+    || { echo "HUB_BASE_IMAGE lacks 7zip/aapt; rebuild the deps image or use HUB_BASE_IMAGE=deps" >&2; exit 1; }
 COPY hub-backend/app ./app
 COPY hub-backend/migrations ./migrations
 COPY hub-backend/jiyong-alembic.ini ./jiyong-alembic.ini

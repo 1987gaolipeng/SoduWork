@@ -127,10 +127,13 @@ assets. Keep each environment's artifacts in a separate directory.
 Deployment remains outside this build workflow. Reuse the official same-version
 Hub image with the target environment's database, storage and service configuration.
 Verify migration/rollback readiness and deploy the Hub before enabling new clients.
-Verify the downloaded installer hashes and sign their update manifests with a key
-trusted by supported installed clients. Upload `installer` and signed JSON `bundle`
-as multipart fields to `POST /api/v1/admin/client-releases/upload`; this stages a
-disabled record. Review all intended platform records, then enable each with
+Verify the downloaded installer hashes, then upload one `installer` multipart file
+to the target Hub's `POST /api/v1/admin/client-releases/upload`, optionally choosing
+`channel=stable` or `channel=beta`. The Hub inspects, signs and registers each package
+as a disabled record. Configure the environment's signing key once as described in
+the [backend guide](../hub-backend/README.md#register-client-installers); publishers
+do not supply a manifest. Existing offline-signed `bundle` uploads remain supported.
+Review all intended platform records, then enable each with
 `PATCH /api/v1/admin/client-releases/<id>` and `{"enabled": true}`. Verify public
 downloads, signatures and the old client's update API. Preserve old records and
 rollback evidence. Keep deployment credentials and update-signing private keys on

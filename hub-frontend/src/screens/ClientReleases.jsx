@@ -1,6 +1,6 @@
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
 /*
- * Manage signed client releases: list versions, upload manifest and installer pairs, and
+ * Manage client releases: upload an installer for server signing and registration, and
  * enable or disable staged releases. Uploads start disabled; enablement requires server
  * signature and integrity checks.
  */
@@ -264,7 +264,7 @@ export default function ClientReleases() {
       : <div className="cr-empty">
         <span><Icon name="box" /></span>
         <b>{tx("还没有发布任何版本")}</b>
-        <p>{tx("点右上角「上传发布」，选择签名清单和安装包；也可以继续用 ops 脚本从构建机直传。")}</p>
+        <p>{tx("点右上角「上传发布」，选择一个安装包，后台会自动解析、签名并登记。")}</p>
       </div>}
 
     {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} onDone={() => { setUploadOpen(false); load() }} />}
@@ -371,12 +371,11 @@ function AttemptsPanel({ releases, attempts, counts, loading, error = null,
   </div>
 }
 
-/* Upload signed manifest and installer together; prevent dismissal while transfer is active. */
+/* Each installer is independently inspected, signed and registered by this Hub. */
 function UploadModal({ onClose, onDone }) {
   const uiLocale = useLocale();
-  const bundleRef = useRef(null)
   const installerRef = useRef(null)
-  const [bundleName, setBundleName] = useState('')
+  const [channel, setChannel] = useState('')
   const [installerName, setInstallerName] = useState('')
   const [busy, setBusy] = useState(false)
   const controller = useRef(null)
@@ -385,9 +384,7 @@ function UploadModal({ onClose, onDone }) {
   const [error, setError] = useState('')
 
   async function submit() {
-    const bundle = bundleRef.current && bundleRef.current.files[0]
     const installer = installerRef.current && installerRef.current.files[0]
-    if (!bundle) { setError(tx("请选择签名清单（bundle.json）")); return }
     if (!installer) { setError(tx("请选择安装包文件")); return }
     if (controller.current) return
     controller.current = new AbortController()
@@ -395,11 +392,12 @@ function UploadModal({ onClose, onDone }) {
     setBusy(true)
     setError('')
     try {
-      const data = await api.uploadClientRelease(bundle, installer, {
+      const data = await api.uploadClientRelease(installer, {
+        channel,
         signal: controller.current.signal, onProgress: (loaded, total, sent) => setProgress({ loaded, total, sent }),
       })
       const rel = data && data.release
-      toast(rel
+      toast(data?.created === false ? tx("该安装包已登记，保留原有发布状态。") : rel
         ? tx("已上传 {0}（{1} / {2}），当前为停用状态，确认后请点「启用」", [rel.version, rel.platform, rel.arch])
         : tx("上传成功"))
       onDone()
@@ -410,7 +408,7 @@ function UploadModal({ onClose, onDone }) {
     setBusy(false)
   }
 
-  return <Modal dirty={!busy && Boolean(bundleName || installerName)} title={tx("上传客户端发布")} icon="send" onClose={busy ? undefined : onClose}
+  return <Modal dirty={!busy && Boolean(channel || installerName)} title={tx("上传客户端发布")} icon="send" onClose={busy ? undefined : onClose}
     foot={dismiss => <>
       <button className="btn btn-ghost" disabled={busy && progress.sent} onClick={() => busy ? controller.current?.abort() : dismiss()}>
         {busy ? tx("上传中，请勿关闭") : tx("取消")}
@@ -420,16 +418,15 @@ function UploadModal({ onClose, onDone }) {
       </button>
     </>}>
     <div className="cr-upload">
-      <p className="cr-upload-hint">{tx("安装包需已按发布流程签名。上传后默认停用，启用时服务端会重验签名与完整性。")}</p>
+      <p className="cr-upload-hint">{tx("只需上传安装包，后台自动解析版本与平台、签名并登记。新登记的安装包默认停用，确认后再启用。")}</p>
       <label className="cr-file-field">
-        <span>{tx("签名清单（bundle.json）")}</span>
-        <input ref={bundleRef} type="file" accept=".json,application/json" disabled={busy} className="cr-file-native"
-          onChange={(e) => setBundleName(e.target.files[0] ? e.target.files[0].name : '')} />
-        <span className="cr-file-row">
-          <span className="cr-file-chip btn btn-ghost xs" aria-hidden="true">{tx("选择文件")}</span>
-          <span className="cr-file-name">{bundleName || tx("未选择任何文件")}</span>
-        </span>
-        <small>{tx("签名上传脚本输出的 .json 清单")}</small>
+        <span>{tx("发布通道")}</span>
+        <select value={channel} onChange={e => setChannel(e.target.value)} disabled={busy}>
+          <option value="">{tx("使用当前环境默认通道")}</option>
+          <option value="stable">{tx("正式渠道")}</option>
+          <option value="beta">Beta</option>
+        </select>
+        <small>{tx("选择 beta 通道不会更改安装包版本；无 beta 后缀的包仅供手动安装。")}</small>
       </label>
       <label className="cr-file-field">
         <span>{tx("安装包")}</span>
@@ -443,7 +440,7 @@ function UploadModal({ onClose, onDone }) {
       </label>
       {busy && <div className="cr-upload-status">
         <progress aria-label={tx("上传进度")} value={progress.total ? progress.loaded : undefined} max={progress.total || 1} />
-        <span>{progress.sent ? tx("上传完成，正在等待服务端校验。") : progress.total
+        <span>{progress.sent ? tx("文件已传输，后台正在解析、签名并登记…") : progress.total
           ? `${Math.floor(progress.loaded / progress.total * 100)}% · ${progress.loaded.toLocaleString()} / ${progress.total.toLocaleString()} B` : tx("上传中…")}</span>
       </div>}
       {error && <div className="cr-upload-error">{error}</div>}

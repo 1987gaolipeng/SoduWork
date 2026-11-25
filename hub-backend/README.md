@@ -8,6 +8,38 @@ Hub provides identity, authorization, execution governance, plugins, shared mate
 
 The first-chat checklist combines the available model catalog with the signed-in administrator’s latest desktop report. The device sends two readiness flags for its runtime and model selection. After five minutes without a fresh report, the Hub shows those steps as awaiting the desktop.
 
+## Register client installers
+
+With `client.update`, send one `installer` multipart file to
+`POST /api/v1/admin/client-releases/upload`. Optional `channel` is `stable` or
+`beta`; omitted uses `SODUWORK_PUBLIC_DOWNLOAD_CHANNEL` if configured, otherwise
+beta for a `-beta.N` version and stable for a plain version. Hub reads the packaged
+version and native architecture, checks the filename, hashes the original bytes,
+signs the update manifest and registers a disabled release. Success means registration
+finished. Identical retries return the original record without changing its enabled
+state; different bytes for the same channel/version/artifact identity return 409.
+Each package is independent; no GitHub integration or six-package batch is required.
+
+Configure `CLIENT_UPDATE_SIGNING_KEY_FILE` and `CLIENT_UPDATE_SIGNING_KEY_ID` once
+per publishing environment. The file contains one canonical Base64-encoded 32-byte
+Ed25519 seed, readable by the Hub account, with POSIX mode 0400 or 0600 (equivalent
+restricted ACLs on Windows). Mount it read-only in containers, whose service runs
+as UID/GID 10001. Its public key must match Hub's trust store and already be trusted
+by installed clients. Never generate a key at startup or include private keys in
+images, source, API responses or installers. Missing, unreadable or untrusted
+signing configuration rejects publication with 503; existing downloads still work.
+
+Desktop inspection needs a maintained `7zz` or `7z` on PATH, or an executable path
+in `CLIENT_UPDATE_ARCHIVE_TOOL`; APK inspection needs `aapt` on PATH. The self-host
+image includes both in its `deps` stage. When reusing `HUB_BASE_IMAGE`, rebuild that
+dependency image to include these tools, or use `HUB_BASE_IMAGE=deps`; the runtime
+build rejects bases missing either tool. EXE, DMG, ZIP, DEB, RPM, tar.gz and AppImage inspection never
+executes uploaded code. Temporary extraction is bounded by time, size and nesting.
+APKs use Android manifest metadata. Preserve original package names. The optional
+`bundle` field still accepts offline-signed installers without server signing
+configuration; deployment-run uploads are unchanged. Selecting beta does not rewrite
+the version: plain versions in beta are for manual installation, not automatic updates.
+
 ## Start locally
 
 For a first session, use `sh start.sh` from the repository root; it creates an isolated database, environment, and administrator.
