@@ -1,6 +1,6 @@
 'use strict';
 
-const { conversationTranscriptMessages } = require('./conversation-transcript.cjs');
+const { conversationTranscriptEntries } = require('./conversation-transcript.cjs');
 
 function assistantRun(messages, start) {
   const parts = [];
@@ -13,11 +13,21 @@ function assistantRun(messages, start) {
 function withTranscript(data, dialogue) {
   if (!dialogue.length) return data;
   const native = data?.snapshot?.messages || [];
-  const visible = conversationTranscriptMessages(native);
+  const visible = conversationTranscriptEntries(native, { includeMessageId: true });
+  const runnerIds = new Set((data?.coverage?.sources || []).filter(source =>
+    typeof source?.id === 'string' && source.adapterId && source.adapterId !== 'pi')
+    .map(source => source.id));
   let matched = 0, index = 0, consumed = 0, comparedUntil = 0;
   while (index < visible.length && matched < dialogue.length) {
     const item = visible[index], wanted = dialogue[matched];
     if (item.role !== wanted.role) break;
+    // Runner journals can omit trailing input spaces retained by the composer.
+    // Match only a user event from a recorded Runner segment, in its original turn.
+    if (item.role === 'user' && wanted.text.length > item.text.length &&
+        runnerIds.has(item.id?.match(/^(.+):\d+$/)?.[1]) && !item.text.endsWith(' ') &&
+        wanted.text.startsWith(item.text) && /^ +$/.test(wanted.text.slice(item.text.length))) {
+      matched++; index++; continue;
+    }
     if (index >= comparedUntil && consumed === 0 && item.role === 'assistant' && item.text !== wanted.text &&
         (visible[index + 1]?.role === 'assistant' || dialogue[matched + 1]?.role === 'assistant')) {
       const archived = assistantRun(visible, index), displayed = assistantRun(dialogue, matched);
@@ -26,6 +36,10 @@ function withTranscript(data, dialogue) {
         matched = displayed.end; index = archived.end; continue;
       }
     }
+    // The displayed text joins adjacent text blocks with a newline. Native
+    // archives may instead store the same blocks as separate assistant messages.
+    if (consumed && item.role === 'assistant' && wanted.text[consumed] === '\n' &&
+        !wanted.text.startsWith(item.text, consumed) && wanted.text.startsWith(item.text, consumed + 1)) consumed++;
     if (wanted.text.startsWith(item.text, consumed)) {
       if (consumed + item.text.length === wanted.text.length) {
         matched++; index++; consumed = 0; continue;
