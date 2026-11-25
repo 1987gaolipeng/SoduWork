@@ -2206,7 +2206,17 @@ async def test_alert_config(
     session: AsyncSession = Depends(get_session),
 ):
     """Send a real test notification to the configured destination."""
-    from ..services import notify
+    from ..services import client_access, notify
+
+    # The configured channel is shared by all administrators.
+    try:
+        await email_auth.take_limits(session, [
+            (f"alert-test:user:{user.id}", 1, 30),
+            ("alert-test:configured-channel", 1, 30),
+        ])
+    except client_access.ClientAccessError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc),
+                            headers={"Retry-After": str(exc.meta.get("retryAfter", 30))}) from exc
     sent = await notify.alert(
         session, "这是一条测试告警：配好了，交付出事时会用这个通道叫人。")
     return {"ok": bool(sent),

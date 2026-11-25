@@ -1,5 +1,10 @@
 """HTTP contract for write-only delivery alert destinations."""
+import asyncio
+import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from fastapi import FastAPI
@@ -7,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import models
+from app.account_models import EmailRateLimit
 from app.api import admin
 from app.auth import sign_token
 from app.db import Base, get_session
@@ -15,12 +21,14 @@ from app.services.notify import ALERT_URL_KEY
 
 class AlertChannelSettingsTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        db_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(db_dir.cleanup)
+        engine = create_async_engine("sqlite+aiosqlite:///" + (Path(db_dir.name) / "alerts.db").as_posix())
         self.addAsyncCleanup(engine.dispose)
         self.sessions = async_sessionmaker(engine, expire_on_commit=False)
         async with engine.begin() as conn:
             tables = [model.__table__ for model in (
-                models.User, models.OrgUnit, models.Role, models.AppSetting, models.AuditLog)]
+                models.User, models.OrgUnit, models.Role, models.AppSetting, models.AuditLog, EmailRateLimit)]
             await conn.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
         async with self.sessions() as session:
             session.add(models.User(id="fixture-admin", username="fixture-admin", is_super=True))
@@ -37,6 +45,31 @@ class AlertChannelSettingsTests(unittest.IsolatedAsyncioTestCase):
                                       base_url="http://fixture/api/v1/admin/",
                                       headers={"Authorization": "Bearer " + sign_token("fixture-admin")})
         self.addAsyncCleanup(self.http.aclose)
+
+    async def test_admins_share_one_test_send_and_rejected_attempts_do_not_extend_cooldown(self):
+        async with self.sessions() as session:
+            session.add(models.User(id="second-admin", username="second-admin", is_super=True))
+            await session.commit()
+        headers = [{"Authorization": "Bearer " + sign_token(uid)}
+                   for uid in ("fixture-admin", "second-admin")]
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        with patch("app.services.email_auth.now", return_value=start) as clock, \
+             patch("app.services.notify.alert", new_callable=AsyncMock, return_value=True) as send:
+            replies = await asyncio.gather(*(self.http.post("alert-config/test", headers=h) for h in headers))
+            self.assertCountEqual([res.status_code for res in replies], [200, 429])
+            self.assertEqual(send.await_count, 1)
+            rejected = next(h for h, res in zip(headers, replies) if res.status_code == 429)
+            clock.return_value = start + timedelta(seconds=29)
+            retry = await self.http.post("alert-config/test", headers=rejected)
+            self.assertEqual(retry.status_code, 429)
+            self.assertGreater(int(retry.headers["Retry-After"]), 0)
+            self.assertEqual(send.await_count, 1)
+            async with self.sessions() as session:
+                counts = (await session.scalars(select(EmailRateLimit.count))).all()
+                self.assertCountEqual(counts, [1, 1])  # Accepted user and shared channel only.
+            clock.return_value = start + timedelta(seconds=30)
+            self.assertTrue((await self.http.post("alert-config/test", headers=rejected)).json()["ok"])
+            self.assertEqual(send.await_count, 2)
 
     async def test_configured_state_survives_legacy_save_and_explicit_removal(self):
         self.assertEqual((await self.http.get("alert-config")).json(), {"url": "", "configured": False, "usesPlainHttp": False})
