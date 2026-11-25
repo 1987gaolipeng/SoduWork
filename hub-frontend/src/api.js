@@ -250,10 +250,10 @@ export const api = {
   },
   setClientReleaseEnabled: (id, enabled) => call(
     'PATCH', '/admin/client-releases/' + encodeURIComponent(id), { enabled }),
-  uploadClientRelease: (bundleFile, installerFile) => {
+  uploadClientRelease: (installerFile, { channel = '' } = {}) => {
     const form = new FormData()
-    form.append('bundle', bundleFile)
     form.append('installer', installerFile)
+    if (channel) form.append('channel', channel)
     return uploadForm('/admin/client-releases/upload', form, 900000)
   },
   assignClient: (id, userId) => call('POST', '/admin/clients/' + id + '/assign', { userId }),

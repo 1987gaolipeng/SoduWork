@@ -65,7 +65,7 @@ export const dictionary = {
     "sub.identity": "企业 OIDC、账号映射与登录安全",
     "sub.audit": "关键操作与责任追溯",
     "nav.client-releases": "客户端发布",
-    "sub.client-releases": "上传已签名安装包、启用或停用各平台版本"
+    "sub.client-releases": "上传安装包、自动签名并管理各平台版本"
   },
   "en-US": {
     "plugin.recommend.action": "Recommend",
@@ -133,7 +133,7 @@ export const dictionary = {
     "sub.identity": "Enterprise OIDC, account mapping and login security",
     "sub.audit": "Critical actions and accountability trail",
     "nav.client-releases": "Client releases",
-    "sub.client-releases": "Upload signed installers and enable or disable platform versions"
+    "sub.client-releases": "Upload installers for automatic signing and manage platform releases"
   },
   "ja-JP": {
     "plugin.recommend.action": "おすすめ",
@@ -201,7 +201,7 @@ export const dictionary = {
     "sub.identity": "企業 OIDC、アカウント対応付けとログインの安全性",
     "sub.audit": "重要な操作と責任の追跡",
     "nav.client-releases": "クライアントのリリース",
-    "sub.client-releases": "署名済みインストーラーをアップロードし、各プラットフォームのバージョンを有効化または無効化"
+    "sub.client-releases": "インストーラーをアップロードして自動署名し、各プラットフォームのリリースを管理"
   },
   "ko-KR": {
     "plugin.recommend.action": "추천",
@@ -269,6 +269,6 @@ export const dictionary = {
     "sub.identity": "기업 OIDC, 계정 매핑 및 로그인 보안",
     "sub.audit": "중요 작업 및 책임 추적",
     "nav.client-releases": "클라이언트 배포",
-    "sub.client-releases": "서명된 설치 파일을 업로드하고 플랫폼별 버전을 사용 또는 사용 중지"
+    "sub.client-releases": "설치 파일을 업로드하여 자동 서명하고 플랫폼별 배포 관리"
   }
 }
