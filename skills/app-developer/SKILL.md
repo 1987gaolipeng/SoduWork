@@ -27,4 +27,4 @@ description: Build SoduWork apps and skills.
 - author真实；appCategory=office/game/robot/other；WEB/H5为接入方式。extensions保留未知字段、不放秘密。
 - 数据遵从必选模式；[契约与JSON](references/cloud-data.md)。初始化版本化，不覆盖用户记录。
 - 修改先读源码与 baseline.json；保留 key，提升 SemVer；资源完整收集，禁止省略未改文件。
-- 最终磁盘运行 scripts/validate.cjs；失败修复重检。登记 .soduwork/delivery.json；走当前会话检查安装。静态检查不等于运行验收，不能虚构通过。
+- 最终磁盘运行 scripts/validate.cjs；失败修复重检。在最终回复用相对当前工作目录的 Markdown 链接交付已验证的草稿；走当前会话检查安装。静态检查不等于运行验收，不能虚构通过。

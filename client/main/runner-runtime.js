@@ -19,6 +19,7 @@ let _lastConfig = '';
 let _processCredential = '';
 let _identityOf = null;
 let _sessionOf = null;
+let _localOwnerOf = null;
 let _canConnect = () => true;
 const _ownedRunners = new Map();
 const _runnerStops = new Set();
@@ -230,6 +231,12 @@ function _clean(raw, dataRoot = '', secureIdentity = null) {
     capabilityGrantVersion: CAPABILITY_GRANT_VERSION,
     capabilityGrants: _grants(x.capabilityGrants),
     dataRoot: String(dataRoot || x.dataRoot || '').trim() };
+}
+
+function desktopAccountScope(app, id) {
+  const owner = id && _localOwnerOf?.(app);
+  if (!/^[a-f0-9]{32}$/.test(owner || '')) return '';
+  return crypto.createHash('sha256').update(JSON.stringify([new URL(id.hub).origin, owner])).digest('hex');
 }
 
 function _stored(cfg) {
@@ -491,6 +498,7 @@ function _start(app) {
     // The same private pipe already owns local RPC. Pass one bounded startup
     // frame before any RPC; the Runner never reopens an Electron-written JSON.
     child.stdin.write('@@SODUWORK_RUNNER_CONFIG@@' + JSON.stringify({ ..._stored(cfg),
+      codexAccountScope: desktopAccountScope(app, _identityOf?.(app)),
       customAgents: require('./agent-runtime/custom-runtime-store.cjs').startupAgents(app) }) + '\n', 'utf8');
     child.once('error', (e) => {
       if (_proc !== child) return;
@@ -573,7 +581,13 @@ function _applyConfig(app, raw) {
   }
 }
 
-function install({ app, ipcMain, identityOf, sessionOf, canConnect }) {
+function install({ app, ipcMain, identityOf, sessionOf, canConnect, localOwnerOf, onSessionIssued }) {
+  _localOwnerOf = localOwnerOf;
+  onSessionIssued?.(() => {
+    if (!_proc) return;
+    const scope = desktopAccountScope(app, _identityOf?.(app));
+    if (scope) void rpc('runtime.codexAccount.bind', { scope }).catch(() => {});
+  });
   _canConnect = canConnect || (() => true);
   _identityOf = identityOf || null;
   _sessionOf = sessionOf;

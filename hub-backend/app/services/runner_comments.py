@@ -113,8 +113,10 @@ async def comment(machine, m, read_local_files, read_packet=None, drop_transfer=
                 "- %s\uff1a%s" % (item.get("name") or "\u9644\u4ef6", item.get("path") or "")
                 for item in staged)
     if m.get("recordUser"):
-        await runner_local_rpc.to_thread(local_stream.record_user_sync, ref, user_text, staged,
-                                m.get("plugins"), m.get("sentAt"))
+        recorded = await runner_local_rpc.to_thread(local_stream.record_user_sync, ref, user_text, staged,
+                                                    m.get("plugins"), m.get("sentAt"))
+        if not recorded.get("ok"):
+            return {"ok": False, "error": recorded.get("error") or "无法保存本轮消息"}
     from app.services import runtime_images
     try:
         cfg = {**dict(m.get("cfg") or {}), "_admissionKey": str(m.get("_admissionKey") or "")}

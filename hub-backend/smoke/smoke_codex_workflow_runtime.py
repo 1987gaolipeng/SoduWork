@@ -140,10 +140,12 @@ def auth_contracts() -> None:
     # unknown; key presence and cached files cannot prove native login.
     with (
         tempfile.TemporaryDirectory(prefix="soduwork-codex-auth-") as home,
-        patch.dict(os.environ, {"CODEX_HOME": home, "OPENAI_API_KEY": ""}),
+        patch.dict(os.environ, {"CODEX_HOME": home, "SODUWORK_DATA_ROOT": home, "OPENAI_API_KEY": ""}),
         patch.object(agent_setup, "_bin_of", return_value="fixture-codex"),
         patch.object(cli_account_auth, "_run", return_value=None) as status,
     ):
+        from app.services import codex_account_home
+        codex_account_home.connected_home(home, create=True)
         check("unavailable CLI status remains explicitly unknown",
               agent_setup._auth_probe("codex")[0] == "")
         with patch.dict(os.environ, {"OPENAI_API_KEY": "smoke-key"}):

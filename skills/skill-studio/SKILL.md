@@ -47,4 +47,4 @@ targets 支持 portable、codex、claude、copilot、soduwork，逗号分隔。S
 
 检查生成的 skill-report.json、CHANGES.md、INSTALL.md 和各目标压缩包。报告区分静态校验与业务实测；指出宿主差异、依赖和未验证项目。最终给出实际可打开的文件链接和简短使用方式。
 
-在 SoduWork 中合并当前 .soduwork/delivery.json 的已有成果登记，不覆盖其他成果；把用户选择平台的压缩包（包括 SoduWork 的 .skill）作为本次主要交付，另外登记验证报告和业务测试报告。用户明确要求安装/上传时才使用现有技能导入/共享流程；不能把个人试用说成团队审批已完成。
+在 SoduWork 中重读本次目标包和报告，在最终回复中用相对工作目录的 Markdown 链接交付用户选择平台的包（包括 SoduWork 的 .skill）、验证报告和业务测试报告。用户明确要求安装/上传时才使用现有技能导入/共享流程；不能把个人试用说成团队审批已完成。

@@ -1,6 +1,7 @@
 """Public module behavior and service contracts."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ import sys
 import threading
 import time
 import uuid
+from pathlib import Path
 
 from . import codex_runtime_home as _codex_runtime_home
 from . import opencode_model_selection
@@ -518,7 +520,11 @@ def _save_meta(ref: str) -> None:
         from . import runner_usage_receipts
         if run.get("error"):
             run["error"] = runner_usage_receipts.redact_metadata(run, run["error"], diagnostic=True)
-        _record_terminal(ref, run)
+        try:
+            _record_terminal(ref, run)
+        except HistoryWriteError:
+            # Persist the storage failure instead of publishing a successful boundary.
+            pass
         if run.get("cli") == "codex":
             run["codexTransport"] = (run.get("cfg") or {}).get(_account_acp.TRANSPORT_KEY, run.get("codexTransport") or "")
         data = {k: run.get(k) for k in _PERSIST_KEYS}
@@ -564,15 +570,53 @@ def _load_baseline(ref: str) -> set:
         return set()
 
 
+_HISTORY_FAILURE = "history_storage"
+_HISTORY_ERROR = "无法保存本地会话记录，请检查磁盘空间和目录写入权限。"
+
+
+class HistoryWriteError(OSError):
+    """A conversation event did not reach its durable commit point."""
+
+
+def _write_event_batch(ref: str, items: list[dict]) -> None:
+    payload = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in items).encode("utf-8")
+    path = os.path.join(_store_dir(ref), "events.jsonl")
+    with open(path, "a+b", buffering=0) as archive:
+        start = archive.tell()
+        if start:
+            archive.seek(-1, os.SEEK_END)
+            if archive.read(1) != b"\n":
+                raise OSError("Incomplete event journal tail")
+        try:
+            if archive.write(payload) != len(payload):
+                raise OSError("Incomplete event journal write")
+            os.fsync(archive.fileno())
+        except OSError:
+            archive.truncate(start)
+            os.fsync(archive.fileno())
+            raise
+
+
 def _append_events(ref: str, items: list[dict]) -> None:
-    if not items:
-        return
+    """Commit under the caller's sequence lock before publishing or acknowledging."""
+    run = _RUNS[ref]
+    if run.get("failureKind") == _HISTORY_FAILURE:
+        raise HistoryWriteError(run["error"])
     try:
-        with open(os.path.join(_store_dir(ref), "events.jsonl"), "a", encoding="utf-8") as f:
-            for it in items:
-                f.write(json.dumps(it, ensure_ascii=False) + "\n")
-    except Exception:  # noqa: BLE001
-        pass
+        _write_event_batch(ref, items)
+    except (OSError, ValueError, TypeError) as exc:
+        log.warning("Local event journal write failed for %s: %s", ref[:8], type(exc).__name__)
+        if any(item.get("kind") != "user" for item in items):
+            # Work may already have side effects. Fence native resumption and
+            # keep the original spool/cursor for inspection and repair.
+            run.update(state="failed", failureKind=_HISTORY_FAILURE, stopping=True,
+                       error=_HISTORY_ERROR + "本轮已中断，请核对未确认的工具结果。", ended=time.time())
+            _save_meta(ref)
+        raise HistoryWriteError(_HISTORY_ERROR) from exc
+    run["seq"] = items[-1]["seq"]
+    run.setdefault("lines", []).extend(items)
+    del run["lines"][:-_MEM_LINES]
+
 
 def _record_event(ref: str, item: dict) -> dict | None:
     """Append one product-level event with the run's authoritative sequence."""
@@ -588,26 +632,23 @@ def _record_event(ref: str, item: dict) -> dict | None:
         stamped["seg"] = int(run.get("segment") or 1)
         from . import turn_correlation
         turn_correlation.stamp(run, stamped)
-        run["seq"] = stamped["seq"]
-        run["lines"] = (run.get("lines") or []) + [stamped]
-        del run["lines"][:-_MEM_LINES]
-    _append_events(ref, [stamped])
+        _append_events(ref, [stamped])
     _save_meta(ref)
     return stamped
 
 
 def _record_terminal(ref: str, run: dict) -> None:
     """Caller holds the run lock; commit the boundary before another turn can start."""
+    if run.get("failureKind") == _HISTORY_FAILURE:
+        return
     from . import turn_correlation
     event = turn_correlation.terminal(run)
     if event is None:
         return
     event.update(seq=int(run.get("seq") or 0) + 1, seg=int(run.get("segment") or 1),
                  at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
-    run["seq"] = event["seq"]
-    run["lines"] = (run.get("lines") or []) + [event]
-    del run["lines"][:-_MEM_LINES]
     _append_events(ref, [event])
+    run["turnEndIdentity"] = [event["admissionKey"], event["round"], event["turnState"]]
 
 
 
@@ -722,6 +763,15 @@ def _restore_stream_checkpoint(run: dict) -> None:
     offsets = dict(stream.get("offsets") or {})
     terminal = dict(run.get("terminal") or {})
     for item in run.get("lines") or []:
+        if (item.get("kind") == "turn-end" and item.get("turnState") and item.get("admissionKey")
+                and item.get("admissionKey") == run.get("admissionKey")
+                and item.get("round") == run.get("round")):
+            run["turnEndIdentity"] = [item["admissionKey"], item["round"], item["turnState"]]
+        # Older archives may have no stream ID but still retain a launch boundary.
+        if (item.get("_streamId") and item["_streamId"] != stream.get("id")
+                or int(item.get("seq") or 0) <= int(run.get("turnStartSeq") or 0)
+                and item.get("seq") is not None):
+            continue
         source = str(item.get("_stream") or "")
         if source in ("out", "err"):
             try:
@@ -966,17 +1016,6 @@ def _env_for(prof: dict, cfg: dict, runtime_ref: str = "", *, require_model: boo
     if prof is _PROFILES.get("pi") and _bundled_pi_node():
         env["ELECTRON_RUN_AS_NODE"] = "1"
     work_root = str((cfg or {}).get("local_workspace_root") or "").strip()
-    if work_root and prof.get("acp_key") != "dsh":
-        absolute = os.path.abspath(os.path.expanduser(work_root)).rstrip("\\/")
-        task_temp = os.path.join(absolute, "temp")
-        try:
-            os.makedirs(task_temp, exist_ok=True)
-        except OSError as exc:
-            raise RuntimeError(
-                "任务临时目录无法创建：" + task_temp) from exc
-        # Keep CLI temporary files inside the user-authorized Runner work root.
-        # Using a system temporary directory could exceed that workspace boundary.
-        env["TEMP"] = env["TMP"] = env["TMPDIR"] = task_temp
     if prof.get("acp_key") == "dsh":
         # DSH's restricted-token sandbox requires a separate runtime temp root.
         # Keep its existing sandbox/approval policy; isolate only host internals.
@@ -984,9 +1023,9 @@ def _env_for(prof: dict, cfg: dict, runtime_ref: str = "", *, require_model: boo
         prepare_temp(env, runtime_root or _data_root(), runtime_ref, work_root)
         apply_access_env(env, cfg.get("accessPolicy"))
     if prof is _PROFILES.get("codex"):
-        # Give each session an independent CODEX_HOME to avoid desktop and concurrent-task cache conflicts.
-        # Copy authentication state only, excluding personal hooks, MCP configuration, caches, and history.
+        # Preserve native journal bindings while keeping all CLI writes under Runner control.
         codex_home = _codex_runtime_home.prepare(env, runtime_root or _data_root(), runtime_ref)
+        codex_temp = env["TMPDIR"]
     # Pass the out-of-repository MCP configuration path to the bridge.
     if (cfg or {}).get("mcpServers"):
         env["SODUWORK_MCP_SERVERS"] = str(cfg["mcpServers"])
@@ -997,6 +1036,20 @@ def _env_for(prof: dict, cfg: dict, runtime_ref: str = "", *, require_model: boo
     for target, source in dict((cfg or {}).get("runtimeSecrets") or {}).items():
         if source in os.environ:
             env[str(target)] = os.environ[str(source)]
+    if work_root and prof is not _PROFILES.get("codex") and prof.get("acp_key") != "dsh":
+        # Scratch files are internal to a Runner execution, including during a
+        # recovered terminal or probe. The project may be a user's Git checkout.
+        root = Path(runtime_root or _data_root()).resolve()
+        namespace = root / "agent-runtimes" / "temp"
+        scope = hashlib.sha256(str(runtime_ref or work_root or "shared").encode()).hexdigest()[:32]
+        temporary = namespace / scope
+        try:
+            if not temporary.resolve().is_relative_to(namespace):
+                raise OSError("Runtime temp directory leaves the managed root")
+            temporary.mkdir(mode=0o700, parents=True, exist_ok=True)
+        except (OSError, RuntimeError) as exc:
+            raise RuntimeError("执行组件的临时目录无法创建，请检查 Runner 数据目录") from exc
+        env["TEMP"] = env["TMP"] = env["TMPDIR"] = str(temporary)
     if prof is _PROFILES.get("opencode"):
         from .opencode_runtime_config import prepare_environment
         prepare_environment(env, runtime_root or _data_root())
@@ -1015,7 +1068,8 @@ def _env_for(prof: dict, cfg: dict, runtime_ref: str = "", *, require_model: boo
             _acp_agents.home_env(prof["acp_key"], env, runtime_root or _data_root())
         if prof is _PROFILES.get("codex"):
             env["CODEX_HOME"] = codex_home
-            _account_acp.prepare_env(env, cfg, _codex_bin() or "")
+            env["TEMP"] = env["TMP"] = env["TMPDIR"] = codex_temp
+            _account_acp.prepare_env(env, cfg, _codex_bin() or "", runtime_root=runtime_root or _data_root())
         return env
     llm = (cfg or {}).get("llm") or {}
     base, key, model = llm.get("base", ""), llm.get("key", ""), llm.get("model", "")
@@ -1077,6 +1131,7 @@ def _env_for(prof: dict, cfg: dict, runtime_ref: str = "", *, require_model: boo
     # Deny the catch-all first, then allow the exact root because later matching rules take precedence.
     external = {"*": "deny"}
     if work_root:
+        absolute = os.path.abspath(os.path.expanduser(work_root)).rstrip("\\/")
         external[absolute + (r"\**" if os.name == "nt" else "/**")] = "allow"
         # Cover both native and forward-slash forms of the same Windows root.
         external[absolute.replace("\\", "/") + "/**"] = "allow"

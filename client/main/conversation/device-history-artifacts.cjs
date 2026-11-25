@@ -7,7 +7,7 @@ const path = require('node:path');
 const contract = require('./delivery-contract');
 const versions = require('./runtime-artifacts.cjs');
 const { assertNoLinks } = require('../plugin-resources');
-const { excludedName, portablePath } = require('./portable-workspace');
+const { excludedName, portablePath, MAX_BYTES: MAX_TRANSFER_BYTES } = require('./portable-workspace');
 const packages = require('./device-history-plugins.cjs');
 const drafts = require('../pi-session/plugin-draft-candidates');
 const realpath = fs.realpathSync.native || fs.realpathSync;
@@ -92,7 +92,7 @@ function matchesJournalRoot(root, cwd) {
   } catch (_) { return false; }
 }
 
-async function journalFiles(root, journal) {
+async function journalFiles(root, journal, maxFileBytes) {
   if (!journal?.turnId || journal.truncated || !Array.isArray(journal.files) || !matchesJournalRoot(root, journal.cwd)) return [];
   const files = [];
   for (const change of journal.files) {
@@ -100,7 +100,7 @@ async function journalFiles(root, journal) {
     if (!['created', 'modified', 'renamed'].includes(change.action) || !receipt?.exists || receipt.path !== relative ||
         !/^[a-f0-9]{64}$/.test(receipt.hash) || !eligible(relative, true)) continue;
     const stat = stable(root, relative);
-    if (!stat || Number(stat.size) !== receipt.size || stat.size > 32n * 1024n * 1024n) continue;
+    if (!stat || Number(stat.size) !== receipt.size || stat.size > maxFileBytes) continue;
     const file = path.join(root, relative), stamp = versions.stamp(stat);
     let fd;
     try {
@@ -118,7 +118,7 @@ async function journalFiles(root, journal) {
   return files;
 }
 
-async function capture({ row, workRoot, workspace, previous, retained, journal }) {
+async function capture({ row, workRoot, workspace, previous, retained, journal, verifiedTransfer = false }) {
   if (!row.cwd || !path.isAbsolute(row.cwd)) return null;
   let root;
   try { root = realpath(row.cwd); } catch (_) { return previous || null; }
@@ -154,7 +154,7 @@ async function capture({ row, workRoot, workspace, previous, retained, journal }
   }
   const completeJournal = journal?.turnId && !journal.truncated && Array.isArray(journal.files) && matchesJournalRoot(root, journal.cwd);
   if (completeJournal && (journal.turnId !== prior?.turnId || journal.turnId !== prior?.packageTurnId))
-    files.push(...await journalFiles(root, journal));
+    files.push(...await journalFiles(root, journal, verifiedTransfer ? BigInt(MAX_TRANSFER_BYTES) : 32n * 1024n * 1024n));
   if (files.length) {
     const expected = new Map(files.map(file => [file.relative, file.verifiedStamp]));
     const indexed = versions.capture(root, { items: classify(root, files, window) }, { sessionId: row.id, adapterId: row.adapterId });
@@ -173,6 +173,7 @@ function view(cwd, history, guard, authorize = guard) {
   const byPath = new Map();
   const cards = new Map(), receipts = new Map();
   for (const row of [...(history?.items || []), ...(history?.resources || [])]) {
+    if (row.archiveOnly) continue;
     if (eligible(row.metadata?.relative, true)) receipts.set(row.metadata.relative, row.stamp);
     if (!eligible(row.metadata?.relative)) continue;
     byPath.set(path.resolve(cwd, row.metadata.relative), row);
@@ -265,4 +266,36 @@ function view(cwd, history, guard, authorize = guard) {
   return { verify(target, stat) { guard(); return matches(target, stat); }, snapshot, snapshotAsync, readSkill, readPlugin, verifyPlugin, authorize };
 }
 
-module.exports = { capture, view };
+function archivedView(profile, id, cwd, history, guard, authorize) {
+  const original = view(cwd, history, guard, authorize);
+  const saved = require('./device-artifact-archive.cjs').projection(profile, id, history);
+  if (!saved?.items.length) return original;
+  const archived = view(saved.root, saved, guard, authorize);
+  function combine(live, copy) {
+    // A larger or unavailable replacement may have kept the prior archived
+    // revision. Prefer the newer original only while its own receipt verifies.
+    const fallbackNames = new Set(history.items.filter(row => row.archiveOnly).map(row => row.metadata.relative));
+    const liveReplacements = new Set(live.items.filter(row => fallbackNames.has(row.relative)).map(row => row.relative));
+    const archivedItems = copy.items.filter(row => !liveReplacements.has(row.relative));
+    const present = new Set(archivedItems.map(row => row.relative));
+    const items = [...archivedItems, ...live.items.filter(row => !present.has(row.relative))];
+    const delivery = { ...copy.delivery, items: items.filter(row => row.primary && !row.processEvidence) };
+    return { ...copy, items, delivery, got: { ...copy.got, delivery } };
+  }
+  const owner = item => archived.verify(item.path) ? archived : original;
+  return { authorize,
+    verify: (file, stat) => archived.verify(file, stat) || original.verify(file, stat),
+    snapshot() {
+      const copy = archived.snapshot();
+      return copy.items.length === history.items.length ? copy : combine(original.snapshot(), copy);
+    },
+    async snapshotAsync() {
+      const copy = await archived.snapshotAsync();
+      return copy.items.length === history.items.length ? copy : combine(await original.snapshotAsync(), copy);
+    },
+    readSkill: item => owner(item).readSkill(item),
+    readPlugin: item => owner(item).readPlugin(item),
+    verifyPlugin: item => owner(item).verifyPlugin(item) };
+}
+
+module.exports = { capture, view, archivedView };

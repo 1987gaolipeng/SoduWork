@@ -11,10 +11,10 @@ import sys
 import time
 from datetime import datetime, timezone
 
-from .local_base import (_CTX_WINDOW_DEFAULT, _LOCK, _MEM_LINES, _PROFILES, _RUNS,
+from .local_base import (_CTX_WINDOW_DEFAULT, _LOCK, _PROFILES, _RUNS,
                          _WIN, _ANSI, _opencode_bin, _COMPACT_AT, _STORE, _friendly,
                          ctx_pct)
-from .local_base import _append_events, _append_raw, _record_event, _record_terminal, _save_meta
+from .local_base import HistoryWriteError, _HISTORY_FAILURE, _append_events, _append_raw, _record_event, _record_terminal, _save_meta
 from .local_base import _LAUNCH_TREE_UNCONFIRMED, _LAUNCH_TREE_UNCONFIRMED_ERROR
 from . import codex_acp_outcome, conversation_plugins, local_turn_outcome, local_context_policy
 
@@ -314,6 +314,8 @@ def comment_sync(cfg: dict, ref: str, text: str) -> dict:
         run = rehydrate(ref)
     if not run:
         return {"ok": False, "error": "这个本地会话已经不在了"}
+    if run.get("failureKind") == _HISTORY_FAILURE:
+        return {"ok": False, "error": run["error"]}
     if run.get("_accessTransition"):
         with _LOCK:
             run.setdefault("queue", []).append(text)
@@ -362,14 +364,22 @@ def record_user_sync(ref: str, text: str, attachments: list[dict] | None = None,
     if not value:
         return {"ok": False, "error": "empty user turn"}
     from .runtime_messages import epoch_ms
-    item = _record_event(ref, {
-        "kind": "user", "tool": "", "text": value[:20000], "full": value[:50000],
-        "plugins": conversation_plugins.badges(plugins),
-        "sentAt": epoch_ms(sent_at) or int(time.time() * 1000),
-        "attachments": [{"name": str(row.get("name") or ""),
-                         "path": str(row.get("path") or "")}
-                        for row in (attachments or []) if isinstance(row, dict)],
-    })
+    from .local_base import rehydrate
+    with _LOCK:
+        missing = ref not in _RUNS
+    if missing:
+        rehydrate(ref)
+    try:
+        item = _record_event(ref, {
+            "kind": "user", "tool": "", "text": value[:20000], "full": value[:50000],
+            "plugins": conversation_plugins.badges(plugins),
+            "sentAt": epoch_ms(sent_at) or int(time.time() * 1000),
+            "attachments": [{"name": str(row.get("name") or ""),
+                             "path": str(row.get("path") or "")}
+                            for row in (attachments or []) if isinstance(row, dict)],
+        })
+    except HistoryWriteError as exc:
+        return {"ok": False, "error": str(exc)}
     return {"ok": bool(item), "item": item}
 
 def _resume(ref: str, text: str, cfg: dict | None = None) -> dict:
@@ -752,6 +762,8 @@ def _on_line(ref: str, raw: str, term: dict, stream: str = "out",
         run = _RUNS.get(ref)
         if run is None:
             return
+        if run.get("failureKind") == _HISTORY_FAILURE:
+            raise HistoryWriteError(run["error"])
         run["lastOut"] = time.time()
     ln = _ANSI.sub("", raw).strip()
     if not ln:
@@ -904,12 +916,11 @@ def _on_line(ref: str, raw: str, term: dict, stream: str = "out",
             turn_correlation.stamp(run, it)
             if stream_end:
                 it["_stream"] = stream
+                it["_streamId"] = (run.get("stream") or {}).get("id") or ""
                 it["_streamEnd"] = int(stream_end)
             stamped.append(it)
         if stamped and term != terminal_before:
             stamped[-1]["_terminal"] = dict(term)
-        run["seq"] = seq
-        run["lines"] = (run.get("lines") or []) + stamped
         from . import local_task_goal
         local_task_goal.observe(run, stamped, native_event=m)
         if local_task_goal.active(run) and run["goalState"]["status"] == "reviewing":
@@ -921,11 +932,10 @@ def _on_line(ref: str, raw: str, term: dict, stream: str = "out",
                     row.update(kind="sys", text="正在核对任务交付与验证结果…")
                     for field in ("full", "streamId", "delta", "done"):
                         row.pop(field, None)
-        del run["lines"][:-_MEM_LINES]
+        _append_events(ref, stamped)
         due = time.time() - float(run.get("metaAt") or 0) > 3
         if due:
             run["metaAt"] = time.time()
-    _append_events(ref, stamped)
     # Persist runtime metadata with throttling so restart recovery includes recent progress and occupancy.
     if due:
         _save_meta(ref)
@@ -1051,6 +1061,9 @@ def _finish_task_goal(ref: str, term: dict) -> bool:
 
 def _finish(ref: str, code: int, term: dict, hard_err: str) -> None:
     from . import access_transition, local_dialogue_outcome, local_task_goal
+    with _LOCK:
+        if (_RUNS.get(ref) or {}).get("failureKind") == _HISTORY_FAILURE:
+            return
     if access_transition.finish(ref, code, hard_err):
         return
     nxt = None

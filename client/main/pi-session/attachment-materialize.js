@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * Materialize the current delivery batch into a hidden workspace cache before local
+ * Materialize the current delivery batch into an account- and session-scoped cache before local
  * preview. Include output and supporting assets, exclude process evidence, deduplicate
  * names, and verify evidence_meta.sha256. Keep limits, temporary writes, and symlink
  * protections aligned with cloud-output-cache.materialize.
@@ -67,7 +67,8 @@ function currentGroup(items, taskId) {
 }
 
 const FILE_LIMIT = 64 * 1024 * 1024, TOTAL_LIMIT = 128 * 1024 * 1024;
-const CACHE_DIR = '.soduwork-attachments';
+const cacheAccess = require('./task-attachment-access.cjs');
+const versions = require('../conversation/runtime-artifacts.cjs');
 
 function safeCacheName(value) {
   // Apply shared output-name constraints to relative path segments across platforms.
@@ -87,20 +88,30 @@ async function ensureDirectory(root, relative = '') {
     if (stat && (!stat.isDirectory() || stat.isSymbolicLink())) {
       throw Error('成果缓存目录包含不安全的链接');
     }
-    if (!stat) await fsp.mkdir(folder, { mode: 0o700 });
+    if (!stat) {
+      try { await fsp.mkdir(folder, { mode: 0o700 }); }
+      catch (error) { if (error.code !== 'EEXIST' || !(await fsp.lstat(folder)).isDirectory()) throw error; }
+    }
   }
   return chain[chain.length - 1];
 }
 
-async function checksum(target, limit) {
-  const digest = crypto.createHash('sha256');
-  let count = 0;
-  for await (const chunk of fs.createReadStream(target)) {
-    count += chunk.length;
-    if (count > limit) throw Error('成果超出本地保存限制');
-    digest.update(chunk);
-  }
-  return digest.digest('hex');
+async function checksum(target, expectedSize) {
+  const file = await fsp.open(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  try {
+    const initial = await file.stat({ bigint: true });
+    if (!initial.isFile() || initial.nlink !== 1n || Number(initial.size) !== expectedSize) throw Error('成果文件已变化');
+    const digest = crypto.createHash('sha256');
+    let count = 0;
+    for await (const chunk of file.createReadStream({ autoClose: false })) {
+      count += chunk.length;
+      if (count > expectedSize) throw Error('成果文件已变化');
+      digest.update(chunk);
+    }
+    const stat = await fsp.lstat(target, { bigint: true });
+    if (count !== expectedSize || !versions.same(versions.stamp(initial), versions.stamp(stat))) throw Error('成果文件已变化');
+    return { stat, sha256: digest.digest('hex') };
+  } finally { await file.close(); }
 }
 
 function create({ app, identityOf, sessionOf, fetch = fetchWithDeviceAuthRetry,
@@ -126,7 +137,7 @@ function create({ app, identityOf, sessionOf, fetch = fetchWithDeviceAuthRetry,
       identity.session = current.session;
     };
     await assertCurrent();
-    return { cwd: real, identity, assertCurrent };
+    return { cwd: real, identity, owner, handle, assertCurrent };
   }
 
   async function listAttachments(identity, taskId) {
@@ -185,10 +196,11 @@ function create({ app, identityOf, sessionOf, fetch = fetchWithDeviceAuthRetry,
     }
   }
 
-  async function materialize({ ref, taskId, previewOnly = false } = {}) {
+  async function materializeBatch({ ref, taskId, previewOnly = false } = {}) {
     if (!ref || !taskId) throw Error('这份成果缺少任务归属，请刷新会话后重试');
     if (!/^[A-Za-z0-9-]{1,64}$/.test(String(taskId))) throw Error('任务标识无效，请刷新会话后重试');
-    const { cwd, identity, assertCurrent } = await resolveScope(ref);
+    const { cwd, identity, owner, handle, assertCurrent } = await resolveScope(ref);
+    cacheAccess.revoke(handle, taskId);
     const batch = currentGroup(await listAttachments(identity, taskId), taskId);
     const attachments = previewOnly ? batch.filter(outputCache.canPreview) : batch;
     await assertCurrent();
@@ -200,8 +212,10 @@ function create({ app, identityOf, sessionOf, fetch = fetchWithDeviceAuthRetry,
           total + expected > TOTAL_LIMIT) throw Error('成果超出本地保存限制');
       total += expected;
     }
-    const root = await ensureDirectory(cwd, path.posix.join(CACHE_DIR, String(taskId)));
-    const artifacts = [];
+    const userData = fs.realpathSync(app.getPath('userData'));
+    const destination = cacheAccess.directory(app, owner, identity.hub, handle.sessionId || ref, taskId);
+    const root = await ensureDirectory(userData, path.relative(app.getPath('userData'), destination).split(path.sep).join('/'));
+    const artifacts = [], stamps = new Map();
     for (const row of attachments) {
       await assertCurrent();
       const relative = safeCacheName(row.filename || row.name || row.path || '');
@@ -216,16 +230,21 @@ function create({ app, identityOf, sessionOf, fetch = fetchWithDeviceAuthRetry,
       if (advertised && !/^[a-f0-9]{64}$/i.test(advertised)) throw Error('成果校验摘要无效');
       // Reuse cached names only when both size and declared digest match the current batch.
       // Otherwise download and verify before replacement; failed downloads must not expose old bytes as new output.
-      const reusable = stat && stat.size === Number(row.size) && advertised &&
-        await checksum(target, FILE_LIMIT) === advertised;
-      const verifiedHash = reusable ? advertised : await downloadOne(identity, row, target, assertCurrent,
-        () => ensureDirectory(cwd, path.relative(cwd, path.dirname(target)).split(path.sep).join('/')));
-      const final = fs.statSync(target);
+      const expected = Number(row.size);
+      let verified = stat && stat.size === expected && advertised ? await checksum(target, expected) : null;
+      if (!verified || verified.sha256 !== advertised) {
+        const downloaded = await downloadOne(identity, row, target, assertCurrent, () => ensureDirectory(userData,
+          path.relative(userData, path.dirname(target)).split(path.sep).join('/')));
+        verified = await checksum(target, expected);
+        if (verified.sha256 !== downloaded) throw Error('成果完整性校验失败');
+      }
+      const final = verified.stat;
+      stamps.set(target, versions.stamp(final));
       const kind = deliveryContract._kindOf(relative) || 'file';
       const category = String(row.evidenceMeta?.category || row.category || '').toLowerCase();
       artifacts.push({
-        path: target, relative, name: path.basename(relative), size: final.size,
-        at: Math.round(final.mtimeMs), sha256: verifiedHash, kind, changedInTurn: true,
+        path: target, relative, name: path.basename(relative), size: Number(final.size),
+        at: Math.round(Number(final.mtimeNs) / 1e6), sha256: verified.sha256, kind, changedInTurn: true,
         primary: row.role !== 'supporting' && !['supporting', 'internal', 'evidence'].includes(category),
         role: row.role || 'output', taskId, attachmentId: row.id,
         remoteMaterialized: true, round: Math.max(0, Number(row.evidenceMeta?.round) || 0),
@@ -233,9 +252,29 @@ function create({ app, identityOf, sessionOf, fetch = fetchWithDeviceAuthRetry,
     }
     await assertCurrent();
     if (!artifacts.length) throw Error('成果未能保存到本地，请重试');
+    cacheAccess.publish(handle, ref, taskId, root, stamps, assertCurrent);
     return { ok: true, cwd, taskId, artifacts };
   }
 
+  // A renderer can request the same batch through an automatic preview and a
+  // manual file action. Serialize writes and grant publication for that handle.
+  const pending = new WeakMap();
+  function materialize(request = {}) {
+    const { ref, taskId, previewOnly = false } = request;
+    const handle = sessionOf?.(String(ref || ''));
+    if (!handle) return materializeBatch(request);
+    let tasks = pending.get(handle);
+    if (!tasks) { tasks = new Map(); pending.set(handle, tasks); }
+    const previous = tasks.get(taskId);
+    if (previous?.ref === ref && previous?.previewOnly === previewOnly) return previous.promise;
+    const job = { ref, previewOnly };
+    job.promise = (previous?.promise.catch(() => {}) || Promise.resolve()).then(() => {
+      if (sessionOf(String(ref || '')) !== handle) throw Error('会话已变化，请重新打开成果');
+      return materializeBatch(request);
+    }).finally(() => { if (tasks.get(taskId) === job) tasks.delete(taskId); });
+    tasks.set(taskId, job);
+    return job.promise;
+  }
   return { materialize };
 }
 
@@ -254,4 +293,4 @@ function install({ app, ipcMain, identityOf, sessionOf, ownerOf }) {
   return controller;
 }
 
-module.exports = { create, install, CACHE_DIR, safeCacheName };
+module.exports = { create, install, CACHE_DIR: cacheAccess.CACHE_DIR, safeCacheName };

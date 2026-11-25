@@ -186,7 +186,7 @@ function executionPrompt(raw) {
     '- Inspect the real workspace first, state a concise plan, then continue straight into implementation in this same turn.',
     '- Run one continuous delivery loop using your native tool loop. Build the smallest end-to-end usable slice first, then close applicable quality gaps.',
     '- Do not stop after a plan, code snippet, backend-only layer, or unverified claim. Mark a coverage layer not applicable only from workspace facts.',
-    '- Run real build/test/start/user-journey checks. When the product has a UI, inspect it and save up to 6 representative final screenshots under .soduwork/evidence/.',
+    '- Run real build/test/start/user-journey checks. When the product has a UI, inspect it using the browser and retain the tool receipts. Save screenshot files in the project only when requested as deliverables.',
     '- Keep narration short and business-facing: one sentence at phase changes, never a transcript of commands, file reads, or internal implementation detail.',
     '- Finish only after the deliverables and evidence are real. SoduWork will independently score the result and may return one focused gap.',
   ].join('\n\n');

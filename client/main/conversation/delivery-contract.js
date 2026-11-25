@@ -348,43 +348,74 @@ function classify(cwd, files) {
   return result;
 }
 
+// A final reply can nominate an output already observed during this turn.
+// A link alone never grants access to a file or satisfies execution checks.
+function fromReply(cwd, snapshot, scanned) {
+  if (!cwd || !scanned?.files?.length) return scanned;
+  const existing = scanned.delivery?.source === 'manifest';
+  if (existing && (!scanned.turnSince || scanned.delivery.presentation === 'summary' || scanned.delivery.warnings?.length))
+    return scanned;
+  const selection = require('./delivery-selection');
+  const { request, answer } = selection.turn(snapshot || {});
+  if (!answer) return scanned;
+  if (answer.length > 256 * 1024) return scanned;
+  const markdown = require('../../core/markdown');
+  const linked = new Set();
+  markdown.walkTokens(markdown.lexer(answer), token => {
+    if (token.type !== 'link' || !token.href || /^(?:[a-z][a-z0-9+.-]*:|[/]{2}|#)/i.test(token.href)) return;
+    try {
+      const target = path.resolve(cwd, decodeURIComponent(token.href));
+      if (kindOf(target) && inside(cwd, target)) linked.add(target);
+    } catch (_) { /* Invalid URL encoding is not a file reference. */ }
+  });
+  if (!linked.size) return scanned;
+  if (existing) {
+    // An explicitly updated manifest and policies for grouped, withdrawn or
+    // networked outputs remain authoritative. A stale simple list from an
+    // older producer should not mask this turn's newly verified deliverable.
+    try {
+      const file = path.join(cwd, MANIFEST_RELATIVE);
+      require('../plugin-resources').assertNoLinks(cwd, file);
+      if (fs.statSync(file).mtimeMs >= scanned.turnSince) return scanned;
+      const manifest = readManifest(cwd);
+      if (!manifest || manifest.invalid || manifest.runtime || manifest.processFiles?.length ||
+          manifest.deliverables.some(item => item?.files?.length || item?.replaces?.length || item?.primary === false || item?.role))
+        return scanned;
+      if ([...linked].every(target => scanned.delivery.items.some(item => path.resolve(item.path) === target))) return scanned;
+    } catch (_) { return scanned; }
+  }
+  const { portablePath, excludedName } = require('./portable-workspace');
+  const { assertNoLinks } = require('../plugin-resources');
+  const items = [], requestCaptures = selection.requestsCaptures(request);
+  for (const file of scanned.files) {
+    if (!file.changedInTurn || !file.path || !file.relative || file.processEvidence ||
+        isProcess(file) && !(requestCaptures && kindOf(file.relative) === 'image') || !kindOf(file.relative) ||
+        !linked.has(path.resolve(file.path))) continue;
+    try {
+      portablePath(file.relative);
+      if (file.relative.split('/').some(part => part.startsWith('.') || excludedName(part))) continue;
+      const root = fs.realpathSync(cwd), target = path.join(root, file.relative);
+      assertNoLinks(root, target);
+      const stat = fs.lstatSync(target);
+      if (!stat.isFile() || stat.nlink !== 1 || fs.realpathSync(file.path) !== target ||
+          stat.size !== file.size || Math.round(stat.mtimeMs) !== file.at) continue;
+      items.push(publicFile(file, { primary: true }, cwd));
+      linked.delete(path.resolve(file.path));
+    } catch (_) { /* A stale or non-portable link is not an output receipt. */ }
+  }
+  if (!items.length) return scanned;
+  return { ...scanned, delivery: { schemaVersion: 1, source: 'conversation', presentation: 'artifacts',
+    items, warnings: linked.size ? ['部分交付链接未匹配本轮工作区文件，请核对后重新交付'] : [],
+    workspaceFileCount: scanned.files.length, omittedCount: scanned.files.length - items.length } };
+}
+
 function instructions() {
   return [
-    '[SoduWork \u4ea4\u4ed8\u6e05\u5355\u534f\u8bae]',
-    '先依据本次需求判断是否需要交付文件：说明、问答或代码变更不强制生成文件；明确要求网页、文档等成品时必须交付可实际使用的成果。最终交付、必需依赖和过程验证材料分开登记，不能用截图或测试报告代替用户要求的成品。',
-    '工程开发、修复或代码审查以变更总结、验证结果和已有提交链接收尾，不要把源码、README 或专门生成的总结文档做成成果卡。此类任务将清单写为 {"schemaVersion":1,"presentation":"summary","summary":"变更摘要","deliverables":[]}；用户明确要求可下载文件或网页成品时才登记成果。',
-    '单个文件直接交付原文件；多个文件组成一个保留结构的 ZIP。单 HTML 使用本地 HTTP 预览；需要服务的网页必须启动并验证实际运行 URL，右侧优先打开该 URL，不要用静态入口代替运行中的应用。',
-    '同一成果的附属文件可在该 deliverable 的 files 数组中列出工作区相对文件路径，保留目录结构。只列最终运行所需文件，不包含输入材料、密钥、缓存、依赖目录和中间过程文件。多文件成果以一个交付包呈现。',
-    '清单描述当前完整交付版本，不能不断追加会话中所有生成文件。修改或转换格式时更新对应条目，并用 replaces 数组记录被替代的旧相对路径；旧文件保留作历史，不再列为当前交付。用户明确要求保留两种格式时才同时列出。最终回复链接到当前成品。',
-    '浏览器验证截图、测试报告、生成脚本放在 .soduwork/evidence 等过程目录，不列入 deliverables 或 files；已有过程文件可在 processFiles 数组中登记相对路径。网页只列入口与实际使用的资源。只有用户明确要求交付截图时才把截图作为独立成果，不能自行把验证图当成最终成品。',
-    '网站如果依赖后端同源接口，在 runtime 中设置 networkPolicy:"online"，并用 externalDependencies 明确列出接口路径（如 ["/api/v1"]）。必须实际启动服务并验证接口；不要把接口伪造成静态文件。CSS、JS、图片和 Worker 仍须完整打包。',
-    [
-      '\u6e90\u7801\u3001\u4f9d\u8d56\u3001\u914d\u7f6e\u3001\u65e5\u5fd7\u3001\u6d4b\u8bd5\u3001',
-      '\u5ba1\u67e5 JSON \u548c\u622a\u56fe\u5c5e\u4e8e\u8fc7\u7a0b\u8bc1\u636e\uff0c',
-      '\u4e0d\u662f\u9ed8\u8ba4\u4ea4\u4ed8\u7269\u3002',
-    ].join(''),
-    [
-      '\u5b8c\u6210\u5e76\u9a8c\u8bc1\u540e\u521b\u5efa .soduwork/delivery.json\uff0c',
-      '\u53ea\u767b\u8bb0\u7528\u6237\u53ef\u76f4\u63a5\u6d88\u8d39\u7684\u6700\u7ec8\u6210\u679c\u3002',
-    ].join(''),
-    [
-      '\u683c\u5f0f\uff1a{"schemaVersion":1,"summary":"\u4ea4\u4ed8\u6458\u8981",',
-      '"deliverables":[{"path":"\u76f8\u5bf9\u8def\u5f84",',
-      '"kind":"document|presentation|spreadsheet|pdf|website|image|video|archive|file",',
-      '"title":"\u540d\u79f0","summary":"\u8bf4\u660e","primary":true}]}\u3002',
-    ].join(''),
-    [
-      '\u6587\u6863\u3001PPT\u3001\u8868\u683c\u548c PDF \u767b\u8bb0\u6700\u7ec8\u6587\u4ef6\uff1b',
-      '\u7f51\u7ad9\u53ea\u767b\u8bb0\u53ef\u6253\u5f00\u7684\u5165\u53e3 HTML\uff0c',
-      '\u4f18\u5148\u6784\u5efa\u4ea7\u7269 index.html\uff0c',
-      'CSS、JS、图片等运行依赖放入该入口的 files 清单，不登记为独立成果，也不能因其是源码而从交付包中遗漏。',
-    ].join(''),
-    [
-      '\u666e\u901a\u95ee\u7b54\u6ca1\u6709\u6700\u7ec8\u6587\u4ef6\u65f6',
-      '\u4e0d\u8981\u521b\u5efa\u6e05\u5355\uff1b',
-      '\u6e05\u5355\u662f\u8fd0\u884c\u65f6\u4ea4\u4ed8\u4e8b\u5b9e\uff0c',
-      '\u4e0d\u8981\u5728\u7528\u6237\u56de\u590d\u4e2d\u89e3\u91ca\u5b83\u3002',
-    ].join(''),
+    '[SoduWork 交付清单协议]',
+    '说明、问答、开发和审查以答复、实际改动及验证结果收尾。需要交付文件时，在最终答复中用 Markdown 链接逐一指向本轮完成的成品，例如 [打开网页](dist/index.html)。',
+    '使用工作区相对路径。多个文件组成一个交付包时，保留真实依赖结构并链接入口；独立成品分别给出链接。涉及服务时必须实际启动、验证接口并给出实际运行地址。',
+    '不要在用户工程中创建会话清单、进度文件或验证目录。验证结果保留在工具回执和答复中；只有用户需要截图等文件时才保存到交付位置。',
+    '已存在的工程交付清单仍可读取，保留用户定义的文件、替代关系、网络依赖与导出规则。',
   ].join('\n');
 }
 
@@ -395,6 +426,7 @@ module.exports = {
   infer,
   readManifest,
   instructions,
+  fromReply,
   _inside: inside,
   _isProcess: isProcess,
   _kindOf: kindOf,

@@ -92,7 +92,9 @@ function allowedNavigation(raw, item) {
   if (!/^file:/i.test(value) || !item.ref) return false;
   try {
     const active = sessions.get(item.ref);
-    return Boolean(active && outputs.inside(item.previewCwd || active.cwd, fileURLToPath(value)));
+    const file = fileURLToPath(value);
+    return Boolean(active && !require('./pi-session/task-attachment-access.cjs').isPrivate(DEPS?.app, file) &&
+      outputs.inside(item.previewCwd || active.cwd, file));
   } catch (_) {
     return false;
   }
@@ -641,11 +643,14 @@ async function show(event, raw) {
     const source = sessions.get(item.ref);
     const project = require('./conversation/cloud-output-cache').project;
     const active = await project(source);
-    const resolved = fileTarget(item.ref, payload.target, active);
+    let access;
+    try { access = await require('./pi-session/task-attachment-access.cjs').authorize(DEPS.app, source, item.ref, payload.target); }
+    catch (error) { return { ok: false, reason: error.message }; }
+    const resolved = access ? { ok: true, path: path.resolve(payload.target) } : fileTarget(item.ref, payload.target, active);
     if (!resolved.ok) return resolved;
     const previewCwd = item.previewCwd = active.cwd;
-    if (/\.(?:html?|mp4|m4v|webm|mov|ogv)$/i.test(resolved.path)) {
-      const started = await artifactRuntime.previewInput(active, item.ref, resolved.path);
+    if (access || /\.(?:html?|mp4|m4v|webm|mov|ogv)$/i.test(resolved.path)) {
+      const started = await artifactRuntime.previewInput(active, item.ref, resolved.path, access);
       if (!started.ok) return started;
       if (sessions.get(item.ref) !== source || !liveContents(owner, item) || generation !== item.showGeneration) return closedResult();
       const currentSession = await project(source);

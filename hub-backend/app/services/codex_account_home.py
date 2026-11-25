@@ -12,9 +12,33 @@ import time
 from . import durable_file
 
 _MODE = b"native-account-v1\n"
+_CONNECTED = b"connected-account-v1\n"
 _LOCK = threading.RLock()
 _LOGINS: set[str] = set()
+_DESKTOP_SCOPE: str | None = None
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def start_desktop(scope) -> None:
+    """Only the private startup pipe may designate this process as desktop-owned."""
+    global _DESKTOP_SCOPE
+    with _LOCK:
+        _DESKTOP_SCOPE = ""
+        if scope:
+            bind_desktop(scope)
+
+
+def bind_desktop(scope) -> bool:
+    """A running process may acquire its initial owner, never switch owners."""
+    global _DESKTOP_SCOPE
+    with _LOCK:
+        if _DESKTOP_SCOPE is None or not isinstance(scope, str) or not re.fullmatch(r"[0-9a-f]{64}", scope):
+            return False
+        if _DESKTOP_SCOPE and _DESKTOP_SCOPE != scope:
+            _DESKTOP_SCOPE = "blocked"
+            return False
+        _DESKTOP_SCOPE = scope
+        return True
 
 
 def _safe(path: str) -> None:
@@ -28,6 +52,11 @@ def _safe(path: str) -> None:
 
 def _directory(data_root: str, *parts: str, create: bool = False) -> str:
     path = os.path.abspath(data_root)
+    scope = _DESKTOP_SCOPE
+    if scope is not None:
+        if scope in {"", "blocked"}:
+            raise RuntimeError("请先登录 SoduWork 后再连接个人 Codex 账号")
+        parts = ("codex-accounts", scope, *parts)
     for part in parts:
         path = os.path.join(path, part)
         _safe(path)
@@ -40,20 +69,25 @@ def _selection_file(data_root: str) -> str:
     return os.path.join(_directory(data_root, "agents"), ".codex-account-mode")
 
 
-def _read_mode(path: str) -> bool:
+def _read_mode(path: str, *, binding=False) -> bytes:
     _safe(path)
     _safe(path + ".wal")
     try:
         value = durable_file.read_bytes(path)
     except FileNotFoundError:
-        return False
-    if value != _MODE:
+        return b""
+    if value != _MODE and not (binding and value == _CONNECTED):
         raise RuntimeError("Codex 独立登录设置无法读取，请在 Agent 管理中重新登录")
-    return True
+    return value
 
 
 def account_home(data_root: str, *, create: bool = False) -> str:
     return _directory(data_root, "agents", "codex-account", create=create)
+
+
+def connected_home(data_root: str, *, create: bool = False) -> str:
+    """The ordinary connection owns its auth, native cache and refresh writes."""
+    return _directory(data_root, "agents", "codex-connected", create=create)
 
 
 def selected_home(data_root: str) -> str:
@@ -62,27 +96,30 @@ def selected_home(data_root: str) -> str:
         return account_home(data_root) if _read_mode(_selection_file(data_root)) else ""
 
 
-def activate(data_root: str) -> None:
-    """Select a private account only after its native login has been verified."""
+def activate(data_root: str, *, connected: bool = False) -> None:
+    """Select a private profile only after its native login has been verified."""
     with _LOCK:
         marker = _selection_file(data_root)
         _safe(marker)
         _safe(marker + ".wal")
-        durable_file.write_bytes(marker, _MODE)
+        if connected:
+            durable_file.remove(marker)
+        else:
+            durable_file.write_bytes(marker, _MODE)
 
 
 def model_catalog_home(data_root: str, ref: str) -> str:
     """Resolve the runtime's account binding without creating a home or importing login data."""
-    from .codex_runtime_home import _folder, login_source_home
     with _LOCK:
         if ref:
-            conversation = _directory(data_root, "agents", "codex", _folder(ref))
+            conversation = conversation_dir(data_root, ref)
             if os.path.isdir(conversation):
                 binding = os.path.join(conversation, ".soduwork-account-home")
-                if _read_mode(binding):
-                    return account_home(data_root)
+                mode = _read_mode(binding, binding=True)
+                if mode:
+                    return (account_home if mode == _MODE else connected_home)(data_root)
                 return "" if os.path.lexists(binding + ".wal") else conversation
-        return selected_home(data_root) or os.path.realpath(login_source_home(os.environ))
+        return selected_home(data_root) or connected_home(data_root)
 
 
 def runtime_home(data_root: str, conversation_home: str) -> str:
@@ -93,38 +130,43 @@ def runtime_home(data_root: str, conversation_home: str) -> str:
             raise RuntimeError("Codex 会话目录不属于当前 Runner")
         _safe(conversation_home)
         binding = os.path.join(conversation_home, ".soduwork-account-home")
-        if _read_mode(binding):
-            return account_home(data_root, create=True)
+        mode = _read_mode(binding, binding=True)
+        if mode:
+            return (account_home if mode == _MODE else connected_home)(data_root, create=True)
         if os.path.lexists(binding) or os.path.lexists(binding + ".wal"):
             raise RuntimeError("Codex 会话登录目录设置尚未完成，请检查数据目录后新建对话")
         if os.path.exists(conversation_home):
             return ""
-        chosen = selected_home(data_root)
+        independent = bool(selected_home(data_root))
+        home = (account_home if independent else connected_home)(data_root, create=True)
         os.mkdir(conversation_home, mode=0o700)
-        if chosen:
+        try:
+            durable_file.write_bytes(binding, _MODE if independent else _CONNECTED)
+        except BaseException:
+            # Only roll back an empty directory created by this attempt.
             try:
-                durable_file.write_bytes(binding, _MODE)
-            except BaseException:
-                # Remove only this attempt's new, empty directory. A committed
-                # marker, WAL, or native journal keeps its original ownership.
-                try:
-                    os.rmdir(conversation_home)
-                except OSError:
-                    pass
-                raise
-            return account_home(data_root, create=True)
-        return ""
+                os.rmdir(conversation_home)
+            except OSError:
+                pass
+            raise
+        return home
 
 
-def environment(data_root: str, *, create: bool = False) -> dict:
+def conversation_dir(data_root: str, ref: str) -> str:
+    from .codex_runtime_home import _folder
+    return _directory(data_root, "agents", "codex", _folder(ref))
+
+
+def environment(data_root: str, *, create: bool = False, connected: bool = False) -> dict:
     """Build native account process settings without inspecting any auth file."""
     env = dict(os.environ)
     for key in ("NODE_OPTIONS", "ELECTRON_RUN_AS_NODE", "CODEX_CONFIG",
                 "DEFAULT_AUTH_REQUEST", "MODEL_PROVIDER", "OPENAI_BASE_URL",
                 "OPENAI_MODEL", "SODUWORK_LLM_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN"):
         env.pop(key, None)
-    env["CODEX_HOME"] = account_home(data_root, create=create)
+    env["CODEX_HOME"] = (connected_home if connected else account_home)(data_root, create=create)
     env["CODEX_SQLITE_HOME"] = env["CODEX_HOME"]
+    env["TMPDIR"] = env["TEMP"] = env["TMP"] = env["CODEX_HOME"]
     return env
 
 

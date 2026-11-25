@@ -9,10 +9,12 @@ import json
 import functools
 import os
 import platform
+from contextlib import nullcontext
 from pathlib import Path
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 import threading
 
@@ -138,12 +140,21 @@ def _stamp(path: str):
 
 def _run_probe(executable: str, args: list[str], timeout: int = 8) -> str:
     try:
-        result = subprocess.run(
-            [executable, *args], env=clean_env(), stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
-            text=True, encoding="utf-8", errors="replace",
-            **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
-               if os.name == "nt" else {}))
+        env = clean_env()
+        is_npm = bool(args and Path(args[0]).name == "npm-cli.js")
+        with tempfile.TemporaryDirectory(prefix="soduwork-npm-probe-") if is_npm else nullcontext() as cache:
+            if cache:
+                # Even npm root and --version can rotate a user's debug logs.
+                for key in list(env):
+                    if key.lower() in {"npm_config_cache", "npm_config_logs_dir"}:
+                        env.pop(key)
+                env.update(npm_config_cache=cache, npm_config_logs_dir=os.path.join(cache, "_logs"))
+            result = subprocess.run(
+                [executable, *args], env=env, stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
+                text=True, encoding="utf-8", errors="replace",
+                **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+                   if os.name == "nt" else {}))
         return result.stdout.strip()[:300] if result.returncode == 0 else ""
     except (OSError, subprocess.TimeoutExpired):
         return ""

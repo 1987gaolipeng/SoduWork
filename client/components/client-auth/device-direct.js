@@ -176,7 +176,8 @@
       }
       for (const file of value.files || []) {
         const label = document.createElement('label'), checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.value = file.path;
-        label.append(checkbox, document.createTextNode(file.path + ' · ' + size(file.size))); files.append(label);
+        const paths = file.historyAlias ? file.path + ' / ' + file.historyAlias : file.path;
+        label.append(checkbox, document.createTextNode(paths + ' · ' + size(file.size))); files.append(label);
       }
       host.querySelector('[data-select-all]').onclick = () => { files.querySelectorAll('input').forEach(input => { input.checked = true; }); };
       host.querySelector('[data-start]').onclick = () => run(async valid => {

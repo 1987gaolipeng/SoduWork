@@ -84,9 +84,13 @@ def prepare_session_environment(env: dict, data_root: str, runtime_ref: str,
     """Bind owned history without requiring, loading or publishing model credentials."""
     scope = hashlib.sha256(str(runtime_ref or uuid.uuid4().hex).encode("utf-8")).hexdigest()[:32]
     directory = Path(data_root).absolute() / "agent-runtimes" / "pi" / scope
+    namespace = Path(data_root).resolve() / "agent-runtimes" / "pi" / scope
     try:
+        for path in (directory, directory / "sessions", directory / "models.json", directory / "npm-cache"):
+            if not path.resolve().is_relative_to(namespace):
+                raise OSError("Pi storage leaves the execution directory")
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         raise RuntimeError("Pi 模型配置无法写入，请检查执行机数据目录权限和磁盘空间后重试。") from exc
     try:
         _preserve_session(directory, env, run or {})
@@ -94,10 +98,12 @@ def prepare_session_environment(env: dict, data_root: str, runtime_ref: str,
         raise RuntimeError("Pi 原执行会话无法安全恢复，请保留现有记录并检查执行机上的会话文件后重试。") from exc
     # Explicit paths avoid Python/Node HOME differences and stale desktop state.
     for key in list(env):
-        if key.upper() in {"PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR"}:
+        if key.upper() in {"PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR", "NPM_CONFIG_CACHE"}:
             del env[key]
     env["PI_CODING_AGENT_DIR"] = str(directory)
     env["PI_CODING_AGENT_SESSION_DIR"] = str(directory / "sessions")
+    # Even a native package lookup writes an npm debug log.
+    env["npm_config_cache"] = str(directory / "npm-cache")
     return directory
 
 

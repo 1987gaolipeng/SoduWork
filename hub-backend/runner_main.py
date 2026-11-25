@@ -752,6 +752,12 @@ class Runner:
             # refresh performs discovery later and reports it to the Hub.
             self._agent_inventory_at = 0
             return {"ok": True, "data": result}
+        if op == "runtime.codexAccount.bind":
+            from app.services import codex_account_home
+            accepted = codex_account_home.bind_desktop(message.get("scope"))
+            if accepted:
+                self._agent_inventory_at = 0
+            return {"ok": accepted}
         if op == "runtime.reconnect":
             # Trusted desktop pipe only. This never interrupts live work or a
             # healthy socket; it wakes a disconnected Runner after login.
@@ -1741,7 +1747,8 @@ class Runner:
                     bundle = await runner_local_rpc.to_thread(
                         plugin_resources.materialize, personal_resources,
                         str(ctx.get('workDir') or self.work_root),
-                        str(dict(ctx.get('personalPluginMeta') or {}).get('key') or ''))
+                        str(dict(ctx.get('personalPluginMeta') or {}).get('key') or ''),
+                        cache_scope=hashlib.sha256(expected_ref.encode()).hexdigest())
                     from app.services.skill_read_scope import ReadScope
                     ctx['_resourceReadScope'] = ReadScope.capture([bundle['directory']])
                     ctx['personalPluginContext'] = str(ctx.get('personalPluginContext') or '') + '\n\n' + plugin_resources.guidance(bundle)
@@ -2067,7 +2074,7 @@ class Runner:
                         "error": "本地模型只能通过本机私有通道测试"}
         if op == "agent.install":
             action = str(m.get("action") or "install")
-            if action not in ("install", "update", "uninstall", "check", "login", "login-isolated", "login-cancel") or (action.startswith("login") and key != "codex"):
+            if action not in ("install", "update", "uninstall", "check", "login", "login-reuse", "login-isolated", "login-cancel") or (action.startswith("login") and key != "codex"):
                 return {"ok": False, "error": "不认识的操作"}
             if action == "login-cancel":
                 try:
@@ -2482,6 +2489,8 @@ def main() -> None:
         except (OSError, ValueError, UnicodeError) as exc:
             log.error("Runner startup configuration rejected (%s)", type(exc).__name__)
             raise SystemExit(2)
+        from app.services import codex_account_home
+        codex_account_home.start_desktop(conf.get("codexAccountScope"))
     if a.config:
         try:
             # Read configuration as utf-8-sig to accept Windows tools that write a BOM.

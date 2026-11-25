@@ -20,7 +20,8 @@ class ProductIncubatorTests(unittest.TestCase):
         self.assertEqual(by_key["accept_release"]["type"], "human_review")
         self.assertEqual(by_key["accept_delivery"]["type"], "human_review")
         self.assertIn("accept_release", by_key["deliver"]["dependsOn"])
-        self.assertIn(".soduwork/delivery.json", by_key["deliver"]["config"]["prompt"])
+        self.assertIn("Markdown 链接交付已核验的 product-delivery.zip 和 delivery-report.md", by_key["deliver"]["config"]["prompt"])
+        self.assertNotIn(".soduwork/", by_key["deliver"]["config"]["prompt"])
         self.assertEqual(by_key["complete"]["dependsOn"], ["accept_delivery"])
         for node in workflow["nodes"]:
             for item in node["inputs"]:

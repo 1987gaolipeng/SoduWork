@@ -3,11 +3,8 @@
 /*
  * Local Markdown memory.
  *
- * Personal summaries live in Electron's userData/memory directory. Project
- * and workspace summaries live beside the worktree in .soduwork/*.md. This
- * module deliberately has no Hub dependency: local memory is a document, not
- * a database record. The caller must provide the current worktree when it
- * wants to read or edit .soduwork files.
+ * All generated summaries live under Electron's userData/memory directory.
+ * A workspace may also contain read-only Markdown from earlier releases.
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -29,6 +26,7 @@ const MAX_SUMMARY = 320;
 // user-facing list without deleting them.
 const PERSONAL_MEMORY_FILE = 'personal.md';
 const PERSONAL_STATE_FILE = '.personal-state.json';
+const DIMENSION_DIR = '.soduwork-scoped-memory';
 const SCOPES = new Set(['personal', 'workspace', 'project']);
 const PROJECT_FILES = new Set(['memory.md', 'decisions.md', 'project-memory.md', 'soduwork-project-memory.md']);
 const WORKSPACE_FILES = new Set(['context.md', 'conventions.md', 'workspace-memory.md', 'soduwork-workspace-memory.md']);
@@ -97,21 +95,20 @@ function userMemoryRoot(app, owner = '') {
   return realRoot(owned);
 }
 
-function workspaceRoot(cwd) {
+function workspaceRoots(cwd) {
   const root = realRoot(cwd);
-  if (!root) return '';
+  if (!root) return [];
   // Keep the established .soduwork layout, but preserve the Markdown memory
   // library used by earlier SoduWork/Workbuddy workspaces as a local source.
   // Do not scan the whole project tree or ordinary documentation.
   const candidates = [path.join(root, '.soduwork'), path.join(root, '.workbuddy', 'memory')];
-  for (const candidate of candidates) {
-    try {
-      const stat = fs.lstatSync(candidate);
-      if (stat.isDirectory() && !stat.isSymbolicLink()) return fs.realpathSync(candidate);
-    } catch (_) { /* try the next supported local memory root */ }
-  }
-  return '';
+  return candidates.filter(candidate => {
+    try { return fs.lstatSync(candidate).isDirectory() && fs.realpathSync(candidate) === candidate; }
+    catch (_) { return false; }
+  });
 }
+function workspaceRoot(cwd) { return workspaceRoots(cwd)[0] || ''; }
+
 function scopeForFile(file, kind) {
   if (kind === 'personal') {
     if (path.basename(path.dirname(file)).toLowerCase() === 'sessions') return 'session';
@@ -166,7 +163,7 @@ function record(kind, root, file, content, bytes) {
     revision: crypto.createHash('sha256').update(content, 'utf8').digest('hex'),
     filePath: file, directory: path.dirname(file),
     ...(kind === 'personal' && scopeForFile(file, kind) === 'personal' ? { editableContent: learning.displayContent(content) } : {}),
-    source: 'local-markdown', writable: true,
+    source: 'local-markdown', writable: kind === 'personal',
   };
   // Keep old bindings resolvable after the ID format migration without
   // exposing the path-shaped compatibility value to the renderer.
@@ -203,6 +200,7 @@ function scanPersonalFiles(root) {
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       const file = path.join(current, entry.name);
       if (entry.isSymbolicLink()) continue;
+      if (current === root && entry.name === DIMENSION_DIR) continue;
       if (entry.isDirectory()) { if (!['sessions', 'accounts'].includes(entry.name.toLowerCase())) walk(file); continue; }
       if (!entry.isFile() || !/\.(md|markdown)$/i.test(entry.name)) continue;
       if (file === path.join(root, PERSONAL_MEMORY_FILE)) continue;
@@ -281,28 +279,37 @@ function scanWorkspace(root) {
     .map(entry => readRecord('workspace', root, path.join(root, entry.name))).filter(Boolean);
 }
 
-function allRecords(app, cwd, owner = '') {
+function allRecords({ app, cwd, owner = '', scopes = [] }) {
   const personal = userMemoryRoot(app, owner);
-  const workspace = workspaceRoot(resolveCwd(app, cwd));
+  const workspaces = workspaceRoots(resolveCwd(app, cwd));
   let personalRows = consolidatePersonal(personal);
   if (owner) { learning.reconcile({ root: personal, write: atomicWrite, backfill: true }); personalRows = consolidatePersonal(personal); }
-  return { personal: personalRows, workspace: scanWorkspace(workspace),
-    personalRoot: personal, workspaceRoot: workspace };
+  const managed = [];
+  for (const { scope, key } of scopes) {
+    if (!key || !['workspace', 'project'].includes(scope)) continue;
+    const file = localFileForScope(personal, scope, key);
+    if (!file) continue;
+    for (const candidate of [file, file.replace(/\.md$/, '-auto.md')]) {
+      const row = readRecord('workspace', path.dirname(file), candidate);
+      if (row) managed.push(row);
+    }
+  }
+  return { personal: personalRows, managed, legacy: workspaces.flatMap(scanWorkspace) };
 }
 
-function list({ app, owner = '', cwd = '', scope = '' } = {}) {
+function list({ app, owner = '', cwd = '', scope = '', scopes = [] } = {}) {
   if (scope && !SCOPES.has(scope)) throw Error('记忆范围无效');
-  const rows = allRecords(app, cwd, owner);
-  const items = [...rows.personal, ...rows.workspace]
+  const rows = allRecords({ app, cwd, owner, scopes });
+  const items = [...rows.personal, ...rows.managed, ...rows.legacy]
     .filter(item => item.scope !== 'session' && (!scope || item.scope === scope))
     .map(({ content, editableContent, ...item }) => item);
   return { ok: true, accountKey: owner, items, hasMore: false };
 }
 
-function get({ app, owner = '', cwd = '', id } = {}) {
+function get({ app, owner = '', cwd = '', id, scopes = [] } = {}) {
   if (!id || typeof id !== 'string' || id.length > 320 || /[\r\n]/.test(id)) throw Error('记忆标识无效');
-  const rows = allRecords(app, cwd, owner);
-  const item = [...rows.personal, ...rows.workspace].find(row => row.id === id || row.legacyId === id || row.aliases?.includes(id));
+  const rows = allRecords({ app, cwd, owner, scopes });
+  const item = [...rows.personal, ...rows.managed, ...rows.legacy].find(row => row.id === id || row.legacyId === id || row.aliases?.includes(id));
   if (!item) throw Error('本地记忆不存在');
   return { ok: true, item };
 }
@@ -358,13 +365,13 @@ function createPersonal({ app, owner = '', title = '', content = '' } = {}) {
 function metadata({ app, owner = '', cwd = '' } = {}) {
   const personal = userMemoryRoot(app, owner);
   const resolved = resolveCwd(app, cwd);
-  const workspace = workspaceRoot(resolved);
+  const workspace = realRoot(resolved);
   return {
     ok: true,
     personalDirectory: personal,
     personalFile: path.join(personal, PERSONAL_MEMORY_FILE),
     personalMaxBytes: MAX_PERSONAL_BYTES,
-    workspaceDirectory: workspace || path.join(resolved, '.soduwork'),
+    workspaceDirectory: path.join(personal, DIMENSION_DIR, 'workspace'),
     scopes: { personal: true, workspace: Boolean(workspace), project: Boolean(workspace), session: false },
   };
 }
@@ -374,6 +381,7 @@ function update({ app, owner = '', cwd = '', id, content, revision = '' } = {}) 
   const bytes = Buffer.byteLength(content, 'utf8');
   const result = get({ app, owner, cwd, id });
   const item = result.item;
+  if (!item.writable) throw Error('工作区和项目记忆为只读');
   if (!bytes) throw Error('记忆文档大小无效');
   const maxBytes = item.scope === 'personal' ? MAX_PERSONAL_BYTES : MAX_BYTES;
   if (bytes > maxBytes) throw Error(item.scope === 'personal' ? '个人记忆内容超过 16 MiB' : '记忆文档大小无效');
@@ -382,14 +390,14 @@ function update({ app, owner = '', cwd = '', id, content, revision = '' } = {}) 
     content = learning.restoreMarkers(item.content, content);
     if (Buffer.byteLength(content, 'utf8') > MAX_PERSONAL_BYTES) throw Error('个人记忆内容超过 16 MiB');
   }
-  const root = item.scope === 'personal' || item.scope === 'session' ? userMemoryRoot(app, owner) : workspaceRoot(resolveCwd(app, cwd));
+  const root = userMemoryRoot(app, owner);
   const file = path.resolve(root, item.relativePath);
   const extension = path.extname(file).toLowerCase();
   if (!inside(root, file) || !['.md', '.markdown'].includes(extension)) throw Error('记忆文档路径无效');
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink()) throw Error('记忆文档路径无效');
-  atomicWrite(file, content, item.scope === 'personal' || item.scope === 'session' ? 0o600 : undefined);
-  const next = readRecord(item.scope === 'personal' || item.scope === 'session' ? 'personal' : 'workspace', root, file);
+  atomicWrite(file, content, 0o600);
+  const next = readRecord('personal', root, file);
   if (!next) throw Error('记忆文档写入后无法读取');
   return { ok: true, item: next };
 }
@@ -411,54 +419,59 @@ function generatedMarkdown(digest, scope, key) {
   return content;
 }
 
-function localFileForScope(app, cwd, scope, key, owner = '') {
-  if (scope === 'session') {
-    const root = userMemoryRoot(app, owner);
-    const dir = path.join(root, 'sessions');
-    try {
-      const stat = fs.lstatSync(dir);
-      if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error('Invalid session memory directory');
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-      fs.mkdirSync(dir, { mode: 0o700 });
+function localFileForScope(root, scope, key, create = false) {
+  const hash = crypto.createHash('sha256').update(String(key)).digest('hex');
+  const parts = scope === 'session' ? ['sessions'] : [DIMENSION_DIR, scope, hash];
+  let dir = root;
+  for (const part of parts) {
+    dir = path.join(dir, part);
+    if (create) {
+      try { fs.mkdirSync(dir, { mode: 0o700 }); }
+      catch (error) { if (error.code !== 'EEXIST') throw error; }
     }
-    return path.join(dir, crypto.createHash('sha256').update(String(key)).digest('hex') + '.md');
+    try {
+      if (fs.lstatSync(dir).isDirectory()) continue;
+    } catch (error) { if (error.code === 'ENOENT' && !create) return ''; throw error; }
+    if (create) throw Error('Invalid memory directory');
+    return '';
   }
-  const root = workspaceRoot(resolveCwd(app, cwd)); if (!root) return '';
-  const name = scope === 'workspace' ? 'soduwork-workspace-memory.md' : 'soduwork-project-memory.md';
-  return path.join(root, name);
+  return path.join(dir, scope === 'session' ? hash + '.md' : 'soduwork-' + scope + '-memory.md');
 }
 
 function signedMarkdown(content) {
   return '<!-- soduwork-generated-sha256=' + crypto.createHash('sha256').update(content).digest('hex') + ' -->\n' + content;
 }
 
-function canReplaceGenerated(file) {
+// Return the signed bytes, an empty string for a new file, or null for a file
+// that must be preserved. Identical retries leave the file and timestamp intact.
+function generatedFileContent(file) {
   try {
     const stat = fs.lstatSync(file);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_BYTES) return false;
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_BYTES) return null;
     const text = fs.readFileSync(file, 'utf8');
     const match = /^<!-- soduwork-generated-sha256=([a-f0-9]{64}) -->\n([\s\S]*)$/.exec(text);
-    return Boolean(match && crypto.createHash('sha256').update(match[2]).digest('hex') === match[1]);
-  } catch (error) { if (error.code === 'ENOENT') return true; throw error; }
+    return match && crypto.createHash('sha256').update(match[2]).digest('hex') === match[1] ? text : null;
+  } catch (error) { if (error.code === 'ENOENT') return ''; throw error; }
 }
 
-function saveDigest({ app, owner = '', cwd = '', digest, scopes = [] } = {}) {
+function saveDigest({ app, owner = '', digest, scopes = [] } = {}) {
   if (!digest || !Array.isArray(scopes)) return { ok: true, saved: [], skipped: [] };
   const saved = [], skipped = [];
   for (const item of scopes.slice(0, 3)) {
     const scope = String(item && item.scope || '');
     if (!['session', 'workspace', 'project'].includes(scope)) continue;
     const key = String(item && item.key || '').trim(); if (!key) continue;
-    let file = localFileForScope(app, cwd, scope, key, owner); if (!file) continue;
-    const root = scope === 'session' ? userMemoryRoot(app, owner) : workspaceRoot(resolveCwd(app, cwd));
-    if (!root || !inside(root, file)) continue;
+    let file = localFileForScope(userMemoryRoot(app, owner), scope, key, true);
     // A manual edit invalidates the checksum. Preserve that document and write
     // to a separate managed companion; never replace a hand-edited Markdown file.
-    if (!canReplaceGenerated(file)) file = file.replace(/\.md$/, '-auto.md');
-    if (!canReplaceGenerated(file)) { skipped.push({ scope, key, reason: 'manual-edit' }); continue; }
+    let previous = generatedFileContent(file);
+    if (previous === null) {
+      file = file.replace(/\.md$/, '-auto.md');
+      previous = generatedFileContent(file);
+    }
+    if (previous === null) { skipped.push({ scope, key, reason: 'manual-edit' }); continue; }
     const content = signedMarkdown(generatedMarkdown(digest, scope, key));
-    atomicWrite(file, content, scope === 'session' ? 0o600 : undefined);
+    if (previous !== content) atomicWrite(file, content, 0o600);
     saved.push({ scope, key, fileName: path.basename(file) });
   }
   const session = scopes.find(item => item?.scope === 'session' && item.key);
@@ -471,22 +484,21 @@ function saveDigest({ app, owner = '', cwd = '', digest, scopes = [] } = {}) {
 }
 
 function context({ app, owner = '', cwd = '', scopes = [] } = {}) {
-  const rows = owner ? allRecords(app, cwd, owner).personal : [];
-  for (const item of Array.isArray(scopes) ? scopes.slice(0, 3) : []) {
-    const scope = String(item && item.scope || ''); const key = String(item && item.key || '').trim();
-    if (scope === 'session' && key) {
-      const file = localFileForScope(app, cwd, scope, key, owner); const root = userMemoryRoot(app, owner);
-      const row = file && root && inside(root, file) ? readRecord('personal', root, file) : null;
-      if (row) rows.push({ ...row, scope: 'session' });
-      continue;
-    }
-    if (scope === 'workspace' || scope === 'project') {
-      const candidates = list({ app, owner, cwd, scope }).items;
-      for (const candidate of candidates) {
-        try { rows.push(get({ app, owner, cwd, id: candidate.id }).item); } catch (_) { /* file changed during scan */ }
-      }
-    }
+  const selected = Array.isArray(scopes) ? scopes.slice(0, 3) : [];
+  const records = allRecords({ app, owner, cwd, scopes: selected });
+  const rows = owner ? [...records.personal] : [];
+  for (const { scope, key } of selected) {
+    if (scope !== 'session' || !key) continue;
+    const root = userMemoryRoot(app, owner);
+    const file = localFileForScope(root, scope, key);
+    const row = file && readRecord('personal', root, file);
+    if (row) rows.push(row);
   }
+  rows.push(...records.managed);
+  // Earlier workspace digests have no owner. Keep their explicit document IDs
+  // readable without automatically adding another account's history to a chat.
+  rows.push(...records.legacy.filter(row => selected.some(item => item.scope === row.scope) &&
+    !/<!-- soduwork-(?:generated-sha256=|managed-memory scope=)/.test(row.content)));
   const unique = rows.filter((row, i, all) => all.findIndex(other => other.id === row.id) === i);
   const prompt = unique.map(row => '--- ' + row.fileName + ' ---\n' + blockAwareSlice(contextContent(row.content), 12000)).join('\n\n').slice(0, 28000);
   return { ok: true, items: unique.map(({ content, editableContent, ...row }) => row), prompt };
@@ -503,7 +515,7 @@ function blockAwareSlice(content, max) {
   return text.slice(0, max);
 }
 
-function contextIds({ app, owner = '', cwd = '', ids = [] } = {}) {
+function contextIds({ app, owner = '', cwd = '', ids = [], scopes = [] } = {}) {
   const root = userMemoryRoot(app, owner); const items = [];
   for (const raw of Array.isArray(ids) ? ids.slice(0, 3) : []) {
     const id = String(raw || '').trim();
@@ -511,12 +523,12 @@ function contextIds({ app, owner = '', cwd = '', ids = [] } = {}) {
     // Explicit personal/workspace/project documents use their stable id.
     // Imported session evidence uses a private hashed key in sessions/.
     try {
-      const direct = get({ app, owner, cwd, id }).item;
+      const direct = get({ app, owner, cwd, id, scopes }).item;
       items.push(direct.scope === 'session' ? { ...direct, scope: 'session' } : direct);
       continue;
     } catch (_) { /* fall through to the hidden session store */ }
-    const file = localFileForScope(app, cwd, 'session', id, owner);
-    const row = readRecord('personal', root, file);
+    const file = localFileForScope(root, 'session', id);
+    const row = file && readRecord('personal', root, file);
     if (row) items.push({ ...row, scope: 'session' });
   }
   const unique = items.filter((row, i, all) => all.findIndex(other => other.id === row.id) === i);
@@ -525,7 +537,8 @@ function contextIds({ app, owner = '', cwd = '', ids = [] } = {}) {
 
 function remove({ app, owner = '', cwd = '', id } = {}) {
   const row = get({ app, owner, cwd, id }).item;
-  const root = row.scope === 'personal' || row.scope === 'session' ? userMemoryRoot(app, owner) : workspaceRoot(resolveCwd(app, cwd));
+  if (!row.writable) throw Error('工作区和项目记忆为只读');
+  const root = userMemoryRoot(app, owner);
   const file = path.resolve(root, row.relativePath);
   if (!inside(root, file)) throw Error('记忆文档路径无效');
   const stat = fs.lstatSync(file);

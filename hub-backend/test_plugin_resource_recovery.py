@@ -26,6 +26,7 @@ class PluginResourceRecoveryTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self.enterContext(patch.dict(os.environ, SODUWORK_DATA_ROOT=str(self.root / 'data')))
         self.initial = resources.materialize(RAW, self.root, KEY)
         self.directory = Path(self.initial['directory'])
         self.file = self.directory / PATH

@@ -1,4 +1,4 @@
-"""Explicit Codex connection jobs reuse native credentials without reading them."""
+"""Manage native Codex device authorization and explicit terminal-login reuse."""
 from __future__ import annotations
 
 import os
@@ -61,21 +61,11 @@ def shutdown(timeout: float = 8) -> bool:
 
 
 def environment(data_root: str) -> dict:
-    """Match the selected account scope; an ordinary install keeps the user's home."""
-    if account.selected_home(data_root):
-        return account.environment(data_root, create=True)
-    env = dict(os.environ)
-    for key in ("NODE_OPTIONS", "ELECTRON_RUN_AS_NODE", "CODEX_CONFIG", "DEFAULT_AUTH_REQUEST",
-                "MODEL_PROVIDER", "OPENAI_BASE_URL", "OPENAI_MODEL", "SODUWORK_LLM_KEY",
-                "OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN"):
-        env.pop(key, None)
-    env["CODEX_HOME"] = os.path.abspath(str(os.environ.get("CODEX_HOME") or "").strip()
-        or os.path.join(os.path.expanduser("~"), ".codex"))
-    env["CODEX_SQLITE_HOME"] = env["CODEX_HOME"]
-    return env
+    """Use a Runner-owned profile for every status, login and refresh process."""
+    return account.environment(data_root, connected=not account.selected_home(data_root))
 
 
-def run(jid: str, executable: str, data_root: str, *, publish, execute=None, isolated=False) -> tuple[bool, str, int]:
+def run(jid: str, executable: str, data_root: str, *, publish, execute=None, isolated=False, reuse=False) -> tuple[bool, str, int]:
     """Only explicit missing authentication starts an official device flow."""
     with _LOCK:
         current = _PENDING.get(jid)
@@ -99,6 +89,8 @@ def run(jid: str, executable: str, data_root: str, *, publish, execute=None, iso
                 _PENDING.pop(jid, None)
                 if isolated:
                     account.activate(data_root)
+                elif reuse:
+                    account.activate(data_root, connected=True)
         if aborted:
             return was_cancelled()
         return finish("succeeded", "已检测到 Codex 登录，可测试连接；独立授权请新建对话使用" if isolated else
@@ -110,7 +102,10 @@ def run(jid: str, executable: str, data_root: str, *, publish, execute=None, iso
         publish({"state": "checking"})
         if not executable:
             return finish("failed", "未找到 Codex，请先安装后重新检查", 1, reason="runtime_missing")
-        env = account.environment(data_root, create=True) if isolated else environment(data_root)
+        if isolated or reuse:
+            env = account.environment(data_root, create=True, connected=reuse and not isolated)
+        else:
+            env = environment(data_root)
         if cancelled.is_set():
             return was_cancelled()
         # Explicit connection may prepare an empty home. Native status rejects
@@ -126,6 +121,21 @@ def run(jid: str, executable: str, data_root: str, *, publish, execute=None, iso
         if state != "unauthed":
             return finish("failed", "暂时无法确认 Codex 登录状态，请重新检查程序和本机访问权限", 1,
                           reason="status_unavailable")
+        if reuse and not isolated and env["CODEX_HOME"] == account.connected_home(data_root):
+            # This path is reachable only from the user's explicit reuse action.
+            # An already authenticated profile above keeps its own rotated token.
+            from .codex_runtime_home import _sync_auth, login_source_home
+            _sync_auth(login_source_home(os.environ), env["CODEX_HOME"])
+            if cancelled.is_set():
+                return was_cancelled()
+            state, _ = account.status(executable, env)
+            if state == "authed":
+                return succeeded(reused=True)
+            if state != "unauthed":
+                return finish("failed", "暂时无法确认 Codex 登录状态，请重新检查程序和本机访问权限", 1,
+                              reason="status_unavailable")
+        if cancelled.is_set():
+            return was_cancelled()
         expires_at = time.time() + 300
         progress = {"state": "waiting", "expiresAt": expires_at}
 

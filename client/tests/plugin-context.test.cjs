@@ -148,7 +148,7 @@ test('IPC forwards only bounded ids, main process re-resolves them and events re
   assert.match(ipc, /clearPluginSelection/);
   assert.doesNotMatch(ipc, /pluginContext\.compact\(rawOptions/);
   assert.match(ipc, /resolvePlugins: async \(pluginIds, projectId, turnContext\) =>/);
-  assert.match(ipc, /await pluginGrant\.resolve\(\{ app, identityOf, appContext,\s*allowUnavailableApp: turnContext\?\.allowUnavailableApp === true && !automationPluginLock,\s*ref: session\.get\(ref\)\?\.sessionId \|\| ref, pluginIds, projectId, cwd: spec\.cwd \}\)/);
+  assert.match(ipc, /await pluginGrant\.resolve\(\{ app, identityOf, appContext,\s*allowUnavailableApp: turnContext\?\.allowUnavailableApp === true && !automationPluginLock,\s*ref: session\.get\(ref\)\?\.sessionId \|\| ref, owner: session\.get\(ref\)\?\.deliveryOwner,\s*pluginIds, projectId, cwd: spec\.cwd \}\)/);
   assert.match(ipc, /capabilityIds: spec\.capabilityIds/);
   assert.match(session, /pluginContext\.augment/);
   assert.match(session, /pluginContext\.authorization/);

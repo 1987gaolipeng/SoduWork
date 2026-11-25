@@ -53,12 +53,12 @@ test('a copying conversation keeps temporary input alive through removal and win
     const copying=store.protect(lease.files);
     await store.handle(owner,'attachments.release',{ids:[file.id]});await store.dispose(owner);await lease.release();
     assert.equal(await fs.readFile(source,'utf8'),'clipboard content');
-    const staged=await attachments.stage(root,lease.files);
+    const staged=await attachments.stage(root,lease.files,{stagingDir:path.join(root,'inputs')});
     assert.equal(staged.files.length,1);assert.equal(staged.files[0].sourceRef,undefined);
     assert.notEqual(staged.files[0].path,source);await copying();
     await assert.rejects(fs.stat(source),{code:'ENOENT'});
     assert.equal(await fs.readFile(staged.files[0].path,'utf8'),'clipboard content');
-    assert.equal((await attachments.stage(root,staged.files)).files.length,1);
+    assert.equal((await attachments.stage(root,staged.files,{stagingDir:path.join(root,'inputs')})).files.length,1);
   } finally {await store.dispose(owner);await fs.rm(root,{recursive:true,force:true});}
 });
 test('source changes fail before admission, quota and binary contract reject oversized or forged inputs', async () => {

@@ -155,14 +155,19 @@ class AccountAcpTests(unittest.TestCase):
         self.assertEqual(run["cfg"], {})
 
     def test_actual_env_builder_protects_isolated_home_from_plugin_env(self):
-        from app.services import codex_runtime_home
+        from app.services import codex_account_home
         cfg = {account.TRANSPORT_KEY: account.TRANSPORT, "accessPolicy": self.policy,
-               "runtimeSecrets": {"CODEX_HOME": "PLUGIN_HOME", "OPENAI_API_KEY": "PLUGIN_KEY"}}
+               "runtimeSecrets": {name: "PLUGIN_HOME" for name in
+                                  ("CODEX_HOME", "CODEX_SQLITE_HOME", "TEMP", "TMP", "TMPDIR")}}
+        cfg["runtimeSecrets"]["OPENAI_API_KEY"] = "PLUGIN_KEY"
+        private = str(self.work / "runner")
         with patch.dict(os.environ, {"PLUGIN_HOME": "untrusted", "PLUGIN_KEY": "plugin-key"}, clear=True), \
-             patch.object(codex_runtime_home, "prepare", return_value="isolated-account"), \
              patch.object(local_base, "_codex_bin", return_value="native-codex"):
-            env = local_base._env_for(local_base._PROFILES["codex"], cfg, runtime_ref="account")
-        self.assertEqual(env["CODEX_HOME"], "isolated-account")
+            env = local_base._env_for(local_base._PROFILES["codex"], cfg, runtime_ref="account", runtime_root=private)
+        self.assertEqual(env["CODEX_HOME"], codex_account_home.connected_home(private))
+        self.assertEqual(env["CODEX_SQLITE_HOME"], env["CODEX_HOME"])
+        for key in ("TEMP", "TMP", "TMPDIR"):
+            self.assertTrue(Path(env[key]).is_relative_to(private))
         self.assertNotIn("OPENAI_API_KEY", env)
         self.assertEqual(env["CODEX_PATH"], "native-codex")
 

@@ -1,5 +1,5 @@
 /*
- * Stage conversation attachments in the workspace and expose them through agent context.
+ * Stage conversation attachments in session-owned storage and expose them through agent context.
  * Normalize trusted file-picker paths and clipboard bytes with shared limits and safe
  * names.
  */
@@ -7,6 +7,7 @@
 
 const fs = require('fs/promises');
 const path = require('path');
+const os = require('node:os');
 
 const MAX_FILES = 20;
 const MAX_BYTES = 256 * 1024 * 1024;
@@ -82,12 +83,13 @@ function inside(root, target) {
   return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
 }
 
-async function available(dir, name) {
+async function writeInput(dir, name, write) {
   const ext = path.extname(name);
   const stem = name.slice(0, name.length - ext.length);
   for (let index = 0; index < 1000; index++) {
     const candidate = path.join(dir, index ? `${stem}-${index + 1}${ext}` : name);
-    try { await fs.access(candidate); } catch (error) { return candidate; }
+    try { await write(candidate); return candidate; }
+    catch (error) { if (error.code !== 'EEXIST') throw error; }
   }
   throw new Error('附件重名过多');
 }
@@ -110,7 +112,12 @@ async function stageFiles(cwd, rawItems, options) {
   const warnings = [];
   const files = [];
   let bytes = 0;
-  let inputDir = '';
+  let inputDir = stagingDir;
+  async function inputDirectory() {
+    if (inputDir) await fs.mkdir(inputDir, { recursive: true, mode: 0o700 });
+    else inputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-inputs-'));
+    return inputDir;
+  }
   if (Array.isArray(rawItems) && rawItems.length > MAX_FILES) warnings.push(`最多接收 ${MAX_FILES} 个附件，其余已忽略`);
 
   for (const item of items) {
@@ -122,10 +129,8 @@ async function stageFiles(cwd, rawItems, options) {
       if (data) {
         if (bytes + data.byteLength > MAX_BYTES) { warnings.push('附件总大小超过 256 MB，超出的文件已忽略'); break; }
         bytes += data.byteLength;
-        inputDir = inputDir || stagingDir || path.join(cwd, '.soduwork-inputs');
-        await fs.mkdir(inputDir, { recursive: true });
-        const target = await available(inputDir, safeName(item.name || '粘贴附件'));
-        await fs.writeFile(target, data);
+        const target = await writeInput(await inputDirectory(), safeName(item.name || '粘贴附件'),
+          file => fs.writeFile(file, data, { flag: 'wx', mode: 0o600 }));
         files.push({ name: safeName(item.name || target), path: target,
           relative: inside(cwd, target) ? path.relative(cwd, target).replace(/\\/g, '/') : target,
           size: data.byteLength, mimeType: String(item.type || item.mimeType || item.contentType || ''),
@@ -157,10 +162,8 @@ async function stageFiles(cwd, rawItems, options) {
        * that file. Directories remain references because copying an entire tree
        * is unbounded and is handled by the explicit folder-input contract.
        */
-      inputDir = inputDir || stagingDir || path.join(cwd, '.soduwork-inputs');
-      await fs.mkdir(inputDir, { recursive: true });
-      const target = await available(inputDir, safeName(item.name || source));
-      await fs.copyFile(source, target);
+      const target = await writeInput(await inputDirectory(), safeName(item.name || source),
+        file => fs.copyFile(source, file, fs.constants.COPYFILE_EXCL));
       files.push({
         name: safeName(item.name || target), path: target,
         relative: inside(cwd, target) ? path.relative(cwd, target).replace(/\\/g, '/') : target,

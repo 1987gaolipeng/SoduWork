@@ -16,6 +16,8 @@ class SkillScopeTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="soduwork-skill-read-")
         self.root = Path(self.temp.name)
+        self.data = self.root / "data"
+        self.enterContext(patch.dict(os.environ, SODUWORK_DATA_ROOT=str(self.data)))
         self.work = self.root / "work"
         self.work.mkdir()
         self.package = self.root / ".agents" / "skills" / "enabled"
@@ -233,7 +235,10 @@ class SkillScopeTests(unittest.TestCase):
                   "directory": str(self.root)}  # Caller path is deliberately ignored.
         run = {"ws": str(self.work), "skillSelection": self.selected}
         scopes.for_run(run, {"skillSelection": self.selected, "pluginResourceBundles": [bundle]})
-        target = self.work / ".soduwork" / "plugins" / bundle["key"] / bundle["digest"] / "references" / "help.md"
+        root = Path(run["_resourceReadScope"].payload()[0]["path"])
+        self.assertTrue(root.is_relative_to(self.data / "plugin-resource-cache"))
+        self.assertFalse((self.work / ".soduwork").exists())
+        target = root / "references" / "help.md"
         self.assertEqual(target.read_text(), "Resource body")
         self.assertTrue(scopes.channel_scope(run).allows(str(self.work), str(target)))
         self.assertFalse(scopes.channel_scope(run).allows(str(self.work), str(self.root / "arbitrary.txt")))
@@ -306,7 +311,7 @@ class SkillScopeTests(unittest.TestCase):
                "mode": "work", "accessPolicy": self.policy, "skillSelection": self.selected,
                "cfg": {"pluginResourceBundles": bundles}}
         scopes.for_run(run, {"skillSelection": self.selected, "pluginResourceBundles": bundles})
-        resource = str(self.work / ".soduwork" / "plugins" / "sample-plugin" / bundles[0]["digest"] / "references" / "help.md")
+        resource = str(Path(run["_resourceReadScope"].payload()[0]["path"]) / "references" / "help.md")
         self.assertTrue(scopes.channel_scope(run).allows(str(self.work), resource))
         scope = run["_skillReadScope"]
         with patch.dict(local_base._RUNS, {ref: run}), patch.dict(local_ctx._PROFILES, {"qwen": {"bin": lambda: "fixture-cli", "resume": lambda *_: []}}), \

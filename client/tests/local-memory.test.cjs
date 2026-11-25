@@ -240,7 +240,20 @@ test('digest never overwrites a manually edited workspace document', t => {
   const result = local.saveDigest({ app: f.app, cwd: f.cwd, digest: { title: 'auto', fields: { summary: 'automatic' } }, scopes: [{ scope: 'project', key: 'p1' }] });
   assert.equal(result.ok, true);
   assert.match(fs.readFileSync(file, 'utf8'), /keep-manual/);
-  assert.ok(fs.existsSync(path.join(f.cwd, '.soduwork', 'soduwork-project-memory-auto.md')));
+  assert.equal(fs.existsSync(path.join(f.cwd, '.soduwork', 'soduwork-project-memory-auto.md')), false);
+  const scope = { scope: 'project', key: 'p1' };
+  const context = () => local.context({ app: f.app, cwd: f.cwd, scopes: [scope] });
+  const managed = context().items.find(row => row.filePath.startsWith(path.join(f.root, 'memory') + path.sep));
+  assert.match(fs.readFileSync(managed.filePath, 'utf8'), /automatic/);
+  fs.appendFileSync(managed.filePath, 'hand-edited note');
+  local.saveDigest({ app: f.app, cwd: f.cwd, digest: { fields: { summary: 'new summary' } }, scopes: [scope] });
+  assert.match(fs.readFileSync(managed.filePath, 'utf8'), /hand-edited note/);
+  assert.match(context().prompt, /new summary/);
+  const legacy = context().items.find(row => row.filePath === file);
+  assert.equal(legacy.writable, false);
+  assert.throws(() => local.update({ app: f.app, cwd: f.cwd, id: legacy.id, content: 'replaced' }), /只读/);
+  assert.throws(() => local.remove({ app: f.app, cwd: f.cwd, id: legacy.id }), /只读/);
+  assert.equal(fs.readFileSync(file, 'utf8'), '# manual\nkeep-manual\n');
 });
 
 test('local digest and explicit selection stay on the owner and never require Hub storage', t => {
@@ -258,7 +271,8 @@ test('local digest and explicit selection stay on the owner and never require Hu
   assert.equal(saved.saved.length, 2);
   assert.equal(local.contextIds({ app: f.app, owner, cwd: f.cwd, ids: [sessionKey] }).items.length, 1);
   assert.equal(local.contextIds({ app: f.app, owner: other, cwd: f.cwd, ids: [sessionKey] }).items.length, 0);
-  assert.ok(fs.existsSync(path.join(f.cwd, '.soduwork', 'soduwork-project-memory.md')));
+  assert.equal(fs.existsSync(path.join(f.cwd, '.soduwork', 'soduwork-project-memory.md')), false);
+  assert.match(local.context({ app: f.app, owner, cwd: f.cwd, scopes: [{ scope: 'project', key: 'project-1' }] }).prompt, /本地摘要/);
 });
 
 test('context includes existing custom Markdown in each local scope', t => {
@@ -328,4 +342,70 @@ test('context injection cuts at memory block boundaries instead of mid-block', t
   assert.equal(opens, closes);
   assert.ok(sliced.length < content.length);
   assert.equal(local.blockAwareSlice('短内容', 600), '短内容');
+});
+
+test('automatic scope files survive restarts, follow project keys and stay outside clean workspaces', t => {
+  const f = fixture(t), owner = 'a'.repeat(32);
+  const first = path.join(f.root, 'first'), second = path.join(f.root, 'second');
+  fs.mkdirSync(first); fs.mkdirSync(second);
+  const workspace = { scope: 'workspace', key: 'first-workspace' };
+  const project = { scope: 'project', key: 'same-project' };
+  const otherProject = { scope: 'project', key: 'other-project' };
+  const opts = { app: f.app, owner, cwd: first };
+  const save = (scope, summary) => local.saveDigest({ ...opts, digest: { fields: { summary } }, scopes: [scope] });
+  assert.equal(save(workspace, 'workspace-only').saved.length, 1);
+  assert.equal(save(project, 'first-project-only').saved.length, 1);
+  assert.equal(save(otherProject, 'second-project-only').saved.length, 1);
+  assert.equal(save(project, 'first-project-only').saved.length, 1);
+  delete require.cache[require.resolve('../main/conversation/local-memory')];
+  const reopened = require('../main/conversation/local-memory');
+  const restore = (options, scopes) => reopened.context({ ...options, scopes });
+  const result = restore(opts, [workspace, project]);
+  assert.equal(result.items.length, 2);
+  assert.match(result.prompt, /workspace-only/);
+  assert.match(result.prompt, /first-project-only/);
+  const managed = result.items.find(row => row.scope === 'project');
+  const oldDate = new Date('2005-01-02T00:00:00Z');
+  fs.utimesSync(managed.filePath, oldDate, oldDate);
+  save(project, 'first-project-only');
+  assert.equal(fs.statSync(managed.filePath).mtimeMs, oldDate.valueOf());
+  assert.match(reopened.get({ ...opts, scopes: [project], id: managed.id }).item.content, /first-project-only/);
+  assert.throws(() => reopened.get({ ...opts, owner: 'b'.repeat(32), scopes: [project], id: managed.id }), /不存在/);
+  assert.throws(() => reopened.get({ ...opts, scopes: [otherProject], id: managed.id }), /不存在/);
+  assert.doesNotMatch(result.prompt, /second-project-only/);
+  assert.equal(restore({ ...opts, owner: 'b'.repeat(32) }, [workspace, project]).prompt, '');
+  assert.equal(reopened.list({ ...opts, scope: 'personal' }).items.length, 0);
+  assert.equal(restore({ ...opts, cwd: second }, [{ scope: 'workspace', key: 'second-workspace' }]).prompt, '');
+  assert.match(restore({ ...opts, cwd: second }, [project]).prompt, /first-project-only/);
+  assert.deepEqual(fs.readdirSync(first), []);
+  assert.deepEqual(fs.readdirSync(second), []);
+});
+
+test('older generated workspace digests can be inspected but are never automatically injected across accounts', t => {
+  const f = fixture(t), file = path.join(f.cwd, '.soduwork', 'soduwork-project-memory.md');
+  const body = '# Old digest\n<!-- soduwork-managed-memory scope=project key=' + '0'.repeat(64) + ' -->\nprivate old summary';
+  const original = '<!-- soduwork-generated-sha256=' + crypto.createHash('sha256').update(body).digest('hex') + ' -->\n' + body;
+  fs.writeFileSync(file, original);
+  const opts = { app: f.app, owner: 'c'.repeat(32), cwd: f.cwd };
+  const scope = { scope: 'project', key: 'p1' };
+  const row = local.list({ ...opts, scope: 'project' }).items.find(item => item.filePath === file);
+  assert.equal(local.get({ ...opts, id: row.id }).item.content, original);
+  assert.doesNotMatch(local.context({ ...opts, scopes: [scope] }).prompt, /private old summary/);
+  assert.equal(fs.readFileSync(file, 'utf8'), original);
+});
+
+test('both legacy layouts retain read-only sources without following linked parents', t => {
+  const f = fixture(t), legacy = path.join(f.cwd, '.workbuddy', 'memory');
+  fs.mkdirSync(legacy, { recursive: true });
+  const historical = path.join(legacy, 'decisions.md');
+  fs.writeFileSync(historical, 'Earlier design decision');
+  const opts = { app: f.app, cwd: f.cwd, scopes: [{ scope: 'project', key: 'p1' }] };
+  assert.match(local.context(opts).prompt, /Earlier design decision/);
+  local.saveDigest({ ...opts, digest: { fields: { summary: 'Updated design' } } });
+  assert.deepEqual(fs.readdirSync(legacy), ['decisions.md']);
+  assert.equal(fs.readFileSync(historical, 'utf8'), 'Earlier design decision');
+  const other = path.join(f.root, 'linked-workspace');
+  fs.mkdirSync(other);
+  fs.symlinkSync(path.dirname(legacy), path.join(other, '.workbuddy'), 'junction');
+  assert.doesNotMatch(local.context({ ...opts, cwd: other }).prompt, /Earlier design decision/);
 });

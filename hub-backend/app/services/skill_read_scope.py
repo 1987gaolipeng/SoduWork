@@ -197,6 +197,7 @@ def materialize_bundles(bundles, workspace):
         digest = plugin_resources.digest(items)
         if not items or bundle.get("digest") != digest:
             raise ValueError("Plugin resource bundle checksum does not match")
-        result = plugin_resources.materialize(items, workspace, bundle.get("key"))
+        result = plugin_resources.materialize(items, workspace, bundle.get("key"),
+                                              cache_scope=bundle.get("cacheScope"))
         paths.append(result["directory"])
     return ReadScope.capture(paths)

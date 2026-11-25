@@ -125,6 +125,7 @@ chk("extra 允许被清空", P.normalize({"extra": ""}, base=P.normalize({"extra
 # Verify flow presets.
 chk("预设至少 5 套", len(PS.PRESETS) >= 5)
 for p in PS.PRESETS:
+    chk("Built-in presets keep task handoff in the reply", all(".soduwork/progress.md" not in step["detail"] for step in p["cfg"].get("steps") or PS.DEFAULT_STEPS))
     chk("预设「%s」配置合法" % p["name"], P.check(p["cfg"]) == "", P.check(p["cfg"]))
     txt = P.dev_flow("develop", True, "tms1", cfg=p["cfg"], env=WIN)
     chk("预设「%s」渲染出正文且红线在" % p["name"], len(txt) > 400 and "force push" in txt)

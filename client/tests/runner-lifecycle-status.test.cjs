@@ -50,7 +50,7 @@ async function fixture(t, options = {}) {
   }
   Object.assign(env, options.env);
   const app = { isPackaged: options.isPackaged !== false, getPath: () => root, whenReady: () => Promise.resolve(), on() {} };
-  const context = { module: { exports: {} }, __dirname: path.join(client, 'main'), Buffer,
+  const context = { module: { exports: {} }, __dirname: path.join(client, 'main'), Buffer, URL,
     process: Object.assign(Object.create(process), { resourcesPath: resources, env }),
     setTimeout: fn => { timers.push(fn); return fn; }, clearTimeout() {},
     require(name) {
@@ -72,6 +72,7 @@ async function fixture(t, options = {}) {
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), context, { filename: file });
   context.module.exports.install({ app, ipcMain: { handle: (id, fn) => handlers.set(id, fn) },
     identityOf: () => ({ ...secureIdentity }),
+    localOwnerOf: options.localOwnerOf, onSessionIssued: options.onSessionIssued,
     sessionOf: (_app, hub, clientId) => {
       assert.equal(hub, secureIdentity.hub);
       assert.equal(clientId, secureIdentity.clientId);
@@ -88,6 +89,16 @@ async function fixture(t, options = {}) {
     mobile: context.module.exports.setMobileCapabilities,
     report: data => children.at(-1).stdout.emit('data', '@@SODUWORK_RUNNER_STATUS@@' + JSON.stringify(data) + '\n') };
 }
+
+test('the private Runner pipe receives only the current trusted desktop account fingerprint', async t => {
+  const f = await fixture(t, { localOwnerOf: () => 'a'.repeat(32) });
+  const frame = JSON.parse(f.children[0].writes[0].split('@@SODUWORK_RUNNER_CONFIG@@')[1]);
+  const expected = require('node:crypto').createHash('sha256')
+    .update(JSON.stringify(['https://fixture.invalid', 'a'.repeat(32)])).digest('hex');
+  assert.equal(frame.codexAccountScope, expected);
+  assert.equal(f.configText().includes('codexAccountScope'), false);
+  assert.equal(f.configText().includes(expected), false);
+});
 
 for (const existingConfig of [false, true]) {
   test(`pending device waits for login with ${existingConfig ? 'a legacy' : 'no'} Runner configuration`, async t => {

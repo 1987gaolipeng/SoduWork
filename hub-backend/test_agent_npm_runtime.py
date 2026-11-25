@@ -160,6 +160,21 @@ class NodeResolutionTests(unittest.TestCase):
                 patch.object(N, 'configured_global_root', return_value=''):
             self.assertEqual(L._npm_root(), str(self.root / 'npm/node_modules'))
 
+    def test_npm_discovery_does_not_write_to_the_user_cache_or_logs(self):
+        def child(_args, **options):
+            env = options['env']
+            cache = Path(env['npm_config_cache'])
+            self.assertTrue(cache.is_dir())
+            self.assertNotEqual(cache, self.root / 'personal')
+            self.assertEqual(Path(env['npm_config_logs_dir']).parent, cache)
+            self.assertNotIn('NPM_CONFIG_CACHE', env)
+            self.assertNotIn('NPM_CONFIG_LOGS_DIR', env)
+            return type('Probe', (), {'returncode': 0, 'stdout': '/known/modules'})()
+        with patch.dict(os.environ, {'NPM_CONFIG_CACHE': str(self.root / 'personal'),
+                                    'NPM_CONFIG_LOGS_DIR': str(self.root / 'logs')}), \
+                patch.object(N.subprocess, 'run', side_effect=child):
+            self.assertEqual(N._run_probe('node', ['npm-cli.js', 'root', '--global']), '/known/modules')
+
     def test_configured_root_uses_installer_pair_and_tracks_npmrc(self):
         node, npm = self.runtime('native')
         root = str(self.root / 'custom npm/node_modules')

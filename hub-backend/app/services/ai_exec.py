@@ -841,9 +841,12 @@ def say_sync(ctx: dict, ref: str, text: str, *, record_user: bool = True, messag
     if record_user and p is _ai_local:
         try:
             from . import local_stream
-            local_stream.record_user_sync(ref, text)
+            recorded = local_stream.record_user_sync(ref, text)
+            if not recorded.get("ok"):
+                return {"ok": False, "error": recorded.get("error") or "无法保存本轮消息"}
         except Exception as error:  # noqa: BLE001
             log.warning("persist local user turn failed: %s", type(error).__name__)
+            return {"ok": False, "error": "无法保存本轮消息"}
     elif record_user and getattr(p, "PREFIX", "") == REMOTE_PREFIX:
         cfg["_recordUser"] = True
     try:

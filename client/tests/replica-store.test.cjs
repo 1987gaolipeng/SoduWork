@@ -170,3 +170,29 @@ test('worker commits cache and lifecycle in order and closes cleanly', async t =
     assert.equal((await store.list()).items.length, 0);
   } finally { await store.close(); }
 });
+
+test('a copied replica database rechecks old reviews in bounded catalog pages', t => {
+  const source = fixture(t), copy = fixture(t);
+  let store = create(source);
+  try {
+    const rows = store.register(Array.from({ length: 19 }, (_, index) => ({ id: 'chat-' + String(index).padStart(2, '0') })));
+    for (const row of rows) {
+      store.saveDeviceHistory(row.id, { snapshot: { messages: [], tools: [] } }, { expectedRevision: row.replicaRevision });
+    }
+    assert.deepEqual(store.archiveUpgradePage(), []);
+  } finally { store.close(); }
+  fs.copyFileSync(source, copy);
+  store = create(copy);
+  try {
+    const first = store.archiveUpgradePage(), second = store.archiveUpgradePage(first.at(-1).id);
+    assert.equal(first.length, 16);
+    assert.equal(second.length, 3);
+    assert.equal(new Set([...first, ...second].map(row => row.id)).size, 19);
+    for (const row of first) {
+      store.markArchiveReviewed(row.id, store.deviceHistoryVersion(row.id));
+    }
+  } finally { store.close(); }
+  store = create(copy);
+  try { assert.equal(store.archiveUpgradePage().length, 3); }
+  finally { store.close(); }
+});

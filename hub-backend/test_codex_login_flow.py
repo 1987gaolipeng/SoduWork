@@ -15,6 +15,7 @@ class CodexLoginFlowTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = self.temp.name
         self.environment = {"CODEX_HOME": self.root}
+        self.enterContext(patch.dict(os.environ, CODEX_HOME=str(Path(self.root, "terminal"))))
 
     def run_flow(self, states, execute=None, jid="fixture"):
         updates = []
@@ -141,7 +142,8 @@ class CodexLoginFlowTests(unittest.TestCase):
 
     def test_discovery_does_not_treat_unknown_native_status_as_authenticated(self):
         from app.services import agent_setup
-        with patch.object(flow.account, "selected_home", return_value=""), \
+        flow.account.connected_home(self.root, create=True)
+        with patch.object(agent_setup, "_data_root", return_value=self.root), \
                 patch.object(agent_setup, "_bin_of", return_value="fixture"), \
                 patch.object(agent_setup, "_account_auth_probe", return_value=("", "")), \
                 patch.dict(os.environ, {"OPENAI_API_KEY": "not-proof-of-native-login"}), \
@@ -217,15 +219,60 @@ class CodexLoginFlowTests(unittest.TestCase):
         flow.cancel("retry", self.root)
         flow.run("retry", "native", self.root, publish=lambda state: None)
 
-    def test_default_environment_uses_original_home_without_mutating_parent(self):
+    def test_default_environment_keeps_native_writes_in_a_managed_home(self):
         with patch.dict(os.environ, {"CODEX_HOME": self.root, "CODEX_CONFIG": "private-gateway",
                                      "SODUWORK_LLM_KEY": "not-native"}):
             before = dict(os.environ)
             actual = flow.environment(self.root)
-            self.assertEqual(actual["CODEX_HOME"], self.root)
+            self.assertEqual(actual["CODEX_HOME"], flow.account.connected_home(self.root))
+            self.assertEqual(actual["CODEX_SQLITE_HOME"], actual["CODEX_HOME"])
             self.assertNotIn("CODEX_CONFIG", actual)
             self.assertNotIn("SODUWORK_LLM_KEY", actual)
             self.assertEqual(dict(os.environ), before)
+
+    def test_explicit_reuse_imports_once_and_preserves_native_refresh(self):
+        from app.services.codex_runtime_home import prepare
+        independent = flow.account.account_home(self.root, create=True)
+        flow.account.activate(self.root)
+        self.assertEqual(prepare({}, self.root, "previous-chat"), independent)
+        personal = Path(os.environ["CODEX_HOME"])
+        personal.mkdir()
+        original = b'{"login":"fixture"}'
+        (personal / "auth.json").write_bytes(original)
+        observed = []
+        def status(executable, env):
+            home = Path(env["CODEX_HOME"])
+            observed.append(home)
+            self.assertEqual(str(home), flow.account.connected_home(self.root))
+            self.assertEqual(env["CODEX_SQLITE_HOME"], str(home))
+            return ("authed" if (home / "auth.json").exists() else "unauthed"), ""
+        with patch.object(flow.account, "status", side_effect=status):
+            for sequence in range(2):
+                self.assertTrue(flow.reserve("reuse", self.root))
+                ok, _, _ = flow.run("reuse", "fixture", self.root, reuse=True, publish=lambda _: None,
+                    execute=lambda *args, **kwargs: self.fail("Unexpected device login"))
+                self.assertTrue(ok)
+                if sequence == 0:
+                    self.assertEqual((observed[-1] / "auth.json").read_bytes(), original)
+                    (observed[-1] / "auth.json").write_bytes(b'{"login":"app-refreshed"}')
+        self.assertEqual((observed[-1] / "auth.json").read_bytes(), b'{"login":"app-refreshed"}')
+        self.assertEqual((personal / "auth.json").read_bytes(), original)
+        self.assertEqual([p.name for p in personal.iterdir()], ["auth.json"])
+        self.assertEqual(prepare({}, self.root, "new-chat"), str(observed[-1]))
+        self.assertEqual(prepare({}, self.root, "previous-chat"), independent)
+
+    def test_older_clients_only_authorize_within_the_managed_home(self):
+        from app.services import codex_runtime_home
+        observed = []
+        self.assertTrue(flow.reserve("legacy", self.root))
+        def authorize(argv, env, *args, **kwargs):
+            observed.append(env["CODEX_HOME"])
+            return 0
+        with patch.object(codex_runtime_home, "_sync_auth", side_effect=AssertionError("no implicit import")), \
+             patch.object(flow.account, "status", side_effect=[("unauthed", ""), ("authed", "")]):
+            result = flow.run("legacy", "fixture", self.root, publish=lambda _: None, execute=authorize)
+        self.assertTrue(result[0])
+        self.assertEqual(observed, [flow.account.connected_home(self.root)])
 
     def test_private_login_activates_only_after_explicit_verified_success(self):
         for index, (code, expected) in enumerate([(0, True), (1, False), (124, False), (130, False)]):

@@ -22,8 +22,10 @@ const attachment = (id, filename, bytes, extra = {}) => ({ id, taskId: 'task', f
   url: '/attachments/' + id + '?ticket=fixture', ...extra });
 
 async function fixture(t, options = {}) {
-  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-deliverable-'));
-  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-deliverable-'));
+  const cwd = path.join(root, 'project'), userData = path.join(root, 'profile');
+  await fs.mkdir(cwd); await fs.mkdir(userData);
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
   const bytes = new Map([
     ['page', '<!doctype html><title>五子棋</title><link rel="stylesheet" href="assets/style.css">'],
     ['css', 'body{background:#111;color:#eee}'],
@@ -68,10 +70,10 @@ async function fixture(t, options = {}) {
   const hub = 'http://127.0.0.1:' + server.address().port;
   const handle = { cwd: options.cwd === undefined ? cwd : options.cwd, deliveryOwner: 'fixture-owner' };
   const state = { handle, owner: 'fixture-owner', identity: { hub, clientId: 'fixture-device', session: 'fixture-session' } };
-  const config = { app: {}, identityOf: async () => state.identity, ownerOf: () => state.owner,
+  const config = { app: { getPath: () => userData }, identityOf: async () => state.identity, ownerOf: () => state.owner,
     sessionOf: () => state.handle };
   const controller = materializeModule.create(config);
-  return { cwd, bytes, calls, requests, controller, rows, hub, config, state };
+  return { cwd, userData, bytes, calls, requests, controller, rows, hub, config, state };
 }
 
 test('desktop attachment IPC uses the authenticated device session when legacy secret auth is disabled', async t => {
@@ -82,7 +84,7 @@ test('desktop attachment IPC uses the authenticated device session when legacy s
   const raw = { hub: f.hub, clientId: 'fixture-device', secret: 'fixture-secret' };
   require('node:vm').runInNewContext(install[0], {
     require: () => ({ install: options => materializeModule.install({ ...options, ownerOf: f.config.ownerOf }) }),
-    app: {}, ipcMain: { handle: (name, callback) => handlers.set(name, callback) },
+    app: f.config.app, ipcMain: { handle: (name, callback) => handlers.set(name, callback) },
     _piSessions: { get: f.config.sessionOf },
     _deviceAuth: { identity: () => raw, authenticatedIdentity: async () => ({ ...raw, session: 'fixture-session' }) },
   });
@@ -138,8 +140,9 @@ test('an account switch during file download cannot publish the old account byte
   const options = {}, f = await fixture(t, options);
   options.beforeDownload = () => { f.state.owner = 'different-owner'; };
   await assert.rejects(f.controller.materialize({ ref: 'r', taskId: 'task' }), /账号|会话/);
-  const listing = await fs.readdir(path.join(f.cwd, materializeModule.CACHE_DIR, 'task'), { recursive: true });
-  assert.deepEqual(listing, [], 'neither final bytes nor temporary bytes are left behind');
+  const files = await fs.readdir(f.userData, { recursive: true, withFileTypes: true });
+  assert.ok(files.every(entry => entry.isDirectory()), 'neither final bytes nor temporary bytes are left behind');
+  assert.deepEqual(await fs.readdir(f.cwd), []);
 });
 
 test('attachment URLs cannot direct authenticated requests to another origin', async t => {
@@ -165,7 +168,8 @@ test('current-round deliverables materialize as a group with verified bytes', as
   assert.equal(css.primary, false, 'supporting assets ride along but are not primary');
   assert.equal(css.relative, 'assets/style.css');
   assert.equal(await fs.readFile(css.path, 'utf8'), f.bytes.get('css'));
-  assert.ok(page.path.startsWith(path.join(f.cwd, materializeModule.CACHE_DIR, 'task')));
+  assert.deepEqual(await fs.readdir(f.cwd), []);
+  assert.ok(page.path.startsWith(path.join(f.userData, materializeModule.CACHE_DIR) + path.sep));
   const shot = result.artifacts.find(row => row.name === 'shot-dark.png');
   assert.equal(shot.attachmentId, 'shot');
 });
@@ -233,7 +237,7 @@ test('tampered or lying bytes are rejected before reaching the canvas', async t 
   const corrupt = await fixture(t, { corrupt: 'page' });
   await assert.rejects(corrupt.controller.materialize({ ref: 'r', taskId: 'task' }), /完整性|校验/);
   // The poisoned file must not survive as a "valid" cache entry.
-  const listing = await fs.readdir(path.join(corrupt.cwd, materializeModule.CACHE_DIR, 'task'), { recursive: true });
+  const listing = await fs.readdir(corrupt.userData, { recursive: true });
   assert.ok(!listing.some(name => String(name).endsWith('.tmp')), 'temporary files never linger');
 
   const missing = await fixture(t);
@@ -262,4 +266,76 @@ test('automatic website materialization does not download Office or archive sibl
   const manual = await f.controller.materialize({ ref: 'session', taskId: 'task' });
   assert.equal(manual.artifacts.length, 6);
   assert.equal(f.calls.filter(url => /\/(sheet|word|zip)\?/.test(url)).length, 3);
+});
+
+test('private previews serve only verified files of the current conversation and account', async t => {
+  const f = await fixture(t), ref = 'ref-1', handle = f.state.handle;
+  const access = require('../main/pi-session/task-attachment-access.cjs');
+  const runtime = require('../main/conversation/artifact-runtime');
+  const { artifacts } = await f.controller.materialize({ ref, taskId: 'task' });
+  const page = artifacts.find(file => file.attachmentId === 'page');
+  const grant = await access.authorize(f.config.app, handle, ref, page.path);
+  assert.ok(grant);
+  await assert.rejects(access.authorize(f.config.app, { ...handle }, ref, page.path));
+  await assert.rejects(access.authorize(f.config.app, handle, 'another-ref', page.path));
+  const unlisted = path.join(path.dirname(page.path), 'guess.txt');
+  await fs.writeFile(unlisted, 'unlisted');
+  await assert.rejects(access.authorize(f.config.app, handle, ref, unlisted));
+  const preview = await runtime.previewInput(handle, ref, page.path, grant);
+  assert.equal(preview.ok, true, preview.reason);
+  t.after(() => runtime.closeRef(ref));
+  const get = relative => fetch(new URL(relative, preview.url), { signal: AbortSignal.timeout(2000) });
+  assert.equal(await (await get('assets/style.css')).text(), f.bytes.get('css'));
+  assert.equal((await get('guess.txt')).status, 404);
+  const css = artifacts.find(file => file.attachmentId === 'css');
+  await fs.writeFile(css.path, 'tampered');
+  assert.equal((await get('assets/style.css')).status, 404);
+  f.state.owner = 'another-owner';
+  assert.equal((await get('index.html')).status, 404);
+  await assert.rejects(access.authorize(f.config.app, handle, ref, page.path));
+});
+
+test('a denied refresh revokes the previous media manifest and a reopened handle must revalidate', async t => {
+  const options = {}, f = await fixture(t, options), ref = 'r';
+  const access = require('../main/pi-session/task-attachment-access.cjs');
+  f.state.handle.sessionId = 'stable-conversation';
+  const cached = (await f.controller.materialize({ ref, taskId: 'task' })).artifacts[0].path;
+  const original = f.state.handle;
+  f.state.handle = { ...original };
+  await assert.rejects(access.authorize(f.config.app, original, ref, cached));
+  await assert.rejects(access.authorize(f.config.app, f.state.handle, ref, cached));
+  const downloads = f.calls.filter(url => !url.includes('/tasks/')).length;
+  await f.controller.materialize({ ref: 'reopened', taskId: 'task' });
+  assert.equal(f.calls.filter(url => !url.includes('/tasks/')).length, downloads);
+  assert.ok(await access.authorize(f.config.app, f.state.handle, 'reopened', cached));
+  options.listStatus = 403;
+  await assert.rejects(f.controller.materialize({ ref: 'reopened', taskId: 'task' }), /403/);
+  await assert.rejects(access.authorize(f.config.app, f.state.handle, 'reopened', cached));
+});
+
+test('artifact IPC accepts exact current cached files, preserves legacy paths and never edits the cache', async t => {
+  const f = await fixture(t), ref = 'r', handlers = new Map();
+  require('../main/pi-session/artifact-ipc').install({ app: f.config.app,
+    session: { get: f.config.sessionOf }, workDir: () => f.cwd,
+    BrowserWindow: {}, ipcMain: {handle: (name, callback) => handlers.set(name, callback)} });
+  const call = (name, ...args) => handlers.get('pi-session-' + name)({}, ref, ...args);
+  const [first, second] = await Promise.all([
+    f.controller.materialize({ ref, taskId: 'task', previewOnly: true }),
+    f.controller.materialize({ ref, taskId: 'task' }),
+  ]);
+  const css = first.artifacts.find(file => file.attachmentId === 'css').path;
+  assert.equal(second.artifacts.find(file => file.attachmentId === 'css').path, css);
+  assert.equal((await call('read-output', css)).text, f.bytes.get('css'));
+  assert.equal(Buffer.from((await call('read-output-binary', css)).data, 'base64').toString(), f.bytes.get('css'));
+  assert.equal((await call('write-output', css, 'modified')).ok, false);
+  const guessed = path.join(path.dirname(css), 'another.txt');
+  await fs.writeFile(guessed, 'unrelated');
+  assert.equal((await call('read-output', guessed)).ok, false);
+  assert.equal((await call('read-output-binary', guessed)).ok, false);
+  const old = path.join(f.cwd, '.soduwork-attachments', 'task', 'old.txt');
+  await fs.mkdir(path.dirname(old), { recursive: true }); await fs.writeFile(old, 'old result');
+  assert.equal((await call('read-output', old)).text, 'old result');
+  f.state.owner = 'another-owner';
+  assert.equal((await call('read-output', css)).ok, false);
+  assert.equal((await call('read-output-binary', css)).ok, false);
 });

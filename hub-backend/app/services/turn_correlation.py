@@ -42,5 +42,4 @@ def terminal(run):
     identity = [admission, max(1, int(run.get("round") or 1)), state]
     if not admission or state not in TERMINAL or run.get("turnEndIdentity") == identity:
         return None
-    run["turnEndIdentity"] = identity
     return stamp(run, {"kind": "turn-end", "text": "", "turnState": state})

@@ -11,7 +11,7 @@ function body(app) {
   const root = app.isPackaged ? path.join(process.resourcesPath, 'skills/app-developer') : path.resolve(__dirname, '../../skills/app-developer');
   const resource = (name, bytes, kind = 'reference') => ({ path: 'references/developer/' + name, kind, encoding: 'base64', content: Buffer.from(bytes).toString('base64') });
   return {
-    template: 'method', key: 'app-developer', name: '即用开发', version: '1.7.3',
+    template: 'method', key: 'app-developer', name: '即用开发', version: '1.7.4',
     locales: {
       'zh-CN': { name: '即用开发', description: '基于插件开发规范，制作带独立窗口、页面与 SoduWork 对话桥的即用，完成预检、安装和交互验证。' },
       'en-US': { name: 'App Developer', description: 'Build apps with dedicated windows, pages and the SoduWork conversation bridge; verify, install and test interactions.' },
@@ -36,7 +36,7 @@ function body(app) {
       '只设计当前即用的单个专属图标，可用单色标志或彩色图标；主体饱满、小尺寸清楚，不强加彩色底板。默认透明/白底/纯色底；禁止多色/跨色相渐变背景，尤其紫色、蓝紫、紫粉渐变及紫色光晕；确需渐变仅允许非紫色同色系明暗变化。生成提示与自检必须包含这些约束；顶层 icon 内嵌 PNG≤256px/96KB；按 icon-design.md 检查，不强制整套或灰色版。',
       '机器人通过 soduWorkApp.automation.create 复用真实计划；入口用业务词语。读取实际 SDK，不编造接口。',
       '严格执行 development-workflow.md：读真实 SDK；context.get 确认宿主；无顶层 connect；宿主错误不得降级浏览器存储；安装后实际打开验收。',
-      '最终磁盘草稿运行 scripts/validate.cjs；登记 .soduwork/delivery.json，走当前会话检查并安装；修复后重检；区分静态通过与实际业务验收。',
+      '最终磁盘草稿运行 scripts/validate.cjs；最终回复用相对路径的 Markdown 链接交付已验证的可安装草稿，走当前会话检查并安装；修复后重检；区分静态通过与实际业务验收。',
     ].join('\n'),
     runtimeCapabilities: ['files', 'terminal', 'browser'],
     resources: [

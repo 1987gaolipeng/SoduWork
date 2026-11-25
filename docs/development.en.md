@@ -82,6 +82,18 @@ An independently started source client defaults to `http://127.0.0.1:18989` when
 
 Run `npm test` and `npm run check:layout` in `client/`. Electron end-to-end checks live in `e2e/`; inspect each script's environment requirements. `dist/`, `.runtime/`, and generated `runner/` files are build outputs. Do not commit them or substitute old release binaries for current source.
 
+### Local conversations, memory and deliverables
+
+The desktop assigns its own conversation ID. It stores device transcripts and tool receipts in `conversation-replicas/history.sqlite` under application data. Native CLI IDs identify execution segments. Ordinary chats are readable across accounts on the same desktop. Account resources, project tasks, imported records and cloud runs retain their ownership checks.
+
+The desktop saves verified output files in `conversation-artifacts/`. Opening the history list starts a background upgrade of older workspace receipts in batches. Opening a conversation also rechecks its files. The original files must still match the recorded receipts. A title or filename in a reply cannot reconstruct a file that was removed before any copy was saved. Include desktop application data and valuable working files in device backups. Each archive generation holds up to 4,000 files and 512 MiB in total, with a 128 MiB limit per file. Recovery keeps older generations while a file still references them. History shows when an archive is incomplete. Previously saved files remain available.
+
+The desktop can use an installed CLI binary that supports the required protocol. The Runner directs native execution segments to application-managed data directories. Personal Codex connections belong to the signed-in SoduWork account. The model catalog and conversations use the same connection. A legacy connection with unverifiable ownership requires a one-time reconnect. The terminal CLI continues to use its own configuration.
+
+Automatic project and workspace memory is saved under `memory/` in application data, scoped to the account and project or workspace. Existing handwritten project memory remains readable. The default engineering workflow records progress in task replies. New tasks can link to outputs produced during the current turn in their final reply. Existing delivery manifests remain readable.
+
+Handoff requires two online desktops on the same account, a direct connection, review of the selected files and transfer of execution ownership. The target verifies the selected bytes. Native CLI databases and model logins stay on their devices. A conversation with an unresolved tool result remains available for reading. Execution recovery and handoff require a complete tool receipt.
+
 ## Skills and plugins
 
 Bundled skills live at `skills/<name>/SKILL.md`; see the [skill catalog](../skills/README.md) for project-owned guides and reviewed upstream development skills. Generic plugins and workflows live in `hub-backend/plugins/*.json`. Follow the [plugin protocol](plugin-authoring.en.md) for immutable versions, minimal permissions, and import review. Adding a bundled skill also requires explicitly updating the release scope in `tools/distribution/PUBLIC-SOURCE.json` and retaining its original license and provenance.

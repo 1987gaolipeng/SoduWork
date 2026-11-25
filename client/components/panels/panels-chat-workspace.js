@@ -198,10 +198,10 @@
   function canAutoPreview(file) {
     // Automatic output handling stays inside the right pane. Other results
     // remain conversation cards until the user chooses an explicit file action.
-    return !WB.historyPreview && !requiresExternalOpen(file, previewKind(file));
+    return !WB.historyPreview && !file.archivedReadOnly && !requiresExternalOpen(file, previewKind(file));
   }
   function requiresExternalOpen(file, kind) {
-    return kind === 'external' || (kind === 'pdf' && !(WB.historyPreview ? file.artifactId : file.path));
+    return kind === 'external' || (kind === 'pdf' && !((WB.historyPreview || file.archivedReadOnly) ? file.artifactId : file.path));
   }
   async function openExternalFile(file) {
     const current = previewOwner();
@@ -359,7 +359,7 @@
     if (target.kind === 'file' && openTaskOutput(target.file)) return true;
     WB.manualClosed = false;
     if (target.kind === 'file' && !isTaskPreview(target.file) &&
-        (previewKind(target.file) === 'external' || (previewKind(target.file) === 'pdf' && !target.file.path))) {
+        requiresExternalOpen(target.file, previewKind(target.file))) {
       artifactRequest(sessionApi(), context().ref, target.file, 'open');
       return true;
     }
@@ -609,7 +609,7 @@
       }).join('') + '</div>' : '<div class="ncw-files-empty">本次对话还没有可查看的文件。</div>') + '</section>';
   }
   function libraryUploadButton(file) {
-    if (WB.historyPreview) return '';
+    if (WB.historyPreview || file?.archivedReadOnly) return '';
     return global.LibraryTransfer?.button(file, context().ref, 'data-wb-library-upload') || '';
   }
 
@@ -646,7 +646,7 @@
       slot.setAttribute('data-native-preview-tab', tab.id);
       if (!tab.nativeReady) {
         if (tab.reloadNative) payload.reload = true;
-        if ((tab.kind === 'web' || (WB.historyPreview && tab.kind === 'pdf')) && tab.file.artifactId) {
+        if ((tab.kind === 'web' || ((WB.historyPreview || tab.file?.archivedReadOnly) && tab.kind === 'pdf')) && tab.file.artifactId) {
           Object.assign(payload, { kind: 'artifact', artifactId: tab.file.artifactId });
         } else if (tab.kind === 'web' || tab.kind === 'pdf') {
           Object.assign(payload, { kind: 'file', target: tab.file.path });

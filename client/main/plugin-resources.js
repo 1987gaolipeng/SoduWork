@@ -105,13 +105,28 @@ function collect(body, draftFile, workRoot) {
   return { ...body, resources: normalize(resources) };
 }
 
-function materialize(raw, workRoot, key, options) {
+function forTurn(raw, app, { cwd, ref = '', owner = '' }, key, options) {
+  if (!raw?.length) return materialize(raw, '', key, options);
+  const workspace = fs.realpathSync(cwd);
+  if (!fs.statSync(workspace).isDirectory()) throw new Error('当前会话工作目录不可用');
+  const cacheScope = hash(JSON.stringify([workspace, String(ref), String(owner)]));
+  const userData = path.resolve(app.getPath('userData'));
+  fs.mkdirSync(userData, { recursive: true, mode: 0o700 });
+  // Desktop Runner receives this same private data root over its config pipe.
+  const root = path.join(userData, 'runner', 'data', 'plugin-resource-cache', cacheScope);
+  assertNoLinks(userData, root);
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  assertNoLinks(userData, root);
+  return { ...materialize(raw, root, key, options), cacheScope };
+}
+
+function materialize(raw, cacheRoot, key, options) {
   const items = normalize(raw, options);
   if (!items.length) return { items: [], directory: '', digest: '', rescued: [], backups: [] };
   if (!/^[a-z][a-z0-9-]{1,62}$/.test(key)) throw new Error('插件标识不合法');
-  const root = path.resolve(workRoot);
-  if (!fs.statSync(root).isDirectory()) throw new Error('当前会话工作目录不可用');
-  const fingerprint = digest(items), directory = path.join(root, '.soduwork', 'plugins', key, fingerprint);
+  const root = path.resolve(cacheRoot);
+  if (!fs.statSync(root).isDirectory()) throw new Error('插件资源缓存目录不可用');
+  const fingerprint = digest(items), directory = path.join(root, key, fingerprint);
   const rescued = [], backups = [];
   // Content-addressed resource directories are intended to be immutable but may be edited externally.
   // Rejecting every later use would permanently block sends for that resource fingerprint.
@@ -121,8 +136,9 @@ function materialize(raw, workRoot, key, options) {
   const rescue = (file, label) => {
     let backup = '';
     try {
-      const backupDirectory = fs.mkdtempSync(path.join(directory, '.local-'));
-      backup = path.join(backupDirectory, ...label.split('/'));
+      // mkdtemp passes its prefix directly to Win32, even when the cache exceeds MAX_PATH.
+      const temporary = fs.mkdtempSync(path.toNamespacedPath(path.join(directory, '.local-')));
+      backup = path.join(directory, path.basename(temporary), ...label.split('/'));
       fs.mkdirSync(path.dirname(backup), { recursive: true });
       assertNoLinks(root, backup);
       try { fs.renameSync(file, backup); }
@@ -180,4 +196,4 @@ function guidance(bundle) {
     bundle.items.slice(0, 6).map(x => '- ' + x.path + '（' + x.kind + '）').join('\n') +
     '\n完整资源共 ' + bundle.items.length + ' 个文件，可在该目录查看。安装不会执行脚本；使用资源仍须遵守当前任务授权。' + rescueNote;
 }
-module.exports = { normalize, summary, digest, collect, materialize, guidance, resourcePath, assertNoLinks, readSized, MAX_FILES, MAX_FILE_BYTES, MAX_BYTES };
+module.exports = { normalize, summary, digest, collect, forTurn, materialize, guidance, resourcePath, assertNoLinks, readSized, MAX_FILES, MAX_FILE_BYTES, MAX_BYTES };

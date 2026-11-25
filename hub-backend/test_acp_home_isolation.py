@@ -73,6 +73,44 @@ class AcpHomeIsolationTests(unittest.TestCase):
                 self.assertEqual(self.marker.read_text(), "private-fixture-state")
                 self.assertEqual(list(self.personal.iterdir()), [self.marker])
 
+    def test_qwen_runtime_override_cannot_redirect_new_history_to_the_personal_cli(self):
+        _, root, home = self.config("qwen")
+        env = {"QWEN_RUNTIME_DIR": str(self.personal), "qwen_runtime_dir": str(self.personal)}
+        acp_agents.home_env("qwen", env, str(root))
+        self.assertEqual(Path(env["QWEN_RUNTIME_DIR"]), home)
+        self.assertNotIn("qwen_runtime_dir", env)
+        self.assertEqual(list(self.personal.iterdir()), [self.marker])
+        private = home / "prior-managed-runtime"
+        env["QWEN_RUNTIME_DIR"] = str(private)
+        acp_agents.home_env("qwen", env, str(root))
+        self.assertEqual(Path(env["QWEN_RUNTIME_DIR"]), private)
+
+    def test_agent_temporary_files_do_not_enter_user_workspaces(self):
+        work = self.root / "work"
+        work.mkdir()
+        cfg = {"llm": {"base": "http://localhost:9", "model": "fixture", "localOnly": True},
+               "local_workspace_root": str(work)}
+        runner = self.root / "runner"
+        for key in ("kimi", "qwen", "pi", "opencode", "dsh", "codex-harness"):
+            with self.subTest(agent=key):
+                env = local_base._env_for(local_base._PROFILES[key], cfg, "fixture", runtime_root=str(runner))
+                temporary = Path(env["TMPDIR"]).resolve()
+                self.assertTrue(temporary.is_relative_to(runner))
+                self.assertTrue(temporary.is_dir())
+                self.assertEqual(str(temporary), env["TMP"])
+                self.assertEqual(str(temporary), env["TEMP"])
+                self.assertEqual(list(work.iterdir()), [])
+
+    def test_external_link_cannot_redirect_a_managed_acp_home(self):
+        _, root, home = self.config("kimi")
+        try:
+            home.symlink_to(self.personal, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest("Directory links unavailable: " + str(exc))
+        with self.assertRaises(RuntimeError):
+            acp_agents.home_env("kimi", {}, str(root))
+        self.assertEqual(list(self.personal.iterdir()), [self.marker])
+
     def test_real_runner_refuses_failed_home_and_retries_after_repair(self):
         fixture = Path(__file__).with_name("tests") / "acp_home_runner_fixture.py"
         for agent in AGENTS:

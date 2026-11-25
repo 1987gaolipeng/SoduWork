@@ -178,8 +178,9 @@ test('personal plugin resolution returns bounded per-turn guidance and the built
     assert.match(result.items[1].context, /browser-use/);
     assert.equal(result.items[0].scopeLabel, '仅自己');
     assert.match(result.items[0].context, /soduwork-plugin-draft\.json/);
-    assert.match(result.items[0].context, /\.soduwork\/delivery\.json/);
-    assert.match(result.items[0].context, /primary/);
+    assert.match(result.items[0].context, /Markdown 链接交付可安装草稿/);
+    assert.doesNotMatch(result.items[0].context, /创建\s*\.soduwork\/delivery\.json/);
+    assert.match(result.items[0].context, /草稿内保留完整资源声明/);
     assert.match(result.items[1].context, /周报/);
     assert.match(result.items[1].context, /个人工作流草稿/);
     assert.match(result.items[1].context, /上传企业并审核发布后/);

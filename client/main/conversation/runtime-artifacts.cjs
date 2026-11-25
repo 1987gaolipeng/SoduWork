@@ -55,7 +55,7 @@ function restore(cwd, history, current = []) {
   const files = [];
   for (const row of history.items) {
     const file = row?.metadata;
-    if (!file?.artifactId || indexed.has(file.artifactId)) continue;
+    if (row.archiveOnly || !file?.artifactId || indexed.has(file.artifactId)) continue;
     try {
       const candidate = target(root, file.relative);
       if (!candidate) continue;
@@ -82,7 +82,7 @@ function forContinuation(cwd, recovered, previous) {
       if (input?.root !== root || !Array.isArray(input.resources)) continue;
       for (const row of [...input.items, ...input.resources]) {
         const name = row.metadata?.relative;
-        if (!name || !(packages.candidate(name) || packages.resource(name) || packages.BASELINE.test(name))) continue;
+        if (row.archiveOnly || !name || !(packages.candidate(name) || packages.resource(name) || packages.BASELINE.test(name))) continue;
         const older = entries.get(name);
         if (!older || same(older.stamp, row.stamp) || restore(cwd, { version: 1, root, items: [row] }).length)
           entries.set(name, row);

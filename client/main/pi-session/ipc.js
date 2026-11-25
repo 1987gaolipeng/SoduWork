@@ -581,11 +581,20 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         historyAccess.assertCurrent(app, historyActor, current);
         return current;
       };
+      const bindArchive = (handle, recovery) => {
+        if (!recovery?.artifactHistory?.archive) return;
+        _sharedHistory.bindContinuationArtifacts(handle, recovery, () => {
+          if (session.get(handle.ref) !== handle || _cloudHandoff.guard(handle))
+            throw Error('账号或会话已变化，请重新打开成果');
+        });
+      };
+      let verifiedArtifacts;
       const verifiedDeviceHistory = async () => {
         const verified = await _sharedHistory.prepareContinuation(local.id, { refresh: true });
         await assertHistoryCurrent();
         if (!historyAccess.usesDeviceChatContext(app, { chatId: local.id }, local, verified.row))
           throw Error('这条历史的归属已变化，请重新打开会话');
+        if (verified.artifactHistory?.archive) verifiedArtifacts = { row: verified.row, artifactHistory: verified.artifactHistory };
         return verified;
       };
       if (automationContext) automationAccess.assertCurrent(automationContext, identity);
@@ -721,6 +730,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           ].map((item) => String(item || '').trim()).filter(Boolean));
           if (!opts.requireTaskBinding || !requestedTaskId || boundTaskIds.has(requestedTaskId)) {
             await assertHistoryCurrent();
+            bindArchive(live, verifiedArtifacts);
             if (preview.appConversationOrigin?.(event?.sender)) await applicationEntries.remember(live, event?.sender, identity);
             require('./app-mcp-grant.cjs').bind(live, event?.sender, appPluginId, app, { identityOf: sendIdentityOf || identityOf });
             _bindUsage(live, identity, live.usageAgentKey || opts.adapterId || 'pi', automationContext);
@@ -882,7 +892,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         : memories.context(identity, memoryOptions);
       // Start optional memory lookup alongside attachment/capability preparation.
       memoryContextPromise.catch(() => {});
-      const inputDir = opts.cwd ? path.join(workDir(app), 'temp', ref, '.soduwork-inputs') : '';
+      const inputDir = path.join(workDir(app), 'temp', ref, '.soduwork-inputs');
       const staged = resume ? { files: [], warnings: [] }
         : await attachments.stage(cwd, opts.attachments, { stagingDir: inputDir });
       const resolved = await capabilityPromise;
@@ -959,7 +969,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           const appContext = await require('./app-mcp-grant.cjs').forSession(session.get(ref));
           const grants = await pluginGrant.resolve({ app, identityOf, appContext,
             allowUnavailableApp: turnContext?.allowUnavailableApp === true && !automationPluginLock,
-            ref: session.get(ref)?.sessionId || ref, pluginIds, projectId, cwd: spec.cwd });
+            ref: session.get(ref)?.sessionId || ref, owner: session.get(ref)?.deliveryOwner,
+            pluginIds, projectId, cwd: spec.cwd });
           automationPluginLock = null;
           return grants;
         },
@@ -1053,6 +1064,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         require('../conversation/requirement-context').assertOwner(app, opened.session, identity);
         accessConsent?.assertValid();
         await assertHistoryCurrent();
+        bindArchive(opened.session, deviceHistoryRecovery || verifiedArtifacts);
         if (preview.appConversationOrigin?.(event?.sender)) await applicationEntries.remember(opened.session, event?.sender, identity);
         require('./app-mcp-grant.cjs').bind(opened.session, event?.sender, appPluginId, app, { identityOf: sendIdentityOf || identityOf });
         _bindUsage(opened.session, identity, opts.adapterId || 'pi', automationContext);

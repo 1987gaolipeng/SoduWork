@@ -193,7 +193,7 @@ def discover(executable: str, home: str, *, check_default: bool = False) -> tupl
             before, before_stamp = _cache(home)
         except FileNotFoundError:
             before, before_stamp = {}, None
-        with tempfile.TemporaryDirectory(prefix="soduwork-codex-models-") as scratch:
+        with tempfile.TemporaryDirectory(prefix=".soduwork-codex-models-", dir=home) as scratch:
             env = _environment(scratch, home)
             deadline = time.monotonic() + _TIMEOUT
             reported = _run(executable, ["--version"], env, deadline, 1024).decode().strip()

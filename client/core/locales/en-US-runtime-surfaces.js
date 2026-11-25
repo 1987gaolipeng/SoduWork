@@ -7,6 +7,7 @@
     "请选择可用的 Codex 模型后再发送。": "Select an available Codex model before sending.",
     "当前 Codex 账号无法使用所选模型。请在此会话中选择其他可用模型，再发送消息。": "This Codex account cannot use the selected model. Choose another available model before sending.",
     "当前 Codex 账号目录中没有所选模型，请选择其他可用模型": "The selected model is missing from this Codex account. Select another available model.",
+    "部分成果尚未保存到会话档案，请保留原工作目录": "Some files have not been archived yet. Keep the original working directory.",
     "记录数": "Record count",
     "上一页": "Previous page",
     "下一页": "Next page",

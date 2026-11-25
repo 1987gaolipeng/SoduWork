@@ -60,7 +60,7 @@ test('review stages original references beside loose or bundled delivery without
       throw Error('Unexpected review request: ' + url);
     });
     const review = await prepare(identity, 't', 'chat', 'turn', 'Review', { acceptanceOnly: true }, {});
-    const staged = await staging.stage(root, review.attachments);
+    const staged = await staging.stage(root, review.attachments, { stagingDir: path.join(root, 'inputs') });
     assert.deepEqual(staged.warnings, []);
     assert.equal(staged.files.length, 2);
     const reference = staged.files.find(file => file.attachmentId === 'reference');

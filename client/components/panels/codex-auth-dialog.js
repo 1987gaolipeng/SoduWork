@@ -50,7 +50,7 @@
     const epoch = scope, restoreTo = document.activeElement, api = global.SoduWorkAPI;
     const runnerId = String(opts.runnerId || '');
     let phase = 'checking', detail = '', auth = null, jobId = '', jobTerminal = false;
-    let isolatedAvailable = false, isolated = false, uncertain = false;
+    let managedLogin = false, isolatedAvailable = false, isolated = false, uncertain = false;
     let busy = false, closing = false, settled = false, timer = null, generation = 0, failures = 0, pollSequence = 0;
     let resolveResult;
     const promise = new Promise(resolve => { resolveResult = resolve; });
@@ -111,11 +111,11 @@
       copyButton.disabled = !waiting || !seconds;
       mark.textContent = phase === 'succeeded' ? '✓' : terminal.has(phase) ? '!' : '';
       primary.hidden = ['checking', 'starting', 'cancelling'].includes(phase);
-      primary.textContent = tr(waiting ? '打开官方授权页' : phase === 'succeeded' ? (opts.onProbe ? '测试连接' : '完成') : phase === 'ready' ? (isolated ? '开始独立授权' : uncertain ? '继续检查' : '继续登录') : '重试');
+      primary.textContent = tr(waiting ? '打开官方授权页' : phase === 'succeeded' ? (opts.onProbe ? '测试连接' : '完成') : phase === 'ready' ? (isolated ? '开始独立授权' : managedLogin ? '复用本机登录' : uncertain ? '继续检查' : '继续登录') : '重试');
       primary.disabled = busy || (waiting && !seconds);
       cancel.hidden = phase === 'succeeded' && (!isolatedAvailable || isolated); cancel.disabled = closing;
       cancel.textContent = tr(phase === 'succeeded' ? '使用独立授权' : jobId && !jobTerminal ? '取消授权' : '取消');
-      recovery.hidden = !(phase === 'failed' || (phase === 'ready' && uncertain)) || !isolatedAvailable || isolated || !!(jobId && !jobTerminal);
+      recovery.hidden = !(phase === 'failed' || (phase === 'ready' && (managedLogin || uncertain))) || !isolatedAvailable || isolated || !!(jobId && !jobTerminal);
       recovery.disabled = busy || closing;
       close.disabled = closing;
     }
@@ -126,13 +126,14 @@
     }
     async function check(keepIsolated = false) {
       const version = ++generation;
-      isolated = false; isolatedAvailable = false; uncertain = false; phase = 'checking'; detail = ''; render();
+      managedLogin = false; isolated = false; isolatedAvailable = false; uncertain = false; phase = 'checking'; detail = ''; render();
       try {
         const result = await api.agentSetup(runnerId);
         if (!current() || version !== generation) return;
         const machines = result?.machines?.length ? result.machines : [{ runnerId: '', agents: result?.agents || [] }];
         const found = machines.find(item => String(item.runnerId || '') === runnerId)?.agents?.find(item => item.key === 'codex');
         if (!found || !found.installed) { fail('这台机器上的 Codex 尚不可用，请先检查安装。'); return; }
+        managedLogin = found.managedLoginHome === true;
         isolatedAvailable = found.isolatedLoginAvailable === true && found.loginFlowVersion === 1;
         if (keepIsolated && isolatedAvailable) { prepareIsolated(); return; }
         if (found.auth === 'authed') { phase = 'succeeded'; detail = '已检测到这台机器的 Codex 登录，无需再次授权。'; render(); return; }
@@ -140,7 +141,8 @@
         uncertain = found.authStatus === 'unknown' || (found.auth !== 'unauthed' && found.state !== 'unauthed');
         // Explicit continuation may prepare a missing account directory. The
         // server still requires native unauthed status before starting OAuth.
-        if (uncertain) detail = '暂时无法确认登录状态。继续后会先检查，确认未登录时才请求授权。';
+        if (managedLogin) detail = '复用会将本机 Codex 登录复制到 SoduWork。也可选择独立授权，在 OpenAI 官方页面登录。';
+        else if (uncertain) detail = '暂时无法确认登录状态。继续后会先检查，确认未登录时才请求授权。';
         phase = 'ready'; render();
       } catch (_) { if (current() && version === generation) fail(); }
     }
@@ -195,7 +197,7 @@
       const version = ++generation;
       busy = true; phase = 'starting'; detail = ''; auth = null; jobId = ''; jobTerminal = false; closingRequested = false; render();
       try {
-        const result = await api.agentInstall('codex', isolated ? 'login-isolated' : 'login', runnerId);
+        const result = await api.agentInstall('codex', isolated ? 'login-isolated' : managedLogin ? 'login-reuse' : 'login', runnerId);
         if (!current() || version !== generation) return;
         if (!result?.jobId) throw Error('Missing authorization job');
         jobId = String(result.jobId); busy = false;

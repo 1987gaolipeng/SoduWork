@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "key": "product-incubator",
   "name": "产品孵化",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "category": "dev",
   "description": "从产品想法持续推进到可运行、可验收、可发布的完整产品；包含真实开发、测试修复、商业运营准备和断点续作。",
-  "instructions": "作为产品孵化负责人，先读取 product-incubator/SKILL.md，逐阶段完成真实产品，不只写方案。工作流节点只做当前阶段；普通会话按技能阶段推进并保留进度、工具输出和成果。每次恢复先核对 .soduwork/product-incubation.json 与真实文件。未经明确授权不得生产发布、付费或外发消息，不能伪造市场验证。",
+  "instructions": "作为产品孵化负责人，先读取 product-incubator/SKILL.md，逐阶段完成真实产品，不只写方案。工作流节点只做当前阶段；普通会话按技能阶段推进并保留进度、工具输出和成果。恢复时核对会话进度、交接或包中的 incubation-state.json 与实际文件，兼容读取旧包的 .soduwork/product-incubation.json。未经明确授权不得生产发布、付费或外发消息，不能伪造市场验证。",
   "entrypoints": {
     "conversation": true,
     "task": true,
@@ -169,7 +169,7 @@
           }
         ],
         "config": {
-          "prompt": "先读取 product-incubator 的 SKILL.md 和 references/delivery-contract.md（个人内置资源位于 references/incubator/）。只执行当前阶段；读取全部上游材料和原始附件，不丢失约束。每次交接写 incubation-state.json，记录目标、证据、源码包、未完成项和下一步。不同节点可能在不同执行机和目录：使用已校验的上游文件，不依赖绝对路径、共享会话记忆或上一台机器。\n将规格拆为可验收纵向功能，循环实现→运行→测试→修复→记录，再做下一项，直到本轮必须项完成。提供真实前后端/持久化/必要权限和业务流程；不允许用假按钮、固定响应或空壳代替已承诺功能。每项至少验证成功、错误和空状态；保存真实命令输出。每类同因失败最多连续修复三次，仍失败写阻断和精确恢复步骤，不无限重试或伪造成功。已有代码先保留修改再增量改进。产出 product-source.zip（含源码、锁文件、数据库迁移、测试、运行说明、.soduwork/product-incubation.json；排除密钥、依赖缓存和用户私有数据）、build-report.md、incubation-state.json 和 decision.json。decision=proceed 仅表示开发阶段真实通过，后续必须独立验证。",
+          "prompt": "先读取 product-incubator 的 SKILL.md 和 references/delivery-contract.md（个人内置资源位于 references/incubator/）。只执行当前阶段；读取全部上游材料和原始附件，不丢失约束。每次交接写 incubation-state.json，记录目标、证据、源码包、未完成项和下一步。不同节点可能在不同执行机和目录：使用已校验的上游文件，不依赖绝对路径、共享会话记忆或上一台机器。\n将规格拆为可验收纵向功能，循环实现→运行→测试→修复→记录，再做下一项，直到本轮必须项完成。提供真实前后端/持久化/必要权限和业务流程；不允许用假按钮、固定响应或空壳代替已承诺功能。每项至少验证成功、错误和空状态；保存真实命令输出。每类同因失败最多连续修复三次，仍失败写阻断和精确恢复步骤，不无限重试或伪造成功。已有代码先保留修改再增量改进。产出 product-source.zip（含源码、锁文件、数据库迁移、测试、运行说明、包根目录的 incubation-state.json；排除密钥、依赖缓存和用户私有数据）、build-report.md、incubation-state.json 和 decision.json。decision=proceed 仅表示开发阶段真实通过，后续必须独立验证。",
           "timeoutSeconds": 14400
         },
         "retry": {
@@ -222,7 +222,7 @@
           }
         ],
         "config": {
-          "prompt": "先读取 product-incubator 的 SKILL.md 和 references/delivery-contract.md（个人内置资源位于 references/incubator/）。只执行当前阶段；读取全部上游材料和原始附件，不丢失约束。每次交接写 incubation-state.json，记录目标、证据、源码包、未完成项和下一步。不同节点可能在不同执行机和目录：使用已校验的上游文件，不依赖绝对路径、共享会话记忆或上一台机器。\n从已校验源码包解压到当前节点的候选目录，不修改上游原件。独立启动产品并从界面完成关键旅程；检查数据持久化、访问控制、异常处理、性能预算、依赖与许可证、可访问性及敏感信息。发现问题在候选目录实际修复、重跑原失败项和回归测试，持续完成验收清单；每类同因失败三次后阻断。保存带命令、退出码、日志文件和日期的 quality-evidence.json，禁止从文案推断测试通过。生成 release-candidate.zip（包含 .soduwork/product-incubation.json）、quality-report.md、incubation-state.json；仍缺必须项 decision=blocked。",
+          "prompt": "先读取 product-incubator 的 SKILL.md 和 references/delivery-contract.md（个人内置资源位于 references/incubator/）。只执行当前阶段；读取全部上游材料和原始附件，不丢失约束。每次交接写 incubation-state.json，记录目标、证据、源码包、未完成项和下一步。不同节点可能在不同执行机和目录：使用已校验的上游文件，不依赖绝对路径、共享会话记忆或上一台机器。\n从已校验源码包解压到当前节点的候选目录，不修改上游原件。独立启动产品并从界面完成关键旅程；检查数据持久化、访问控制、异常处理、性能预算、依赖与许可证、可访问性及敏感信息。发现问题在候选目录实际修复、重跑原失败项和回归测试，持续完成验收清单；每类同因失败三次后阻断。保存带命令、退出码、日志文件和日期的 quality-evidence.json，禁止从文案推断测试通过。生成 release-candidate.zip（包根目录含 incubation-state.json）、quality-report.md、incubation-state.json；仍缺必须项 decision=blocked。",
           "timeoutSeconds": 14400
         },
         "retry": {
@@ -360,7 +360,7 @@
           }
         ],
         "config": {
-          "prompt": "先读取 product-incubator 的 SKILL.md 和 references/delivery-contract.md（个人内置资源位于 references/incubator/）。只执行当前阶段；读取全部上游材料和原始附件，不丢失约束。每次交接写 incubation-state.json，记录目标、证据、源码包、未完成项和下一步。不同节点可能在不同执行机和目录：使用已校验的上游文件，不依赖绝对路径、共享会话记忆或上一台机器。\n将已验收候选、运行和发布说明交付为 product-delivery.zip，并生成 delivery-report.md 和 incubation-state.json。默认 readiness=release_ready，清楚给出本地启动方式、可打开的成果链接、未配置的生产项和下一轮行动。仅当本次会话存在针对精确目标环境和版本的明确发布授权且凭据通过已授权连接提供时才实际部署，先备份验证回滚，再上线后真实探活；未执行或失败不能写 launched。不要将人工验收或插件 publish 节点当成生产发布授权。填写 .soduwork/delivery.json，保留其他成果，只登记用户成品。未满足本轮已确认的必须项仍为 blocked，不能宣称完成。",
+          "prompt": "先读取 product-incubator 的 SKILL.md 和 references/delivery-contract.md（个人内置资源位于 references/incubator/）。只执行当前阶段；读取全部上游材料和原始附件，不丢失约束。每次交接写 incubation-state.json，记录目标、证据、源码包、未完成项和下一步。不同节点可能在不同执行机和目录：使用已校验的上游文件，不依赖绝对路径、共享会话记忆或上一台机器。\n将已验收候选、运行和发布说明交付为 product-delivery.zip，并生成 delivery-report.md 和 incubation-state.json。默认 readiness=release_ready，清楚给出本地启动方式、可打开的成果链接、未配置的生产项和下一轮行动。仅当本次会话存在针对精确目标环境和版本的明确发布授权且凭据通过已授权连接提供时才实际部署，先备份验证回滚，再上线后真实探活；未执行或失败不能写 launched。不要将人工验收或插件 publish 节点当成生产发布授权。在最终回复中用相对工作目录的 Markdown 链接交付已核验的 product-delivery.zip 和 delivery-report.md。未满足本轮已确认的必须项仍为 blocked，不能宣称完成。",
           "timeoutSeconds": 7200
         },
         "retry": {

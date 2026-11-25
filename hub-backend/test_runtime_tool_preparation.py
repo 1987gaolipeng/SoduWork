@@ -215,7 +215,7 @@ class PreparationTests(unittest.TestCase):
         ref = "preparing-error-fixture"
         run = {"cli": "pi", "lines": [], "segment": 1, "state": "running", "metaAt": float("inf")}
         with patch.dict(local_base._RUNS, {ref: run}), patch.object(local_stream, "_append_raw"), \
-                patch.object(local_stream, "_append_events"), patch.object(local_stream, "_save_meta"):
+                patch.object(local_base, "_write_event_batch"), patch.object(local_stream, "_save_meta"):
             term = {}
             local_stream._on_line(ref, json.dumps(partial()), term)
             local_stream._on_line(ref, json.dumps({"type": "turn.failed", "error": {

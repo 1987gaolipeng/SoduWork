@@ -2,11 +2,13 @@ import base64
 import hashlib
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 from app.services import plugin_resources as resources, plugin_drafts, plugin_packages
 
 
@@ -82,10 +84,11 @@ process.stdin.on('end', async () => {
       }});
     assert.equal(result.grant, null);
     assert.equal(result.items[0].resourceBundle, undefined);
-    const materialized = resources.materialize(normalized, root, pack.manifest.key);
-    assert.ok(result.items[0].context.includes(materialized.directory));
+    const [directory] = result.readRoots;
+    assert.equal(fs.existsSync(path.join(root, '.soduwork')), false);
+    assert.ok(result.items[0].context.includes(directory));
     for (const item of normalized) {
-      const bytes = fs.readFileSync(path.join(materialized.directory, ...item.path.split('/')));
+      const bytes = fs.readFileSync(path.join(directory, ...item.path.split('/')));
       assert.equal(require('node:crypto').createHash('sha256').update(bytes).digest('hex'), item.sha256);
       assert.equal(bytes.length, item.size);
     }
@@ -94,7 +97,7 @@ process.stdin.on('end', async () => {
     assert.deepEqual(resources.summary(exported.resources), resources.summary(pack.draft.resources));
     const imported = personal.create({getPath: () => path.join(root, 'second-account')}, exported).plugin;
     assert.equal(imported.checksum, installed.checksum);
-    console.log('public parser/grant/materialization/personal roundtrip verified');
+    console.log(JSON.stringify({directory, bundle: result.resourceBundles[0]}));
   } catch (error) { console.error(error.stack); process.exitCode = 1; }
 });
 """
@@ -104,7 +107,14 @@ process.stdin.on('end', async () => {
                                     text=True, encoding="utf8", capture_output=True, timeout=30,
                                     cwd=Path(__file__).resolve().parent.parent)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("roundtrip verified", result.stdout)
+            from app.services import skill_read_scope
+            manifest = json.loads(result.stdout)
+            runner_root = Path(root) / 'account' / 'runner' / 'data'
+            with patch.dict(os.environ, SODUWORK_DATA_ROOT=str(runner_root)):
+                scope = skill_read_scope.materialize_bundles([manifest["bundle"]], root)
+            self.assertEqual(Path(scope.payload()[0]["path"]).resolve(), Path(manifest["directory"]).resolve())
+            self.assertTrue(scope.allows(root, str(Path(manifest["directory"]) / "templates/报告.md")))
+            self.assertFalse((Path(root) / '.soduwork').exists())
 
     def test_mutated_or_missing_resource_cannot_pass_package_validation(self):
         original=plugin_drafts.build(draft())
@@ -129,7 +139,7 @@ process.stdin.on('end', async () => {
 
     def test_materialize_and_execute_fixture_uses_real_packaged_files(self):
         body=draft(); body['resources'][1]['content']='from pathlib import Path\nprint((Path(__file__).parent.parent / "templates" / "报告.md").read_text(encoding="utf8").replace("{{title}}", "READY"))'
-        with tempfile.TemporaryDirectory() as root:
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, SODUWORK_DATA_ROOT=str(Path(root) / 'data')):
             bundle=resources.materialize(body['resources'],root,body['key'])
             file=Path(bundle['directory'])/'scripts/render.py'
             import sys

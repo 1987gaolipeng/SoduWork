@@ -25,7 +25,7 @@ def _run(executable: str, args: list[str], *, env: dict | None = None) -> tuple[
             text=True,
             encoding='utf-8',
             errors='replace',
-            env=env,
+            env=env, cwd=env.get('CODEX_HOME') if args == ['login', 'status'] else None,
             timeout=6,
             creationflags=flags,
             check=False,

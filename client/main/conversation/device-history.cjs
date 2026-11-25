@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const native = require('./device-history-native.cjs');
+const archive = require('./device-artifact-archive.cjs');
 const { withTranscript } = require('./conversation-body.cjs');
 const { mergeNativeEvidence } = require('./history-evidence.cjs');
 const { accountId } = require('../device-auth-request');
@@ -16,6 +17,10 @@ function replayedUsage(snapshot, row) {
   const usage = require('./used-harnesses');
   const replayed = usage.fromTimeline(snapshot);
   return replayed.length ? { usedHarnesses: usage.merge(replayed, row.usedHarnesses) } : {};
+}
+function locallyReceivedArtifacts(row, data) {
+  return Boolean(row?.deviceTransferId && row.deviceTransferId === data?.imported?.transferId &&
+    row.deviceTransferId === data?.localArtifactHistory?.transferId);
 }
 function assertSettled(data) {
   if (data?.coverage?.unresolvedTools?.length || native.unresolvedTools(data?.snapshot).length)
@@ -38,6 +43,39 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     combined.evidence = () => evidence;
     return combined;
   }
+  async function restoreArchiveReceipts(row, data, check) {
+    if (!data?.localArtifactHistory?.archive || data.historyProtection || check.evidence().historyProtection) return data;
+    const received = locallyReceivedArtifacts(row, data);
+    if (!received && (data.imported || !allowsArtifacts(check.evidence()))) return data;
+    function current() {
+      check();
+      if (received) authorize(check.evidence());
+    }
+    let localArtifactHistory = await archive.rebind(app.getPath('userData'), row.id, data.localArtifactHistory, current);
+    if (localArtifactHistory.archive?.pendingFiles?.length) {
+      try {
+        localArtifactHistory = await archive.preserve(app.getPath('userData'), row.id, localArtifactHistory,
+          localArtifactHistory, current, { readWorkspace: false });
+      } catch (error) {
+        current();
+        if (error.historyAccessFailure) throw error;
+      }
+    }
+    current();
+    if (localArtifactHistory === data.localArtifactHistory) return data;
+    const { digest: oldDigest, savedAt, ...body } = data;
+    const updated = { ...body, localArtifactHistory };
+    const result = await store.saveDeviceHistory(row.id, updated, { expectedRevision: row.replicaRevision,
+      expectedTransferId: row.deviceTransferId || '', expectedHistoryDigest: oldDigest });
+    await archive.retire(app.getPath('userData'), row.id, data.localArtifactHistory.archive, localArtifactHistory.archive,
+      result.ok).catch(() => {});
+    current();
+    if (result.ok) return { ...updated, digest: result.digest, savedAt };
+    const concurrent = await store.deviceHistory(row.id);
+    current();
+    if (concurrent?.digest === digest(updated)) return concurrent;
+    throw Object.assign(Error('历史记录已变化，请重新读取'), { code: 'HISTORY_CONCURRENT_UPDATE' });
+  }
   async function refresh(id, { verify, journal } = {}) {
     // A stricter caller must inspect its own native ownership receipt instead
     // of borrowing a background read authorized only for the local desktop.
@@ -49,15 +87,16 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       const row = await resolve(id);
       if (!row || row.deleted || row.cached || row.cloud) return null;
       const check = readGuard(row, verify); check();
+      const manifest = require('./runtime-segments').read(app, row.id);
       if (row.deviceTransferId) {
-        const manifest = require('./runtime-segments').read(app, row.id);
         if (manifest?.deviceTransferId !== row.deviceTransferId) {
           const imported = await store.deviceHistory(row.id); check();
-          if (imported?.imported?.transferId === row.deviceTransferId && imported.coverage?.complete) return imported;
+          if (imported?.imported?.transferId === row.deviceTransferId && imported.coverage?.complete)
+            return restoreArchiveReceipts(row, imported, check);
           throw Object.assign(Error('交接历史尚未完整接收，请先完成迁移'), { code: 'HISTORY_IMPORT_PENDING' });
         }
       }
-      const previous = await store.deviceHistory(row.id); check();
+      let previous = await store.deviceHistory(row.id); check();
       // Local receipt hashes are stored outside portable snapshots and coverage.
       // An imported transcript cannot certify tools from the receiving desktop.
       const previousToolReceipts = previous?.imported || row.deviceTransferId ? [] : previous?.localToolReceipts ?? previous?.localImageReceipts;
@@ -83,6 +122,8 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
         throw error;
       }
       check();
+      previous = await restoreArchiveReceipts(row, previous, check);
+      expected.expectedHistoryDigest = previous?.digest ?? null;
       const workspace = data.localWorkspace;
       delete data.localWorkspace;
       const priorCursors = new Map((previous?.coverage?.sources || []).filter(source => source.adapterId !== 'pi')
@@ -93,20 +134,44 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
         Number(source.revision) < priorCursors.get(source.id));
       if (lostBody || regressed)
         throw Object.assign(Error('原始历史比现有记录少，已保留本机副本'), { code: 'NATIVE_HISTORY_UNAVAILABLE' });
-      if (previous?.imported) data.imported = previous.imported;
+      if (previous?.imported) {
+        data.imported = previous.imported;
+        if (locallyReceivedArtifacts(row, previous)) data.localArtifactHistory = previous.localArtifactHistory;
+      }
       check(previous?.historyProtection ? { historyProtection: previous.historyProtection } : undefined);
       if (check.evidence().historyProtection === 'account') data.historyProtection = 'account';
-      if (!data.historyProtection && !data.imported && allowsArtifacts(check.evidence())) {
-        const retained = require('./runtime-segments').read(app, row.id)?.artifactHistory;
-        const artifacts = await require('./device-history-artifacts.cjs').capture({ row, workspace,
-          workRoot: workspace ? workRoot?.() : null, previous: previous?.localArtifactHistory, retained, journal });
+      const identity = data.imported && journal ? identityOf() : null;
+      const receivingTurn = Boolean(identity && row.deviceTransferId && row.deviceTransferId === data.imported.transferId &&
+        row.deviceTransferDigest === data.imported.sha256 && row.creator?.account === accountId(identity) &&
+        row.creator?.hub === identity.hub && manifest?.owner === row.workOwner && manifest.hub === identity.hub &&
+        row.workOwner === require('../platform-connections/runtime.cjs').scope(identity));
+      if (!data.historyProtection && (receivingTurn || !data.imported && allowsArtifacts(check.evidence()))) {
+        if (receivingTurn) authorize(check.evidence());
+        const prior = data.imported ? data.localArtifactHistory : previous?.localArtifactHistory;
+        // Incoming messages and segment metadata cannot attest to files. A new
+        // local turn can contribute only its verified on-disk change receipts.
+        const collected = await require('./device-history-artifacts.cjs').capture({ row, previous: prior, journal,
+          ...(!receivingTurn ? { workspace, workRoot: workspace ? workRoot?.() : null, retained: manifest?.artifactHistory } : {}) });
+        const artifacts = archive.retain(prior, collected);
         check();
-        if (artifacts) data.localArtifactHistory = artifacts;
+        if (artifacts) {
+          try {
+            data.localArtifactHistory = await archive.preserve(app.getPath('userData'), row.id, artifacts, prior, check);
+          } catch (error) {
+            check();
+            if (error.historyAccessFailure) throw error;
+            data.localArtifactHistory = { ...artifacts, archivePending: true,
+              ...(prior?.archive ? { archive: prior.archive } : {}) };
+          }
+          if (receivingTurn) data.localArtifactHistory.transferId = row.deviceTransferId;
+        }
       }
       const current = await resolve(id); check();
       if (!current || current.deleted || current.replicaRevision !== row.replicaRevision ||
           current.deviceTransferId !== row.deviceTransferId) throw Error('历史记录已变化，请重新读取');
       const saved = await store.saveDeviceHistory(row.id, data, expected); check();
+      await archive.retire(app.getPath('userData'), row.id, previous?.localArtifactHistory?.archive,
+        data.localArtifactHistory?.archive, saved.ok).catch(() => {});
       if (!saved.ok) throw Object.assign(Error('历史记录已变化，请重新读取'), { code: 'HISTORY_CONCURRENT_UPDATE' });
       await register([{ ...current, deviceHistory: true, historyContentState: 'available',
         ...replayedUsage(data.snapshot, current),
@@ -118,16 +183,21 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     });
     writers.set(id, work); pending.set(key, work); return work;
   }
-  async function saved(id, { refresh: update = false, verify, preferRecorded = false } = {}) {
+  async function saved(id, { refresh: update = false, verify, preferRecorded = false, onlyUpgrade = false } = {}) {
     const row = await resolve(id);
     if (!row || row.deleted || row.cached) return null;
     const check = readGuard(row, verify); check();
     let data = await store.deviceHistory(row.id); check();
     check(data?.historyProtection ? { historyProtection: data.historyProtection } : undefined);
+    if (onlyUpgrade && !data?.localArtifactHistory) {
+      if (data?.digest) await store.markArchiveReviewed(row.id, data.digest);
+      return data;
+    }
     const shared = requiresNativeEvidence(row);
     if (shared) await native.probe({ app, session, row, guard: check });
     if (row.deviceTransferId && data?.imported?.transferId !== row.deviceTransferId)
       throw Object.assign(Error('交接历史尚未完整接收，请先完成迁移'), { code: 'HISTORY_IMPORT_PENDING' });
+    data = await restoreArchiveReceipts(row, data, check);
     let dialogue = [], transcriptError, inspected = false;
     async function readDialogue() {
       if (inspected || !usesDeviceDialogue(check.evidence())) return;
@@ -143,7 +213,7 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     // An owner's passive desktop view can paint its committed dialogue without
     // waiting for a model or a Runner RPC. Execution and peer access revalidate.
     const localDisplay = preferRecorded && !shared && !verify && dialogue.length > 0;
-    if (!localDisplay && (update || !data || !data.coverage?.complete || transcriptError)) {
+    if (!onlyUpgrade && !localDisplay && (update || !data || !data.coverage?.complete || transcriptError)) {
       try { data = await refresh(row.id, { verify }); }
       catch (error) {
         if (error.historyAccessFailure || error.code === 'HISTORY_CONCURRENT_UPDATE') throw error;
@@ -163,6 +233,29 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
         // unavailable native runtime. Continuation performs its own strict probe.
         data = { ...data, nativeReadError: { code: error.code || 'NATIVE_HISTORY_UNAVAILABLE', reason: error.message } };
       }
+    }
+    // Legacy replicas can outlive the native CLI journal. Upgrade only their
+    // already-verified file identities while the original workspace exists.
+    if (archive.needsBackup(data?.localArtifactHistory) && !data.imported && !data.historyProtection &&
+        allowsArtifacts(check.evidence()) && await fs.realpath(row.cwd).catch(() => null) === data.localArtifactHistory.root) {
+      const { digest: oldDigest, savedAt, nativeReadError, ...stored } = data;
+      const prior = data.localArtifactHistory;
+      const updated = await archive.preserve(app.getPath('userData'), row.id, prior, prior, check)
+        .catch(error => { if (error.historyAccessFailure) throw error; return null; });
+      check();
+      if (updated) {
+        stored.localArtifactHistory = updated;
+        const result = await store.saveDeviceHistory(row.id, stored, { expectedRevision: row.replicaRevision,
+          expectedTransferId: row.deviceTransferId || '', expectedHistoryDigest: oldDigest });
+        await archive.retire(app.getPath('userData'), row.id, prior.archive, updated.archive, result.ok).catch(() => {});
+        check();
+        if (!result.ok) throw Object.assign(Error('历史记录已变化，请重新读取'), { code: 'HISTORY_CONCURRENT_UPDATE' });
+        data = { ...stored, digest: result.digest, savedAt, nativeReadError };
+      }
+    }
+    if (onlyUpgrade) {
+      if (data?.digest && !archive.needsBackup(data.localArtifactHistory)) await store.markArchiveReviewed(row.id, data.digest);
+      return data;
     }
     if (localDisplay && update) schedule([row], { includeSaved: true });
     if (data?.nativeConflict) data = { ...data, nativeReadError: data.nativeConflict };
@@ -185,6 +278,22 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       values.push(value);
     }
     return values;
+  }
+  async function transferSources(id, ref) {
+    const row = await resolve(id);
+    if (!row || row.cached || row.cloud || row.deleted) throw Error('没有可迁移的本机会话');
+    authorize(row);
+    const check = readGuard(row), data = await saved(id, { verify: check });
+    check(data?.historyProtection ? { historyProtection: data.historyProtection } : undefined);
+    authorize(check.evidence());
+    const sources = require('./device-transfer-sources.cjs');
+    const authorized = !data?.historyProtection && (locallyReceivedArtifacts(row, data) ||
+      !data?.imported && allowsArtifacts(check.evidence()));
+    const files = authorized && data?.localArtifactHistory
+      ? sources.artifactFiles(app.getPath('userData'), id, data.localArtifactHistory) : [];
+    files.push(...await sources.inputFiles(workRoot?.(), ref, data?.snapshot));
+    check();
+    return files;
   }
   async function exportPortable(id) {
     const row = await resolve(id);
@@ -241,7 +350,7 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
         throw Error('目标设备已存在同名会话或删除记录，不能覆盖');
       expectedHistoryDigest = saved.digest;
     }
-    const approved = new Map();
+    const approved = new Map(), attachmentPaths = new Map(), received = [];
     for (const file of files) {
       require('./portable-workspace').portablePath(file.path);
       if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > native.MAX_BYTES ||
@@ -252,6 +361,11 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       if (bytes.length !== file.size || crypto.createHash('sha256').update(bytes).digest('hex') !== file.sha256)
         throw Error('交接文件校验失败');
       approved.set(file.path, target);
+      if (file.artifact === true) received.push({ action: 'created', path: file.path,
+        after: { exists: true, path: file.path, size: file.size, hash: file.sha256 } });
+      if (typeof file.attachmentKey === 'string' && /^[a-f0-9]{64}$/.test(file.attachmentKey) &&
+          file.path.startsWith('conversation-inputs/' + file.attachmentKey.slice(0, 16) + '/'))
+        attachmentPaths.set(file.attachmentKey, target);
     }
     const mapped = new Map((bundle.attachments || []).filter(item => item.relativePath && approved.has(item.relativePath))
       .map(item => [item.path, approved.get(item.relativePath)]));
@@ -271,7 +385,19 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     };
     // Tool arguments/results remain historical evidence. Only structured
     // message media may acquire a path, through the verified file manifest.
-    for (const message of snapshot.messages) cleanReference(message);
+    const attachmentContract = require('../pi-session/attachment-contract');
+    for (const message of snapshot.messages) {
+      const inputs = (message.role === 'user' ? message.attachments || [] : []).map(item => {
+        const key = typeof item.previewRef === 'string' && crypto.createHash('sha256').update(item.previewRef).digest('hex');
+        if (key && attachmentPaths.has(key)) return attachmentPaths.get(key);
+        if (item.path && attachmentContract.previewPath(item.previewRef) === item.path) return mapped.get(item.path);
+      });
+      cleanReference(message);
+      inputs.forEach((target, index) => {
+        if (target) Object.assign(message.attachments[index], { path: target, availability: 'available',
+          previewRef: attachmentContract.previewRef(target) });
+      });
+    }
     await current();
     const [row] = await register([{ ...metadata(bundle.conversation), cwd, cached: false, cloud: false,
       deviceHistory: true, deviceTransferId: transferId, deviceTransferDigest: sha256,
@@ -283,6 +409,15 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     const check = guard(row); check();
     const data = { snapshot, coverage: bundle.coverage,
       imported: { transferId, sha256 }, historyRecovery: { mode: 'device-history', nativeArchiveMissing: true } };
+    if (received.length) {
+      // Reclassify verified bytes in the receiving workspace. The sender's file
+      // paths, preview capabilities, archive stamps and package actions are never imported.
+      const captured = await require('./device-history-artifacts.cjs').capture({
+        row, verifiedTransfer: true, journal: { cwd: await fs.realpath(cwd), turnId: transferId, files: received } });
+      await current();
+      if (captured) data.localArtifactHistory = {
+        ...await archive.preserve(app.getPath('userData'), row.id, captured, null, check), transferId };
+    }
     await current();
     const result = await store.saveDeviceHistory(row.id, data, { expectedRevision: row.replicaRevision,
       expectedTransferId: transferId }); check(); await current();
@@ -305,7 +440,7 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     const nativeArchiveMissing = !refresh || data.nativeReadError?.code === 'NATIVE_HISTORY_MISSING' ||
       Boolean(data.imported && data.historyRecovery?.nativeArchiveMissing);
     return { row: verified, prefix: native.publicSnapshot(data.snapshot),
-      ...(data.localArtifactHistory && !data.imported && !data.historyProtection && allowsArtifacts(verified)
+      ...(data.localArtifactHistory && !data.historyProtection && (locallyReceivedArtifacts(row, data) || !data.imported && allowsArtifacts(verified))
         ? { artifactHistory: data.localArtifactHistory } : {}), historyRecovery: { mode: 'device-history',
       nativeArchiveMissing, savedAt: data.savedAt || Date.now(), attachments: references } };
   }
@@ -320,8 +455,8 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       });
     }
   }
-  return { refresh, saved, schedule, exportPortable, importPortable, prepareContinuation,
+  return { refresh, saved, schedule, transferSources, exportPortable, importPortable, prepareContinuation,
     attachments: message => attachments({ messages: [message] }),
     async close() { await background; await Promise.allSettled([...pending.values()]); } };
 }
-module.exports = { create, SCHEMA };
+module.exports = { create, SCHEMA, locallyReceivedArtifacts };

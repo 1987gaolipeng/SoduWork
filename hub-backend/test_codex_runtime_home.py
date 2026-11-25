@@ -123,6 +123,13 @@ class CodexLoginTests(unittest.TestCase):
                 self.sync()
         self.assertEqual(self.login.read_bytes(), previous)
 
+    def test_explicit_import_rejects_linked_file_without_overwriting_its_target(self):
+        original = self.source / "auth.json"
+        os.link(original, self.login)
+        with self.assertRaisesRegex(RuntimeError, "登录文件位置异常"):
+            self.sync()
+        self.assertEqual(original.read_bytes(), self.data)
+
     def test_invalid_source_fails_before_replacing_valid_login(self):
         self.login.write_bytes(self.data)
         (self.source / "auth.json").write_bytes(b"not-readable-json")

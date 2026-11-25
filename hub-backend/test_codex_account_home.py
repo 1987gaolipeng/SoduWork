@@ -45,18 +45,62 @@ class AccountHomeTests(unittest.TestCase):
             self.assertEqual(account.selected_home(self.root), "")
 
     def test_existing_conversation_keeps_legacy_home_and_new_ones_bind(self):
-        with patch.object(runtime, "_sync_auth") as sync:
-            previous = runtime.prepare({}, self.root, "old-chat")
+        previous = Path(self.root, "agents", "codex", runtime._folder("old-chat"))
+        previous.mkdir(parents=True)
+        (previous / "auth.json").write_text('{"fixture":"old"}')
         self.assertTrue(self.activate()[0])
-        with patch.object(runtime, "_sync_auth") as sync:
-            self.assertEqual(runtime.prepare({}, self.root, "old-chat"), previous)
-            sync.assert_called_once()
+        with patch.object(runtime, "_sync_auth", side_effect=AssertionError("no implicit import")):
+            env = {"CODEX_SQLITE_HOME": "personal-db"}
+            self.assertEqual(runtime.prepare(env, self.root, "old-chat"), str(previous))
+            self.assertEqual(env["CODEX_SQLITE_HOME"], str(previous))
+            self.assertEqual((previous / "auth.json").read_text(), '{"fixture":"old"}')
             env_a, env_b = {}, {}
             first = runtime.prepare(env_a, self.root, "new-chat-a")
             second = runtime.prepare(env_b, self.root, "new-chat-b")
         self.assertEqual(first, second)
         self.assertNotEqual(env_a["TEMP"], env_b["TEMP"])
         self.assertNotEqual(env_a["TEMP"], first)
+
+    def test_fresh_chat_and_catalog_never_use_the_terminal_profile(self):
+        terminal = Path(self.root, "terminal")
+        terminal.mkdir()
+        (terminal / "auth.json").write_text('{"fixture":"terminal"}')
+        with patch.dict(os.environ, CODEX_HOME=str(terminal), CODEX_SQLITE_HOME=str(terminal)), \
+             patch.object(runtime, "_sync_auth", side_effect=AssertionError("no implicit import")):
+            first = account.model_catalog_home(self.root, "fresh")
+            self.assertNotEqual(first, str(terminal))
+            env = dict(os.environ)
+            self.assertEqual(runtime.prepare(env, self.root, "fresh"), first)
+            self.assertEqual(env["CODEX_SQLITE_HOME"], first)
+            self.assertFalse(Path(first, "auth.json").exists())
+            self.activate()
+            self.assertEqual(runtime.prepare({}, self.root, "fresh"), first)
+            self.assertNotEqual(runtime.prepare({}, self.root, "after-independent-login"), first)
+
+    def test_desktop_identity_binds_only_from_the_private_parent(self):
+        with patch.object(account, "_DESKTOP_SCOPE", None):
+            self.assertFalse(account.bind_desktop("a" * 64), "Standalone RPC cannot designate an account")
+            legacy = Path(account.account_home(self.root, create=True))
+            (legacy / "auth.json").write_text('{"login":"existing-unattributed-account"}')
+            account.start_desktop(None)
+            with self.assertRaisesRegex(RuntimeError, "SoduWork"):
+                runtime.prepare({}, self.root, "same-chat")
+            self.assertTrue(account.bind_desktop("a" * 64))
+            a = Path(runtime.prepare({}, self.root, "same-chat"))
+            self.assertFalse((a / "auth.json").exists(), "Never claim an unowned profile on upgrade")
+            (a / "auth.json").write_text('{"login":"a"}')
+            self.assertFalse(account.bind_desktop("b" * 64))
+            with self.assertRaisesRegex(RuntimeError, "SoduWork"):
+                account.model_catalog_home(self.root, "same-chat")
+            account.start_desktop("b" * 64)
+            b = Path(runtime.prepare({}, self.root, "same-chat"))
+            self.assertNotEqual(a, b)
+            self.assertFalse((b / "auth.json").exists())
+            self.assertEqual(account.model_catalog_home(self.root, "same-chat"), str(b))
+            account.start_desktop("a" * 64)
+            self.assertEqual(runtime.prepare({}, self.root, "same-chat"), str(a))
+            self.assertEqual((a / "auth.json").read_text(), '{"login":"a"}')
+            self.assertEqual((legacy / "auth.json").read_text(), '{"login":"existing-unattributed-account"}')
 
     def test_binding_survives_missing_global_selection(self):
         self.activate()

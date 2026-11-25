@@ -1,5 +1,10 @@
 (function (global) {
   const messages = {
+    "复用本机登录": "Reuse local sign-in",
+    "历史版本位于 conversation-history/。选择历史版本后，已勾选的共用文件会同时放入工作目录和历史目录。": "Historical versions are under conversation-history/. When you select a historical version, selected shared files are copied to both the workspace and the history directory.",
+    "还没登录：请在 Agent 管理中连接 Codex": "Sign in by connecting Codex in Agent Management",
+    "请先登录 SoduWork 后再连接个人 Codex 账号": "Sign in to SoduWork before connecting your personal Codex account",
+    "复用会将本机 Codex 登录复制到 SoduWork。也可选择独立授权，在 OpenAI 官方页面登录。": "Reusing your local Codex sign-in copies it into SoduWork. You can also choose separate authorization to sign in with OpenAI.",
     "继续检查": "Continue checking",
     "暂时无法确认登录状态。继续后会先检查，确认未登录时才请求授权。": "Sign-in status is unknown. Continue to check it; authorization is requested only if you are signed out.",
     "暂时无法确认登录状态。可以重试，或使用独立授权连接 SoduWork。": "Unable to confirm sign-in status. Retry or connect SoduWork using a separate authorization.",

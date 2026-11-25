@@ -19,10 +19,10 @@ description: 持续孵化商业化产品。用于把产品想法或已有工程�
 
 先完整阅读 [交付契约](references/delivery-contract.md)。
 
-检查当前工作目录、原始材料和已有 `.soduwork/product-incubation.json`，与磁盘实物核对。若有上一轮交付包或上游状态，安全解包到当前候选目录，再增量继续。发现状态和代码不一致时以真实证据为准，说明差异，不抹掉用户改动。
+恢复时核对当前会话进度、原始材料与真实文件。读取上游交接或源码包中的 `incubation-state.json`，也可读取旧版 `.soduwork/product-incubation.json`。若有上一轮交付包或上游状态，安全解包到当前候选目录，再增量继续。发现状态和代码不一致时以真实证据为准，说明差异，不抹掉用户改动。
 
 维护状态：schemaVersion=1，goal，scope，readiness，phase，sourceRefs，acceptance，completed，openIssues，nextActions，candidate，updatedAt。只存任务信息，不存密码。readiness 使用 discovery / building / verifying / release_ready / launched / blocked；launched 必须有真实部署与健康检查证据。
-- 每个阶段在本节点输出 `incubation-state.json`；源码包内同步为 `.soduwork/product-incubation.json`。
+- 工作流节点按声明交接 `incubation-state.json`，源码包将同名状态放在包根目录。普通会话在回复中记录阶段进度和证据。
 - 每项完成和每次失败后更新；错误记录包含复现、已尝试修复、证据路径和下一步。
 - 工作流节点目录/机器可能不同。只使用已校验的上游文件交接；不得依赖上轮绝对路径、未声明目录或模型记忆。不要修改已交接的上游原件。
 - 恢复只补未完成项。一个阶段不得因有旧报告就直接通过，必须核对目标版本与证据。
@@ -41,4 +41,4 @@ description: 持续孵化商业化产品。用于把产品想法或已有工程�
 ## 沟通与成果
 
 持续呈现普通会话的过程、工具运行、关键里程碑与可点击成果。报告“完成了什么、证据在哪、还缺什么”，不要只回传成果包。
-交付真实源码/构建包与运行入口，原始资料索引、验收证据、发布/回滚和运营手册。包中排除密钥、生产数据、依赖缓存和机器专属路径。使用 `.soduwork/delivery.json` 登记用户可消费的成品并保留已有登记，不将测试日志当主成果。聊天中引用真实存在的相对文件链接；图片/页面有可打开的入口。
+交付真实源码/构建包与运行入口，原始资料索引、验收证据、发布/回滚和运营手册。包中排除密钥、生产数据、依赖缓存和机器专属路径。最终回复用相对工作目录的 Markdown 链接列出已核验的成品和运行入口，测试日志作为验收证据。图片/页面有可打开的入口。

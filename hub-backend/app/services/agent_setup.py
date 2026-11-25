@@ -266,14 +266,13 @@ def _version_of(key: str) -> tuple[str, str, str]:
 def _auth_probe(key: str) -> tuple[str, str]:
     """Probe native account status in the same scope used by execution."""
     if key == "codex":
-        from . import codex_account_home
+        from . import codex_login_flow
         try:
-            if codex_account_home.selected_home(_data_root()):
-                state, _ = _account_auth_probe(key, _bin_of(key),
-                    env=codex_account_home.environment(_data_root()))
-                if state == "authed":
-                    return "authed", "SoduWork 独立 Codex 账号已登录；新对话使用此账号"
-                return state, "独立 Codex 账号未通过本机验证，请点击「登录 Codex」后新建对话"
+            env = codex_login_flow.environment(_data_root())
+            if not os.path.isdir(env["CODEX_HOME"]):
+                return "unauthed", "还没登录：请在 Agent 管理中连接 Codex"
+            auth, detail = _account_auth_probe(key, _bin_of(key), env=env)
+            return (auth, "还没登录：请在 Agent 管理中连接 Codex") if auth == "unauthed" else (auth, detail)
         except Exception:
             return "", "Codex 独立登录设置无法读取，请检查 Runner 数据目录后重新登录"
     return _account_auth_probe(key, _bin_of(key))
@@ -398,6 +397,7 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
         "loginAvailable": key == "codex" and bool(binp),
         "loginFlowVersion": 1 if key == "codex" and binp else 0,
         "isolatedLoginAvailable": key == "codex" and bool(binp),
+        "managedLoginHome": key == "codex" and bool(binp),
         "version": ver,
         "verFrom": ver_from,        # Distinguish package metadata from CLI fallback version detection.
         "warnNow": warn_now,        # Separate this machine's issue from general runtime requirements.
@@ -473,7 +473,7 @@ def job(jid: str, *, owner_id: str | None = None, include_private: bool = False)
             return {"id": j["id"], "key": j["key"], "action": "probe", "state": j["state"],
                     "ok": j["ok"], "detail": j["detail"] or "正在本机实际测试 Agent", "lines": [],
                     "private": True, "startedAt": j["startedAt"], "endedAt": j["endedAt"]}
-        if (j and owner_id is not None and j.get("action") in {"login", "login-isolated"}
+        if (j and owner_id is not None and j.get("action") in {"login", "login-reuse", "login-isolated"}
                 and j.get("_owner", "") != owner_id):
             return None
         return {k: v for k, v in j.items() if not k.startswith("_")} if j else None
@@ -579,7 +579,7 @@ def start_install(key: str, action: str, *, owner_id: str = "") -> str:
     """Start an explicit lifecycle or account-login job and return its polling ID."""
     if key not in _SPECS:
         raise ValueError("该执行底座已不可用，请选择其他底座")
-    if action not in {"install", "update", "uninstall", "check", "login", "login-isolated"}:
+    if action not in {"install", "update", "uninstall", "check", "login", "login-reuse", "login-isolated"}:
         raise ValueError("Unsupported Agent installation action")
     if action.startswith("login") and key != "codex":
         raise ValueError("Account login is supported only for Codex")
@@ -629,9 +629,9 @@ def _run_codex_login(jid: str) -> None:
             if jid in _JOBS:
                 _JOBS[jid]["auth"] = dict(auth)
     with _JOB_LOCK:
-        isolated = (_JOBS.get(jid) or {}).get("action") == "login-isolated"
+        action = (_JOBS.get(jid) or {}).get("action")
     ok, detail, code = codex_login_flow.run(jid, _bin_of("codex"), _data_root(),
-                                         publish=publish, isolated=isolated)
+                                         publish=publish, isolated=action == "login-isolated", reuse=action == "login-reuse")
     _done(jid, ok, detail, code)
 
 
@@ -640,7 +640,7 @@ def cancel_login(jid: str, *, owner_id: str = "") -> dict:
     from . import codex_login_flow
     with _JOB_LOCK:
         current = _JOBS.get(jid)
-        if (not current or current.get("key") != "codex" or current.get("action") not in {"login", "login-isolated"}
+        if (not current or current.get("key") != "codex" or current.get("action") not in {"login", "login-reuse", "login-isolated"}
                 or current.get("_owner", "") != owner_id):
             raise ValueError("没有这个 Codex 授权任务，或任务不属于当前账号")
         if current["state"] == "done":

@@ -216,7 +216,7 @@ async def post_agent_install(
     action = str(body.get("action") or "install").strip()
     if key not in agent_setup._SPECS:
         raise HTTPException(status_code=404, detail="该执行底座已不可用，请选择其他底座")
-    if action not in ("install", "update", "uninstall", "check", "login", "login-isolated", "login-cancel") or (action.startswith("login") and key != "codex"):
+    if action not in ("install", "update", "uninstall", "check", "login", "login-reuse", "login-isolated", "login-cancel") or (action.startswith("login") and key != "codex"):
         raise HTTPException(status_code=400, detail="不认识的操作")
     if action == "uninstall" and key == "pi":
         raise HTTPException(status_code=409, detail="Pi 是 SoduWork 必需组件，不能单独卸载。")

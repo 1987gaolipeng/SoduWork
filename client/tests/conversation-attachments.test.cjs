@@ -6,7 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const attachments = require('../main/pi-session/attachments');
 
-test('conversation attachments are staged inside the real session workspace', async () => {
+test('conversation attachments are copied to the configured session input directory', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-attachments-'));
   const sourceDir = path.join(root, 'source');
   const cwd = path.join(root, 'work');
@@ -14,12 +14,13 @@ test('conversation attachments are staged inside the real session workspace', as
   const source = path.join(sourceDir, '需求原稿.md');
   fs.writeFileSync(source, '# 真实需求', 'utf8');
   try {
-    const result = await attachments.stage(cwd, [{ name: '需求?.md', path: source }]);
+    const managed = path.join(root, 'managed');
+    const result = await attachments.stage(cwd, [{ name: '需求?.md', path: source }], { stagingDir: managed });
     assert.equal(result.files.length, 1);
     assert.equal(result.warnings.length, 0);
-    assert.equal(attachments.inside(cwd, result.files[0].path), true);
+    assert.equal(attachments.inside(cwd, result.files[0].path), false);
     assert.equal(fs.readFileSync(result.files[0].path, 'utf8'), '# 真实需求');
-    assert.match(result.files[0].relative, /^\.soduwork-inputs\//);
+    assert.ok(attachments.inside(managed, result.files[0].path));
     assert.match(attachments.prompt(result.files), /用户在开始本次会话时提供/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -53,15 +54,18 @@ test('folders are accepted by reference instead of being rejected', async () => 
   }
 });
 
-test('files already inside the chosen workspace are copied before model access', async () => {
+test('files already inside the chosen workspace are copied before model access', async t => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-workspace-'));
   const source = path.join(cwd, '现有资料.txt');
   fs.writeFileSync(source, 'source', 'utf8');
   try {
     const result = await attachments.stage(cwd, [{ name: '现有资料.txt', path: source }]);
     assert.notEqual(result.files[0].path, source);
-    assert.equal(attachments.inside(cwd, result.files[0].path), true);
-    assert.match(result.files[0].relative, /^\.soduwork-inputs\//);
+    assert.equal(attachments.inside(cwd, result.files[0].path), false);
+    const temporary = path.dirname(result.files[0].path);
+    assert.match(path.basename(temporary), /^soduwork-inputs-/);
+    t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+    assert.deepEqual(fs.readdirSync(cwd), ['现有资料.txt']);
     assert.equal(fs.readFileSync(result.files[0].path, 'utf8'), 'source');
     fs.writeFileSync(result.files[0].path, 'model changed', 'utf8');
     assert.equal(fs.readFileSync(source, 'utf8'), 'source');
@@ -96,10 +100,11 @@ test('pasted binary images are staged and forwarded to the model without exposin
   try {
     const result = await attachments.stage(cwd, [{
       name: '粘贴图片.png', type: 'image/png', data: new Uint8Array(bytes),
-    }]);
+    }], { stagingDir: path.join(root, 'managed') });
     assert.equal(result.files.length, 1);
     assert.equal(result.files[0].mimeType, 'image/png');
-    assert.equal(result.files[0].relative.startsWith('.soduwork-inputs/'), true);
+    assert.equal(attachments.inside(path.join(root, 'managed'), result.files[0].path), true);
+    assert.deepEqual(fs.readdirSync(cwd), []);
     assert.deepEqual(fs.readFileSync(result.files[0].path), bytes);
     const images = await attachments.images(result.files);
     assert.equal(images.length, 1);
@@ -122,7 +127,7 @@ test('arbitrary image MIME types reach visual analysis while previews stay safe'
   try {
     const result = await attachments.stage(cwd, [{
       name: 'diagram.svg', type: 'image/svg+xml', data: new Uint8Array(bytes),
-    }]);
+    }], { stagingDir: path.join(root, 'managed') });
     const images = await attachments.images(result.files);
     assert.equal(images.length, 1);
     assert.equal(images[0].mimeType, 'image/svg+xml');
@@ -223,4 +228,17 @@ test('initial and follow-up composers accept clipboard files and forward attachm
   assert.match(preload, /pi-session-send', ref, text, attachments/);
   assert.match(preload, /pi-session-attachment-image/);
   assert.match(preload, /pi-session-copy-attachment-image/);
+});
+
+test('concurrent attachments with identical names retain both payloads outside the project', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-parallel-inputs-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const cwd = path.join(root, 'project'), stagingDir = path.join(root, 'managed');
+  fs.mkdirSync(cwd);
+  const stage = data => attachments.stage(cwd, [{ name: 'same.txt', data: Buffer.from(data) }], { stagingDir });
+  const [a, b] = await Promise.all([stage('first'), stage('second')]);
+  assert.notEqual(a.files[0].path, b.files[0].path);
+  assert.equal(fs.readFileSync(a.files[0].path, 'utf8'), 'first');
+  assert.equal(fs.readFileSync(b.files[0].path, 'utf8'), 'second');
+  assert.deepEqual(fs.readdirSync(cwd), []);
 });

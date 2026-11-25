@@ -3,9 +3,8 @@
 The Codex desktop app and Codex CLI normally share ``~/.codex``. Running both
 against that directory lets system-skill installation and plugin-cache writes
 race each other. Managed Windows filesystem filters then turn some atomic
-replaces into ``os error 17``/``4395``. SoduWork gives every conversation a stable
-private CODEX_HOME and imports only the user's login file -- never personal
-hooks, MCP configuration, caches, or session history.
+replaces into ``os error 17``/``4395``. SoduWork binds each conversation to a stable Runner-owned home.
+Only an explicit connection request may import the terminal login.
 """
 from __future__ import annotations
 
@@ -59,8 +58,9 @@ def _remove_reparse(path: str) -> None:
 
 def clean_skills(env: dict) -> None:
     """Remove reparse points without following them into their targets."""
-    home = str(env.get("CODEX_HOME") or "").strip() or \
-        os.path.join(os.path.expanduser("~"), ".codex")
+    home = str(env.get("CODEX_HOME") or "").strip()
+    if not home:
+        return
     skills_dir = os.path.join(home, "skills")
     try:
         if _is_reparse(skills_dir):
@@ -117,17 +117,15 @@ def _replace_login(temporary: str, target: str, data: bytes) -> None:
             getattr(exc, "winerror", None) in (2, 17))
         if not compatible or not os.path.isfile(temporary) or not os.path.isdir(os.path.dirname(target)):
             raise
-    if _is_reparse(target):
+    if _is_reparse(target) or os.path.lexists(target) and os.lstat(target).st_nlink != 1:
         raise OSError("Codex login target must not be a link")
     try:
         with open(target, "rb") as previous:
             before = previous.read()
     except FileNotFoundError:
         before = None
-    # This is a private per-conversation home, synchronized BEFORE launching
-    # Codex. No native process can observe an incomplete first login. Every
-    # subsequent preparation compares bytes, so an interrupted replacement
-    # is repaired rather than mistaken for a newer, valid login by mtime.
+    # Some managed Windows volumes reject atomic replace. Restore the previous
+    # bytes on failure so another explicit connection can safely retry.
     try:
         _write_login(target, data, exclusive=before is None)
     except OSError:
@@ -137,7 +135,7 @@ def _replace_login(temporary: str, target: str, data: bytes) -> None:
 
 
 def _sync_auth(source_home: str, runtime_home: str) -> None:
-    """Synchronize only current login state before starting native Codex.
+    """Import a terminal login when the user explicitly requests reuse.
 
     A hard link is not usable on machines where transparent encryption exposes
     the two user-profile areas as different volumes. The destination inherits
@@ -147,8 +145,15 @@ def _sync_auth(source_home: str, runtime_home: str) -> None:
     target = os.path.join(runtime_home, "auth.json")
     marker = os.path.join(runtime_home, ".soduwork-auth-source")
     try:
+        original = os.lstat(source)
+        if not stat.S_ISREG(original.st_mode) or _is_reparse(source) or original.st_size > 4 * 1024 * 1024:
+            raise OSError("Unexpected Codex login file")
         with open(source, "rb") as handle:
-            data = handle.read()
+            if not os.path.samestat(original, os.fstat(handle.fileno())):
+                raise OSError("Codex login file replaced")
+            data = handle.read(original.st_size + 1)
+            if len(data) != original.st_size or os.fstat(handle.fileno()).st_mtime_ns != original.st_mtime_ns:
+                raise OSError("Codex login changed while reading")
     except FileNotFoundError:
         return
     except OSError as exc:
@@ -168,7 +173,7 @@ def _sync_auth(source_home: str, runtime_home: str) -> None:
     except FileNotFoundError:
         imported = None
     try:
-        if _is_reparse(target):
+        if _is_reparse(target) or os.path.lexists(target) and os.lstat(target).st_nlink != 1:
             raise RuntimeError("Codex 登录文件位置异常，请检查隔离工作目录")
         with open(target, "rb") as existing:
             current = existing.read()
@@ -211,14 +216,9 @@ def login_source_home(env: dict) -> str:
 def prepare(env: dict, data_root: str, ref: str = "") -> str:
     """Select a stable private home for one SoduWork conversation."""
     from . import codex_account_home
-    root = os.path.join(os.path.abspath(data_root), "agents", "codex")
-    runtime_home = os.path.join(root, _folder(ref))
+    runtime_home = codex_account_home.conversation_dir(data_root, ref)
     selected = codex_account_home.runtime_home(data_root, runtime_home)
-    if not selected:
-        _sync_auth(login_source_home(env), runtime_home)
-    env["CODEX_HOME"] = selected or runtime_home
-    if selected:
-        env["CODEX_SQLITE_HOME"] = selected
+    env["CODEX_HOME"] = env["CODEX_SQLITE_HOME"] = selected or runtime_home
     internal_temp = os.path.join(runtime_home, ".soduwork-tmp")
     os.makedirs(internal_temp, exist_ok=True)
     env["TEMP"] = env["TMP"] = env["TMPDIR"] = internal_temp

@@ -42,7 +42,7 @@ test('canonical manifest is packaged verbatim and cached body cannot leak mutati
   const first=incubator.body({});assert.deepEqual(first.workflow,canonical.workflow);
   assert.equal(first.version,canonical.version);
   assert.match(first.instructions,/\.soduwork\/product-incubation\.json/);
-  assert.match(first.workflow.nodes.find(node=>node.key==='deliver').config.prompt,/\.soduwork\/delivery\.json/);
+  assert.match(first.workflow.nodes.find(node=>node.key==='deliver').config.prompt,/Markdown 链接交付已核验的 product-delivery\.zip 和 delivery-report\.md/);
   first.workflow.nodes[0].name='mutated';
   assert.notEqual(incubator.body({}).workflow.nodes[0].name,'mutated');
   assert.ok(require('../package.json').build.extraResources.some(x=>x.from==='../hub-backend/plugins/product-incubator.json'&&x.to==='product-incubator-plugin.json'));
