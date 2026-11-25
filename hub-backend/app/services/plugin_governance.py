@@ -47,11 +47,13 @@ async def overview(session: AsyncSession, org_ids: set[str] | None = None,
             "summary": {
                 "total": 0, "available": 0, "pendingReview": 0,
                 "activeRuns": 0, "successRate": None, "attention": 0,
+                "pendingReviewVersions": 0, "attentionItems": 0,
             },
             "counts": {key: 0 for key in (
                 "review", "quality", "dependency", "runtime", "revoked")},
             "queues": {key: [] for key in (
                 "review", "quality", "dependency", "runtime", "revoked")},
+            "pluginCounts": {},
             "items": [],
         }
 
@@ -213,8 +215,17 @@ async def overview(session: AsyncSession, org_ids: set[str] | None = None,
             at=_ms(run.finished_at or run.updated_at or run.created_at),
         ))
 
-    # The summary counts plugins across all pending versions; only the displayed queue is capped.
-    review_plugins = {item["pluginId"] for item in queues["review"]}
+    # Summary tiles count plugins; queue counts count actionable items. Compute
+    # both before limiting previews so neither depends on the display limit.
+    counts = {key: len(value) for key, value in queues.items()}
+    plugin_counts = {plugin_id: {"review": 0, "attention": 0}
+                     for plugin_id in plugin_ids}
+    for kind, queue in queues.items():
+        for item in queue:
+            plugin_counts[item["pluginId"]]["attention"] += 1
+            if kind == "review":
+                plugin_counts[item["pluginId"]]["review"] += 1
+
     for key in queues:
         queues[key].sort(
             key=lambda item: (item.get("severity") == "high", item.get("at") or 0),
@@ -229,15 +240,18 @@ async def overview(session: AsyncSession, org_ids: set[str] | None = None,
     decided = [row for row in runs if row.state in {"succeeded", "failed"}]
     success_rate = (round(sum(row.state == "succeeded" for row in decided) * 100 /
                           len(decided), 1) if decided else None)
-    counts = {key: len(value) for key, value in queues.items()}
     return {
         "generatedAt": _ms(datetime.now(timezone.utc)),
         "summary": {
             "total": len(items), "available": available,
-            "pendingReview": len(review_plugins), "activeRuns": active_runs,
-            "successRate": success_rate, "attention": sum(counts.values()),
+            "pendingReview": sum(row["review"] > 0 for row in plugin_counts.values()),
+            "pendingReviewVersions": counts["review"], "activeRuns": active_runs,
+            "successRate": success_rate,
+            "attention": sum(row["attention"] > 0 for row in plugin_counts.values()),
+            "attentionItems": sum(counts.values()),
         },
         "counts": counts,
         "queues": queues,
+        "pluginCounts": plugin_counts,
         "items": items,
     }

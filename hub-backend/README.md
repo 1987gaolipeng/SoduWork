@@ -132,6 +132,12 @@ Model metadata carries its privacy classification from snapshot capture to remot
 
 Run `python3 -m unittest test_runner_local_rpc test_runner_remote_rpc test_runner_event_delivery test_runner_usage_receipts test_runner_input_cleanup test_local_process_cleanup test_task_goal_stop_races` in the backend test environment. The private-pipe test uses a real Runner process and durable queue with synthetic discovery; process-cleanup tests use isolated operating-system children. These checks do not establish real-provider or Windows acceptance when run on another platform.
 
+## Plugin governance counts
+
+`GET /api/v1/admin/plugins/governance` counts distinct visible plugins in `summary.pendingReview` and `summary.attention`. A plugin with an older quarantined version still counts as pending review after a newer version is approved.
+
+`counts.review` and `summary.pendingReviewVersions` count individual versions. `summary.attentionItems` is the sum of all action counts. Each entry in `pluginCounts` gives that plugin's pending version count (`review`) and action count (`attention`). Totals are computed before each queue preview is limited to 30 items. Review actions retain their individual `versionId`. The existing query limits of 1,000 evaluations and 500 runs in the last 30 days still apply to the corresponding action counts.
+
 ## Offline quality gate
 
 Native requirement preparation can save `executionSubmissionChoice` independently of the effective `executionSubmissionMode`. For the `infer` choice, completed and validated primary artifacts resolve the mode to automatic review submission; explicit manual and ambiguous legacy manual values retain their behavior. Review remains a human action owned by the requirement creator. Current-turn delivery issues expose interrupted capture, invalid output or an unavailable creator without changing approval permissions. Upgrade desktop and Hub together for the new choice acknowledgment and issue receipts.

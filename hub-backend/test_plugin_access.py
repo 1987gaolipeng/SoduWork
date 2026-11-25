@@ -553,12 +553,12 @@ class PluginAccessTests(unittest.IsolatedAsyncioTestCase):
                     trust_state="quarantined", created_at=stamp + timedelta(minutes=index)))
         await self.session.commit()
 
-        response = await self.http.get("/api/v1/admin/plugins/governance")
-        self.assertEqual(response.status_code, 200, response.text)
-        result = response.json()
+        result = await self.governance()
         self.assertEqual(result["summary"]["total"], 3)  # Includes the approved fixture plugin.
         self.assertEqual(result["summary"]["pendingReview"], 2)
-        self.assertEqual(result["counts"]["review"], 30)
+        self.assertEqual(result["counts"]["review"], 32)
+        self.assertEqual(result["pluginCounts"]["older"]["review"], 1)
+        self.assertNotIn("outside", result["pluginCounts"])
         queue = result["queues"]["review"]
         self.assertEqual(len(queue), 30)
         self.assertEqual({item["pluginId"] for item in queue}, {"newer"})
@@ -621,6 +621,123 @@ class PluginAccessTests(unittest.IsolatedAsyncioTestCase):
                          [expected_latest["governance-dependency"]])
         self.assertEqual(dependencies[0]["detail"], "Current dependency")
         self.assertEqual(result["summary"]["attention"], 4)
+
+    async def seed_governance_reviews(self, plugin_count, version_count):
+        self.version.trust_state = "quarantined"
+        self.version.enabled = False
+        for index in range(1, version_count):
+            plugin_id = self.plugin.id if index >= plugin_count else f"pending-{index}"
+            if index < plugin_count:
+                self.session.add(am.Plugin(id=plugin_id, key=plugin_id, name=plugin_id,
+                                           org_id="company", created_by="author"))
+            self.session.add(am.PluginVersion(
+                id=f"pending-version-{index}", plugin_id=plugin_id, version=f"2.0.{index}",
+                checksum=f"pending-checksum-{index}", trust_state="quarantined", enabled=False,
+                manifest=self.version.manifest, workflow={"nodes": []},
+                capability_report={"hasWorkflow": False}))
+        await self.session.commit()
+
+    async def governance(self):
+        response = await self.http.get("/api/v1/admin/plugins/governance")
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    async def test_governance_counts_plugins_separately_from_review_versions(self):
+        await self.seed_governance_reviews(26, 27)
+        result = await self.governance()
+        summary = result["summary"]
+        self.assertEqual(summary["total"], 26)
+        self.assertEqual(summary["pendingReview"], 26)
+        self.assertEqual(summary["pendingReviewVersions"], 27)
+        self.assertEqual(summary["attention"], 26)
+        self.assertEqual(summary["attentionItems"], 27)
+        self.assertEqual(result["counts"]["review"], 27)
+        self.assertEqual(len({row["versionId"] for row in result["queues"]["review"]}), 27)
+        self.assertEqual(result["pluginCounts"][self.plugin.id], {"review": 2, "attention": 2})
+
+    async def test_governance_plugin_counts_do_not_depend_on_queue_preview(self):
+        await self.seed_governance_reviews(40, 40)
+        result = await self.governance()
+        self.assertEqual(result["summary"]["total"], 40)
+        self.assertEqual(result["summary"]["pendingReview"], 40)
+        self.assertEqual(result["summary"]["attention"], 40)
+        self.assertEqual(result["counts"]["review"], 40)
+        self.assertEqual(len(result["queues"]["review"]), 30)
+        self.assertEqual(len(result["pluginCounts"]), 40)
+        self.assertTrue(all(row == {"review": 1, "attention": 1}
+                            for row in result["pluginCounts"].values()))
+
+    async def test_governance_version_counts_do_not_depend_on_queue_preview(self):
+        await self.seed_governance_reviews(1, 40)
+        result = await self.governance()
+        self.assertEqual(result["summary"]["total"], 1)
+        self.assertEqual(result["summary"]["pendingReview"], 1)
+        self.assertEqual(result["summary"]["pendingReviewVersions"], 40)
+        self.assertEqual(result["summary"]["attention"], 1)
+        self.assertEqual(result["summary"]["attentionItems"], 40)
+        self.assertEqual(result["counts"]["review"], 40)
+        self.assertEqual(len(result["queues"]["review"]), 30)
+        self.assertEqual(result["pluginCounts"][self.plugin.id], {"review": 40, "attention": 40})
+        detail = await self.http.get(f"/api/v1/admin/plugins/{self.plugin.id}")
+        self.assertEqual(detail.status_code, 200, detail.text)
+        self.assertEqual(len(detail.json()["versions"]), 40)
+
+    async def test_governance_keeps_older_pending_versions_until_reviewed(self):
+        await self.seed_governance_reviews(1, 2)
+        current = await self.session.get(am.PluginVersion, "pending-version-1")
+        current.created_at = datetime.now(timezone.utc) + timedelta(seconds=1)
+        current.trust_state = "approved"
+        current.enabled = True
+        await self.session.commit()
+        result = await self.governance()
+        self.assertEqual(result["items"][0]["latestVersion"]["id"], current.id)
+        self.assertEqual(result["summary"]["available"], 1)
+        self.assertEqual(result["summary"]["pendingReview"], 1)
+        self.assertEqual(result["summary"]["pendingReviewVersions"], 1)
+        self.assertEqual([row["versionId"] for row in result["queues"]["review"]], [self.version.id])
+        self.version.trust_state = "approved"
+        await self.session.commit()
+        result = await self.governance()
+        self.assertEqual(result["summary"]["pendingReview"], 0)
+        self.assertEqual(result["summary"]["pendingReviewVersions"], 0)
+        self.assertEqual(result["pluginCounts"][self.plugin.id], {"review": 0, "attention": 0})
+
+    async def test_governance_attention_deduplicates_plugins_across_action_types(self):
+        self.version.capability_report = {"hasWorkflow": True, "adapterBlockers": ["Fixture blocker"]}
+        self.version.workflow = {"nodes": [{"key": "work", "type": "ai"}]}
+        binding = await self.session.get(am.PluginBinding, "permission-binding")
+        binding.enabled = False
+        self.session.add(am.PluginEvaluationRun(
+            id="failed-evaluation", plugin_id=self.plugin.id, version_id=self.version.id,
+            org_id="company", case_key="fixture", state="failed", verdict="failed"))
+        await self.session.commit()
+        result = await self.governance()
+        self.assertEqual(result["counts"]["dependency"], 2)
+        self.assertEqual(result["counts"]["quality"], 1)
+        self.assertEqual(result["summary"]["attention"], 1)
+        self.assertEqual(result["summary"]["attentionItems"], 3)
+        self.assertEqual(result["pluginCounts"][self.plugin.id], {"review": 0, "attention": 3})
+
+    async def test_governance_counts_respect_scope_and_empty_catalog(self):
+        await self.seed_governance_reviews(2, 3)
+        outside = await self.session.get(am.Plugin, "pending-1")
+        outside.org_id = "other"
+        await self.session.commit()
+        result = await self.governance()
+        self.assertEqual(result["summary"]["total"], 1)
+        self.assertEqual(result["summary"]["pendingReview"], 1)
+        self.assertEqual(result["summary"]["pendingReviewVersions"], 2)
+        self.assertEqual(set(result["pluginCounts"]), {self.plugin.id})
+        self.assertEqual({row["pluginId"] for row in result["queues"]["review"]}, {self.plugin.id})
+        self.plugin.org_id = "other"
+        await self.session.commit()
+        result = await self.governance()
+        self.assertEqual(result["summary"], {"total": 0, "available": 0, "pendingReview": 0,
+                         "pendingReviewVersions": 0, "activeRuns": 0, "successRate": None,
+                         "attention": 0, "attentionItems": 0})
+        self.assertEqual(result["pluginCounts"], {})
+        self.assertFalse(any(result["counts"].values()))
+        self.assertFalse(any(result["queues"].values()))
 
     async def test_edit_grant_does_not_replace_older_usable_version_with_restricted_new_one(self):
         self.session.add(am.PluginVersion(

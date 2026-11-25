@@ -111,6 +111,12 @@ Runner 重启后，恢复终端仍绑定原执行的会话历史，不恢复模�
 
 在后端测试环境运行 `python3 -m unittest test_runner_local_rpc test_runner_remote_rpc test_runner_event_delivery test_runner_usage_receipts test_runner_input_cleanup test_local_process_cleanup test_task_goal_stop_races`。私有管道测试使用真实 Runner 进程和持久队列，底座检测为模拟；进程清理测试使用隔离的操作系统子进程。在其他平台运行这些检查，不代表已完成真实模型或 Windows 验收。
 
+## 插件治理统计口径
+
+`GET /api/v1/admin/plugins/governance` 的 `summary.pendingReview` 和 `summary.attention` 分别统计当前用户可见的待审核插件数和需要处理的插件数。同一插件只计一次。即使新版本已经批准，只要旧版本仍在隔离区，该插件仍计入待审核。
+
+`counts.review` 和 `summary.pendingReviewVersions` 统计待审核版本数。`summary.attentionItems` 是各类待办事项数之和。`pluginCounts` 按插件给出待审核版本数（`review`）和待办事项数（`attention`）。接口先统计，再为每类队列返回最多 30 条预览。每条审核待办保留独立的 `versionId`。评测事项的统计范围仍为最近 1,000 条评测，运行事项的统计范围仍为近 30 天内最近 500 次运行。
+
 ## 质量门禁
 
 本机需求准备阶段将 `executionSubmissionChoice` 与实际的 `executionSubmissionMode` 分开保存。选择自动判断时，本轮完成且校验通过的正式成果会触发自动提交验收；明确手动及来源不明的历史手动值保持原行为。验收仍由需求创建人执行。本轮交付问题会显示采集中断、成果无效或创建人不可用，不改变审批权限。新的策略确认和问题回执需要桌面与 Hub 一起更新。

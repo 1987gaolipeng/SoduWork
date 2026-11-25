@@ -31,7 +31,7 @@ const fmt = (ms) => ms ? new Date(ms).toLocaleString(getLocale(), { hour12: fals
 
 export default function PluginDetailWorkspace({
   plugin, version, section, runs = [], evaluationData, audienceData,
-  busy, evaluationBusy, actions, issues = [], categoryRevision = 0,
+  busy, evaluationBusy, actions, issues = [], issueCount = issues.length, categoryRevision = 0,
 }) {
   const uiLocale = useLocale();
   plugin = catalogPlugin(plugin, uiLocale, version);
@@ -95,8 +95,9 @@ export default function PluginDetailWorkspace({
 
     {section === 'overview' && <div className="plugin-detail-panel plugin-overview-panel">
       <PluginDescription plugin={plugin} version={version} entrypoints={entrypoints} approved={approved} />
-      {issues.length > 0 && <details className="plugin-contract-disclosure">
-        <summary>{tx("待处理事项 · ")}{issues.length}</summary>
+      {issueCount > 0 && <details className="plugin-contract-disclosure">
+        <summary>{tx("待处理事项 · ")}{issueCount}</summary>
+        {issues.length < issueCount && <p>{tx("当前预览显示 {0} 项待处理事项。", [issues.length])}</p>}
         <div className="plugin-contract-disclosure-body plugin-issue-list">{issues.map((item, index) =>
           <button key={item.id || index} type="button" onClick={() => actions.openIssue(item)}><Icon name="alert" />
             <span>{[item.title, item.reason, item.label].find((value) => typeof value === 'string' && value) || tx("查看待处理事项")}</span><Icon name="chevron" /></button>)}</div>
