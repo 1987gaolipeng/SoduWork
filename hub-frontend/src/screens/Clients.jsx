@@ -27,11 +27,11 @@ const AUTH_STATES = localeMap(() => ({
   },
   pending: {
     label: '待激活',
-    help: "选择归属用户并保存后，这台 SoduWork 才能读取需求和企业资源。",
+    help: '请核对员工的身份，让员工在自己的桌面端点击“复制设备配对码”，然后将配对码粘贴到这里。',
   },
   revoked: {
     label: '已停用',
-    help: '当前会话已失效；重新选择归属并保存可恢复使用。',
+    help: '设备访问已停用。如需恢复，请先重新登记，再用员工桌面端的新配对码激活。',
   },
 }))
 function authState(value) {
@@ -55,6 +55,66 @@ function Pager({ page, total, onChange }) {
   return <ListPager page={page} pages={pages} total={total} onChange={onChange} />
 }
 
+function OwnerSelect({ value, onChange, allowUnassigned = false, disabled = false }) {
+  const [users, setUsers] = useState([])
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let active = true
+    api.clientOwnerOptions()
+      .then(list => { if (active) setUsers(list) })
+      .catch(e => { if (active) setError(e.message) })
+    return () => { active = false }
+  }, [])
+  return <>
+    <SelectMenu className="f-in" aria-label={tx("归属成员")} value={value}
+      disabled={disabled} onChange={e => onChange(e.target.value)}>
+      <option value="">{allowUnassigned ? tx("未分配") : tx("请选择归属成员")}</option>
+      {users.map(u => <option key={u.id} value={u.id}>{u.displayName && u.displayName !== u.username
+        ? `${u.displayName} (${u.username})` : u.username}</option>)}
+    </SelectMenu>
+    {error && <span role="alert">{error}</span>}
+  </>
+}
+
+function PairingTokenInput({ value, onChange, disabled }) {
+  return <label>
+    <span className="f-lbl">{tx("设备配对码")}</span>
+    <input className="f-in" type="password" autoComplete="off" spellCheck={false}
+      value={value} disabled={disabled} onChange={e => onChange(e.target.value)} />
+  </label>
+}
+
+function PairDevice({ onClose, onPaired }) {
+  const [owner, setOwner] = useState('')
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  async function pair() {
+    if (busy || !owner || !token.trim()) return
+    setBusy(true)
+    setError('')
+    try {
+      await api.pairClient(owner, token.trim())
+    } catch (e) {
+      setError(tx(e.message))
+      setBusy(false)
+      return
+    }
+    toast(tx("设备已激活并完成归属"))
+    onPaired()
+  }
+  return <Modal title={tx("配对设备")} onClose={busy ? undefined : onClose} dirty={!!owner || !!token}
+    foot={dismiss => <>
+      <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
+      <button className="btn btn-primary" disabled={busy || !owner || !token.trim()} onClick={pair}>{tx("配对并激活")}</button>
+    </>}>
+    <p className="muted">{tx("请核对员工的身份，让员工在自己的桌面端点击“复制设备配对码”，然后将配对码粘贴到这里。")}</p>
+    <div><span className="f-lbl">{tx("归属成员")}</span><OwnerSelect value={owner} onChange={setOwner} disabled={busy} /></div>
+    <PairingTokenInput value={token} onChange={setToken} disabled={busy} />
+    {error && <div role="alert">{error}</div>}
+  </Modal>
+}
+
 function DeviceFleet() {
   const listRef = useViewportHeight(180)
   useLocale()
@@ -62,6 +122,7 @@ function DeviceFleet() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [detail, setDetail] = useState(null)
+  const [pairing, setPairing] = useState(false)
   const [state, setState] = useState('all')
   const [form, setForm] = useState('all')
   const [page, setPage] = useState(1)
@@ -155,13 +216,14 @@ function DeviceFleet() {
         disabled={exporting || loading || !!error || !data?.total || composing || draft.trim() !== q}>
         {exporting ? tx("正在导出…") : tx("导出 CSV")}
       </button>
+      {can('client.assign') && <button type="button" className="btn btn-primary xs" onClick={() => setPairing(true)}>{tx("配对设备")}</button>}
       </div>
     </div>
     {error && <div className="en-state bad" role="alert"><Icon name="alert" /><div><b>{tx("终端数据没有加载出来")}</b><span>{error}</span></div>
       <button className="btn btn-ghost xs" onClick={() => load(false)}>{tx("重试")}</button></div>}
     {loading && !data && <div className="en-state"><span className="en-spinner" /><div><b>{tx("正在读取终端")}</b><span>{tx("只加载当前筛选和当前页")}</span></div></div>}
     {data && !items.length && <div className="en-empty"><Icon name="monitor" /><b>{tx("没有符合条件的终端")}</b>
-      <span>{counts.all ? tx("换一个筛选条件或清空搜索词。") : tx("启动 SoduWork 客户端后，终端会自动登记到这里。")}</span></div>}
+      <span>{counts.all ? tx("换一个筛选条件或清空搜索词。") : tx("员工在桌面端成功登录或管理员完成配对后，设备会显示在这里。")}</span></div>}
     {!!items.length && <div ref={listRef} className="en-table-wrap admin-viewport-list" tabIndex={0} role="region" aria-label={tx("员工终端")}><table className="en-table" aria-busy={loading}>
       <thead><tr>
         {[['name', tx("终端")], ['owner', tx("归属成员")], ['online', tx("连接状态")], ['auth', tx("设备身份")], ['platform', tx("系统 / 版本")], ['lastSeen', tx("最后心跳")]].map(([key, label]) => {
@@ -192,6 +254,7 @@ function DeviceFleet() {
     </table></div>}
     {data && <Pager page={page} total={data.total || 0} onChange={setPage} />}
     {detail && <ClientDetail client={detail} onClose={() => setDetail(null)} onChanged={() => load(true)} />}
+    {pairing && <PairDevice onClose={() => setPairing(false)} onPaired={() => { setPairing(false); load(true) }} />}
   </section>
 }
 
@@ -217,7 +280,7 @@ function ClientDetail({ client, onClose, onChanged }) {
   const [notice, setNotice] = useState('')
   const [owner, setOwner] = useState(client.ownerUserId || '')
   const [busy, setBusy] = useState('')
-  const [users, setUsers] = useState([])
+  const [pairingToken, setPairingToken] = useState('')
   const [updates, setUpdates] = useState([])
   const [confirm, setConfirm] = useState(null)   // Confirmation state for destructive remote actions.
   const detailScope = useRef(null)
@@ -230,11 +293,11 @@ function ClientDetail({ client, onClose, onChanged }) {
     detailScope.current = scope
     pushLock.current = false
     setD(null)
+    setPairingToken('')
     setBusy('')
     api.clientDetail(client.id)
       .then((next) => { if (alive && !scope.revision) { setD(next); setOwner(next.ownerUserId || '') } })
       .catch(() => { if (alive && !scope.revision) setD({ ...client, config: {} }) })
-    if (can('client.assign')) api.users().then((list) => { if (alive) setUsers(list || []) }).catch(() => {})
     return () => { alive = false; if (detailScope.current === scope) detailScope.current = null }
   }, [client.id])
 
@@ -299,17 +362,19 @@ function ClientDetail({ client, onClose, onChanged }) {
     }
   }
   async function saveOwner() {
+    if (saveDisabled) return
     setBusy('owner')
     try {
       const before = authState((d || client).authState).key
-      const result = await api.assignClient(client.id, owner || null)
+      const result = await api.assignClient(client.id, owner || null, needsPairing ? pairingToken.trim() : undefined)
+      setPairingToken('')
       await reloadDetail()
       if (!owner) toast(tx("归属已解除，设备访问已停用"))
       else if (before !== 'active' && result.authState === 'active') toast(tx("设备已激活并完成归属"))
       else toast(tx("归属已更新"))
       onChanged && onChanged()
     }
-    catch (e) { toast(tx("失败：") + e.message) }
+    catch (e) { toast(tx("失败：") + tx(e.message)) }
     setBusy('')
   }
 
@@ -349,10 +414,12 @@ function ClientDetail({ client, onClose, onChanged }) {
   const current = d || client
   const auth = authState(current.authState)
   const ownerUnchanged = owner === (current.ownerUserId || '')
+  const needsPairing = !!owner && (auth.key !== 'active' || !ownerUnchanged)
   const saveDisabled = busy === 'owner' || (!owner && ownerUnchanged) || (ownerUnchanged && auth.key === 'active')
+    || (needsPairing && (auth.key === 'revoked' || !pairingToken.trim()))
   return (
     <>
-      <Modal dirty={Boolean(notice) || !ownerUnchanged} wide className="client-detail-modal" onClose={onClose}
+      <Modal dirty={Boolean(notice || pairingToken) || !ownerUnchanged} wide className="client-detail-modal" onClose={onClose}
         title={<span className="client-detail-heading"><span className="cli"><span className="ava">{(client.name || client.id).slice(0, 1)}</span><span className="nm">{client.name || client.id}</span></span>
           <span className={'status-dot ' + (client.online ? 'on' : 'off')}><i />{client.online ? tx("在线") : tx("离线")}</span></span>}
         foot={dismiss => <>
@@ -394,16 +461,15 @@ function ClientDetail({ client, onClose, onChanged }) {
           )}
 
           {can('client.assign') && (
-            <div><label className="f-lbl">{tx("归属用户（决定 SoduWork 所属部门）")}</label>
+            <div><span className="f-lbl">{tx("归属用户（决定 SoduWork 所属部门）")}</span>
               <div className="client-detail-input-action">
-                <SelectMenu className="f-in" value={owner} onChange={(e) => setOwner(e.target.value)}>
-                  <option value="">{tx("未分配")}</option>
-                  {users.map((u) => <option key={u.id} value={u.id}>{(u.displayName || u.username)}</option>)}
-                </SelectMenu>
+                <OwnerSelect allowUnassigned value={owner} onChange={next => { setOwner(next); setPairingToken('') }} disabled={busy === 'owner'} />
                 <button className="btn btn-primary" disabled={saveDisabled} onClick={saveOwner}><Icon name="check" />{auth.key === 'active' ? tx("保存") : tx("激活并保存")}</button>
               </div>
             </div>
           )}
+          {can('client.assign') && needsPairing && auth.key !== 'revoked' &&
+            <PairingTokenInput value={pairingToken} onChange={setPairingToken} disabled={busy === 'owner'} />}
 
           {can('client.control') && (
             <div><label className="f-lbl">{tx("发一条通知（客户端气泡显示）")}</label>

@@ -13,8 +13,9 @@ import httpx
 from sqlalchemy import select, func
 from app.main import app
 from app import models
+from app.auth import hash_password
 from app.db import Base, engine, SessionLocal
-from app.services import rbac, work_catalog, device_auth
+from app.services import rbac, work_catalog
 
 # Other unittest modules may import and cache app.db before this module sets env.
 # Fail before even create_all; teardown must never act on a previously-bound Hub DB.
@@ -34,27 +35,26 @@ class NewUserDataTests(unittest.IsolatedAsyncioTestCase):
             a = models.OrgUnit(id="company-a", name="Existing company")
             b = models.OrgUnit(id="company-b", name="New company")
             session.add_all([a,b])
+            password_hash = hash_password("Isolated-test-password")
             self.users = [
-                models.User(id="old-user",username="old-person",password_hash="test-only",org_id=a.id),
-                models.User(id="new-user",username="new-person",password_hash="test-only",org_id=b.id),
-                models.User(id="colleague",username="same-company",password_hash="test-only",org_id=a.id),
+                models.User(id="old-user",username="old-person",password_hash=password_hash,org_id=a.id),
+                models.User(id="new-user",username="new-person",password_hash=password_hash,org_id=b.id),
+                models.User(id="colleague",username="same-company",password_hash=password_hash,org_id=a.id),
             ]
             session.add_all(self.users)
             await session.commit()
         self.headers = {}
-        for uid in ("old-user","new-user","colleague"):
-            device = "device-"+uid
+        for user in self.users:
+            device = "device-"+user.id
+            headers = {"X-Device-Key":"isolated-enrollment-key-"+user.id+"-12345678901234567890"}
             response = await self.http.post("/api/v1/clients/enroll",
-                headers={"X-Device-Key":"isolated-enrollment-key-"+uid+"-12345678901234567890"},
+                headers=headers,
                 json={"device":device,"name":"Isolated installation"})
             self.assertEqual(response.status_code,200,response.text)
-            async with SessionLocal() as session:
-                client = await session.get(models.Client,device)
-                user = await session.get(models.User,uid)
-                device_auth.activate(client,user)
-                await session.commit()
-                token,_ = device_auth.issue_session(client)
-                self.headers[uid]={"Authorization":"Device "+token,"X-Soduwork-Device":device}
+            login = await self.http.post("/api/v1/client-auth/login", headers=headers,
+                json={"device":device, "account":user.username, "password":"Isolated-test-password"})
+            self.assertEqual(login.status_code,200,login.text)
+            self.headers[user.id]={"Authorization":"Device "+login.json()["session"],"X-Soduwork-Device":device}
 
     async def asyncTearDown(self):
         await self.http.aclose()

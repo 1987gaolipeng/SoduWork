@@ -145,7 +145,8 @@
         '<div class="ac-setting-row"><div><b>登录邮箱</b><span>' + text(user.email || '尚未绑定邮箱') + '</span></div><button class="ac-secondary" data-email-change>' + (user.email ? '更换邮箱' : '绑定邮箱') + '</button></div>' +
         '<div class="ac-setting-row"><div><b>账号 ID</b><span><code class="ac-account-id-value">' + text(user.id) + '</code></span></div></div>' +
         '<div class="ac-setting-row"><div><b>登录密码</b><span>' + (emailPassword ? '通过邮箱验证码设置新密码，所有已登录设备需要重新登录' : '修改后，所有已登录设备需要重新登录') + '</span></div><button class="ac-secondary" data-password-change>' + (emailPassword ? '设置新密码' : '修改密码') + '</button></div>' +
-        '<div class="ac-setting-row"><div><b>当前设备</b><span>退出后需重新验证身份</span></div><button class="ac-secondary" data-logout>退出登录</button></div><p class="ac-status" role="status"></p>';
+        '<div class="ac-setting-row"><div><b>当前设备</b><span>退出后需重新验证身份</span></div><button type="button" class="ac-secondary" data-copy-device-pairing>复制设备配对码</button><button class="ac-secondary" data-logout>退出登录</button></div><p class="ac-status" role="status"></p>';
+      global.ClientAuth?.bindDevicePairing?.(content.querySelector('[data-copy-device-pairing]'), status);
       content.querySelector('[data-email-change]').onclick = changeEmail;
       content.querySelector('[data-password-change]').onclick = () => { if (!dialog.embedded) dialog.close(); global.ClientAuth?.changePassword(); };
       content.querySelector('[data-logout]').onclick = () => global.ClientAuth?.logout();

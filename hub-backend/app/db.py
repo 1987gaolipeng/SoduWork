@@ -108,6 +108,7 @@ async def init_db() -> None:
 # Compatibility columns used only during adoption of pre-Alembic databases.
 # Existing columns are unchanged; normal versioned upgrades use Alembic.
 _WANT_COLUMNS = {
+    "ai_usage_event": [("reported_chat_session_id", "VARCHAR(180)")],
     "attachment": [
         # Associate new evidence with its execution and workflow node while retaining legacy compatibility.
         ("role", "VARCHAR(24) DEFAULT 'input'"),
@@ -431,6 +432,7 @@ def _backfill_data(conn) -> None:
     # Legacy adoption skips numbered revisions, so apply the same immutable
     # usage-attribution shape before stamping the database at the integrated head.
     import_module("migrations.versions.0064_usage_attribution").adopt(conn)
+    import_module("migrations.versions.0096_usage_chat_source").backfill(conn)
 
     # create_all does not add indexes to existing tables. Adoption skips the
     # numbered revisions, so preserve and retire duplicates before stamping.

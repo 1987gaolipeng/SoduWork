@@ -1,5 +1,7 @@
 // Only reviewed server message keys are translated; parameters remain business data.
 export const serverMessages = {
+  'quota.platform_write_forbidden': ['平台级套餐与默认额度仅超级管理员可修改', 'Only super administrators can change platform plans and the default quota.', 'プラットフォームのプランと既定の利用枠を変更できるのは、スーパー管理者だけです。', '플랫폼 요금제와 기본 사용 한도는 최고 관리자만 변경할 수 있습니다.'],
+  'hub.input.promotion_requires': ['requires 必须是环境标识数组', 'requires must be an array of environment keys.', 'requires には環境キーの配列を指定してください。', 'requires에는 환경 키 배열을 지정해야 합니다.'],
   'hub.input.release_environment': ['当前任务在所选环境中没有可用的部署目标，请检查发布链配置', 'This task has no available deployment target in the selected environment. Check the release pipeline configuration.', '選択した環境には、このタスクで使用できるデプロイ先がありません。リリースパイプラインの設定を確認してください。', '선택한 환경에서 이 작업에 사용할 수 있는 배포 대상이 없습니다. 릴리스 파이프라인 설정을 확인하세요.'],
   "catalog.department.in_use": ["请先迁移部门成员或一并归档下属部门", "Move department members first, and include active child departments in the archive.", "先に所属メンバーを移動し、有効な子部門も一緒にアーカイブしてください。", "먼저 소속 구성원을 이동하고 활성 하위 부서도 함께 보관하세요."],
   "catalog.department.restore_parent": ["请先恢复上级部门", "Restore the parent department first.", "先に上位部門を復元してください。", "상위 부서를 먼저 복원하세요."],
@@ -52,6 +54,7 @@ export const serverMessages = {
   'plugin.mcp.missing': ['尚未启用：{names}', 'Not enabled: {names}', '未有効：{names}', '활성화되지 않음: {names}'],
   'plugin.tools.ready': ['已批准 {count} 个具体工具', '{count} specific tools approved.', '{count} 個のツールを承認済みです。', '도구 {count}개 승인됨.'],
   'plugin.tools.missing': ['尚未选择：{names}', 'Not selected: {names}', '未選択：{names}', '선택되지 않음: {names}'],
+  'model.config.invalid-object': ['模型配置必须是 JSON 对象', 'Model configuration must be a JSON object.', 'モデル設定は JSON オブジェクトで指定してください。', '모델 설정은 JSON 객체여야 합니다.'],
   'model.discovery.invalid-url': ['先填写以 http(s):// 开头的服务地址', 'Enter a service address that starts with http(s)://.', 'http(s):// で始まるサービスアドレスを入力してください。', 'http(s)://로 시작하는 서비스 주소를 입력하세요.'],
   'model.discovery.missing-key': ['先配置组织密钥', 'Configure the organization key first.', '先に組織キーを設定してください。', '먼저 조직 키를 설정하세요.'],
   'model.discovery.invalid-list': ['服务没有返回有效的模型列表', 'The service did not return a valid model list.', 'サービスから有効なモデル一覧が返されませんでした。', '서비스가 올바른 모델 목록을 반환하지 않았습니다.'],

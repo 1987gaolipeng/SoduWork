@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import subprocess
 import tempfile
+from unittest.mock import patch
 
 from app.services import git_ops
 
@@ -174,6 +176,61 @@ chk("Runner SCM starts from a controlled Git environment",
     and controlled.get("GIT_CONFIG_COUNT") != "99"
     and controlled.get("GCM_INTERACTIVE") == "Never"
     and controlled.get("GIT_TERMINAL_PROMPT") == "0", controlled)
+
+
+def run_git(cwd, *args):
+    return subprocess.run(
+        ["git", "-c", "user.name=Fixture", "-c",
+         "user.email=fixture@example.test", *args], cwd=cwd,
+        env=git_ops._env(), check=True, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE).stdout
+
+
+with tempfile.TemporaryDirectory(prefix="conversation-git-paths-") as temp:
+    root = Path(temp)
+    remote, seed = root / "remote.git", root / "seed"
+    run_git(root, "init", "--bare", "--initial-branch=main", str(remote))
+    run_git(root, "init", "--initial-branch=main", str(seed))
+    (seed / "README.md").write_text("base\n", encoding="utf-8")
+    run_git(seed, "add", ".")
+    run_git(seed, "commit", "-m", "base")
+    run_git(seed, "remote", "add", "origin", str(remote))
+    run_git(seed, "push", "origin", "main")
+    run_git(seed, "checkout", "-b", "task/fixture")
+    names = [" leading.txt", "report final.txt", "说明.md", "plain.txt"]
+    if os.name != "nt":
+        names += ["trailing.txt ", "report\tfinal.txt", "report\nfinal.txt",
+                  "report\r\nfinal.txt"]
+    for name in names:
+        (seed / name).write_text("candidate\n", encoding="utf-8")
+    run_git(seed, "add", ".")
+    run_git(seed, "commit", "-m", "candidate")
+    run_git(seed, "push", "origin", "task/fixture")
+    expected = sorted(names, key=lambda name: name.encode("utf-8"))
+    with patch.dict(os.environ, {"SODUWORK_DATA_ROOT": str(root / "state")}):
+        from app.services import runner_scm
+
+        mirror = runner_scm._repo_dir(str(remote))
+        ready = git_ops.ensure_server_repo(mirror, str(remote))
+        chk("file-path fixture uses a real clean Runner mirror", ready.get("ok"), ready)
+        payload = {"gitUrl": str(remote), "branch": "task/fixture",
+                   "target": "main", "taskId": "fixture"}
+        for quote in ("true", "false"):
+            run_git(mirror, "config", "core.quotePath", quote)
+            receipt = runner_scm.inspect_sync(payload)
+            chk("Runner returns exact file paths with core.quotePath=" + quote,
+                receipt.get("ok") and receipt.get("files") == expected, receipt)
+        same = runner_scm.inspect_sync({**payload, "target": "task/fixture"})
+        chk("unchanged branches keep an empty file list",
+            same.get("ok") and same.get("files") == [] and same.get("merged"), same)
+        for index in range(45):
+            (seed / f"extra-{index:02}.txt").write_text("extra\n", encoding="utf-8")
+        run_git(seed, "add", ".")
+        run_git(seed, "commit", "-m", "many files")
+        run_git(seed, "push", "origin", "task/fixture")
+        bounded = runner_scm.inspect_sync(payload)
+        chk("delivery inspection retains the 40-file limit",
+            bounded.get("ok") and len(bounded.get("files", [])) == 40, bounded)
 
 print(f"\n{ok} passed, {fail} failed")
 raise SystemExit(1 if fail else 0)

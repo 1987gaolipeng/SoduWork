@@ -355,6 +355,45 @@ test('pending enrollment reveals sign-in without exposing private content', asyn
   assert.equal(f.mounted.submitButton.disabled, false);
 });
 
+test('login choices are opt-in per Hub and ordinary retries preserve the current form', async () => {
+  const f = bootView();
+  f.api.loginPreferences = () => ({ rememberAccount: f.api.hubBase().includes('second'), autoLogin: false });
+  f.init(); f.finishEnrollment({ ok: true, activationRequired: true }); await f.flush();
+  const remember = f.gate.querySelector('#soduWorkRememberAccount');
+  const automatic = f.gate.querySelector('#soduWorkAutoLogin');
+  assert.match(f.gate.innerHTML, /id="soduWorkAutoLogin" type="checkbox" aria-describedby="soduWorkAutoLoginHint"/);
+  assert.equal(remember.checked, false);
+  assert.equal(automatic.checked, false);
+  automatic.checked = true;
+  f.window.dispatchEvent({ type: 'soduwork-client-auth-required', detail: { state: 'pending' } });
+  assert.equal(automatic.checked, true);
+  f.switchHub(); f.window.dispatchEvent({ type: 'soduwork-data-scope-changed' });
+  assert.equal(automatic.checked, false);
+  assert.equal(remember.checked, true);
+});
+
+test('password sign-in passes the chosen options for both account routes', async () => {
+  for (const [account, method, rememberAccount, autoLogin] of [
+    ['employee', 'legacy', true, false], ['person@example.test', 'password', false, true],
+  ]) {
+    const f = view();
+    f.mounted.setPolicy({ mailReady: true });
+    f.mode('resetPassword');
+    assert.equal(f.gate.querySelector('.soduwork-auth-preferences').hidden, true);
+    f.mode('password');
+    assert.equal(f.gate.querySelector('.soduwork-auth-preferences').hidden, false);
+    f.mounted.accountInput.value = account;
+    f.mounted.passwordInput.value = 'fixture-password';
+    f.gate.querySelector('#soduWorkRememberAccount').checked = rememberAccount;
+    f.gate.querySelector('#soduWorkAutoLogin').checked = autoLogin;
+    await f.mounted.form.fire('submit');
+    assert.equal(f.calls[0].kind, method);
+    assert.equal(f.calls[0].payload.rememberAccount, rememberAccount);
+    assert.equal(f.calls[0].payload.autoLogin, autoLogin);
+    f.mounted.dispose();
+  }
+});
+
 test('an active event may complete restoration before its bootstrap response', async () => {
   const f = bootView(); f.init();
   assert.equal(f.restoringNode.hidden, false);
@@ -565,6 +604,27 @@ function deliveryView(statusReply, sentReply = {}) {
   f.polls = () => f.calls.filter(call => call.kind === 'emailChallengeStatus').length;
   return f;
 }
+
+test('email verification uses sign-in choices only for actions that enter the workspace', async () => {
+  for (const mode of ['emailCode', 'register', 'resetPassword']) {
+    const f = deliveryView({ ok: true, user: { id: 'test' } });
+    f.mounted.setPolicy({ mailReady: true, requiredConsentVersions: { terms: 'v1', privacy: 'v1' } });
+    f.mode(mode);
+    f.gate.querySelector('#soduWorkRememberAccount').checked = true;
+    f.gate.querySelector('#soduWorkAutoLogin').checked = true;
+    await f.send();
+    assert.equal(f.calls[0].payload.autoLogin, undefined);
+    f.gate.querySelector('#acEmailCode').value = '123456';
+    f.mounted.passwordInput.value = f.gate.querySelector('#acConfirmPassword').value = 'fixture-password';
+    f.gate.querySelector('#acConsent').checked = true;
+    await f.mounted.form.fire('submit');
+    const request = f.calls.at(-1);
+    assert.equal(request.kind, mode);
+    assert.equal(request.payload.rememberAccount, mode === 'resetPassword' ? undefined : true);
+    assert.equal(request.payload.autoLogin, mode === 'resetPassword' ? undefined : true);
+    f.mounted.dispose();
+  }
+});
 
 test('invalid email never requests a code or changes to registration', async () => {
   const f = deliveryView(null);

@@ -74,13 +74,26 @@
   function loginAccountKey() {
     return 'soduwork_work_last_login_account_v1@' + encodeURIComponent(normalizeHub(base()));
   }
-  function rememberLoginAccount(value, result) {
+  function storedLoginAccount() {
+    // A missing key is a legacy profile. An empty value is an explicit opt-out.
+    try { return localStorage.getItem(loginAccountKey()); } catch (_) { return null; }
+  }
+  function rememberLoginAccount(value, result, remember) {
+    if (!result?.ok || !result.user?.id) return;
+    if (remember === false) {
+      writeLocal(loginAccountKey(), '');
+      return;
+    }
     var account = loginAccount(value);
-    if (account && result?.ok && result.user?.id) writeLocal(loginAccountKey(), account);
+    if (account && (remember === true || storedLoginAccount() !== '')) writeLocal(loginAccountKey(), account);
   }
   function normalizeHub(raw) {
     var value = String(raw || '').trim();
     if (!value) throw new Error('请填写 SoduWork 服务地址');
+    // URL interprets a single integer as IPv4. Reject it before the original host is lost.
+    if (/^(?:https?:\/\/)?\d+\.?(?=[:/?#]|$)/i.test(value)) {
+      throw new Error('主机名不能只包含数字，请填写完整 IP 地址或域名');
+    }
     if (!/^https?:\/\//i.test(value)) value = 'http://' + value;
     value = value.replace(/\/+$/, '');
     try {
@@ -3403,7 +3416,7 @@
               try { if (readLocal(LEGACY_AUTH_HUB_KEY) === base()) localStorage.removeItem('soduwork_work_device_secret'); } catch (e) {}
             }
             // Existing signed-in profiles may predate the explicit account preference.
-            if (secure.ok && secure.session && secure.user?.id && !secure.activationRequired && !SoduWorkAPI.rememberedLoginAccount()) {
+            if (secure.ok && secure.session && secure.user?.id && !secure.activationRequired && storedLoginAccount() === null) {
               rememberLoginAccount(loginAccount(secure.user.email) || loginAccount(secure.user.username), secure);
             }
             rememberSession(secure);
@@ -3456,6 +3469,7 @@
       checkLogin();
       var result = await window.soduWorkAPI.deviceAuthLogin({
         hub: loginHub, clientId: device(), preserveLegacyIdentity: !!secret(),
+        autoLogin: credentials?.autoLogin,
         account: String(credentials && credentials.account || '').trim(),
         password: String(credentials && credentials.password || ''),
         displayName: String(credentials && credentials.displayName || '').trim(),
@@ -3466,7 +3480,7 @@
       checkLogin();
       invalidateRegistrations();
       var acceptedEpoch = _registrationEpoch;
-      rememberLoginAccount(account, result);
+      rememberLoginAccount(account, result, credentials?.rememberAccount);
       rememberSession(result || {}, { interactiveLogin: true });
       if (result && result.ok) {
         await syncRunnerConfig(root);
@@ -3503,7 +3517,7 @@
       if (signsIn && result && result.ok) {
         invalidateRegistrations();
         var acceptedEpoch = _registrationEpoch;
-        rememberLoginAccount(account, result);
+        rememberLoginAccount(account, result, payload?.rememberAccount);
         rememberSession(result, { interactiveLogin: true });
         await syncRunnerConfig(root);
         if (acceptedEpoch !== _registrationEpoch || hub !== base()) throw staleTaskScope();
@@ -3635,7 +3649,11 @@
         clientId: device(), online: _online, requestsAllowed: requestsAllowed() };
     },
     rememberedLoginAccount() {
-      return loginAccount(readLocal(loginAccountKey()));
+      return loginAccount(storedLoginAccount());
+    },
+    loginPreferences() {
+      // A manual sign-in requires fresh consent to restore this account on restart.
+      return { rememberAccount: !!SoduWorkAPI.rememberedLoginAccount(), autoLogin: false };
     },
     im: {
       catalog: opts => jfetch('/im', Object.assign({cache: 'no-store'}, opts)),

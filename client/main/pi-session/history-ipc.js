@@ -80,6 +80,8 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
     const sources = [...new Set([...guard.aliasIds, ...(guard.row?.historyAliasIds || []), ...(synced.aliasIds || [])])];
     const copies = await sharedHistory?.deleteCloudCaches(sources) || [];
     guard();
+    require('./skill-failure-context.cjs').remove(app, guard.readScope,
+      [...sources, guard.nativeId, ...copies]);
     // These IDs describe this completed deletion, not permanent identity aliases.
     return guard.complete('delete', result, { ...synced, aliasIds: [...(synced.aliasIds || []), ...copies] });
   }

@@ -10,7 +10,7 @@ from ..db import get_session
 from ..deps import current_client, require_perm
 from ..models import Client, User
 from ..services import model_catalog, model_config_guard
-from ..services.desktop_login_policy import DESKTOP_PLATFORMS
+from ..services.desktop_login_policy import is_desktop_platform
 
 router = APIRouter(prefix="/api/v1", tags=["first-chat"])
 REPORT_KEY = "firstChatReadiness"
@@ -50,7 +50,7 @@ async def first_chat_readiness(user: User = Depends(require_perm("integration.ma
     devices = await session.scalars(select(Client).where(
         Client.user_ref == user.id, Client.auth_state == "active"
     ).order_by(Client.last_seen_at.desc().nulls_last(), Client.id))
-    desktops = (d for d in devices if (d.platform or "").split("/", 1)[0].strip().lower() in DESKTOP_PLATFORMS)
+    desktops = (d for d in devices if is_desktop_platform(d.platform))
     # An account can have older clients without a report. Prefer the most recent
     # observation; the stable query order breaks ties and supplies a legacy device.
     device = max(desktops, key=lambda d: _report(d).get("checkedAt", 0), default=None)

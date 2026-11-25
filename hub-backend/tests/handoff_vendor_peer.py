@@ -25,7 +25,8 @@ def work(prompt):
     first_prompt = json.loads(history.read_text(encoding="utf-8").splitlines()[0])["prompt"] if history.exists() else prompt
     if 'CLOUD_ACCEPTANCE_TEST' in first_prompt:
         # Synthetic reviewer: exercise real report discovery and transport, not model quality.
-        material = json.loads(prompt.split('固定版本材料：\n', 1)[1].split('\n验收人补充说明：', 1)[0])
+        # Decode the material object without consuming later reviewer guidance.
+        material, _ = json.JSONDecoder().raw_decode(prompt.split('固定版本材料：\n', 1)[1].lstrip())
         name = re.search(r'acceptance-report-[a-f0-9]{24}\.json', prompt).group()
         assert material['artifact']['manifest']['text'] == 'Isolated review output'
         report = {'verdict': 'approve', 'summary': 'Synthetic reviewer read the fixed text',

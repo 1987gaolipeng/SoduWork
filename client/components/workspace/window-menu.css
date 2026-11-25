@@ -54,3 +54,104 @@ html[data-desk-panel="workspace"] .window-menu{
   background:var(--ws-side);
   border-bottom:0;
 }
+html[data-desk-panel="workspace"][data-theme] .window-menu{
+  background-color:var(--titlebar-base,var(--accent));
+  color:var(--titlebar-ink,contrast-color(var(--titlebar-base,var(--accent))));
+  isolation:isolate;
+}
+/* Electron paints native caption buttons with one solid color. Finish each
+   material on that same base before the rendered strip meets the controls. */
+html[data-desk-panel="workspace"][data-theme] .window-menu::before{
+  content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+  background:var(--titlebar-surface,none);
+  opacity:var(--titlebar-surface-opacity,1);
+  mask-image:linear-gradient(to right,black var(--titlebar-fade-start,88%),transparent 99%);
+}
+/* Fractional display scales can expose a pixel above the OS caption buttons. */
+html[data-desk-panel="workspace"][data-window-titlebar="overlay"] .window-menu::after{
+  content:"";position:absolute;left:100%;top:0;height:100%;
+  width:max(0px,calc(100vw - 100% - env(titlebar-area-x,0px)));
+  background-color:inherit;pointer-events:none;
+}
+html[data-skin="box"]:is([data-theme="vivid"],[data-theme="enlarged"]) .window-menu{
+  --titlebar-base:var(--bg-0);
+  --titlebar-ink:var(--ink-2);
+}
+html[data-skin="box"][data-character="box"][data-theme="vivid"] .window-menu{
+  --titlebar-base:color-mix(in srgb,var(--boxlid-4) 7%,var(--bg-0));
+  --titlebar-surface:
+    linear-gradient(to bottom,rgb(255 255 255 / 84%),rgb(255 255 255 / 94%) 45%,
+      rgb(255 255 255 / 84%) calc(100% - 6px),rgb(255 255 255 / 48%) calc(100% - 5px),
+      transparent calc(100% - 3px)),
+    linear-gradient(90deg,var(--boxlid-1) 21%,var(--boxlid-2) 29% 46%,
+      var(--boxlid-3) 54% 71%,var(--boxlid-4) 79%);
+}
+html:is([data-skin="glass"],[data-skin="diamond"])[data-theme="vivid"] .window-menu{
+  --titlebar-base:color-mix(in srgb,var(--box-c2-hi) 28%,white);
+  --titlebar-ink:#16334a;
+}
+html[data-skin="diamond"][data-theme="vivid"] .window-menu{
+  --titlebar-fade-start:calc(99% - min(36px,6%));
+  --titlebar-surface:
+    linear-gradient(123deg,transparent 89%,rgb(255 255 255 / 72%) 89.1%,transparent 96%),
+    conic-gradient(at 78% 37%,transparent 0 46deg,#c4cde7 46deg 91deg,
+      #e2f3fb 91deg 142deg,transparent 142deg 225deg,#a8d4df 225deg 264deg,transparent 264deg),
+    linear-gradient(164deg,rgb(255 255 255 / 46%),transparent 43%,rgb(138 192 217 / 18%) 83%,transparent),
+    linear-gradient(118deg,transparent 27%,rgb(255 255 255 / 76%) 27.1%,transparent 39%),
+    linear-gradient(53deg,transparent 57%,rgb(232 223 255 / 85%) 57.1%,transparent 74%),
+    conic-gradient(from 64deg at 43% 68%,#d4e7f8 0 55deg,#a9c8df 55deg 111deg,
+      #e8f8ff 111deg 176deg,#c7c6e7 176deg 228deg,#f7fcff 228deg 279deg,#b4dce9 279deg);
+}
+html[data-character="bear"][data-skin="glass"][data-theme="vivid"] .window-menu{
+  --glass-light:#f8ffff;--glass-body:#c5e3ef;--glass-shadow:#90bdcc;
+}
+html[data-character="bear"][data-skin="ruby"][data-theme="ruby"] .window-menu{
+  --glass-light:var(--ruby-red-hi);--glass-body:var(--ruby-red);--glass-shadow:var(--ruby-red-deep);
+}
+html[data-character="bear"][data-skin="flat"][data-theme="azure"] .window-menu{
+  --glass-light:#75aef1;--glass-body:var(--accent-hover);--glass-shadow:#194c9d;
+}
+/* Broad reflections and a narrow lower rim give the whole strip a curved glass surface. */
+html[data-character="bear"]:is([data-skin="glass"][data-theme="vivid"],
+  [data-skin="ruby"][data-theme="ruby"],[data-skin="flat"][data-theme="azure"]) .window-menu{
+  --titlebar-surface:
+    linear-gradient(114deg,transparent 38%,rgb(255 255 255 / 15%) 42%,transparent 51%),
+    radial-gradient(ellipse 64% 96% at 60% -60%,rgb(255 255 255 / 48%) 32%,rgb(255 255 255 / 16%) 96%,transparent),
+    radial-gradient(ellipse 33% 35% at 68% 105%,rgb(223 255 255 / 76%),transparent),
+    linear-gradient(to bottom,var(--glass-light) -9%,var(--glass-body) 36%,
+      color-mix(in srgb,var(--glass-shadow) 64%,var(--glass-body)) 82%,var(--glass-body) 94%,var(--glass-light));
+}
+html[data-skin="ruby-box"][data-theme="ruby"] .window-menu{
+  --titlebar-base:var(--ruby-red-lo);
+  --titlebar-surface:linear-gradient(to top,var(--ruby-red-deep),transparent 2px),
+    linear-gradient(100deg,var(--ruby-red),var(--ruby-red-lo) 85%);
+}
+html[data-skin="flat"][data-theme="azure"] .window-menu{
+  --titlebar-base:var(--accent-hover);
+  --titlebar-surface:linear-gradient(var(--boxlid-2),var(--boxlid-2)) bottom / 100% 2px no-repeat;
+}
+html[data-theme="signature"] .window-menu{
+  --titlebar-base:color-mix(in srgb,var(--soduwork-pet-blue,var(--accent)) 16%,white);
+  --titlebar-ink:var(--box-ink);
+  --titlebar-surface:radial-gradient(ellipse 24% 150% at 65% 110%,
+    color-mix(in srgb,var(--soduwork-pet-mint,var(--accent)) 17%,white),transparent),
+    linear-gradient(110deg,white 9%,var(--titlebar-base) 45%,white 76%,var(--titlebar-base));
+}
+html[data-theme="enlarged"] .window-menu button{
+  height:30px;font-size:var(--text-sm);font-weight:500;
+}
+html[data-theme="enlarged"] .wm-sidebar svg{width:20px;height:20px}
+@media(max-width:400px){
+  html[data-window-titlebar="overlay"][data-theme="enlarged"] .window-menu nav button{padding-inline:4px}
+}
+html[data-desk-panel="workspace"][data-theme] .window-menu button:is(:hover,[aria-expanded="true"]):not(:disabled){
+  background:color-mix(in srgb,currentColor 8%,transparent);
+  color:inherit;
+}
+html[data-desk-panel="workspace"][data-theme] .window-menu button[aria-expanded="true"]:not(:disabled){
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 22%,transparent);
+}
+html[data-desk-panel="workspace"][data-theme] .wm-divider{background:currentColor;opacity:.18}
+html[data-desk-panel="workspace"][data-theme] .window-menu button:focus-visible{
+  outline-color:currentColor;
+}

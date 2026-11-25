@@ -165,10 +165,66 @@
     if (open) setBody(ctx, tool, bodyHtml(ctx, tool, view));
     return true;
   }
+
+  const dialogs = new WeakMap();
+  async function openSkillFailure(ctx, button) {
+    const id = button.dataset.skillFailure;
+    const ref = ctx._ref, owner = scopeOf(ctx);
+    if (!id || button.dataset.commandOwner !== owner || ctx._snap?.skillFailure?.id !== id) return;
+    dialogs.get(ctx)?.remove();
+    const dialog = document.createElement('dialog');
+    dialogs.set(ctx, dialog);
+    dialog.className = 'nchat-skill-failure-dialog';
+    const t = value => global.SoduWorkI18n?.translateText?.(value) || value;
+    const add = (tag, text) => {
+      const element = document.createElement(tag);
+      element.textContent = text;
+      dialog.appendChild(element);
+      return element;
+    };
+    dialog.setAttribute('aria-label', t('技能失败报告'));
+    add('h3', t('技能失败报告'));
+    const status = add('p', '');
+    status.setAttribute('role', 'status');
+    const close = add('button', t('关闭'));
+    close.onclick = () => dialog.close();
+    dialog.addEventListener('close', () => {
+      dialog.remove();
+      if (dialogs.get(ctx) === dialog) dialogs.delete(ctx);
+    }, { once: true });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    const current = () => dialog.isConnected && dialogs.get(ctx) === dialog && ctx._ref === ref && scopeOf(ctx) === owner;
+    try {
+      const result = await ctx._api().skillFailureContext(ref, id);
+      if (!current()) return;
+      if (!result?.ok) throw Error();
+      const r = result.report;
+      const fields = [
+        ['技能与版本', r.skills.map(s => s.name + ' (' + (s.version || t('未声明版本')) + ')').join(', ')],
+        ['本轮提示词', r.prompt], ...(r.files.length ? [['输入附件', r.files.join(', ')]] : []),
+        ['失败的工具', r.tool], ['工具入参', r.input], ['失败返回', r.output],
+        ['运行系统', r.system], ['Node', r.node || t('未检测到')], ['Python', r.python || t('未检测到')], ['执行目录', r.cwd],
+      ];
+      const pre = add('pre', fields.map(([key, value]) => t(key) + ': ' + value).join('\n\n'));
+      pre.setAttribute('data-user-content', '');
+      status.textContent = t(result.unsaved ? '本地保存失败，仍可复制报告' : '报告已保存在本机');
+      const copy = add('button', t('复制纯文本报告'));
+      copy.dataset.copySkillFailure = '';
+      copy.onclick = async () => {
+        try { await navigator.clipboard.writeText(pre.textContent); status.textContent = t('报告已复制'); }
+        catch (_) { status.textContent = t('无法复制报告，请选择文本复制'); }
+      };
+      dialog.appendChild(close);
+      copy.focus();
+    } catch (_) { if (current()) status.textContent = t('无法读取这次失败记录'); }
+  }
+
   function reset(ctx) {
+    dialogs.get(ctx)?.remove(); dialogs.delete(ctx);
     states.delete(ctx);
     const listener = listeners.get(ctx);
     listener?.root.removeEventListener('click', listener.cancel, true); listeners.delete(ctx);
   }
-  global.ChatToolDetails = Object.freeze({ bodyHtml, activate, openRecord, reset });
+  global.ChatToolDetails = Object.freeze({ bodyHtml, activate, openRecord, openSkillFailure, reset });
 })(typeof window !== 'undefined' ? window : globalThis);

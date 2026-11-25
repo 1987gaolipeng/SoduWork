@@ -26,7 +26,9 @@ router = APIRouter(prefix="/api/v1/admin", tags=["environments"])
 
 
 def _bad(error: ValueError) -> HTTPException:
-    if isinstance(error, InvalidHealthCheck):
+    if isinstance(error, svc.InvalidPromotionDependencies):
+        return HTTPException(400, detail=str(error), headers={"X-Error-Code": "hub.input.promotion_requires"})
+    if isinstance(error, (InvalidHealthCheck, svc.InvalidSecretReferenceOrg)):
         return HTTPException(status_code=400, detail=str(error))
     if isinstance(error, svc.InvalidRunnerSelector):
         return HTTPException(status_code=422, detail=str(error))

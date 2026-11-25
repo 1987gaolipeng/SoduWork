@@ -129,6 +129,9 @@ async def lifespan(app: FastAPI):
     if bus.enabled:
         bus.validate()
     async with cluster_control.bootstrap_lock():
+        from .services import storage
+        async with SessionLocal() as session:
+            await storage.migrate_local_attachments(session)
         async with SessionLocal() as session:  # Initialize the root department, default roles, and bootstrap administrator when needed.
             await rbac.bootstrap(session)
             await rbac.seed_positions(session)   # Seed default professional roles idempotently.

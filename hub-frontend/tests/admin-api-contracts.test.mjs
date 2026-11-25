@@ -64,6 +64,23 @@ const authenticatedOperations = {
   download: api => api.downloadClientRelease('synthetic-release', 'fixture.bin'),
 }
 
+test('promotion policy validation identifies the requires field in every admin locale', async t => {
+  const f = await fixture(t)
+  const previous = getLocale()
+  t.after(() => setLocale(previous))
+  const code = 'hub.input.promotion_requires'
+  f.respond(400, { detail: 'requires 必须是环境标识数组' }, { 'X-Error-Code': code })
+  for (const [locale, message] of [
+    ['zh-CN', 'requires 必须是环境标识数组'],
+    ['en-US', 'requires must be an array of environment keys.'],
+    ['ja-JP', 'requires には環境キーの配列を指定してください。'],
+    ['ko-KR', 'requires에는 환경 키 배열을 지정해야 합니다.'],
+  ]) {
+    setLocale(locale)
+    await assert.rejects(f.api.me(), { status: 400, code, message })
+  }
+})
+
 test('release environment conflict is displayed in each selected language', async t => {
   const f = await fixture(t)
   const previous = getLocale()
@@ -79,6 +96,25 @@ test('release environment conflict is displayed in each selected language', asyn
     setLocale(locale)
     await assert.rejects(f.api.me(), { status: 409, code, message })
   }
+})
+
+test('invalid model configuration is rejected in each selected language', async t => {
+  const f = await fixture(t)
+  const previous = getLocale()
+  t.after(() => setLocale(previous))
+  const code = 'model.config.invalid-object'
+  f.respond(400, { detail: '模型配置必须是 JSON 对象' }, { 'X-Error-Code': code })
+  for (const [locale, message] of [
+    ['zh-CN', '模型配置必须是 JSON 对象'],
+    ['en-US', 'Model configuration must be a JSON object.'],
+    ['ja-JP', 'モデル設定は JSON オブジェクトで指定してください。'],
+    ['ko-KR', '모델 설정은 JSON 객체여야 합니다.'],
+  ]) {
+    setLocale(locale)
+    await assert.rejects(f.api.saveModelDef({ providerId: 'fixture', name: 'model', config: [] }),
+      { status: 400, code, message })
+  }
+  assert.ok(f.requests.every(request => request.method === 'PUT' && request.path === '/api/v1/admin/model-defs'))
 })
 
 for (const [kind, operation] of Object.entries(authenticatedOperations)) {

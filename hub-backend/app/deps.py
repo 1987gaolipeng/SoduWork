@@ -193,6 +193,15 @@ def require_perm(key: str):
     return dep
 
 
+def require_platform_quota_admin(user: User) -> None:
+    if not user.is_super:
+        raise HTTPException(
+            status_code=403,
+            detail="平台级套餐与默认额度仅超级管理员可修改",
+            headers={"X-Error-Code": "quota.platform_write_forbidden"},
+        )
+
+
 def require_any_perm(*keys: str):
     """Allow read models shared by operators and capability users."""
     wanted = tuple(str(key) for key in keys if str(key))

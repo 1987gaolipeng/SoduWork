@@ -12,6 +12,7 @@ from ..services import repository_catalog as catalog
 from ..services.business_records import record_fields
 from ..services.resource_leases import LeaseBusy as resource_busy
 from ..services.workdirs import InvalidRepositoryDirectory
+from .scope import integration_target_org, require_integration_org
 
 router = APIRouter(prefix="/api/v1/admin", tags=["repository-catalog"])
 
@@ -26,14 +27,12 @@ async def _scope(session: AsyncSession, user: User) -> set[str] | None:
     return await rbac.scope_org_ids(session, user)
 
 
-async def _assert_integration_scope(session: AsyncSession, user: User, integration_id: str) -> None:
+async def _assert_integration_scope(session: AsyncSession, user: User, integration_id: str) -> models.Integration:
     integration = await session.get(models.Integration, integration_id)
     if integration is None:
         raise HTTPException(status_code=404, detail="Integration not found")
-    scope = await _scope(session, user)
-    org_id = (integration.config or {}).get("orgId")
-    if scope is not None and (not isinstance(org_id, str) or org_id.strip() not in scope):
-        raise HTTPException(status_code=403, detail="Integration is outside your organization scope")
+    require_integration_org(await _scope(session, user), (integration.config or {}).get("orgId"))
+    return integration
 
 
 async def _project(session: AsyncSession, user: User, project_id: str) -> models.Project:
@@ -109,8 +108,9 @@ async def sync_repositories(
 ):
     client_id = str(body.get("clientId") or "")
     await _client_in_scope(session, user, client_id)
+    integration = await _assert_integration_scope(session, user, integration_id)
     try:
-        result = await catalog.sync_integration(session, integration_id,
+        result = await catalog.sync_integration(session, integration.id,
                                                 client_id=client_id)
     except resource_busy as exc:
         raise HTTPException(status_code=423, detail="Repository synchronization is already running") from exc
@@ -128,12 +128,21 @@ async def save_pull_account(
     session: AsyncSession = Depends(get_session),
 ):
     """Store the source's backend pull credentials: username and password or token."""
+    integration = await catalog.lock_integration(session, integration_id)
+    if integration is None:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    scope = await _scope(session, user)
+    current = require_integration_org(scope, (integration.config or {}).get("orgId"))
+    target = body.get("orgId")
+    org_id = ""  # An omitted or empty destination keeps the current owner.
+    if target is not None and target != "":
+        org_id = await integration_target_org(session, scope, target, current)
     try:
         await catalog.set_pull_account(
             session, integration_id,
             user=str(body.get("user") or ""), secret=body.get("secret"),
             kind=str(body.get("kind") or "") if "kind" in body else None,
-            org_id=str(body.get("orgId") or ""))
+            org_id=org_id)
     except ValueError as exc:
         raise _conflict(exc) from exc
     await audit.log(session, user, "repository.pull_account", "integration",

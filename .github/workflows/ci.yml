@@ -64,6 +64,12 @@ jobs:
       - name: Verify isolated HTTP startup, persistence, and shutdown
         if: runner.os != 'Windows'
         run: python tools/dev/verify_local_start.py
+      - name: Verify workspace titlebar palettes on macOS
+        if: runner.os == 'macOS'
+        working-directory: client
+        run: |
+          npm ci
+          ./node_modules/.bin/electron e2e/titlebar-modal-theme.cjs "$RUNNER_TEMP/titlebar-palettes"
       - name: Verify Windows desktop startup and install caches on another volume
         if: runner.os == 'Windows'
         shell: pwsh
@@ -145,10 +151,16 @@ jobs:
           cygpath -aw "$package" >> "$GITHUB_PATH"
       - name: Verify ripgrep is on the client test PATH
         run: rg --version
-      - name: Verify attachment storage names under native Windows rules
-        if: runner.os == 'Windows'
-        run: .venv/Scripts/python.exe -m unittest -v test_attachment_storage_names
+      - name: Verify local attachment storage and live Hub upgrades
+        shell: bash
         working-directory: hub-backend
+        run: |
+          python=.venv/bin/python
+          if [ "$RUNNER_OS" = Windows ]; then python=.venv/Scripts/python.exe; fi
+          "$python" -m unittest -v test_attachment_storage_names
+          "$python" -m unittest -v test_cloud_conversations.CloudConversationTests.test_concurrent_submissions_keep_one_input_object
+          "$python" -m unittest -v test_requirement_maintenance
+          "$python" tests/local_storage_upgrade_http.py
       - run: npm ci
         working-directory: client
       - run: xvfb-run -a npm test

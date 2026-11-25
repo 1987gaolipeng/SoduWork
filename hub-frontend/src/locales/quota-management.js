@@ -7,6 +7,7 @@ const rows = [
   ['AI 使用额度', 'AI allowances', 'AI の利用枠', 'AI 사용 한도'],
   ['让每位成员都有合适的额度', 'The right allowance for every member', 'メンバーごとに適切な利用枠を', '구성원에게 맞는 사용 한도'],
   ['设置套餐或个人总额度，也可为指定模型添加上限。', 'Set total allowances for plans or members and add limits for specific models.', 'プランやメンバーごとの総利用枠を設定し、必要に応じてモデル別の上限を追加できます。', '요금제 또는 구성원의 총 한도를 설정하고 특정 모델에 한도를 추가할 수 있습니다.'],
+  ['为管辖范围内的成员分配套餐或设置个人额度。平台套餐与默认额度由超级管理员维护。', 'Assign plans or set personal limits for members you manage. Only super administrators can edit platform plans and default allowances.', '管轄内のメンバーにプランを割り当てたり、個別の上限を設定したりできます。プラットフォームのプランと既定の利用枠を編集できるのはスーパー管理者のみです。', '관리 범위에 속한 구성원에게 요금제를 할당하거나 개인 한도를 설정할 수 있습니다. 플랫폼 요금제와 기본 한도는 최고 관리자만 변경할 수 있습니다.'],
   ['套餐设置', 'Plans', 'プラン設定', '요금제 설정'],
   ['成员额度', 'Member allowances', 'メンバーの利用枠', '구성원 한도'],
   ['原有账号默认规则', 'Existing account defaults', '既存アカウントの既定値', '기존 계정 기본 규칙'],

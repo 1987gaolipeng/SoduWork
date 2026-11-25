@@ -19,7 +19,7 @@ from .. import automation_models as am
 from .. import models, repository_issue_models  # noqa: F401 - register catalog subscription metadata
 from ..connectors import get_connector
 from ..timestamps import iso_utc
-from . import code_creds, resource_leases, scm_support
+from . import code_creds, rbac, resource_leases, scm_support
 from .business_records import creation_source
 from .workdirs import validate_repo_local_dir
 
@@ -136,6 +136,13 @@ async def _runtime_config(session: AsyncSession, integration: models.Integration
     return cfg, org_id
 
 
+async def lock_integration(session: AsyncSession, integration_id: str) -> models.Integration | None:
+    """Keep the organization tree and integration config stable through the write."""
+    await rbac.lock_org_tree(session, shared=True)
+    return await session.get(models.Integration, integration_id, with_for_update=True,
+                             populate_existing=True)
+
+
 async def set_pull_account(session: AsyncSession, integration_id: str, *,
                            user: str, secret, kind: str | None = None,
                            org_id: str = "") -> None:
@@ -231,6 +238,7 @@ async def sync_integration(session: AsyncSession, integration_id: str, *,
     connector = get_connector(integration.type)
     if connector is None or not callable(getattr(connector, "list_repositories", None)):
         raise ValueError("This integration cannot list repositories")
+    config_snapshot = _fingerprint(integration.config or {})
     lease = await resource_leases.acquire(
         session, "repository-sync", str(integration.id), ttl_seconds=SYNC_LEASE_SECONDS,
         detail={"integrationId": str(integration.id), "stage": "preparing"})
@@ -239,6 +247,9 @@ async def sync_integration(session: AsyncSession, integration_id: str, *,
         await _publish_sync_stage(session, lease, "listing")
         rows = await asyncio.to_thread(connector.list_repositories, cfg)
         await _publish_sync_stage(session, lease, "saving")
+        integration = await lock_integration(session, integration_id)
+        if integration is None or _fingerprint(integration.config or {}) != config_snapshot:
+            raise ValueError("Integration configuration changed during synchronization. Retry the sync.")
         seen: set[str] = set()
         created = updated = 0
         now = datetime.now(timezone.utc)
@@ -300,8 +311,8 @@ async def sync_integration(session: AsyncSession, integration_id: str, *,
         raise
     except Exception as exc:
         await session.rollback()
-        integration = await session.get(models.Integration, integration_id)
-        if integration is not None:
+        integration = await lock_integration(session, integration_id)
+        if integration is not None and _fingerprint(integration.config or {}) == config_snapshot:
             integration.repository_sync_at = datetime.now(timezone.utc)
             integration.repository_sync_ok = False
             integration.repository_sync_error = str(exc)[:512]

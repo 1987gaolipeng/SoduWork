@@ -126,6 +126,19 @@ test('settings placeholders and screenshot notices follow every supported locale
   }
 });
 
+test('invalid model configuration errors follow every supported locale', () => {
+  const c = client();
+  for (const [locale, expected] of [
+    ['zh-CN', '模型配置必须是 JSON 对象'],
+    ['en-US', 'Model configuration must be a JSON object.'],
+    ['ja-JP', 'モデル設定は JSON オブジェクトで指定してください。'],
+    ['ko-KR', '모델 설정은 JSON 객체여야 합니다.'],
+  ]) {
+    c.api.setLocale(locale);
+    assert.equal(c.api.translateText('模型配置必须是 JSON 对象'), expected, locale);
+  }
+});
+
 test('model save outcomes and retry guidance follow every supported locale', () => {
   const c = client();
   const phrases = ['模型配置已保存，但模型选择器刷新失败，请重新打开对话。',

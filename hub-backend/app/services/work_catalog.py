@@ -194,6 +194,13 @@ _KEY_RE = re.compile(r"^[a-z][a-z0-9-]{1,79}$")
 _CAP_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,63}$")
 
 
+def _validate_array_fields(body: dict, *fields: str) -> None:
+    for field in fields:
+        value = body.get(field)
+        if value is not None and not isinstance(value, (list, tuple)):
+            raise ValueError(f"{field} 必须是数组")
+
+
 def _items(value, *, limit: int, length: int) -> list[str]:
     out: list[str] = []
     for raw in value or []:
@@ -563,6 +570,7 @@ async def save_profession(
     row.category = category
     row.description = str(body.get(
         "description", current.description if current else "") or "").strip()[:400]
+    _validate_array_fields(body, "competencies")
     try:
         competencies = _items(
             body.get("competencies", current.competencies if current else []),
@@ -627,6 +635,12 @@ async def validate_scenario(
     if not name:
         raise ValueError("请填写工作场景名称")
     enabled = bool(body.get("enabled", current.enabled if current else True))
+    _validate_array_fields(body, "positionIds", "intentHints", "requiredCapabilities")
+    incoming_contract = body.get("outputContract")
+    if incoming_contract is not None:
+        if not isinstance(incoming_contract, dict):
+            raise ValueError("outputContract 须为对象")
+        _validate_array_fields(incoming_contract, "deliverables", "acceptance")
     position_ids = await validate_profession_ids(
         session, org_id,
         body.get("positionIds", current.position_ids if current else []),

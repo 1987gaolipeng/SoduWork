@@ -327,6 +327,10 @@ class InvalidEnvironmentTier(ValueError):
     """The requested deployment tier is outside the catalog."""
 
 
+class InvalidPromotionDependencies(ValueError):
+    """A submitted promotion policy has malformed environment prerequisites."""
+
+
 class BusinessConflict(ValueError):
     """The operation conflicts with existing data or rules (e.g., circular dependency)."""
 
@@ -420,7 +424,12 @@ async def save_environment(session: AsyncSession, body: dict, row: am.Environmen
     row.approval_policy_id = approval_id
     row.acceptance_policy_id = acceptance_id
     if "promotionPolicy" in body or creating:
-        row.promotion_policy = promotion_policy(body.get("promotionPolicy"))
+        policy = body.get("promotionPolicy")
+        if isinstance(policy, dict):
+            prerequisites = policy.get("requires", [])
+            if not isinstance(prerequisites, list) or not all(isinstance(key, str) for key in prerequisites):
+                raise InvalidPromotionDependencies("requires 必须是环境标识数组")
+        row.promotion_policy = promotion_policy(policy)
     if "enabled" in body:
         row.enabled = bool(body.get("enabled"))
     if "sort" in body:
@@ -515,6 +524,10 @@ async def list_secret_refs(session: AsyncSession, org_ids: set[str] | None) -> l
     return [secret_api(x) for x in (await session.execute(q)).scalars().all()]
 
 
+class InvalidSecretReferenceOrg(ValueError):
+    """The requested secret-reference organization is not a valid catalog scope."""
+
+
 async def save_secret_ref(session: AsyncSession, body: dict,
                           row: am.SecretReference | None = None) -> am.SecretReference:
     provider = _text(body.get("provider") if row is None else body.get("provider", row.provider), 32)
@@ -524,7 +537,16 @@ async def save_secret_ref(session: AsyncSession, body: dict,
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", locator):
         raise ValueError("Runner 环境变量名不合法")
     if row is None:
-        row = am.SecretReference(org_id=body.get("orgId") or None,
+        org_id = body.get("orgId")
+        if org_id is not None and not isinstance(org_id, str):
+            raise InvalidSecretReferenceOrg("orgId 必须是组织 ID 字符串")
+        # Preserve the existing explicit system-scope forms, without treating
+        # malformed falsey values ([], {}, false, 0) as system references.
+        if org_id == "":
+            org_id = None
+        if org_id is not None and await session.get(models.OrgUnit, org_id) is None:
+            raise InvalidSecretReferenceOrg("orgId 对应的组织不存在")
+        row = am.SecretReference(org_id=org_id,
                                  name=_text(body.get("name"), 100) or locator,
                                  provider=provider, locator=locator)
         session.add(row)
