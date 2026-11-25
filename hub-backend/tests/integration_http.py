@@ -147,8 +147,14 @@ def main(unsupported_type="unregistered-fixture"):
             body = {"external_id": "record-1", "title": "First isolated record"}
             request("POST", "/ingest", status=401, json=body)
             request("POST", "/ingest", json=body, headers={"X-Ingest-Token": ingest_token})
-            request("POST", "/webhooks/" + generic["id"], json={**body, "title": "Updated record"},
-                    headers={"X-Ingest-Token": ingest_token})
+            missing_route = "/webhooks/" + str(uuid.uuid4())
+            for header in ("X-Ingest-Token", "X-Gitlab-Token"):
+                headers = {header: ingest_token}
+                request("POST", missing_route, json={}, headers=headers, status=404)
+                updated = request("POST", "/webhooks/" + generic["id"],
+                                  json={**body, "title": "Updated record"}, headers=headers)
+                assert updated["count"] == 1
+            checks.append("webhook route binding with both supported token headers")
             listed = request("GET", "/admin/integrations")
             row = next(row for row in listed if row["id"] == generic["id"])
             assert row["taskCount"] == 1 and "ingestToken" not in row
