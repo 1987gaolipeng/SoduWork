@@ -19,6 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const { fileURLToPath } = require('url');
 const deliveryContract = require('../conversation/delivery-contract');
+const { publishedDirectory } = require('../conversation/delivery-workspace.cjs');
 
 const SKIP_DIRS = new Set(['skills', 'node_modules', '.git', '.pi', '__pycache__', '.venv', 'node-compile-cache']);
 const SKIP_EXT = new Set(['.tmp', '.part', '.crdownload', '.swp']);
@@ -54,7 +55,7 @@ function _skip(name) {
 
 /* Synchronous compatibility entry for legacy API users and tests. Main-process requests use
    scanAsync: the result cap does not bound visits to older workspace files. */
-function collect(dir, since, depth, out, changed) {
+function collect(dir, since, depth, out, changed, root = dir) {
   if (depth > MAX_DEPTH || out.length >= SCAN_CAP) return out;
   let entries;
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return out; }
@@ -77,13 +78,13 @@ function collect(dir, since, depth, out, changed) {
   }
   for (const ent of entries) {
     if (out.length >= SCAN_CAP) break;
-    if (!ent.isDirectory() || _skip(ent.name) || SKIP_DIRS.has(ent.name)) continue;
-    collect(path.join(dir, ent.name), since, depth + 1, out, changed);
+    if (!ent.isDirectory() || _skip(ent.name) || SKIP_DIRS.has(ent.name) || publishedDirectory(root, dir, ent.name)) continue;
+    collect(path.join(dir, ent.name), since, depth + 1, out, changed, root);
   }
   return out;
 }
 
-async function collectAsync(dir, since, depth, out, changed) {
+async function collectAsync(dir, since, depth, out, changed, root = dir) {
   if (depth > MAX_DEPTH || out.length >= SCAN_CAP) return out;
   let entries;
   try { entries = await fileIO(() => fs.promises.readdir(dir, { withFileTypes: true })); }
@@ -106,8 +107,8 @@ async function collectAsync(dir, since, depth, out, changed) {
   }
   for (const ent of entries) {
     if (out.length >= SCAN_CAP) break;
-    if (!ent.isDirectory() || _skip(ent.name) || SKIP_DIRS.has(ent.name)) continue;
-    await collectAsync(path.join(dir, ent.name), since, depth + 1, out, changed);
+    if (!ent.isDirectory() || _skip(ent.name) || SKIP_DIRS.has(ent.name) || publishedDirectory(root, dir, ent.name)) continue;
+    await collectAsync(path.join(dir, ent.name), since, depth + 1, out, changed, root);
   }
   return out;
 }

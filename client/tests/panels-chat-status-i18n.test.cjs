@@ -315,3 +315,25 @@ test('status catalogs still cover every static status phrase (ja/ko)', () => {
     for (const phrase of phrases) assert.ok(catalog.includes(phrase), locale + ' catalog missing: ' + phrase);
   }
 });
+
+
+test('incomplete archives and failed working copies show the applicable recovery in English', () => {
+  loadI18n('en-US');
+  const status = require('../components/panels/panels-chat-status.js');
+  const current = { ref: 'chat', snap: { status: 'idle', localReplica: true, execution: { canContinueOnDevice: false } } };
+  const view = status.createThinking(() => current);
+  const reasons = [
+    ['本轮成果未能完整核对，未自动归档。请在会话生成目录中查看原文件。', /verified/],
+    ['本轮有 2 个文件超过 32 MiB，未自动归档。请在会话生成目录中查看原文件。', /32 MiB.+2/],
+    ['本轮成果归档失败。请在会话生成目录中查看原文件。', /Archiving failed/],
+    ['部分会话成果未完成归档，请保留工作目录中的文件。', /Keep the files/],
+    ['已归档的原件可从历史成果卡另存。工作副本未能投递，请检查目录权限和可用空间。', /disk space/],
+    ['会话成果原件已保存。工作目录已有不同内容的同名副本，可从历史成果卡另存。', /different contents/],
+  ];
+  for (const [warning, expected] of reasons) {
+    current.snap.artifactCaptureWarning = warning;
+    assert.match(view.statusHtml(false), expected);
+    assert.doesNotMatch(view.statusHtml(false), /[\u4e00-\u9fff]/u);
+  }
+  view.stopThinkingClock();
+});

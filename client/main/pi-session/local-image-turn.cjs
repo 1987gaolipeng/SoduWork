@@ -100,7 +100,7 @@ async function generate({ handle, selected, text, submissionId, signal, push, em
   try {
     const local = await require('./image-model').resolveLocal(selected);
     if (!local) throw Error('Local image selection is unavailable');
-    outputDirectory(handle.cwd);
+    outputDirectory(require('../conversation/delivery-workspace.cjs').ensure(handle.cwd, handle.deliveryWorkspace));
     const base = new URL(local.baseUrl);
     if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) throw Error('Invalid image provider');
     const combined = AbortSignal.any([signal, AbortSignal.timeout(250000)]);
@@ -127,7 +127,7 @@ async function generate({ handle, selected, text, submissionId, signal, push, em
       bytes = await bounded(download, MAX_BYTES, combined);
     } else throw Error('Image data is missing');
     combined.throwIfAborted();
-    const file = save(handle.cwd, bytes, id);
+    const file = save(require('../conversation/delivery-workspace.cjs').root(handle.cwd, handle.deliveryWorkspace), bytes, id);
     handle.appendTaskTool({ ...event, type: 'tool_execution_end', isError: false,
       result: { content: [{ type: 'text', text: JSON.stringify({ file: file.relative }) }] } }, '');
     handle.appendTaskMessage('assistant', '图片已生成。\n\n[查看图片](' + file.relative + ')', [], '', 'image-result:' + generationId);

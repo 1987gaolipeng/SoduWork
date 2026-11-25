@@ -22,7 +22,13 @@ function target(root, relative) {
 }
 
 function capture(cwd, snapshot, source, recordedPackages) {
-  const root = realpath(cwd);
+  let root;
+  try { root = realpath(cwd); }
+  catch (error) {
+    // A conversation that has never produced a file has no draft directory.
+    if (error.code === 'ENOENT' && !snapshot?.items?.length) return { version: 1, root: path.resolve(cwd), items: [] };
+    throw error;
+  }
   const items = [];
   for (const file of snapshot?.items || []) {
     if (!file.artifactId || !file.path) continue;
@@ -107,10 +113,11 @@ const continued = new WeakMap();
 function continuedPlugins(handle) {
   const base = handle?.artifactHistory?.recordedPackages;
   if (!base) return null;
-  const cwd = handle.cwd, owner = handle.deliveryOwner, id = handle.sessionId;
+  const deliveryWorkspaces = require('./delivery-workspace.cjs');
+  const cwd = deliveryWorkspaces.root(handle.cwd, handle.deliveryWorkspace), owner = handle.deliveryOwner, id = handle.sessionId;
   const cached = continued.get(handle);
   if (cached?.current()) return cached;
-  const current = () => handle.cwd === cwd && handle.sessionId === id &&
+  const current = () => deliveryWorkspaces.root(handle.cwd, handle.deliveryWorkspace) === cwd && handle.sessionId === id &&
     handle.deliveryOwner === owner && handle.artifactHistory?.recordedPackages === base;
   const guard = () => {
     if (!current()) throw Error('会话成果来源已变化，请刷新后重试');

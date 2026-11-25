@@ -130,3 +130,47 @@ test('an undated legacy archive keeps its recovery scope after a newly timestamp
   assert.equal((await session.send({ text: 'continue' }).completion).ok, true);
   assert.equal((await artifacts.action(handle, handle.ref, id, 'read', {})).text, '# Legacy result');
 });
+
+test('Runner keeps the project cwd but only freezes files staged for this conversation', async t => {
+  const cwd = workspace(t);
+  const workspaces = require('../main/conversation/delivery-workspace.cjs');
+  const deliveryWorkspace = workspaces.allocate(cwd);
+  const other = workspaces.allocate(cwd);
+  const start = Date.now();
+  let handle;
+  const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime('opencode'),
+    modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'fixture', key: 'fixture' } }) },
+    runnerRuntime: { async rpc(op, params) {
+      if (op === 'job.dispatch') {
+        assert.equal(params.ctx.workDir, cwd);
+        assert.ok(params.task.note.includes(deliveryWorkspace.key));
+        fs.writeFileSync(path.join(cwd, 'source.md'), 'requested edit');
+        for (const [assignment, content] of [[other, 'foreign'], [deliveryWorkspace, 'own']]) {
+          fs.writeFileSync(path.join(workspaces.ensure(cwd, assignment), 'index.html'), content);
+        }
+        return { ok: true, data: { ref: handle.sessionId } };
+      }
+      if (op === 'job.session') return { ok: true, data: { status: 'done', started: start / 1000,
+        ended: Date.now() / 1000, round: 1, items: [
+          { seq: 1, kind: 'user', text: 'create it', at: new Date(start).toISOString() },
+          { seq: 2, kind: 'say', text: 'index.html' }] } };
+      return { ok: true, data: {} };
+    } },
+  });
+  const session = await adapter.createSession({ native: { runner: { openOptions: { cwd, deliveryWorkspace,
+    contextPrompts: [workspaces.prompt(deliveryWorkspace)] } } } });
+  t.after(() => session.dispose());
+  handle = getRunnerSessionDetails(session).handle;
+  const captures = [];
+  handle.captureArtifactTurn = async journal => { captures.push(structuredClone(journal)); };
+  assert.equal((await session.send({ text: 'create it' }).completion).ok, true);
+  const rows = (await handle.outputSnapshotAsync()).files;
+  assert.deepEqual(rows.map(file => file.relative), ['index.html']);
+  assert.equal(fs.readFileSync(rows[0].path, 'utf8'), 'own');
+  assert.ok(handle.fileChanges.files.some(file => file.path === 'source.md'));
+  assert.deepEqual(handle.uiSnapshot().fileChanges.files.map(file => file.path), ['index.html']);
+  assert.equal(captures.length, 1);
+  assert.equal(captures[0].cwd, deliveryWorkspace.draftRoot);
+  assert.equal(captures[0].userMessageIndex, 0);
+  assert.deepEqual(captures[0].files.map(file => file.path), ['index.html']);
+});

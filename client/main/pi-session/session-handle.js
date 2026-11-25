@@ -27,9 +27,15 @@ function create(ctx) {
     if (ctx.opts?.resumedConversation) return ctx.pluginOutputSince || 0;
     return ctx.startedAt;
   }
+  function outputRoot() {
+    return require('../conversation/delivery-workspace.cjs').root(ctx.effectiveCwd, ctx.opts?.deliveryWorkspace);
+  }
+  function outputJournal() {
+    return (ctx.opts?.deliveryWorkspace ? ctx.handle.deliveryFileChanges : ctx.handle.fileChanges) || null;
+  }
   function completedJournal() {
     const journal = ctx.completedOutputJournal;
-    return journal && journal.startedAt === ctx.run.startedAt && journal.changes === ctx.handle.fileChanges
+    return journal && journal.startedAt === ctx.run.startedAt && journal.changes === outputJournal()
       ? journal.changes : null;
   }
   function completedOutputs(scanned) {
@@ -53,24 +59,26 @@ activeTaskId: ctx.taskBinding.activeTaskId || ctx.taskRef,
 intent: ctx.goal.intent,
 goal: ctx.goal,
 cwd: ctx.effectiveCwd,
+deliveryWorkspace: ctx.opts?.deliveryWorkspace || null,
+deliveryFileChanges: null,
 get desktopControlScope() { return ctx.desktopControlScope; },
 get skills() { return ctx.resources.skills; },
 get skillWarnings() { return ctx.resources.skillWarnings || []; },
 startedAt: ctx.startedAt,
 outputSince: outputsSince(),
 outputs() {
-      return require('./outputs').list(ctx.effectiveCwd, outputsSince());
+      return require('./outputs').list(outputRoot(), outputsSince());
     },
 outputSnapshot() {
       const since = outputsSince();
-      return { ...completedOutputs(require('./outputs').scan(ctx.effectiveCwd, since, ctx.run.startedAt || 0, completedJournal())),
-        pluginSince: ctx.pluginOutputSince, pluginValidation: require('./plugin-generation-gate.cjs').records(ctx.handle), fileChanges: ctx.handle.fileChanges || null };
+      return { ...completedOutputs(require('./outputs').scan(outputRoot(), since, ctx.run.startedAt || 0, completedJournal())),
+        pluginSince: ctx.pluginOutputSince, pluginValidation: require('./plugin-generation-gate.cjs').records(ctx.handle), fileChanges: outputJournal() };
     },
 async outputSnapshotAsync() {
       const since = outputsSince();
-      const turnSince = ctx.run.startedAt || 0, fileChanges = ctx.handle.fileChanges || null;
-      const scanned = await require('./outputs').scanAsync(ctx.effectiveCwd, since, turnSince, completedJournal());
-      if ((ctx.run.startedAt || 0) !== turnSince || (ctx.handle.fileChanges || null) !== fileChanges)
+      const turnSince = ctx.run.startedAt || 0, fileChanges = outputJournal();
+      const scanned = await require('./outputs').scanAsync(outputRoot(), since, turnSince, completedJournal());
+      if ((ctx.run.startedAt || 0) !== turnSince || outputJournal() !== fileChanges)
         throw Error('当前轮次的成果已变化，请刷新后重试');
       return { ...completedOutputs(scanned), pluginSince: ctx.pluginOutputSince, pluginValidation: require('./plugin-generation-gate.cjs').records(ctx.handle), fileChanges };
     },

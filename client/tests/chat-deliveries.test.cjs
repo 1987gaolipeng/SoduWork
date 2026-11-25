@@ -116,3 +116,38 @@ test('a recorded unfinished tool allows file viewing only in a passive history s
   assert.equal(deliveries.isSettled(snapshot), false);
   assert.equal(deliveries.isSettled({ ...snapshot, localReplica: true, execution: { readOnly: true } }), true);
 });
+
+test('the last settled card previews and exports its archived revision despite a same-size and same-time replacement', async t => {
+  const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'soduwork-card-revision-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'report.md'), at = new Date(1700000000000);
+  const write = text => { fs.writeFileSync(file, text); fs.utimesSync(file, at, at); return fs.statSync(file); };
+  const original = write('v1'), replacement = write('v2');
+  assert.equal(original.size, replacement.size);
+  assert.equal(original.mtimeMs, replacement.mtimeMs);
+
+  const buttons = [], appended = [];
+  const child = () => ({ dataset: {}, classList: { toggle() {} }, setAttribute() {},
+    appendChild() {}, replaceWith() {}, replaceChildren() {}, querySelector: child });
+  const card = child(), document = { createTextNode: textContent => ({ textContent }),
+    createElement(tag) { const node = tag === 'section' ? card : child(); if (tag === 'button') buttons.push(node); return node; } };
+  const message = { dataset: { deliveryCurrent: 'true', deliveryFinal: 'true', deliveryTurn: 'first' },
+    ownerDocument: document, querySelector: () => null, querySelectorAll: () => [], appendChild: node => appended.push(node) };
+  const root = { ownerDocument: document, querySelectorAll: selector => selector === '[data-delivery]' ? [] : [message] };
+  const live = { primary: true, name: 'report.md', relative: 'report.md', artifactId: 'live',
+    changedInTurn: true, at: replacement.mtimeMs, size: replacement.size };
+  const archived = { ...live, artifactId: 'version:frozen', originalArtifactId: 'live',
+    turnId: 'first', versionId: 'frozen', at: original.mtimeMs, size: original.size };
+  const deliveries = helper(document);
+  deliveries.decorate(root, [live, archived], 'chat', { status: 'idle',
+    messages: [{ role: 'user', submissionId: 'first' }, { role: 'assistant' }] });
+  assert.deepEqual(appended, [card]);
+  assert.deepEqual(buttons.filter(b => b.dataset.openApp).map(b => b.dataset.openApp), ['version:frozen']);
+  assert.match(card.innerHTML, /data-open-app="version:frozen"/);
+  assert.doesNotMatch(card.dataset.delivery, /"live"/);
+  const save = buttons.find(b => b.dataset.deliveryExportVersion);
+  save.closest = () => save;
+  let request;
+  await deliveries.handle(save, { async saveDelivery(ref, ids) { request = [ref, ...ids]; return { ok: true }; } }, 'chat');
+  assert.deepEqual(request, ['chat', 'version:frozen']);
+});

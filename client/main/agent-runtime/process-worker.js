@@ -142,9 +142,9 @@ const peer = createRpcPeer({
       return result;
     },
     property(ref, name, value) {
-      if (name !== 'captureDelivery') throw Error('Session property is not writable');
+      if (name !== 'captureDelivery' && name !== 'captureArtifactTurn') throw Error('Session property is not writable');
       const handle = session(ref);
-      handle.captureDelivery = typeof value === 'function' ? async (...args) => {
+      handle[name] = typeof value === 'function' ? async (...args) => {
         await context.current().synchronize(handle); return value(...args);
       } : undefined;
       return true;

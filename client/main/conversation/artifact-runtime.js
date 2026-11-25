@@ -16,6 +16,8 @@ const screenshotEvidence = require('./screenshot-evidence');
 const artifactTitle = require('./artifact-title');
 const selection = require('./delivery-selection');
 
+const { root: deliveryRoot } = require('./delivery-workspace.cjs');
+const turnArchives = new WeakMap();
 const continuationArchives = new WeakMap();
 const archiveReaders = new WeakMap();
 const RECORDS = new Map();
@@ -68,14 +70,14 @@ function within(root, target, allowRoot) {
 }
 
 function recoveredFiles(session) {
-  return require('./saved-report-artifacts').recover(session.cwd,
+  return require('./saved-report-artifacts').recover(deliveryRoot(session.cwd, session.deliveryWorkspace),
     typeof session.snapshot === 'function' ? session.snapshot()?.tools : []);
 }
 
 async function snapshotAsync(session) {
   if (!session) return null;
   if (session.historyArtifacts) return session.historyArtifacts.snapshotAsync();
-  const cwd = session.cwd, sessionId = session.sessionId, owner = session.deliveryOwner, history = session.artifactHistory;
+  const cwd = deliveryRoot(session.cwd, session.deliveryWorkspace), sessionId = session.sessionId, owner = session.deliveryOwner, history = session.artifactHistory;
   const asynchronous = session.outputSnapshotAsync, synchronous = session.outputSnapshot, list = session.outputs;
   const recovered = recoveredFiles(session);
   let scanned = typeof asynchronous === 'function'
@@ -107,7 +109,7 @@ async function snapshotAsync(session) {
   const validation = await require('../pi-session/plugin-generation-gate.cjs').inspect({ handle: session, snapshot: scanned,
     files: merged.filter(file => !continued?.paths.includes(file.path)) });
   scanned = { ...scanned, pluginValidation: validation };
-  if (session.cwd !== cwd || session.sessionId !== sessionId || session.deliveryOwner !== owner || session.artifactHistory !== history ||
+  if (deliveryRoot(session.cwd, session.deliveryWorkspace) !== cwd || session.sessionId !== sessionId || session.deliveryOwner !== owner || session.artifactHistory !== history ||
       session.outputSnapshotAsync !== asynchronous || session.outputSnapshot !== synchronous || session.outputs !== list)
     throw Object.assign(Error('会话成果来源已变化，请刷新后重试'), { code: 'ARTIFACT_SOURCE_CHANGED' });
   return sessionSnapshot(session, scanned, recovered, merged);
@@ -115,7 +117,25 @@ async function snapshotAsync(session) {
 
 // Only the interactive output index and its read actions consult archived bytes.
 async function viewSnapshotAsync(session) {
-  return appendArchivedItems(session, await snapshotAsync(session));
+  const current = await appendArchivedItems(session, await snapshotAsync(session));
+  if (!turnArchives.has(session) || !current) return current;
+  return { ...current, items: [...current.items, ...await turnArtifacts(session)] };
+}
+
+async function turnArtifacts(session, requestedId) {
+  if (!turnArchives.has(session)) return [];
+  const versions = [], checked = new Set();
+  for (const { reader, turnId, userMessageIndex } of await turnArchives.get(session)()) {
+    if (!checked.has(reader.authorize)) { await reader.authorize(); checked.add(reader.authorize); }
+    for (const file of reader.snapshot().items) {
+      if (!/^[a-f0-9]{64}$/.test(file.versionId) || !turnId || requestedId && requestedId !== 'version:' + file.versionId) continue;
+      const item = { ...file, artifactId: 'version:' + file.versionId, originalArtifactId: file.artifactId,
+        turnId, userMessageIndex, changedInTurn: false, pluginDraft: false, actions: ['open'] };
+      archiveReaders.set(item, reader);
+      versions.push(item);
+    }
+  }
+  return versions;
 }
 async function appendArchivedItems(session, current) {
   const getArchive = continuationArchives.get(session);
@@ -137,58 +157,59 @@ async function appendArchivedItems(session, current) {
 function sessionSnapshot(session, scanned, recovered, candidates) {
   if (!session) return null;
   if (session.historyArtifacts) return session.historyArtifacts.snapshot();
+  const cwd = deliveryRoot(session.cwd, session.deliveryWorkspace);
   const continued = versions.continuedPlugins(session);
   const recorded = new Map((continued?.view.snapshot().items || [])
     .filter(file => file.pluginDraft).map(file => [file.path, file]));
-  const historical = versions.restore(session.cwd, session.artifactHistory);
+  const historical = versions.restore(cwd, session.artifactHistory);
   const historicalPaths = new Set(historical.map(file => path.resolve(file.path)));
   const currentAnswer = selection.turn(session.artifactState || {}).answer;
   const reused = historical.filter(file => file.historicalPrimary && !file.processEvidence &&
-    currentAnswer && selection.mentioned(currentAnswer, session.cwd, file)).map(file => ({ ...file, primary: true }));
+    currentAnswer && selection.mentioned(currentAnswer, cwd, file)).map(file => ({ ...file, primary: true }));
   const currentFile = file => !file.path || !historicalPaths.has(path.resolve(file.path)) ||
-    Boolean(currentAnswer && selection.mentioned(currentAnswer, session.cwd, file));
+    Boolean(currentAnswer && selection.mentioned(currentAnswer, cwd, file));
   const savedReports = require('./saved-report-artifacts');
   if (!recovered) recovered = recoveredFiles(session);
   if (!scanned) scanned = typeof session.outputSnapshot === 'function'
     ? session.outputSnapshot() : { files: typeof session.outputs === 'function' ? session.outputs() : [] };
   const state = session.snapshot?.() || {};
-  scanned = deliveryContract.fromReply(session.cwd, state, scanned);
-  const captures = screenshotEvidence.toolPaths(session.cwd, state.tools || []);
-  const declared = deliveryContract.readManifest(session.cwd);
+  scanned = deliveryContract.fromReply(cwd, state, scanned);
+  const captures = screenshotEvidence.toolPaths(cwd, state.tools || []);
+  const declared = deliveryContract.readManifest(cwd);
   const processFiles = new Set((Array.isArray(declared?.processFiles) ? declared.processFiles : [])
-    .filter(value => typeof value === 'string').map(value => path.resolve(session.cwd, value)));
+    .filter(value => typeof value === 'string').map(value => path.resolve(cwd, value)));
   const captureKey = file => process.platform === 'win32' ? path.resolve(file.path || '').toLowerCase() : path.resolve(file.path || '');
-  const metadata = file => artifactTitle.decorate(session.cwd, captures.has(captureKey(file)) ||
+  const metadata = file => artifactTitle.decorate(cwd, captures.has(captureKey(file)) ||
     processFiles.has(path.resolve(file.path || '')) || selection.processRoles.has(file.role) ||
     deliveryContract._kindOf(file.path) === 'image' && deliveryContract._isProcess(file)
     ? { ...file, processEvidence: true, evidenceSource: captures.has(captureKey(file)) ? 'capture' : 'manifest', primary: false } : file);
-  const got = { ...scanned, files: savedReports.currentFiles(session.cwd, scanned?.files, recovered).filter(currentFile).map(metadata) };
+  const got = { ...scanned, files: savedReports.currentFiles(cwd, scanned?.files, recovered).filter(currentFile).map(metadata) };
   for (const file of reused) if (!got.files.some(item => item.path === file.path)) got.files.push(file);
   const scannedDelivery = got.delivery || { source: 'legacy', items: got.files };
   const originalDelivery = { ...scannedDelivery, items: [...(scannedDelivery.items || []),
     ...reused.filter(file => !(scannedDelivery.items || []).some(item => item.path === file.path))] };
   const request = selection.turn(state).request;
   const allowCaptures = selection.requestsCaptures(request) || !request && originalDelivery.source === 'manifest';
-  const delivery = selection.select(session.cwd, { ...originalDelivery,
-    items: originalDelivery.presentation === 'summary' ? [] : savedReports.currentFiles(session.cwd, originalDelivery.items, recovered)
+  const delivery = selection.select(cwd, { ...originalDelivery,
+    items: originalDelivery.presentation === 'summary' ? [] : savedReports.currentFiles(cwd, originalDelivery.items, recovered)
       .map(file => allowCaptures && !processFiles.has(path.resolve(file.path || '')) && !selection.processRoles.has(file.role)
-        ? artifactTitle.decorate(session.cwd, file) : metadata(file))
+        ? artifactTitle.decorate(cwd, file) : metadata(file))
       .filter(file => !file.processEvidence && currentFile(file)) }, state);
   if (got.delivery) got.delivery = delivery;
   // A primary delivery list is a shortlist, not the set of files a user may
   // revisit. Keep scanned documents/websites/media addressable across turns,
   // without promoting supporting files or changing delivery acceptance.
   const items = [...(delivery.items || [])].filter(file =>
-    continued?.paths.includes(file.path) || pluginDrafts.withinSnapshot(file, got) || !pluginDrafts.describe(session.cwd, file));
+    continued?.paths.includes(file.path) || pluginDrafts.withinSnapshot(file, got) || !pluginDrafts.describe(cwd, file));
   const indexed = new Set(items.filter(item => item.path && item.artifactId).map(item => path.resolve(item.path)));
-  const screenshots = screenshotEvidence.collect(session.cwd, {
+  const screenshots = screenshotEvidence.collect(cwd, {
     since: got.since ?? session.outputSince ?? session.startedAt, turnSince: got.turnSince,
   });
   for (const file of [...(got && got.files || []), ...recovered, ...screenshots]) {
     if (!currentFile(file)) continue;
     const kind = deliveryContract._kindOf(file.path);
     if (!file.path || !kind || indexed.has(path.resolve(file.path))) continue;
-    const relative = path.relative(session.cwd, file.path).split(path.sep).join('/');
+    const relative = path.relative(cwd, file.path).split(path.sep).join('/');
     const item = { ...file, relative, artifactId: deliveryContract._artifactId(kind, relative),
       kind, primary: false, processEvidence: file.processEvidence === true || deliveryContract._isProcess(file),
       preview: ['website', 'video', 'image', 'pdf'].includes(kind),
@@ -198,8 +219,8 @@ function sessionSnapshot(session, scanned, recovered, candidates) {
     indexed.add(path.resolve(file.path));
   }
   const drafts = candidates || (continued ? pluginDrafts.mergePluginCandidates([
-    ...pluginDrafts.collect(session.cwd, { ...got, excludedDrafts: continued.paths }), ...recorded.values()])
-    : pluginDrafts.collect(session.cwd, got));
+    ...pluginDrafts.collect(cwd, { ...got, excludedDrafts: continued.paths }), ...recorded.values()])
+    : pluginDrafts.collect(cwd, got));
   for (const file of drafts) {
     const checked = recorded.get(file.path);
     if (continued?.paths.includes(file.path) ? !checked || checked.pluginRevision !== file.pluginRevision
@@ -240,6 +261,13 @@ async function resolveAsync(session, artifactId) {
 }
 
 async function resolveView(session, artifactId) {
+  if (typeof artifactId === 'string' && artifactId.startsWith('version:')) {
+    const [item] = await turnArtifacts(session, artifactId);
+    const reader = archiveReaders.get(item);
+    if (!reader || !reader.verify(item.path)) return { ok: false, reason: '成果文件已改变或无法读取' };
+    return { ok: true, item, path: item.path, stat: fs.statSync(item.path),
+      snapshot: reader.snapshot(), previewRoot: reader.rootFor?.(item) || reader.root, historyArtifacts: reader };
+  }
   const current = await snapshotAsync(session);
   if (current?.items.some(row => row.artifactId === artifactId)) return resolveSnapshot(session, artifactId, current);
   const snapshot = await appendArchivedItems(session, current);
@@ -260,7 +288,8 @@ function resolveSnapshot(session, artifactId, snapshot) {
     if (!session.historyArtifacts.verify(candidatePath)) return { ok: false, reason: '成果文件已改变或无法读取' };
     return { ok: true, item, path: candidatePath, stat: fs.statSync(candidatePath), snapshot, historyArtifacts: session.historyArtifacts };
   }
-  if (!outputs.inside(session.cwd, candidatePath)) {
+  const cwd = deliveryRoot(session.cwd, session.deliveryWorkspace);
+  if (!outputs.inside(cwd, candidatePath)) {
     return { ok: false, reason: '这份成果不在当前会话工作区内' };
   }
   let target;
@@ -269,7 +298,7 @@ function resolveSnapshot(session, artifactId, snapshot) {
     // Match the native canonical paths used by outputs.inside and asynchronous
     // packaging; the JS realpath implementation can retain Windows 8.3 aliases.
     const realpath = fs.realpathSync.native || fs.realpathSync;
-    const root = realpath(String(session.cwd || ''));
+    const root = realpath(String(cwd || ''));
     target = realpath(candidatePath);
     if (!within(root, target, false)) {
       return { ok: false, reason: '这份成果的真实路径超出了当前会话工作区' };
@@ -298,6 +327,8 @@ function publicArtifact(ref, item) {
     preview: Boolean(item && item.preview),
     primary: item ? item.primary !== false : true,
     ...(archiveReaders.has(item) ? { archivedReadOnly: true } : {}),
+    ...(item?.versionId && item.turnId && archiveReaders.has(item) ?
+      { versionId: item.versionId, turnId: item.turnId, userMessageIndex: item.userMessageIndex, originalArtifactId: item.originalArtifactId } : {}),
     processEvidence: Boolean(item && item.processEvidence),
     changedInTurn: Boolean(item && item.changedInTurn),
     ...(item && item.pluginDraft ? { pluginDraft: true, pluginPackage: Boolean(item.pluginPackage), skillPackage: Boolean(item.skillPackage),
@@ -348,7 +379,15 @@ function candidate(record, rawPath) {
   const clean = decoded.replace(/\\/g, '/').replace(/^\/+/, '');
   let target = clean ? path.resolve(record.root, clean) : record.entry;
   if (!within(record.root, target, true)) return null;
+  let root = record.root;
   try {
+    if (record.versionFiles) {
+      const relative = path.relative(root, target).split(path.sep).join('/');
+      const receipt = record.versionFiles.get(relative) || record.versionFiles.get(path.posix.join(relative, 'index.html'));
+      if (!receipt) throw Error('Missing archived asset');
+      root = receipt.root; target = path.resolve(root, receipt.relative);
+      if (!within(root, target, false)) return null;
+    }
     let stat = fs.statSync(target);
     if (stat.isDirectory()) {
       target = path.join(target, 'index.html');
@@ -356,7 +395,7 @@ function candidate(record, rawPath) {
     }
     if (!stat.isFile()) throw new Error('not a file');
     const real = fs.realpathSync(target);
-    if (!within(record.root, real, false) || record.historyArtifacts &&
+    if (!within(root, real, false) || record.historyArtifacts &&
         (real !== target || !record.historyArtifacts.verify(target))) return null;
     return { path: real, stat };
   } catch (_) {
@@ -472,8 +511,10 @@ async function startResolvedPreview(found, ref, artifactId) {
   if (current) stopRecord(current);
   const root = found.previewRoot || fs.realpathSync(path.dirname(found.path));
   const entry = fs.realpathSync(found.path);
+  const entries = found.item.versionId && found.historyArtifacts?.packageFiles?.();
+  const versionFiles = entries && new Map(entries.map(file => [file.relative, file]));
   const record = {
-    key, ref: String(ref || ''), artifactId: String(artifactId || ''),
+    versionFiles, key, ref: String(ref || ''), artifactId: String(artifactId || ''),
     itemAt: Number(found.item.at || 0), version, root, entry, historyArtifacts: found.historyArtifacts,
     server: null, sockets: new Set(), url: '', lastUsed: Date.now(),
   };
@@ -684,6 +725,7 @@ if (typeof sweep.unref === 'function') sweep.unref();
 module.exports = {
   snapshot: sessionSnapshot,
   viewSnapshotAsync,
+  bindTurnArchives(handle, readers) { turnArchives.set(handle, readers); },
   bindContinuationArchive(handle, reader) { continuationArchives.set(handle, reader); },
   snapshotAsync,
   decorate,
@@ -691,6 +733,7 @@ module.exports = {
   resolve,
   resolveSnapshot,
   resolveAsync,
+  resolveView,
   preview,
   previewInput,
   previewLocation,

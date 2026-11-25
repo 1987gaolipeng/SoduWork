@@ -18,7 +18,20 @@ if (!isMainThread && workerData?.kind === 'soduwork-delivery-package') {
   }).catch(error => parentPort.postMessage({ error: String(error.message || error), code: error.code }));
 }
 async function capture(session, ids, options = {}) {
-  const indexed = await require('./artifact-runtime').snapshotAsync(session);
+  const runtime = require('./artifact-runtime');
+  let frozenSource, cwd, indexed;
+  if (Array.isArray(ids) && ids.some(id => typeof id === 'string' && id.startsWith('version:'))) {
+    if (ids.length !== 1 || !/^version:[a-f0-9]{64}$/.test(ids[0])) throw Error('请逐个导出历史版本');
+    const result = await runtime.resolveView(session, ids[0]);
+    if (!result.ok || !result.historyArtifacts) throw Error('该轮成果原件不可用');
+    await result.historyArtifacts.authorize();
+    cwd = result.previewRoot;
+    frozenSource = { item: { relative: result.item.relative, title: result.item.title },
+      files: result.historyArtifacts.packageFiles() };
+  } else {
+    cwd = require('./delivery-workspace.cjs').root(session.cwd, session.deliveryWorkspace);
+    indexed = await runtime.snapshotAsync(session);
+  }
   if (active.size >= 2) return Promise.reject(Error('其他成果正在整理，当前文件已保留，可稍后重试保存'));
   let resolveCapture, rejectCapture, resolvePayload, rejectPayload;
   const captured = new Promise((resolve, reject) => { resolveCapture = resolve; rejectCapture = reject; });
@@ -43,12 +56,12 @@ async function capture(session, ids, options = {}) {
   };
   try {
     worker = new Worker(__filename, { workerData: { kind: 'soduwork-delivery-package',
-      cwd: session.cwd, sessionId: session.sessionId, ids,
+      cwd, sessionId: session.sessionId, ids,
       snapshot: { status: session.snapshot?.()?.status }, inFlight: Boolean(session.inFlight?.()),
       taskTitle: String(session.taskTitle || ''),
       sessionTitle: String(session.historyRow?.()?.title || ''),
-      files: { ...indexed.got, files: indexed.items, delivery: { ...indexed.delivery, items: indexed.items } },
-      options: { completedTurn: Boolean(options.completedTurn), turnSince: options.turnSince || 0 } } });
+      files: indexed && { ...indexed.got, files: indexed.items, delivery: { ...indexed.delivery, items: indexed.items } },
+      options: { frozen: frozenSource, completedTurn: Boolean(options.completedTurn), turnSince: options.turnSince || 0 } } });
     active.add(worker);
     timer = setTimeout(() => finish(Error('成果整理较慢，文件已保留，可稍后重试保存')), options.completedTurn ? 2000 : 120000);
     worker.on('message', message => {

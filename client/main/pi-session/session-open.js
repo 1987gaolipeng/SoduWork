@@ -40,6 +40,7 @@ async function open(opts) {
     get desktopControlScope() { return desktopControlScope; }, set desktopControlScope(value) { desktopControlScope = value; },
     get displayTitle() { return displayTitle; }, set displayTitle(value) { displayTitle = value; },
     get effectiveCwd() { return effectiveCwd; },
+    get outputRoot() { return require('../conversation/delivery-workspace.cjs').root(effectiveCwd, opts.deliveryWorkspace); },
     get failedLastTurn() { return failedLastTurn; }, set failedLastTurn(value) { failedLastTurn = value; },
     get finishTurnJournal() { return finishTurnJournal; },
     get goal() { return goal; },
@@ -767,7 +768,8 @@ async function open(opts) {
   // accepted the generation request.  A persistent attachment index prevents
   // repeated downloads every time the conversation is reopened.
   queueMicrotask(() => {
-    mediaArtifacts.recover(identity, handle.sessionId, effectiveCwd).then(({ files, errors }) => {
+    Promise.resolve().then(() => mediaArtifacts.recover(identity, handle.sessionId, state.outputRoot, undefined,
+      require('../conversation/delivery-workspace.cjs').fileGuard(effectiveCwd, opts.deliveryWorkspace))).then(({ files, errors }) => {
       if (closed) return;
       for (const file of files || []) {
         if (file.artifactId) materializedMedia.add(String(file.artifactId));

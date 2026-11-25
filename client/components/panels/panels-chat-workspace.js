@@ -792,7 +792,12 @@
     const nextChanges = changes(turnTools);
     WB.fileChanges = info.currentWorkJournal(snapshot);
     const nextFiles = mergeFileChanges(files, WB.fileChanges);
-    const selection = info.currentWorkSelection(snapshot || {}, nextFiles, context().cwd || context().intent?.cwd);
+    const turn = snapshot?.messages?.findLast(message => message?.role === 'user')?.submissionId;
+    // The live workbench follows the working version. Historical cards select
+    // their immutable entry directly by ID, including after a new revision.
+    const currentFiles = WB.historyPreview && links?.filesForTurn ? links.filesForTurn(nextFiles, turn, true) :
+      nextFiles.filter(file => !file.versionId);
+    const selection = info.currentWorkSelection(snapshot || {}, currentFiles, context().cwd || context().intent?.cwd);
     const nextSummaryFiles = selection.files;
     // A remote Runner prints the same localhost URL as a local dev server, but
     // that loopback belongs to the Runner machine. The committed cloud target
@@ -865,7 +870,7 @@
      */
     const settled = !global.ChatDeliveries || global.ChatDeliveries.isSettled(snapshot || {});
     const deliveryFiles = settled && typeof info.currentDeliveryFiles === 'function'
-      ? info.currentDeliveryFiles(snapshot || {}, nextFiles) : [];
+      ? info.currentDeliveryFiles(snapshot || {}, currentFiles) : [];
     const deliveryRank = file => {
       const kind = previewKind(file);
       if (kind === 'web') return 0;

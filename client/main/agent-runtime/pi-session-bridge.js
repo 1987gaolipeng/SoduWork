@@ -370,7 +370,8 @@ function createPiSessionBridge(options) {
           ...(deviceContinuation ? { deviceShared: true, executionOwner: deviceContinuation.executionOwner } : {}),
           title: row.title || '', cwd: legacyOptions.cwd, originAdapter: previous?.originAdapter || row.adapterId || adapterId,
           at: Date.now(), prefix: historyRecovery.prefix, usedHarnesses: row.usedHarnesses,
-          artifactHistory: require('../conversation/runtime-artifacts.cjs').forContinuation(legacyOptions.cwd,
+          artifactHistory: require('../conversation/runtime-artifacts.cjs').forContinuation(
+            require('../conversation/delivery-workspace.cjs').root(legacyOptions.cwd, legacyOptions.deliveryWorkspace),
             row.deviceTransferId ? undefined : historyRecovery.artifactHistory, previous?.artifactHistory),
           segments: previous ? [...previous.segments, previous.active] : deviceContinuation ?
             [{ sessionId: row.id, adapterId: row.adapterId || adapterId, path: row.path || row.id,

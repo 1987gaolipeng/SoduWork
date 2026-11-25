@@ -918,6 +918,19 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       const editSource = opts.pluginEditId && !opts.chatId ? await require('../jiyong-edit-source.cjs').prepare({
         app,identityOf,pluginId:opts.pluginEditId,cwd:spec.cwd,readOnly:spec.readOnly,
       }) : null;
+      const deliveryWorkspaces = require('../conversation/delivery-workspace.cjs');
+      // A local replica supplies the device-owned namespace on resume. Remote
+      // imports and renderer options never determine an output directory.
+      const legacyChat = !local && resume && historyAccess.usesDeviceChatContext(app, opts, resume);
+      const receivedChat = local?.deviceTransferId && !historyAccess.requestsAccountContext(opts) &&
+        historyAccess.classifyLocal(app, local.id, local).kind === 'ordinary';
+      const localChat = desktopContinuation && !work.first && !spec.taskRef &&
+        !memoryContext?.ids?.length && !String(memoryContext?.prompt || '').trim() &&
+        Boolean(deviceChatContext || legacyChat || receivedChat);
+      const explicitProject = resume ? resume.cwd && path.resolve(resume.cwd) === cwd &&
+        (Boolean(local?.deliveryWorkspaceKey) || !scratchCwd) : Boolean(opts.cwd);
+      const deliveryWorkspace = localChat && explicitProject
+        ? deliveryWorkspaces.allocate(cwd, local?.deliveryWorkspaceKey ?? undefined) : null;
       let openingTimedOut = false;
       const openingPromise = Promise.resolve().then(async () => {
         await assertHistoryCurrent();
@@ -926,7 +939,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         }
         accessConsent?.assertValid();
         return session.open({
-        app, identity, cwd: spec.cwd, ref, runtimeConversationId: resume?.runtimeConversationId,
+        app, identity, cwd: spec.cwd, ref, deliveryWorkspace, runtimeConversationId: resume?.runtimeConversationId,
         deviceHistoryRecovery, deviceContinuationGrant: continuationGrant, startDeviceSegment,
         workConversation: work.bootstrap,
         workConversationId: work.first ? resume.id : undefined,
@@ -976,6 +989,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         },
         inputAttachments: staged.files,
         contextPrompts: [
+          ...(deliveryWorkspace ? [deliveryWorkspaces.prompt(deliveryWorkspace)] : []),
           ...(resolved.capabilityIds.includes('browser') ? [
             '【Browser Use 会话】本次隔离浏览器会话 ID：' + ref +
             '。调用 browser.mjs 时每条命令末尾都追加 --session ' + ref +
@@ -1071,6 +1085,12 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         if (event) _attach(opened.session, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender));
         else _detach(opened.session);
         _wire(BrowserWindow, opened.session);
+        if (deliveryWorkspace && _sharedHistory) {
+          await _sharedHistory.deliveryWorkspaceReady(opened.session);
+          await assertHistoryCurrent();
+          accessConsent?.assertValid();
+          appRequest?.assertActive();
+        }
         _cloudHandoff.observe(opened.session);
         appRequest?.assertActive();
         const reply = _openReply(opened.session, { resumed: !!resume, seeded: opened.seeded || 0 });

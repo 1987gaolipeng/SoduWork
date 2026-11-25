@@ -180,8 +180,9 @@ async function preserve(profile, id, history, previous, guard, { readWorkspace =
     const proofs = new Map([...pendingFiles.map(file => [file.relative, file.sourceStamp]), ...committed]);
     const keep = list => (list || []).filter(row => !row.archiveOnly || same(row.stamp, proofs.get(row.metadata.relative)));
     const omitted = [...desired].filter(([name, row]) => !same(row.stamp, committed.get(name))).length;
-    return { ...history, items: keep(history.items), resources: keep(history.resources), archivePending: !!pendingFiles.length,
-      archive: { version: 1, generation, files, omitted, ...(pendingFiles.length ? { pendingFiles } : {}) } };
+    const archive = { version: 1, generation, files, omitted, ...(pendingFiles.length ? { pendingFiles } : {}) };
+    require('./artifact-versions.cjs').record(archive, prior, history);
+    return { ...history, items: keep(history.items), resources: keep(history.resources), archivePending: !!pendingFiles.length, archive };
   }
   if (prior && [...selected.values()].every(choice => choice.old?.generation === prior.generation &&
       same(choice.entry.stamp, choice.old.sourceStamp))) {
@@ -194,8 +195,10 @@ async function preserve(profile, id, history, previous, guard, { readWorkspace =
       return selectedRow?.metadata.relative !== name || !same(row.stamp, selectedRow.stamp);
     }).length;
     const pending = !!prior.pendingFiles?.length || selected.size !== prior.files.length;
-    if (history.archive === prior && history.archivePending === pending && prior.omitted === omitted) return history;
-    return { ...history, archivePending: pending, archive: { ...prior, omitted } };
+    const archived = { ...prior, omitted };
+    const changed = require('./artifact-versions.cjs').record(archived, prior, history);
+    if (!changed && history.archive === prior && history.archivePending === pending && prior.omitted === omitted) return history;
+    return { ...history, archivePending: pending, archive: archived };
   }
 
   const generation = crypto.randomUUID(), base = directory(profile, id), root = path.join(base, generation);
@@ -246,7 +249,10 @@ async function preserve(profile, id, history, previous, guard, { readWorkspace =
         throw Error('Artifact archive file changed after writing');
       for (let directory = path.dirname(target); !directories.has(directory); directory = path.dirname(directory))
         directories.add(directory);
-      files.push({ relative, sha256, sourceStamp: entry.stamp, stamp: closed });
+      const dependencies = !entry.source?.turnId ? [] : old?.sha256 === sha256 && old.dependencies
+        ? old.dependencies : require('./artifact-versions.cjs').dependencies(relative, bytes);
+      files.push({ relative, sha256, sourceStamp: entry.stamp, stamp: closed,
+        ...(dependencies.length ? { dependencies } : {}) });
     }
     guard();
     await owned();
@@ -270,11 +276,26 @@ async function retire(profile, id, before, after, accepted) {
   if (before === after) return;
   // A pending file names the physical generation to retry if its media returns.
   // A failed CAS owns only its newly created generation.
-  const origins = archive => new Set([archive?.generation, ...(archive?.pendingFiles || []).map(file => file.generation)].filter(Boolean));
+  const origins = archive => new Set([archive?.generation, ...(archive?.pendingFiles || []).map(file => file.generation),
+    ...(archive?.versions || []).map(file => file.generation)].filter(Boolean));
   const retained = origins(accepted ? after : before);
   const obsolete = accepted ? origins(before) : [after?.generation];
   for (const generation of obsolete)
     if (generation && !retained.has(generation)) await discard(profile, id, generation);
+
+  // An old full snapshot only needs the files referenced by surviving turn and
+  // recovery receipts. Do not retain a second copy of every unchanged result.
+  if (accepted && before?.generation && before.generation !== after?.generation && retained.has(before.generation)) {
+    const needed = new Set([...(after?.versions || []), ...(after?.pendingFiles || [])]
+      .filter(file => file.generation === before.generation).map(file => file.relative));
+    const root = location(profile, id, before);
+    for (const file of before.files) {
+      if (needed.has(file.relative) || !await verified(root, file.relative, file.stamp)) continue;
+      const target = path.join(root, portablePath(file.relative));
+      assertNoLinks(profile, target);
+      await fs.unlink(target).catch(error => { if (!missing(error)) throw error; });
+    }
+  }
 }
 
 async function discard(profile, id, generation) {
@@ -399,4 +420,4 @@ async function rebind(profile, id, history, guard) {
   return rebound;
 }
 
-module.exports = { needsBackup, preserve, projection, retain, retire, discard, detach, reclaim, readVersion, rebind };
+module.exports = { needsBackup, preserve, projection, retain, retire, discard, detach, reclaim, readVersion, rebind, location, restoredStamp, syncDirectories };

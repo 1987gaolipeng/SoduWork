@@ -12,6 +12,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const fsp = fs.promises;
+const { publishedDirectory } = require('./delivery-workspace.cjs');
 const path = require('node:path');
 
 const SCHEMA_VERSION = 1;
@@ -119,7 +120,7 @@ async function walk(root, opts) {
     if (files.size >= opts.maxFiles) { truncated = true; return; }
     for (const ent of entries) {
       throwIfAborted(opts.signal);
-      if (!ent.isDirectory() || ignored(ent.name)) continue;
+      if (!ent.isDirectory() || ignored(ent.name) || publishedDirectory(root, dir, ent.name)) continue;
       // Symlinks are not Dirent directories, so they cannot escape cwd.
       await visit(path.join(dir, ent.name), depth + 1);
       if (files.size >= opts.maxFiles) { truncated = true; break; }
@@ -148,6 +149,23 @@ async function snapshot(cwd, rawOptions) {
   }
   if (!stat.isDirectory()) return { schemaVersion: SCHEMA_VERSION, cwd: root, files: {}, truncated: false, capturedAt: Date.now() };
   const walked = await walk(root, opts);
+  if (opts.includeEvidence) {
+    const { stamp } = require('./runtime-artifacts.cjs');
+    const { readVersion } = require('./device-artifact-archive.cjs');
+    // Only the reserved raster evidence directory can add hidden files to a
+    // private turn receipt. Apply the ordinary file cap and cancellation.
+    for (const image of require('./screenshot-evidence').collect(root)) {
+      throwIfAborted(opts.signal);
+      if (walked.files.size >= opts.maxFiles) { walked.truncated = true; break; }
+      try {
+        const stat = await fsp.lstat(image.path, { bigint: true });
+        const bytes = await readVersion(root, image.relative, stamp(stat));
+        if (!bytes) { walked.truncated = true; break; }
+        walked.files.set(image.relative, { path: image.relative, exists: true, size: bytes.length,
+          mtimeMs: Number(stat.mtimeNs) / 1e6, hash: hash(bytes), isBinary: true, text: null, textTruncated: false });
+      } catch (_) { walked.truncated = true; break; }
+    }
+  }
   throwIfAborted(opts.signal);
   const files = {};
   for (const [relative, record] of walked.files) files[relative] = record;

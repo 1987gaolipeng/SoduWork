@@ -247,7 +247,7 @@ async function _readIndex(outputDir) {
   } catch (_) { return {}; }
 }
 
-async function _indexedFile(outputDir, artifact, origin) {
+async function _indexedFile(outputDir, artifact, origin, guard) {
   const aid = String(artifact && artifact.attachmentId || '');
   if (!aid) return null;
   const index = await _readIndex(outputDir);
@@ -256,6 +256,7 @@ async function _indexedFile(outputDir, artifact, origin) {
   const target = path.resolve(outputDir, relative);
   if (!target.startsWith(path.resolve(outputDir) + path.sep)) return null;
   try {
+    guard?.(target);
     const stat = await fs.promises.stat(target);
     if (!stat.isFile() || !stat.size) return null;
     if (_safeFilename(path.basename(target), artifact.mimeType) !== path.basename(target)) return null;
@@ -293,12 +294,12 @@ async function _rememberFile(outputDir, attachmentId, target, origin) {
 }
 
 /** Download one signed Hub attachment into cwd/outputs and return its file row. */
-async function materialize(artifact, identity, cwd, fetchImpl = global.fetch, abortSignal) {
+async function materialize(artifact, identity, cwd, fetchImpl = global.fetch, abortSignal, guard) {
   const key = path.resolve(String(cwd || ''), 'outputs');
   const previous = outputQueues.get(key) || Promise.resolve();
   const running = previous.catch(() => {}).then(() => {
     abortSignal?.throwIfAborted();
-    return _materialize(artifact, identity, cwd, fetchImpl, abortSignal);
+    return _materialize(artifact, identity, cwd, fetchImpl, abortSignal, guard);
   });
   outputQueues.set(key, running);
   try { return await running; }
@@ -311,7 +312,7 @@ async function materialize(artifact, identity, cwd, fetchImpl = global.fetch, ab
   finally { if (outputQueues.get(key) === running) outputQueues.delete(key); }
 }
 
-async function _materialize(artifact, identity, cwd, fetchImpl, abortSignal) {
+async function _materialize(artifact, identity, cwd, fetchImpl, abortSignal, guard) {
   if (!artifact || !['video', 'image'].includes(String(artifact.kind || '').toLowerCase())) {
     throw new Error('视频结果格式无效');
   }
@@ -325,9 +326,13 @@ async function _materialize(artifact, identity, cwd, fetchImpl, abortSignal) {
   }
   if (typeof fetchImpl !== 'function') throw new Error('当前运行环境不支持视频下载');
   const outputDir = path.resolve(String(cwd || ''), 'outputs');
+  const indexFile = path.join(outputDir, INDEX_NAME);
+  guard?.(indexFile);
   await fs.promises.mkdir(outputDir, { recursive: true });
-  const existing = await _indexedFile(outputDir, artifact, parsedUrl.origin);
+  guard?.(indexFile);
+  const existing = await _indexedFile(outputDir, artifact, parsedUrl.origin, guard);
   if (existing) {
+    guard?.(existing.path);
     existing.relative = path.relative(String(cwd), existing.path).split(path.sep).join('/');
     return existing;
   }
@@ -362,12 +367,15 @@ async function _materialize(artifact, identity, cwd, fetchImpl, abortSignal) {
   }
   const temp = `${target}.part-${process.pid}-${Date.now()}`;
   try {
+    guard?.(temp);
     const size = await _writeResponse(response, temp, expectedType, maxBytes);
     if ((Number(artifact.size) > 0 && size !== Number(artifact.size)) ||
         (advertised > 0 && size !== advertised)) {
       throw new Error('视频下载不完整，请重新获取成果');
     }
+    guard?.(temp); guard?.(target);
     await fs.promises.rename(temp, target);
+    guard?.(indexFile);
     await _rememberFile(outputDir, artifact.attachmentId, target, parsedUrl.origin).catch(() => {});
     return {
       path: target,
@@ -381,12 +389,12 @@ async function _materialize(artifact, identity, cwd, fetchImpl, abortSignal) {
       mimeType: expectedType,
     };
   } catch (error) {
-    try { await fs.promises.unlink(temp); } catch (_) { /* best effort */ }
+    try { guard?.(temp); await fs.promises.unlink(temp); } catch (_) { /* best effort */ }
     throw error;
   }
 }
 
-async function recover(identity, conversationId, cwd, fetchImpl = global.fetch) {
+async function recover(identity, conversationId, cwd, fetchImpl = global.fetch, guard) {
   const base = String(identity && identity.hub || '').trim().replace(/\/+$/, '');
   const ref = String(conversationId || '').trim();
   if (!base || !identity || (!identity.session && !identity.secret) || !ref || typeof fetchImpl !== 'function') {
@@ -405,7 +413,7 @@ async function recover(identity, conversationId, cwd, fetchImpl = global.fetch) 
   const files = [];
   const errors = [];
   for (const artifact of (Array.isArray(payload && payload.items) ? payload.items : []).slice(0, 10)) {
-    try { files.push(await materialize(artifact, identity, cwd, fetchImpl)); }
+    try { files.push(await materialize(artifact, identity, cwd, fetchImpl, undefined, guard)); }
     catch (error) { errors.push(String(error && error.message || error).slice(0, 300)); }
   }
   return { files, errors };

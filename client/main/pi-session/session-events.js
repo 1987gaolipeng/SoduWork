@@ -2,8 +2,9 @@
 
 const JOURNAL_SNAPSHOT_TIMEOUT_MS = 10 * 1000;
 const toolProgress = require('./tool-progress');
+const deliveryWorkspaces = require('../conversation/delivery-workspace.cjs');
 
-function snapshotWithTimeout(fileChangeJournal, cwd, timeoutMs) {
+function snapshotWithTimeout(fileChangeJournal, cwd, timeoutMs, options) {
   const configured = Number(timeoutMs);
   const limit = Number.isFinite(configured) && configured > 0
     ? configured : JOURNAL_SNAPSHOT_TIMEOUT_MS;
@@ -18,7 +19,7 @@ function snapshotWithTimeout(fileChangeJournal, cwd, timeoutMs) {
     }, limit);
   });
   const snapshot = Promise.resolve().then(() =>
-    fileChangeJournal.snapshot(cwd, { signal: controller.signal }));
+    fileChangeJournal.snapshot(cwd, { ...options, signal: controller.signal }));
   return Promise.race([snapshot, timeout]).finally(() => {
     if (timer) clearTimeout(timer);
   });
@@ -26,6 +27,7 @@ function snapshotWithTimeout(fileChangeJournal, cwd, timeoutMs) {
 
 // State remains owned by the session; accessors keep async transitions live.
 function create(ctx) {
+  const pendingMedia = new Set();
   const stampUsage = require('./usage-attribution').create(() => ctx.prep);
   const {
     SCOPE_ENTRY_TYPE, fileChangeJournal, goalLoop, goalQuality, goalToolStages,
@@ -170,7 +172,8 @@ function _snapshot(options) {
       taskBindings: binding.taskBindings, activeTaskId: binding.activeTaskId,
       activePlugins: ctx.activePluginIds.slice(),
       collaboration: Boolean(binding.taskIds.length), ...(ctx.access ? ctx.access.snapshot() : {}),
-      fileChanges: ctx.handle.fileChanges || null,
+      fileChanges: (ctx.opts?.deliveryWorkspace ? ctx.handle.deliveryFileChanges : ctx.handle.fileChanges) || null,
+      ...(ctx.handle.artifactCaptureWarning ? { artifactCaptureWarning: ctx.handle.artifactCaptureWarning } : {}),
       adapterId: 'pi', displayName: 'Pi', nextAccessPolicy: ctx.accessChanges.pending(),
       accessControl: { ...require('../agent-runtime/runtime-catalog').runtime('pi').accessControl,
         supported: typeof ctx.piSession.agent?.beforeToolCall === 'function',
@@ -230,7 +233,10 @@ const onPiEvent = (ev) => {
       const mediaKey = String(artifact.attachmentId || artifact.url || '');
       if (mediaKey && !ctx.materializedMedia.has(mediaKey)) {
         ctx.materializedMedia.add(mediaKey);
-        mediaArtifacts.materialize(artifact, ctx.identity, ctx.effectiveCwd)
+        const workspace = ctx.opts?.deliveryWorkspace;
+        const pending = Promise.resolve().then(() => mediaArtifacts.materialize(artifact, ctx.identity,
+          deliveryWorkspaces.root(ctx.effectiveCwd, workspace), undefined, undefined,
+          deliveryWorkspaces.fileGuard(ctx.effectiveCwd, workspace)))
           .then((file) => {
             if (!ctx.closed) ctx._emit({ kind: 'settled', mediaArtifact: file });
           })
@@ -240,7 +246,8 @@ const onPiEvent = (ev) => {
               kind: 'media-artifact-error',
               reason: String((error && error.message) || error).slice(0, 300),
             });
-          });
+          }).finally(() => pendingMedia.delete(pending));
+        pendingMedia.add(pending);
       }
     }
     // The SDK emits start before invoking the tool. Admission above permits
@@ -249,25 +256,28 @@ const onPiEvent = (ev) => {
 
 async function beginTurnJournal(turn) {
     ctx.completedOutputJournal = null;
+    ctx.handle.artifactCaptureWarning = '';
     const turnId = String(turn?.submissionId || '') ||
       `${ctx.ref}:${++ctx.turnJournalSeq}:${Date.now()}`;
     const startedAt = ctx.run.startedAt;
     const cwd = ctx.effectiveCwd;
-    try {
-      ctx.activeTurnJournal = {
-        turnId, startedAt, cwd,
-        before: await snapshotWithTimeout(fileChangeJournal, cwd, ctx.journalSnapshotTimeoutMs),
-      };
-    } catch (_) {
-      // Capture is supplementary; never block a model turn on a file scan.
-      ctx.activeTurnJournal = { turnId, startedAt, cwd, before: null };
-    }
+    const workspace = ctx.opts?.deliveryWorkspace;
+    if (workspace) ctx.handle.deliveryFileChanges = null;
+    const snapshot = (dir, options) => snapshotWithTimeout(fileChangeJournal, dir, ctx.journalSnapshotTimeoutMs, options);
+    const [before, draftBefore] = await Promise.all([
+      snapshot(cwd).catch(() => null),
+      deliveryWorkspaces.deliverySnapshot(cwd, workspace, snapshot),
+    ]);
+    ctx.activeTurnJournal = { turnId, startedAt, cwd, before, draftBefore };
   }
 
-async function finishTurnJournal() {
+async function finishTurnJournal(result) {
     const journal = ctx.activeTurnJournal;
     ctx.activeTurnJournal = null;
     if (!journal) return;
+    if (pendingMedia.size && require('./task-turn').resultState(result) === 'completed') {
+      await Promise.allSettled([...pendingMedia]);
+    }
     try {
       const after = await snapshotWithTimeout(fileChangeJournal, journal.cwd, ctx.journalSnapshotTimeoutMs);
       ctx.handle.fileChanges = journal.before
@@ -290,7 +300,21 @@ async function finishTurnJournal() {
         stats: { created: 0, modified: 0, deleted: 0, total: 0 },
       };
     }
-    ctx.completedOutputJournal = { startedAt: journal.startedAt, changes: ctx.handle.fileChanges };
+    let changes = ctx.handle.fileChanges;
+    if (ctx.opts?.deliveryWorkspace) {
+      const after = await deliveryWorkspaces.deliverySnapshot(journal.cwd, ctx.opts.deliveryWorkspace,
+        (dir, options) => snapshotWithTimeout(fileChangeJournal, dir, ctx.journalSnapshotTimeoutMs, options));
+      changes = deliveryWorkspaces.changes(journal.draftBefore, after, journal.turnId);
+      ctx.handle.deliveryFileChanges = changes;
+    }
+    ctx.completedOutputJournal = { startedAt: journal.startedAt, changes };
+    if (require('./task-turn').resultState(result) === 'completed') {
+      await deliveryWorkspaces.freezeTurn(ctx.handle, changes, ctx.acc.state.messages,
+        reason => {
+          ctx.handle.artifactCaptureWarning = reason;
+          ctx._emit({ kind: 'artifact-capture-error', reason });
+        });
+    }
     ctx._emit({ kind: 'file-changes', turnId: journal.turnId });
   }
   return { _persistScope, _beginGoalTurn, _beginAudit, _beginFinalAnswer, _endGoalTurn, _checkpoint, _setHarness, _captureDirectDelivery, _runContext, _execution, _thinkingView, _snapshot, _stopForLimit, _stopProtocolIssue, beginTurnJournal, finishTurnJournal, onPiEvent };

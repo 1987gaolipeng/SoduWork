@@ -129,7 +129,14 @@
         name.setAttribute('data-user-content', '');
         name.textContent = row.relative || row.name || row.path || '';
         amount.textContent = size(row.size);
-        link.appendChild(name); link.appendChild(amount); li.appendChild(link); ul.appendChild(li);
+        link.appendChild(name); link.appendChild(amount); li.appendChild(link);
+        if (original?.versionId) {
+          const save = doc.createElement('button');
+          save.type = 'button'; save.dataset.deliveryExportVersion = key(original);
+          save.textContent = tx('导出'); save.setAttribute('aria-label', save.textContent + ' · ' + name.textContent);
+          li.appendChild(save);
+        }
+        ul.appendChild(li);
       }
       return ul;
     };
@@ -153,6 +160,14 @@
       if (!summaryOnly) decorateHistoryFiles(root, files, snapshot);
       return;
     }
+    const versions = files.filter(file => file.versionId);
+    if (versions.length && !summaryOnly) {
+      const active = [...root.querySelectorAll('.nmsg.ai')].filter(message =>
+        message.dataset.deliveryCurrent !== 'false' && message.dataset.deliveryFinal !== 'false').at(-1);
+      const activeTurn = active?.dataset.deliveryTurn;
+      decorateHistoryFiles(root, versions.filter(file => file.turnId !== activeTurn), snapshot);
+    }
+    files = files.filter(file => !file.versionId);
     const cloudTaskId = String(snapshot.cloudHandoff?.taskId || '');
     const artifactUrl = artifactUrlFor(
       snapshot.artifactUrl || snapshot.cloudHandoff?.artifactUrl || snapshot.execution?.artifactUrl ||
@@ -189,8 +204,12 @@
       const currentTurn = message.dataset.deliveryCurrent !== 'false';
       if (cloudTaskId && latestForTask && currentTurn && !snapshot.codeDelivery && !/^https?:\/\/(?:github\.com|gitlab\.com|bitbucket\.org)(?:\/|$)/i.test(artifactUrl)) appendArtifactUrl(message, artifactUrl);
       const captured = f => (snapshot.deliverySync?.artifactVersions || []).some(v => v.id === key(f) && String(v.at || 0) === String(f.at || 0) && Number(v.size || 0) === Number(f.size || 0));
+      const versionsForReply = versions.filter(file => file.turnId === message.dataset.deliveryTurn);
       const ownerRound = outputRound(message, snapshot);
-      const available = groupFiles(files, taskId, ownerRound).filter(f => !used.has(key(f)) && !alreadyDelivered(f) && (
+      // Once the turn is archived, every action on its delivery card must
+      // resolve the frozen bytes, even if a replacement has the same size and mtime.
+      const available = groupFiles(versionsForReply.length ? versionsForReply : files, taskId, ownerRound)
+        .filter(f => !used.has(key(f)) && !alreadyDelivered(f) && (f.versionId ||
         (taskId && ownerRound > 0 && Number(f.round) === ownerRound) ||
         mentioned.has(key(f)) ||
         ((currentTurn && snapshot.deliverySync?.currentTurn !== false && (f.changedInTurn || captured(f)) && f.primary !== false && message === messages[0])) ||
@@ -251,7 +270,8 @@
     return turns;
   }
   function decorateHistoryFiles(root, files, snapshot) {
-    const remaining = new Map(groupFiles(files, '').filter(file => file.artifactId && !file.deleted &&
+    const recorded = new Set(files.filter(file => file.versionId).map(file => file.originalArtifactId));
+    const remaining = new Map(groupFiles(files.filter(file => file.versionId || !recorded.has(key(file))), '').filter(file => file.artifactId && !file.deleted &&
       file.primary === true && file.role !== 'supporting').map(file => [key(file), file]));
     const append = (owner, rows) => {
       if (!rows.length) return;
@@ -266,15 +286,22 @@
       reply.dataset.deliveryFinal !== 'false' && !reply.querySelector('.nacceptance-result')).reverse();
     const rowsByReply = new Map(replies.map(reply => [reply, []]));
     for (const reply of replies) {
+      for (const [id, file] of remaining) {
+        if (file.versionId && reply.dataset.deliveryTurn === file.turnId) {
+          rowsByReply.get(reply).push(file);
+          remaining.delete(id);
+        }
+      }
       for (const node of reply.querySelectorAll('[data-open-app],[data-output-image],[data-output-video]')) {
         const id = node.dataset.openApp || node.dataset.outputImage || node.dataset.outputVideo;
-        if (remaining.has(id)) { rowsByReply.get(reply).push(remaining.get(id)); remaining.delete(id); }
+        if (remaining.has(id) && !remaining.get(id).versionId) { rowsByReply.get(reply).push(remaining.get(id)); remaining.delete(id); }
       }
     }
     // A complete single-turn transcript owns the session's verified outputs.
     // In longer histories, only a bounded turn can claim an unmentioned file.
     const turns = historyDeliveryTurns(snapshot, replies);
     for (const [id, file] of remaining) {
+      if (file.versionId) continue;
       const at = Number(file.at);
       const owners = turns.length === 1 ? turns : turns.filter((turn, index) => {
         const next = turns[index + 1]?.start;
@@ -369,7 +396,7 @@
       }
     }
     card.querySelector('[data-delivery-files-count]')?.replaceChildren(document.createTextNode(count + ' ' + text.files));
-    if (rows?.length === 1) card.querySelector('.ndelivery-files').hidden = true;
+    if (rows?.length === 1) card.querySelector('.ndelivery-files').hidden = !group.files[0]?.versionId;
     if (rows?.length > 1) {
       const details = card.querySelector('.ndelivery-files'); details.hidden = false;
       card.querySelector('[data-delivery-count]').textContent = rows.length + ' ' + text.files + ' · ' + text.structure;
@@ -519,7 +546,18 @@
     if (!opened) throw Error('本地会话未能打开，请重试');
     return true;
   }
-  async function handle(node, api) {
+  async function handle(node, api, ref) {
+    const save = node.closest('[data-delivery-export-version]');
+    if (save) {
+      if (save.disabled) return true;
+      save.disabled = true;
+      try {
+        const result = await api.saveDelivery(ref, [save.dataset.deliveryExportVersion]);
+        if (!result?.ok && !result?.canceled) throw Error(result?.reason || tx('保存失败'));
+      } catch (error) { global.petSay?.(error.message); }
+      finally { save.disabled = false; }
+      return true;
+    }
     const external = node.closest('[data-cloud-artifact-url]');
     if (external) {
       const url = String(external.dataset.url || external.dataset.cloudArtifactUrl || '').trim();

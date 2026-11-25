@@ -28,7 +28,7 @@ function fixture(t, options = {}) {
   fs.writeFileSync(file, '{"role":"user","content":"Original question"}\n{"role":"assistant","content":"Original answer"}\n');
   const item = { id: 'acct-native-session', sourceSessionId: row.id,
     sourceClientId: options.otherDevice ? 'other-device' : actor.clientId };
-  const opens = [], views = [], reads = [], retired = [], live = new Map();
+  const opens = [], views = [], reads = [], retired = [], readyKeys = [], live = new Map();
   const foreignClosures = [], recoveries = [];
   let foreignLive = options.foreignSnapshot ? {
     ref: 'previous-account-ref', sessionId: row.id, adapterId: row.adapterId,
@@ -70,7 +70,7 @@ function fixture(t, options = {}) {
       return id === row.id && !options.missingArchive ? row : null;
     },
     attachView: view => { views.push(view); return view; },
-    open: async value => { opens.push(value); const handle = nativeHandle(); live.set(row.id, handle);
+    open: async value => { opens.push(value); const handle = nativeHandle(); handle.deliveryWorkspace = value.deliveryWorkspace; live.set(row.id, handle);
       return { ok: true, session: handle }; },
     get: () => null,
   };
@@ -96,6 +96,14 @@ function fixture(t, options = {}) {
       },
       _sharedHistory: options.sharedLocal ? {
         resolve: async id => id === row.id ? row : null, store: { get: () => row },
+        deliveryWorkspaceReady(handle) {
+          assert.equal(handle.cwd, root);
+          const key = handle.deliveryWorkspace.key;
+          assert.equal(require('../main/conversation/delivery-workspace.cjs').validKey(key), true);
+          readyKeys.push(key);
+          row.deliveryWorkspaceKey = key;
+          return Promise.resolve();
+        },
         prepareContinuation: async id => { recoveries.push(id); return { row,
           messages: [{ role: 'user', text: 'Original question' }, { role: 'assistant', text: 'Original answer' }],
           historyRecovery: { mode: 'local-history', source: 'device' } }; },
@@ -127,7 +135,7 @@ function fixture(t, options = {}) {
   restart();
   if (options.live) live.set(row.id, nativeHandle());
   if (options.passiveLive) live.set(row.id, projection(row.id));
-  return { row, item, opens, views, reads, retired, restart, foreignClosures, recoveries,
+  return { row, item, opens, views, reads, retired, readyKeys, restart, foreignClosures, recoveries,
     handle: () => live.get(row.id), switchAccount: value => { currentActor = value; },
     open: raw => context.openConversation(event, raw) };
 }
@@ -153,6 +161,7 @@ test('same-PC navigation closes only a confirmed idle previous runtime and opens
   assert.deepEqual(f.foreignClosures, [f.row.id]); assert.deepEqual(f.recoveries, [f.row.id]);
   assert.equal(f.opens.length, 1); assert.equal(ownership.scope(f.opens[0].identity), ownership.scope(identity('two')));
   assert.equal(f.opens[0].resumePath, ''); assert.ok(f.opens[0].deviceContinuationGrant);
+  assert.deepEqual(f.readyKeys, [f.opens[0].deliveryWorkspace.key]);
   assert.equal(f.opens[0].deviceHistoryRecovery.historyRecovery.mode, 'device-account-continuation');
   assert.deepEqual(Array.from(f.handle().ui.memories), []);
   const continuation = require('../main/conversation/device-local-continuation.cjs');

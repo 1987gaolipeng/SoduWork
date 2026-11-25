@@ -217,7 +217,7 @@ async function initializeExtensions(session, resources) {
 async function independentReview(options) {
   const value = options || {};
   const deterministic = goalReview.machine({
-    cwd: value.cwd,
+    cwd: value.outputRoot || value.cwd,
     profile: value.profile,
     spec: value.spec,
     evidence: value.evidence,
@@ -277,18 +277,7 @@ async function independentReview(options) {
     try {
       const rows = Array.isArray(value.outputSnapshot && value.outputSnapshot.files)
         ? value.outputSnapshot.files.slice() : [];
-      const evidenceDir = path.join(value.cwd, '.soduwork', 'evidence');
-      try {
-        fs.readdirSync(evidenceDir, { withFileTypes: true }).forEach((entry) => {
-          if (!entry.isFile() || !/\.(?:png|jpe?g|webp)$/i.test(entry.name)) return;
-          const target = path.join(evidenceDir, entry.name);
-          const stat = fs.statSync(target);
-          rows.push({
-            path: target, relative: '.soduwork/evidence/' + entry.name,
-            name: entry.name, size: stat.size, mimeType: '',
-          });
-        });
-      } catch (error) { /* UI evidence is optional for non-visual work */ }
+      rows.push(...require('../conversation/screenshot-evidence').collect(value.outputRoot || value.cwd));
       const seen = new Set();
       const visualFiles = rows.filter((file) => {
         const target = String(file && file.path || '');

@@ -22,7 +22,7 @@ function fixture(options = {}) {
   const event = { sender, senderFrame: sender.mainFrame };
   const context = vm.createContext({
     _accountSync: options.accountSync,
-    _sharedHistory: options.sharedHistory || null,
+    _sharedHistory: options.sharedHistory ? { ...options.sharedHistory, deliveryWorkspaceReady: options.deliveryWorkspaceReady || (async () => {}) } : null,
     _cloudHandoff: options.cloudHandoff || { observe() {} },
     firstTurnTitle: { enroll() {} },
     skillTurn: require('../main/pi-session/skill-turn'), sendIdentityOf: null,
@@ -86,7 +86,7 @@ function fixture(options = {}) {
       if (name === '../conversation/execution-outcome.cjs') return require('../main/conversation/execution-outcome.cjs');
       if (name === '../conversation/device-local-continuation.cjs') return require('../main/conversation/device-local-continuation.cjs');
       if (name === '../agent-runtime/switchable-conversation') return require('../main/agent-runtime/switchable-conversation');
-      if (!['../native-locale.cjs', '../agent-runtime/runtime-catalog', '../access-control/policy', '../access-control/preferences', '../access-control/automation-access', '../platform-connections/runtime.cjs', '../conversation/history-access', '../conversation/requirement-context', '../conversation/acceptance-session', '../conversation/work-conversation-opening', '../conversation-connectors.cjs', './resume-cwd', './task-access'].includes(name)) throw Error('Unexpected dependency ' + name);
+      if (!['../native-locale.cjs', '../agent-runtime/runtime-catalog', '../access-control/policy', '../access-control/preferences', '../access-control/automation-access', '../platform-connections/runtime.cjs', '../conversation/history-access', '../conversation/requirement-context', '../conversation/acceptance-session', '../conversation/work-conversation-opening', '../conversation/delivery-workspace.cjs', '../conversation-connectors.cjs', './resume-cwd', './task-access'].includes(name)) throw Error('Unexpected dependency ' + name);
       return require(path.join(__dirname, '../main/pi-session', name));
     },
   });
@@ -369,12 +369,13 @@ test('ordinary desktop chat skips automatic private memory on creation and reope
       { sharedOnDevice: true, originalOwner: scope(a) });
     assert.ok(!opens.calls.at(-1).contextPrompts.some(value => /synthetic/.test(value)));
   }
-  const privateRow = { ...row, id: 'private' }, privateHandle = { ...handle, sessionId: privateRow.id };
+  const privateRow = { ...row, cwd: root, id: 'private' }, privateHandle = { ...handle, sessionId: privateRow.id };
   const privateOpens = fixture({ app, memories, identity: a, archive: privateRow, openResult: { ok: true, session: privateHandle },
     sharedHistory: { resolve: async () => privateRow } });
   for (const options of [{ memoryIds: [document.item.id] }, { chatId: privateRow.id }]) {
-    const opened = await privateOpens.open({ ...options, deviceChatContext: true });
+    const opened = await privateOpens.open({ cwd: root, ...options, deviceChatContext: true });
     assert.equal(opened.ok, true, opened.reason);
+    assert.equal(privateOpens.calls.at(-1).deliveryWorkspace, null);
     assert.ok(privateOpens.calls.at(-1).contextPrompts.some(value => value.includes('synthetic private memory')));
     assert.ok(privateHandle.ui.memoryScopes.length);
     assert.throws(() => access.assertDeviceReadable(app, privateRow.id, access.actor(app, b), privateRow));
@@ -1212,4 +1213,23 @@ test('生产 IPC 只给通过回执和 Hub 校验的 Pi 首次草稿传递首次
   const before = f.calls.length;
   assert.equal((await f.open(options)).ok, false);
   assert.equal(f.calls.length, before, '其他账号的草稿仍拒绝启动');
+});
+
+test('opening a selected project waits for durable ownership and closes a failed registration', async t => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-workspace-ready-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  let release, entered, closed = 0;
+  const ready = new Promise(resolve => { entered = resolve; });
+  const persistence = new Promise((resolve, reject) => { release = reject; });
+  const f = fixture({ sharedHistory: {}, deliveryWorkspaceReady() { entered(); return persistence; },
+    session: { open: async opts => ({ ok: true, session: { cwd, sessionId: 'fixture', deliveryWorkspace: opts.deliveryWorkspace,
+      close() { closed++; return { ok: true }; } } }) } });
+  const opening = f.open({ cwd, accessMode: 'standard' });
+  await ready;
+  assert.equal(closed, 0);
+  release(Error('synthetic registration failure'));
+  const result = await opening;
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /synthetic registration failure/);
+  assert.equal(closed, 1);
 });

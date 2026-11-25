@@ -431,3 +431,78 @@ test('the image index still rejects unlisted, deleted and out-of-workspace files
     assert.equal((await runtime.action(session, 'scope', id, 'image-full', {})).ok, false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('two chats in one project open their own turn revisions after the working copy changes', async t => {
+  const drafts = require('../main/conversation/delivery-workspace.cjs');
+  const journal = require('../main/conversation/file-change-journal');
+  const history = require('../main/conversation/device-history-artifacts.cjs');
+  const storage = require('../main/conversation/device-artifact-archive.cjs');
+  const versions = require('../main/conversation/artifact-versions.cjs');
+  const links = require('../components/panels/chat-output-links');
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-turn-links-')));
+  const profile = path.join(root, 'profile'), project = path.join(root, 'project');
+  fs.mkdirSync(profile); fs.mkdirSync(project);
+  t.after(() => { runtime.closeAll(); fs.rmSync(root, { recursive: true, force: true }); });
+  const makeChat = id => {
+    const workspace = drafts.allocate(project), cwd = drafts.ensure(project, workspace);
+    const handle = { cwd: project, sessionId: id, deliveryWorkspace: workspace, outputs: () => {
+      const file = path.join(cwd, 'report.md');
+      if (!fs.existsSync(file)) return [];
+      const stat = fs.statSync(file);
+      return [{ path: file, relative: 'report.md', name: 'report.md', size: stat.size, at: Math.round(stat.mtimeMs) }];
+    } };
+    let saved, allowed = true;
+    const guard = () => { if (!allowed) throw Error('Inactive conversation'); };
+    runtime.bindTurnArchives(handle, () => versions.readers(profile, id, saved?.archive, guard));
+    async function write(turnId, text) {
+      const before = await journal.snapshot(cwd);
+      const entries = typeof text === 'string' ? { 'report.md': text } : text;
+      for (const [relative, bytes] of Object.entries(entries)) {
+        const target = path.join(cwd, relative);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, bytes);
+      }
+      const change = journal.compare(before, await journal.snapshot(cwd), { turnId });
+      const captured = await history.capture({ row: { id, cwd }, previous: saved, journal: change, verifiedTurn: true });
+      saved = await storage.preserve(profile, id, captured, saved, guard);
+    }
+    return { cwd, handle, write, revoke() { allowed = false; } };
+  };
+  const a = makeChat('chat-A'), b = makeChat('chat-B');
+  await a.write('a-one', 'A / first');
+  await a.write('a-two', 'A / next revision');
+  await b.write('b-one', 'B / separate conversation');
+  async function cards(chat) {
+    const snapshot = await runtime.viewSnapshotAsync(chat.handle);
+    return runtime.decorate(chat.handle.sessionId, snapshot);
+  }
+  const first = links.filesForTurn(await cards(a), 'a-one', false);
+  const next = links.filesForTurn(await cards(a), 'a-two', true);
+  const sibling = links.filesForTurn(await cards(b), 'b-one', true);
+  assert.deepEqual(first.map(file => file.relative), ['report.md']);
+  assert.deepEqual(next.map(file => file.relative), ['report.md']);
+  assert.deepEqual(sibling.map(file => file.relative), ['report.md']);
+  const ids = [first[0], next[0], sibling[0]].map(file => file.artifactId);
+  assert.equal(new Set(ids).size, 3);
+  fs.unlinkSync(path.join(a.cwd, 'report.md'));
+  fs.writeFileSync(path.join(b.cwd, 'report.md'), 'later edit');
+  const read = (chat, id) => runtime.action(chat.handle, chat.handle.sessionId, id, 'read', {});
+  assert.equal((await read(a, ids[0])).text, 'A / first');
+  assert.equal((await read(a, ids[1])).text, 'A / next revision');
+  assert.equal((await read(b, ids[2])).text, 'B / separate conversation');
+  assert.equal((await read(b, ids[0])).ok, false);
+  const html = '<link rel="stylesheet" href="../theme.css"><h1>first</h1>';
+  await b.write('web-first', { 'site/page/index.html': html, 'site/theme.css': 'body{color:red}' });
+  await b.write('web-second', { 'site/page/index.html': html.replace('first', 'second'), 'site/theme.css': 'body{color:blue}' });
+  const web = (await cards(b)).find(file => file.turnId === 'web-first' && file.kind === 'website');
+  assert.ok(web);
+  const preview = await runtime.action(b.handle, b.handle.sessionId, web.artifactId, 'preview', {});
+  assert.equal(preview.ok, true);
+  assert.equal((await request(preview.url)).body, html);
+  assert.equal((await request(new URL('../theme.css', preview.url))).body, 'body{color:red}');
+  assert.equal((await request(new URL('/file-from-another-turn.css', preview.url))).status, 404);
+  b.revoke();
+  assert.equal((await request(preview.url)).status, 404);
+  a.revoke();
+  await assert.rejects(read(a, ids[0]), /Inactive conversation/);
+});

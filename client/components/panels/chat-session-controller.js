@@ -340,6 +340,11 @@ async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() 
             ctx._setCollabEntryStatus(eventEntry, taskStatus, taskStatus === 'completed' ? 'complete' : 'failed');
           }
         }
+        if (p.kind === 'artifact-capture-error') {
+          const warning = p.snapshot?.artifactCaptureWarning || p.reason || '部分成果尚未保存到会话档案，请保留原工作目录';
+          global.petSay?.(global.SoduWorkI18n?.translateText?.(warning) || warning);
+          if (effects) effects.outputs = true; else ctx._pullOuts();
+        }
         if (!p.snapshot) return;
         if (p.kind === 'media-artifact-error') {
           if (typeof petSay === 'function') {
