@@ -49,6 +49,9 @@ for profile in ("release", "extended"):
           scripts_for(profile).count("test_release_schema_history.py") == 1)
 check("live profile never pulls offline checks in implicitly", scripts_for("live") == LIVE_SMOKES)
 check("every tier is non-empty", all((RELEASE_SMOKES, EXTENDED_SMOKES, LIVE_SMOKES)))
+for profile in ("release", "extended"):
+    check("mobile review transport regressions run exactly once in " + profile,
+          scripts_for(profile).count("test_mobile_acceptance_transport.py") == 1)
 with tempfile.TemporaryDirectory(prefix="soduwork-misplaced-smoke-") as temporary:
     misplaced = Path(temporary) / "smoke_unregistered.py"
     misplaced.write_text("raise AssertionError('must be registered')", encoding="utf-8")
@@ -105,6 +108,12 @@ with tempfile.TemporaryDirectory(prefix="soduwork-gate-contract-") as temporary:
     check("test entries use a private database accepted by the production safety guard",
           probe.returncode == 0 and Path(temporary).as_posix() in isolated["DATABASE_URL"],
           probe.stderr.decode("utf-8", errors="replace")[-500:])
+    discovery = subprocess.run([sys.executable, "-c",
+        "import unittest; s=unittest.defaultTestLoader.loadTestsFromName('test_mobile_acceptance_transport'); "
+        "print(s.countTestCases())"], cwd=BACKEND, env=isolated,
+        capture_output=True, text=True, timeout=20)
+    check("mobile review entry discovers five prompt cases and one real transport case",
+          discovery.returncode == 0 and discovery.stdout.strip() == "6", discovery.stderr[-500:])
 check("unittest gate entries run discovery instead of silently importing",
       _python_check_command("test_model_runtime_cancellation.py") ==
       [sys.executable, "-m", "unittest", "-v", "test_model_runtime_cancellation"]
