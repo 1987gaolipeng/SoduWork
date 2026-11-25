@@ -12,14 +12,15 @@ async function dialog(t, upload) {
       '../ui.jsx': { Modal: 'Modal', toast: message => messages.push(message) }, './client-releases.css': {} },
   })
   t.after(() => page.unmount())
-  const submit = () => page.nodes(node => node.props.className === 'btn btn-primary', page.render().props.foot)[0].props.onClick()
+  const submitButton = () => page.render().props.foot.props.children.find(node => node.props.className === 'btn btn-primary')
+  const submit = () => submitButton().props.onClick()
   const choose = file => {
     const inputs = page.nodes(node => node.type === 'input' && node.props.type === 'file')
     assert.equal(inputs.length, 1, 'no separate manifest input')
     inputs[0].ref.current = { files: [file] }
     page.act(() => inputs[0].props.onChange({ target: { files: [file] } }))
   }
-  return { page, submit, choose, messages, completed }
+  return { page, submit, submitButton, choose, messages, completed }
 }
 
 test('one installer is enough; completion waits for server registration', async t => {
@@ -36,7 +37,7 @@ test('one installer is enough; completion waits for server registration', async 
   assert.equal(options.channel, 'beta')
   fixture.page.render()
   assert.equal(fixture.completed.length, 0)
-  assert.equal(fixture.page.nodes(node => node.props.className === 'btn btn-primary', fixture.page.render().props.foot)[0].props.disabled, true)
+  assert.equal(fixture.submitButton().props.disabled, true)
   finish({ created: true, release: { version: '9.8.7', platform: 'win32', arch: 'x64', enabled: false } })
   await pending
   assert.equal(fixture.completed.length, 1)
