@@ -4,7 +4,7 @@ const fs = require('node:fs'), fsp = fs.promises, path = require('node:path'), c
 const {Readable} = require('node:stream');
 const contract = require('../core/app-files-contract.cjs');
 const settings = require('./app-settings-store.cjs');
-const uploads = new Map(), completed = new Map(),copies=new Map();
+const uploads = new Map(), starting = new Map(), completed = new Map(),copies=new Map();
 const sources=require('./app-local-sources.cjs');
 const hash = text => crypto.createHash('sha256').update(text).digest('hex');
 const projectKey = value => 'p_' + hash(value);
@@ -52,13 +52,21 @@ async function execute(app,binding,method,input,assertCurrent=()=>{},options={})
   const key=scope+':'+p.id;
   if(method==='files.finish' && completed.has(key)){current();return {ok:true,file:completed.get(key)};}
   if(method==='files.begin') {
-    if([...uploads.values()].filter(r=>r.scope===scope).length>=4)throw Error('文件正在保存，请稍后重试');
-    const dir=await directory(app,scope,['uploads'],true);current();
-    const id=uuid('upload_'),temp=path.join(dir,id+'.part'),handle=await fsp.open(temp,'wx',0o600);
-    function expire(){const row=uploads.get(scope+':'+id);if(!row)return;if(row.busy){row.expiry=setTimeout(expire,10000);row.expiry.unref();return;}uploads.delete(scope+':'+id);row.handle.close().then(()=>fsp.rm(row.temp,{force:true})).catch(()=>{});}
-    const expiry=setTimeout(expire,10*60*1000);expiry.unref();
-    uploads.set(scope+':'+id,{expiry,scope,id,temp,handle,projectId:p.projectId,name:p.name.replace(/.*[/\\]/,'')||'file',type:p.type.toLowerCase(),size:p.size,written:0,hash:crypto.createHash('sha256'),busy:false});
-    return {ok:true,id,chunkBytes:contract.CHUNK_BYTES};
+    const pending=starting.get(scope)||0;
+    if([...uploads.values()].filter(r=>r.scope===scope).length+pending>=4)throw Error('文件正在保存，请稍后重试');
+    // Reserve capacity before filesystem awaits, including starts still opening.
+    starting.set(scope,pending+1);
+    try {
+      const dir=await directory(app,scope,['uploads'],true);current();
+      const id=uuid('upload_'),temp=path.join(dir,id+'.part'),handle=await fsp.open(temp,'wx',0o600);
+      function expire(){const row=uploads.get(scope+':'+id);if(!row)return;if(row.busy){row.expiry=setTimeout(expire,10000);row.expiry.unref();return;}uploads.delete(scope+':'+id);row.handle.close().then(()=>fsp.rm(row.temp,{force:true})).catch(()=>{});}
+      const expiry=setTimeout(expire,10*60*1000);expiry.unref();
+      uploads.set(scope+':'+id,{expiry,scope,id,temp,handle,projectId:p.projectId,name:p.name.replace(/.*[/\\]/,'')||'file',type:p.type.toLowerCase(),size:p.size,written:0,hash:crypto.createHash('sha256'),busy:false});
+      return {ok:true,id,chunkBytes:contract.CHUNK_BYTES};
+    } finally {
+      const remaining=starting.get(scope)-1;
+      if(remaining)starting.set(scope,remaining);else starting.delete(scope);
+    }
   }
   const row=uploads.get(key);if(!row||row.scope!==scope)throw Error('文件上传不存在或已取消');
   if(row.busy)throw Error('文件分块正在处理');row.busy=true;

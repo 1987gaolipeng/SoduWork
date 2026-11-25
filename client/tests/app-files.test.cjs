@@ -184,3 +184,60 @@ test('a lost receipt after publication retains the committed file for an idempot
   assert.deepEqual(again,retry);
   assert.equal(await (await f.request({url:retry.file.url,method:'GET'})).text(),'abc');
 });
+
+test('concurrent SDK file imports respect the per-application upload limit',async t=>{
+  const f=fixture(t);await f.open();const {sdk}=nativeFileSdk(f),bytes=Buffer.from('bounded import');
+  const results=await Promise.allSettled(Array.from({length:8},()=>sdk.files.importFile(
+    new Blob([bytes],{type:'image/png'}),{projectId:'concurrent'})));
+  const saved=results.filter(row=>row.status==='fulfilled').map(row=>row.value.file);
+  const rejected=results.filter(row=>row.status==='rejected');
+  assert.equal(saved.length,4,'only four concurrent imports are admitted');
+  assert.equal(rejected.length,4);rejected.forEach(row=>assert.match(row.reason.message,/正在保存/));
+  const records=fs.readdirSync(path.join(f.root,'jiyong-files'),{recursive:true});
+  assert.equal(records.filter(name=>String(name).endsWith('.json')).length,4);
+  assert.equal(records.filter(name=>String(name).endsWith('.part')).length,0);
+  for(const file of saved)assert.deepEqual(Buffer.from(await (await f.request({url:file.url,method:'GET'})).arrayBuffer()),bytes);
+  const retry=await sdk.files.importFile(new Blob([bytes],{type:'image/png'}),{projectId:'concurrent'});
+  assert.equal(retry.ok,true,'completed imports release their upload slots');
+});
+
+test('upload admission is application-scoped and cancellation releases a slot',async t=>{
+  const f=fixture(t),other=fixture(t),input={projectId:'bounded',name:'pending.png',type:'image/png',size:1};
+  const active=[],independent=[];
+  try{
+    active.push(...await Promise.all(Array.from({length:4},()=>f.call('files.begin',input))));
+    await assert.rejects(()=>f.call('files.begin',input),/正在保存/);
+    independent.push(...await Promise.all(Array.from({length:4},()=>other.call('files.begin',input))));
+    assert.equal(independent.length,4,'another installed application retains its own capacity');
+    await f.call('files.cancel',{id:active.shift().id});
+    active.push(await f.call('files.begin',input));
+    await assert.rejects(()=>f.call('files.begin',input),/正在保存/);
+    assert.equal(fs.readdirSync(path.join(f.root,'jiyong-files'),{recursive:true})
+      .filter(name=>String(name).endsWith('.part')).length,4);
+  }finally{
+    await Promise.allSettled([...active.map(row=>f.call('files.cancel',{id:row.id})),
+      ...independent.map(row=>other.call('files.cancel',{id:row.id}))]);
+  }
+});
+
+test('failed upload starts release admission capacity',async t=>{
+  for(const phase of ['directory','staging-open'])await t.test(phase,async t=>{
+    const f=fixture(t),input={projectId:'retry-start',name:'pending.png',type:'image/png',size:1};
+    const method=phase==='directory'?'mkdir':'open',original=fs.promises[method].bind(fs.promises);
+    let armed=true;
+    t.mock.method(fs.promises,method,async(file,...args)=>{
+      if(armed&&String(file).includes(path.sep+'jiyong-files')){
+        armed=false;throw Object.assign(Error('Synthetic upload start failed'),{code:'EACCES'});
+      }
+      return original(file,...args);
+    });
+    await assert.rejects(()=>f.call('files.begin',input),/Synthetic upload start failed/);
+    assert.equal(armed,false);t.mock.restoreAll();
+    const active=[];
+    try{
+      active.push(...await Promise.all(Array.from({length:4},()=>f.call('files.begin',input))));
+      assert.equal(active.length,4,'the failed start does not retain an upload slot');
+      await assert.rejects(()=>f.call('files.begin',input),/正在保存/);
+    }finally{await Promise.allSettled(active.map(row=>f.call('files.cancel',{id:row.id})));}
+  });
+});
