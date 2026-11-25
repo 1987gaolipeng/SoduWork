@@ -5,9 +5,10 @@ import asyncio
 import logging
 import time
 import uuid
+from functools import partial
 
-from .cluster_bus import bus, ClusterUnavailable, RunnerOwnerChanged
 from . import runner_hub
+from .cluster_bus import ClusterUnavailable, RunnerOwnerChanged, bus
 
 _REMOTE = {}
 _LOCAL_INVENTORY = {}
@@ -246,7 +247,7 @@ async def before_refresh():
         _LOCAL_INVENTORY.pop(rid, None)
 
 
-async def on_snapshot(peers):
+async def on_snapshot(peers, *, on_runner_connected=None):
     entries = [(node, info) for node, state in peers.items() if node != bus.node
                for info in state.get("runners", [])]
     owners = await bus.redis.mget([bus.key("runner", info["runnerId"])
@@ -270,6 +271,8 @@ async def on_snapshot(peers):
             if current:
                 _end_terms(current)
             current = _REMOTE[rid] = RemoteRunner(node, info)
+            if on_runner_connected is not None:
+                on_runner_connected(current)
         else:
             current.update(info)
         current.inventory_revision = reference["revision"]
@@ -423,7 +426,7 @@ async def on_failure():
         await hub.close_device(device, 1012, _local=True)
 
 
-async def start():
+async def start(*, on_runner_connected=None):
     global _RELAY_JOB, _STOPPING
     _STOPPING = False
     runner_hub.bind_loop()
@@ -431,7 +434,7 @@ async def start():
     ai_local._HUB_CLUSTER_MODE = bus.enabled
     bus.snapshot = snapshot
     bus.before_refresh = before_refresh
-    bus.on_snapshot = on_snapshot
+    bus.on_snapshot = partial(on_snapshot, on_runner_connected=on_runner_connected)
     bus.on_event = on_event
     bus.on_request = on_request
     bus.on_failure = on_failure

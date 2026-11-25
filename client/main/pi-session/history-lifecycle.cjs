@@ -74,7 +74,7 @@ function create({ app, session, accountHistory, BrowserWindow }) {
         if (session.findBySessionId?.(alias)?.inFlight?.()) throw Error('这条会话还在执行，完成或停止后再操作');
       }
     };
-    return Object.assign(guard, { row, nativeId, account, aliasIds, ensureIdle, accountOnly, cacheOnly,
+    return Object.assign(guard, { row, nativeId, account, readScope: captured.readScope, aliasIds, ensureIdle, accountOnly, cacheOnly,
       missingContent: missing?.missing === true,
       async commit(action) {
         ensureIdle();

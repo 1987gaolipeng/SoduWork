@@ -26,6 +26,36 @@ test('correlation metadata never changes error classification or retry eligibili
     }
   }
 });
+test('only generic HTTP 403 survives local privacy filtering as a summary candidate', () => {
+  const privacy = require('../main/pi-session/local-model-runtime-privacy.cjs');
+  for (const value of ['HTTP 403', 'HTTP 403: Forbidden']) {
+    for (const error of [value, privacy.safeError(value)]) assert.equal(errors.describe(error).genericForbidden, true);
+  }
+  for (const value of ['HTTP 401', 'HTTP 403: invalid API key', 'HTTP 403: permission denied',
+    'HTTP 403: content_filtered', 'HTTP 403: image input rejected', 'HTTP 403: context_length_exceeded',
+    'HTTP 403: insufficient_quota', { error: { status: 403, code: 'token_quota_exceeded' } }]) {
+    for (const error of [value, privacy.safeError(value)]) assert.ok(!errors.describe(error).genericForbidden);
+  }
+});
+test('a 403 needs explicit neutral evidence before offering a summary', () => {
+  const privacy = require('../main/pi-session/local-model-runtime-privacy.cjs');
+  for (const body of [{}, [], { requestId: 'fixture' }, { error: null }, { error: [] }, { error: {} },
+    { error: { message: null } }, { error: { detail: ' ' } }, { error: { code: '.' } },
+    { error: { message: ['Forbidden'] } }, { error: { message: 'Forbidden', mystery: 'unknown' } }]) {
+    const raw = 'HTTP 403: ' + JSON.stringify(body);
+    for (const value of [raw, new Error(raw), privacy.safeError(raw)]) {
+      assert.ok(!errors.describe(value).genericForbidden, raw);
+    }
+    const sdkError = Object.assign(new Error('HTTP 403: Forbidden'), { error: body, status: 403 });
+    assert.ok(!errors.describe(sdkError).genericForbidden, raw);
+  }
+  for (const value of ['HTTP 403: !', '403:', '403: ambiguous {"error":{"message":"Forbidden"}}',
+    '403 [{"error":{"message":"Forbidden"}}]']) assert.ok(!errors.describe(value).genericForbidden, value);
+  for (const value of ['403', '403 status code (no body)', { error: { status: 403 } },
+    '403 {"error":{"message":"Forbidden."},"request_id":"fixture"}']) {
+    assert.equal(errors.describe(value).genericForbidden, true, JSON.stringify(value));
+  }
+});
 const secretBody = '<html><body><h1>504 Gateway Time-out</h1>' +
   "The server didn't respond in time. http://192.0.2.40:8181/private?token=fixture-secret" +
   '<p>Authorization: Bearer fixture-secret</p></body></html>';
@@ -69,7 +99,7 @@ test('chat shows the thinking setting for classified Hub errors and SDK stream e
   assert.equal(errors.forDisplay({ error: { status: 400, code: 'InvalidParameter', message: 'thinking.type' } }),
     '模型服务返回了暂时无法处理的错误（HTTP 400）');
   assert.equal(errors.forDisplay({ error: { status: 401, code: 'thinking_disabled_unsupported' } }),
-    '模型服务拒绝了当前凭据或模型权限（HTTP 401）');
+    '模型服务拒绝了当前凭据或模型权限。个人服务请在「我的模型」检查个人 Key，企业服务请联系管理员核对模型授权（HTTP 401）');
 });
 
 test('a request transformed to omit the tool result cannot report a tool continuation', async () => {

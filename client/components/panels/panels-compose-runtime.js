@@ -390,7 +390,7 @@
     const valid = () => generation === probeGeneration && owner === ownerScope();
     const task = probeOnce(adapterId, options, announce, key, valid).finally(() => {
       if (pendingProbes.get(key) === task) pendingProbes.delete(key);
-      if (valid()) options.refresh();
+      if (valid()) { options.refresh(); global.FirstChatReadiness?.checked(); }
     });
     pendingProbes.set(key, task);
     options.refresh();
@@ -453,6 +453,7 @@
         const nodes = (reply?.diagnostics?.nodes || []).filter(node => node.code !== 'current_device');
         const detail = nodes.length && nodes.every(node => node.code === nodes[0].code) ? nodes[0].message : '';
         const result = { ok: reply?.ok !== false && Array.isArray(reply?.targets) && reply.targets.length > 0,
+          unverified: reply?.ok === false || !Array.isArray(reply?.targets),
           reason: reply?.reason || detail || reply?.diagnostics?.summary || '没有可用的云端执行机，请配置云端环境' };
         probes[key] = result;
         if (!result.ok && announce) options.say(result.reason);
@@ -461,19 +462,19 @@
         if (!valid()) return false;
         const reason = /No handler registered for ['"]conversation-cloud-targets['"]/i.test(String(error.message || ''))
           ? '云端会话功能尚未加载，请完全退出并重启客户端后重试' : error.message;
-        probes[key] = { ok: false, reason };
+        probes[key] = { ok: false, reason, unverified: true };
         if (announce) options.say(reason);
         return false;
       }
     }
     if (!api || typeof api.probe !== 'function') {
-      probes[key] = { ok: adapterId === 'pi' };
+      probes[key] = { ok: adapterId === 'pi', unverified: true };
       return adapterId === 'pi';
     }
     try {
       const result = await bounded(api.probe(adapterId));
       if (!valid()) return false;
-      probes[key] = result || { ok: false };
+      probes[key] = result || { ok: false, unverified: true };
       paint(options.root);
       if (!result || !result.ok) {
         demoteUnavailableLocal(adapterId, result, options.root);
@@ -484,7 +485,7 @@
       return true;
     } catch (error) {
       if (!valid()) return false;
-      probes[key] = { ok: false, reason: String(error && error.message || error) };
+      probes[key] = { ok: false, reason: String(error && error.message || error), unverified: true };
       paint(options.root);
       if (announce) options.say('执行底座检测没有成功');
       return false;

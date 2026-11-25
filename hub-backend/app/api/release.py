@@ -26,7 +26,8 @@ def _decision_error(out: dict) -> HTTPException:
         "note": "退回时请写清楚需要修改的地方",
         "forbidden": out.get("detail") or "没有审批权限",
     }.get(reason, out.get("detail") or "审批没有生效")
-    return HTTPException(status_code=status, detail=text)
+    headers = {"X-Error-Code": out["errorCode"]} if out.get("errorCode") else None
+    return HTTPException(status_code=status, detail=text, headers=headers)
 
 
 @router.get("/pending")
@@ -84,6 +85,7 @@ async def decide(
         decision=str(body.get("decision") or ""), note=str(body.get("note") or ""),
         artifact_version_id=str(body.get("artifactVersionId") or ""),
         environment_id=str(body.get("environmentId") or ""),
+        request_id=request_id,
     )
     if not out.get("ok"):
         raise _decision_error(out)

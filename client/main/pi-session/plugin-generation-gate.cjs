@@ -119,8 +119,9 @@ function finalDeliveryRevision(snapshot) {
   return JSON.stringify([delivery.source, delivery.summary, files.map(file =>
     [file.relative, file.size, file.at, file.primary, file.kind]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))]);
 }
-async function begin({handle, app, identity, logicalOwner, outputSnapshot, selectedPluginIds = [], cancelled = () => false, pauseConfirmed = () => false, repair, changed = () => {}, preflight} = {}) {
-  if (!handle?.cwd) return { canStart: () => !cancelled(), finish: async result => result, dispose() {} };
+async function begin({handle, app, identity, logicalOwner, outputSnapshot, selectedPluginIds = [], cancelled = () => false,
+  validationAllowed = () => true, pauseConfirmed = () => false, repair, changed = () => {}, preflight} = {}) {
+  if (!handle?.cwd) return { canStart: () => !cancelled() && validationAllowed(), finish: async result => result, dispose() {} };
   const cwd=handle.cwd, sessionId=handle.sessionId, owner=handle.deliveryOwner;
   const scope = () => JSON.stringify([handle.deliveryOwner, identity?.hub, identity?.clientId,
     identity ? require('../device-auth-request').accountScopeKey(identity) : '']);
@@ -142,7 +143,8 @@ async function begin({handle, app, identity, logicalOwner, outputSnapshot, selec
   const originalScope = logical.scope;
   let disposed=false;
   const owned=()=>!disposed && logical.handle===handle && handle.cwd === cwd && handle.sessionId === sessionId && handle.deliveryOwner === owner && scope() === originalScope;
-  const current=()=>owned() && !cancelled();
+  const active=()=>owned() && !cancelled();
+  const current=()=>active() && validationAllowed();
   const baseline=logical.baseline, touched=logical.touched;
   const collectTargets=async()=>{
     const latest = await scan();
@@ -186,10 +188,13 @@ async function begin({handle, app, identity, logicalOwner, outputSnapshot, selec
     if (finished) return finished;
     finished=(async()=>{
       if (!completed(result)) return result;
-      if(!current())return stopped();
+      if(!active())return stopped();
       let targets=await collectTargets();
-      if(!current())return stopped();
+      if(!active())return stopped();
+      // An in-place approval can finish an ordinary turn. Generated drafts
+      // still require the original permissions for validation and repair.
       if(!targets.length)return result;
+      if(!validationAllowed())return stopped();
       for(let attempt=logical.repairs;attempt<=2;attempt++) {
         let failed=[];
         const checked=new Map();

@@ -790,14 +790,29 @@ async def purge_task_children(
     """
     if not tids:
         return {}, []
-    from sqlalchemy import delete as _del, update as _update
+    from sqlalchemy import delete as _del
+    from sqlalchemy import update as _update
+
     from .. import automation_models as am
+    from ..conversation_handoff_models import ConversationHandoff
 
     task_ids = list(dict.fromkeys(str(item) for item in tids if item))
     attachments = list((await session.execute(
         select(models.Attachment).where(models.Attachment.task_id.in_(task_ids))
     )).scalars().all())
     storage_refs = [(row.storage_key, row.backend) for row in attachments if row.storage_key]
+    # Retain each transfer's idempotency receipt, but end its ownership of the
+    # deleted task's archive in the same transaction as the attachment rows.
+    handoffs = await session.scalars(select(ConversationHandoff).where(
+        ConversationHandoff.task_id.in_(task_ids)).with_for_update())
+    for handoff in handoffs:
+        if handoff.storage_key:
+            storage_refs.append((handoff.storage_key, handoff.backend))
+            handoff.storage_key, handoff.backend = "", ""
+        pending = (handoff.options or {}).get("legacyBlob")
+        if isinstance(pending, dict) and pending.get("key") and pending.get("backend"):
+            # Content migration keeps this receipt until it completes post-commit cleanup.
+            storage_refs.append((pending["key"], pending["backend"]))
     run_ids = list((await session.execute(
         select(am.WorkflowRun.id).where(am.WorkflowRun.task_id.in_(task_ids))
     )).scalars().all())
@@ -867,10 +882,13 @@ async def purge_task_children(
     return out, storage_refs
 
 
-def _delete_task_storage(refs: list[tuple[str, str]]) -> None:
+async def _delete_task_storage(session: AsyncSession, refs: list[tuple[str, str]]) -> None:
     from . import storage
-    for key, backend in refs:
-        storage.delete(key, backend)
+    try:
+        await storage.delete_unreferenced_objects(session, refs)
+    except Exception as exc:
+        # Task deletion is committed. Keep the bytes if ownership cannot be checked.
+        log.warning("Task attachment cleanup deferred (%s)", type(exc).__name__)
 
 
 async def delete_task(session: AsyncSession, owner_id: str, tid: str) -> dict:
@@ -890,7 +908,7 @@ async def delete_task(session: AsyncSession, owner_id: str, tid: str) -> dict:
     task_notifications.enqueue(session, t, "task.deleted", recipients=[c.id for c in recipients],
         recipient_accounts={c.id: c.user_ref or "" for c in recipients}, previous_org=previous_org)
     await session.commit()
-    _delete_task_storage(storage_refs)
+    await _delete_task_storage(session, storage_refs)
     return {"ok": True}
 
 
@@ -917,15 +935,17 @@ async def clear_done(session: AsyncSession, owner_id: str) -> dict:
         task_notifications.enqueue(session, t, "task.deleted", recipients=[c.id for c in viewers],
             recipient_accounts={c.id: c.user_ref or "" for c in viewers})
     await session.commit()
-    _delete_task_storage(storage_refs)
+    await _delete_task_storage(session, storage_refs)
     return {"removed": len(ids)}
 
 
 async def batch_update(session: AsyncSession, owner_id: str, ids: list[str], patch: dict) -> dict:
-    count = rejected = 0
+    missing: list[str] = []
+    rejected = 0
     for tid in ids:
         result = await update_task(session, owner_id, tid, patch)
-        if result is not None:
-            count += 1
-            rejected += int(bool(result.get("statusTransition")))
-    return {"updated": count, "statusRejected": rejected}
+        if result is None:
+            missing.append(tid)
+        elif result.get("statusTransition"):
+            rejected += 1
+    return {"updated": len(ids) - len(missing), "statusRejected": rejected, "missing": missing}

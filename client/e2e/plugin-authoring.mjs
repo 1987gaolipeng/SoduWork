@@ -52,7 +52,7 @@ await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));
 const port = probe.address().port;
 await new Promise(resolve => probe.close(resolve));
 const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-const child = spawn(path.join(client, 'node_modules/electron/dist/electron.exe'),
+const child = spawn(require('electron'),
   [path.join(client, 'e2e/fixtures/plugin-authoring-window.cjs'), profile, controlFile, '--remote-debugging-port=' + port],
   { windowsHide: true, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let processLog = '';

@@ -107,7 +107,7 @@ export default function McpServers({ templates = [] }) {
         </span>
         <span className="mcp-run-legend" aria-label={tx("连接器执行位置")}>
           <i><Icon name="grid" />{tx("HTTP 由 Hub 调用")}</i>
-          <i><Icon name="desktop" />{tx("stdio 由在线 Runner 执行")}</i>
+          <i><Icon name="monitor" />{tx("stdio 由在线 Runner 执行")}</i>
         </span>
         <span className="mcp-toolbar-actions">
           <input ref={importPicker} type="file" accept=".json,.toml,application/json"

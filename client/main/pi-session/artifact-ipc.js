@@ -12,6 +12,7 @@ const { shell, nativeImage, dialog } = require('electron');
 const imageClipboard = require('../conversation/image-clipboard');
 
 function install({ app, ipcMain, BrowserWindow, session, workDir, resolveSession = async handle => handle }) {
+  ipcMain.handle('pi-session-skill-failure-context', require('./skill-failure-context.cjs').handler({ session, BrowserWindow }));
   require('./tool-detail-ipc').install({ ipcMain, session, BrowserWindow });
   require('../conversation/delivery-package-ipc').install({ ipcMain, session, BrowserWindow, dialog, resolveSession });
 async function _attachmentTarget(handle, ref, token) {

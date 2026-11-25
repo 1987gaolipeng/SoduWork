@@ -53,6 +53,9 @@
   var emailView = null;
   var loginAccountHub = null;
   var loginAccountEdited = false;
+  var loginPreferencesLoaded = false;
+  var rememberAccountInput = null;
+  var autoLoginInput = null;
   var loginReload = null;
   var policyRevision = 0;
   var quotaNotice = null;
@@ -67,8 +70,34 @@
     return global.SoduWorkAPI || null;
   }
 
+  function bindDevicePairing(button, status) {
+    if (!button) return;
+    button.hidden = !global.soduWorkAPI?.copyDevicePairingToken;
+    button.onclick = async function () {
+      const snapshot = api().clientAuthSnapshot();
+      const scope = { hub: api().hubBase(), clientId: snapshot.clientId, userId: snapshot.user?.id || '' };
+      button.disabled = true;
+      try {
+        const result = await global.soduWorkAPI.copyDevicePairingToken(scope);
+        if (!result?.ok) throw Error(result?.error || '无法复制设备配对码');
+        status(translate('设备配对码已复制。请在 10 分钟内通过可信渠道发给管理员。'));
+      } catch (error) {
+        status(translate(error.message || '无法复制设备配对码'));
+      } finally { button.disabled = false; }
+    };
+  }
+
   function trackLoginAccount() {
+    rememberAccountInput = gate.querySelector('#soduWorkRememberAccount');
+    autoLoginInput = gate.querySelector('#soduWorkAutoLogin');
     accountInput?.addEventListener('input', function () { loginAccountEdited = true; });
+  }
+
+  function loginPreferencesHtml() {
+    return '<div class="soduwork-auth-preferences">' +
+      '<label><input id="soduWorkRememberAccount" type="checkbox"><span>记住账号</span></label>' +
+      '<label><input id="soduWorkAutoLogin" type="checkbox" aria-describedby="soduWorkAutoLoginHint"><span>在此设备上自动登录</span></label>' +
+      '<p id="soduWorkAutoLoginHint">自动登录使用系统加密保存的设备凭据。</p></div>';
   }
 
   function restoreLoginAccount(reset) {
@@ -77,10 +106,19 @@
     if (reset || (loginAccountHub !== null && loginAccountHub !== hub)) {
       accountInput.value = '';
       loginAccountEdited = false;
+      loginPreferencesLoaded = false;
+      rememberAccountInput.checked = autoLoginInput.checked = false;
     }
     loginAccountHub = hub;
     // Enrollment resolves the saved service before the form adopts its account.
-    if (booting || switchingConnection || gate?.hidden || loginAccountEdited || accountInput.value) return;
+    if (booting || switchingConnection || gate?.hidden) return;
+    if (!loginPreferencesLoaded) {
+      var preferences = bridge?.loginPreferences?.();
+      rememberAccountInput.checked = preferences?.rememberAccount === true;
+      autoLoginInput.checked = preferences?.autoLogin === true;
+      loginPreferencesLoaded = true;
+    }
+    if (loginAccountEdited || accountInput.value) return;
     var remembered = bridge?.rememberedLoginAccount?.();
     if (typeof remembered === 'string') accountInput.value = remembered;
   }
@@ -128,8 +166,8 @@
   }
 
   /*
-   * Show the collapsible endpoint editor whenever the main process permits service
-   * selection, including installed clients; fixed test connections remain hidden.
+   * Editable connections use a dialog on the account screen and a disclosure
+   * on the legacy screen. Fixed connections have no address editor.
    */
   function connectionPanelHtml() {
     var editable = false;
@@ -138,6 +176,15 @@
       editable = !!(bridge && typeof bridge.hubConfig === 'function' && bridge.hubConfig().editable === true);
     } catch (e) {}
     if (!editable) return '';
+    if (emailView) {
+      return '<dialog class="soduwork-auth-connection ac-hub-dialog" aria-labelledby="acHubTitle">' +
+        '<h2 id="acHubTitle">服务连接</h2>' +
+        '<label for="soduWorkAuthHub">SoduWork 服务地址</label>' +
+        '<input id="soduWorkAuthHub" type="url" autocomplete="off" spellcheck="false" autofocus>' +
+        '<p class="ac-hub-message" role="status"></p>' +
+        '<div class="ac-hub-actions"><button type="button" class="ac-secondary ac-hub-cancel">取消</button>' +
+        '<button type="button" class="ac-primary soduwork-auth-connect">保存并连接</button></div></dialog>';
+    }
     return '<details class="soduwork-auth-connection"><summary>服务连接 · 更改地址</summary>' +
         '<label for="soduWorkAuthHub">SoduWork 服务地址</label>' +
         '<div class="soduwork-auth-connection-row"><input id="soduWorkAuthHub" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://service.soduwork.ai">' +
@@ -150,8 +197,11 @@
     if (!gate || !form) return;
     var existing = gate.querySelector('.soduwork-auth-connection');
     var html = connectionPanelHtml();
+    const trigger = gate.querySelector('[data-edit-hub]');
+    if (trigger) trigger.hidden = !html;
     if (html && !existing) {
-      form.insertAdjacentHTML('afterbegin', html);
+      if (emailView) gate.insertAdjacentHTML('beforeend', html);
+      else form.insertAdjacentHTML('afterbegin', html);
       bindConnectionPanel();
     } else if (!html && existing) {
       existing.remove();
@@ -164,9 +214,23 @@
     hubInput = gate.querySelector('#soduWorkAuthHub');
     hubButton = gate.querySelector('.soduwork-auth-connect');
     if (!hubInput || !hubButton) return;
-    hubInput.value = (function () {
+    function savedHub() {
       try { return text(api().hubConfig().hub); } catch (e) { return ''; }
-    })();
+    }
+    hubInput.value = savedHub();
+    if (emailView) {
+      const dialog = connectionDetails;
+      for (const label of dialog.querySelectorAll('h2, label, button')) label.textContent = translate(label.textContent);
+      const trigger = gate.querySelector('[data-edit-hub]');
+      trigger.onclick = function () {
+        hubInput.value = savedHub();
+        dialog.querySelector('.ac-hub-message').textContent = '';
+        dialog.showModal();
+        hubInput.focus();
+      };
+      dialog.querySelector('.ac-hub-cancel').onclick = () => dialog.close();
+      dialog.addEventListener('cancel', event => { if (switchingConnection) event.preventDefault(); });
+    }
     hubButton.addEventListener('click', function () {
       var hub = text(hubInput.value).trim();
       var environment = /^(?:https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(hub)
@@ -205,8 +269,8 @@
     var recheck = failed || reason?.activationRequired === true || reason?.state === 'pending';
     if (recoveryNode) recoveryNode.hidden = !recheck;
     if (retryButton) retryButton.hidden = !recheck;
-    /* Expand endpoint settings after connection failure to allow correction. */
-    if (failed && connectionDetails) connectionDetails.open = true;
+    /* Keep the modern login in place until the user chooses to edit the address. */
+    if (failed && connectionDetails && !emailView) connectionDetails.open = true;
   }
 
   function quotaCopy(quota) {
@@ -268,7 +332,12 @@
   }
 
   function setStatus(message, kind) {
-    if (emailView) { emailView.setStatus(message, kind); return; }
+    if (emailView) {
+      const note = connectionDetails?.open && connectionDetails.querySelector('.ac-hub-message');
+      if (note) note.textContent = translate(text(message));
+      emailView.setStatus(message, kind);
+      return;
+    }
     if (!statusNode) return;
     statusSource = text(message);
     statusNode.textContent = translate(statusSource);
@@ -282,7 +351,7 @@
     submitButton.classList.toggle('is-busy', !!busy);
     submitButton.querySelector('span').textContent = label ||
       (busy ? '\u6b63\u5728\u767b\u5f55' : '\u767b\u5f55\u5e76\u7ee7\u7eed');
-    [accountInput, passwordInput, displayInput].forEach(function (input) {
+    [accountInput, passwordInput, displayInput, rememberAccountInput, autoLoginInput].forEach(function (input) {
       if (input) input.disabled = !!busy;
     });
     if (passwordEye) passwordEye.disabled = !!busy;
@@ -294,7 +363,10 @@
 
   function createGate() {
     if (gate) return gate;
-    try { mountGate(); }
+    try {
+      mountGate();
+      bindDevicePairing(gate.querySelector('[data-copy-device-pairing]'), setStatus);
+    }
     catch (error) {
       // Authentication hides the workspace before mounting. A partially built
       // gate must be replaced with visible recovery, never leave a blank page
@@ -352,6 +424,37 @@
     if (restoringNode) restoringNode.hidden = !restoring;
   }
 
+  function bindWheelReversals(surface) {
+    if (!/^Win/i.test(global.navigator?.platform || '')) return;
+    let previousDirection = 0, previousTime = 0, target = null;
+    surface.addEventListener('wheel', event => {
+      // Windows wheel notches arrive in multiples of 120, including coalesced ticks.
+      if (!event.cancelable || event.defaultPrevented || event.ctrlKey || event.shiftKey ||
+          event.altKey || event.metaKey || event.deltaX || event.deltaMode !== 0 ||
+          !event.wheelDeltaY || event.wheelDeltaY % 120 !== 0 || Math.abs(event.deltaY) < 40 ||
+          event.target.closest?.('dialog, select, textarea, [contenteditable="true"], .ac-mask')) {
+        previousDirection = 0;
+        target = null;
+        return;
+      }
+      const direction = Math.sign(event.deltaY);
+      const limit = surface.scrollHeight - surface.clientHeight;
+      if (limit <= 0) return;
+      // Chromium latches the gesture on its first tick. Keep one native smooth-scroll
+      // destination per direction and start a reversal at the visible position.
+      const continuing = direction === previousDirection && event.timeStamp - previousTime < 160;
+      const next = Math.max(0, Math.min(limit, (continuing ? target : surface.scrollTop) + event.deltaY));
+      event.preventDefault();
+      if (!continuing || next !== target) {
+        const reduced = global.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        surface.scrollTo({ top: next, behavior: reduced ? 'instant' : 'smooth' });
+      }
+      previousDirection = direction;
+      previousTime = event.timeStamp;
+      target = next;
+    }, { passive: false });
+  }
+
   function mountGate() {
     gate = document.createElement('div');
     gate.id = 'soduWorkClientAuthGate';
@@ -359,8 +462,9 @@
     gate.setAttribute('role', 'dialog');
     gate.setAttribute('aria-modal', 'true');
     gate.setAttribute('aria-labelledby', 'soduWorkAuthTitle');
+    bindWheelReversals(gate);
     if (global.EmailAuth) {
-      emailView = global.EmailAuth.mount(gate, { api: api, retry: function () { return boot({ recheckAuth: true }); },
+      emailView = global.EmailAuth.mount(gate, { api: api, preferencesHtml: loginPreferencesHtml(), retry: function () { return boot({ recheckAuth: true }); },
         success: function (result) {
           if (!scheduleLoginReload(result.user)) return false;
           updateIdentity(result.user, result.quota);
@@ -396,14 +500,14 @@
           '</span></label>' +
           '<details class="soduwork-auth-first"><summary>\u9996\u6b21\u4f7f\u7528\uff1f\u53ef\u9009\u586b\u5199\u663e\u793a\u540d</summary>' +
             '<label><span>\u663e\u793a\u540d <em>\u53ef\u9009</em></span><input id="soduWorkAuthDisplayName" name="name" autocomplete="name" maxlength="64" placeholder="\u4f8b\uff1a\u80e1\u8015\u6c38"></label>' +
-          '</details>' +
+          '</details>' + loginPreferencesHtml() +
           '<div class="soduwork-auth-status" role="status" aria-live="polite"></div>' +
           '<div class="soduwork-auth-recovery" hidden>' +
             '<button class="soduwork-auth-retry" type="button" hidden>\u91cd\u8bd5\u8fde\u63a5</button>' +
           '</div>' +
           '<button class="soduwork-auth-submit" type="submit"><span>\u767b\u5f55\u5e76\u7ee7\u7eed</span><i aria-hidden="true"></i></button>' +
         '</form>' +
-        '<footer><span class="soduwork-auth-secure"><i></i>\u5bc6\u7801\u4e0d\u4f1a\u4fdd\u5b58\u5728\u8fd9\u53f0\u7535\u8111</span>' +
+        '<footer><button type="button" class="ac-link" data-copy-device-pairing>复制设备配对码</button><span class="soduwork-auth-secure"><i></i>\u5bc6\u7801\u4e0d\u4f1a\u4fdd\u5b58\u5728\u8fd9\u53f0\u7535\u8111</span>' +
           '<span class="soduwork-auth-form-badge" hidden></span>' +
           '<span class="soduwork-auth-hub">\u8fde\u63a5 <b></b></span></footer>' +
       '</main>';
@@ -534,6 +638,7 @@
     setRestoringLogin(false);
     document.documentElement.classList.remove('soduwork-auth-pending');
     document.body.classList.remove('soduwork-client-auth-open');
+    if (emailView && connectionDetails?.open) connectionDetails.close();
     if (gate) gate.hidden = true;
   }
 
@@ -597,7 +702,9 @@
       var result = await api().clientLogin({
         account: account,
         password: password,
-        displayName: text(displayInput.value).trim()
+        displayName: text(displayInput.value).trim(),
+        rememberAccount: rememberAccountInput.checked,
+        autoLogin: autoLoginInput.checked
       });
       if (legacySubmission !== attempt) return;
       passwordInput.value = '';
@@ -1024,6 +1131,7 @@
     });
     global.addEventListener('soduwork-data-scope-changed', function () {
       loginReload = null;
+      loginPreferencesLoaded = false;
       invalidateLogin();
       restoreLoginAccount(false);
     });
@@ -1038,6 +1146,7 @@
 
   document.documentElement.classList.add('soduwork-auth-pending');
   global.ClientAuth = {
+    bindDevicePairing: bindDevicePairing,
     logout: logout,
     confirmLogout: confirmLogout,
     connectionMessage: connectionMessage,

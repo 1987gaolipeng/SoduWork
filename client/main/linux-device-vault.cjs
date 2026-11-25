@@ -7,6 +7,8 @@ const { promisify } = require('node:util');
 
 const derive = promisify(crypto.scrypt);
 const storage = 'soduwork-passphrase-v1';
+const localModelsLabel = 'soduwork-local-models-v1';
+const unlocked = Symbol('soduwork-unlocked-vault');
 const headerName = 'device-vault-v1';
 const saltSize = 16;
 const ivSize = 12;
@@ -86,8 +88,30 @@ async function unlock(directory, mode, passphrase) {
   } finally { material.fill(0); }
 
   const context = (hub, clientId) => Buffer.from(JSON.stringify([storage, hub, clientId]));
+  // Local model secrets reuse this in-memory key with a separate AAD. Device
+  // credentials stay bound to [storage, hub, clientId]; the raw key is not returned.
+  function protect(label, plaintext) {
+    if (label !== localModelsLabel) throw Error('Unsupported vault protection label');
+    if (typeof plaintext !== 'string') throw Error('Unsupported vault plaintext');
+    const iv = crypto.randomBytes(ivSize);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    cipher.setAAD(Buffer.from(label));
+    const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+    return Buffer.concat([iv, cipher.getAuthTag(), encrypted]);
+  }
+  function unprotect(label, bytes) {
+    if (label !== localModelsLabel) throw Error('Unsupported vault protection label');
+    try {
+      if (!Buffer.isBuffer(bytes) || bytes.length <= ivSize + tagSize) throw Error();
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, bytes.subarray(0, ivSize));
+      decipher.setAAD(Buffer.from(label));
+      decipher.setAuthTag(bytes.subarray(ivSize, ivSize + tagSize));
+      return Buffer.concat([decipher.update(bytes.subarray(ivSize + tagSize)), decipher.final()]).toString('utf8');
+    } catch { throw Error('Cannot decrypt the stored local secret'); }
+  }
   return {
-    platform: 'linux', storage, available: () => true,
+    [unlocked]: true,
+    platform: 'linux', storage, available: () => true, protect, unprotect,
     encrypt(secret, hub, clientId) {
       const iv = crypto.randomBytes(ivSize);
       const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -110,4 +134,10 @@ async function unlock(directory, mode, passphrase) {
   };
 }
 
-module.exports = { startupMode, unlock };
+function isUnlockedVault(store) {
+  return !!store && store[unlocked] === true && store.platform === 'linux' && store.storage === storage &&
+    typeof store.protect === 'function' && typeof store.unprotect === 'function' &&
+    typeof store.available === 'function';
+}
+
+module.exports = { startupMode, unlock, isUnlockedVault, localModelsLabel };

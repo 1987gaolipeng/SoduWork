@@ -24,7 +24,6 @@ HUB = ""
 ADMIN_USER = ""
 ADMIN_PASS = ""
 CID = "u-smoke-pluge2e"
-SECRET = "smoke-pluge2e-secret"
 KEY = "smoke-authoring-demo"
 
 ok = fail = 0
@@ -188,12 +187,21 @@ def main():
         (st, starter_headers, starter_blob[:120]))
 
     # Register and bind the device to the correct organization before plugin use.
-    st, r = _req("POST", "/clients/register",
-                 {"device": CID, "name": "（冒烟）插件实证", "platform": "smoke"})
-    secret = (r or {}).get("secret") or SECRET
-    dh = {"X-Soduwork-Device": CID, "X-Soduwork-Secret": secret}
-    st, r = _req("POST", "/admin/clients/%s/assign" % CID, {"userId": uid}, headers=ah)
-    chk("设备归属超管（任务与绑定同组织）", st == 200, (st, r))
+    secret = secrets.token_urlsafe(32)
+    device = {"device": CID, "name": "（冒烟）插件实证", "platform": "smoke"}
+    key_header = {"X-Device-Key": secret}
+    st, result = _req("POST", "/clients/enroll?pairing=true", device, headers=key_header)
+    chk("获取设备配对凭据", st == 200 and bool(result.get("pairingToken")), st)
+    if fail:
+        return fail
+    st, r = _req("POST", "/admin/clients/pair",
+                 {"userId": uid, "pairingToken": result["pairingToken"]}, headers=ah)
+    chk("设备归属超管（任务与绑定同组织）", st == 200, st)
+    st, renewed = _req("POST", "/clients/enroll", device, headers=key_header)
+    chk("设备取得短期会话", st == 200 and bool(renewed.get("session")), st)
+    if fail:
+        return fail
+    dh = {"Authorization": "Device " + renewed["session"]}
 
     # Create and upload the package through multipart HTTP.
     blob = _package()

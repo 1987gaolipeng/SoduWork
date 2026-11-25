@@ -9,6 +9,8 @@ FastAPI + SQLAlchemy(async) + PostgreSQL（本地开发可回退 SQLite）。
 
 模块职责与状态归属见[首版范围](../docs/release-scope.md)。
 
+首次对话清单根据可用模型目录和当前管理员最近一次桌面端报告显示进度。设备上报底座和模型选择是否就绪。五分钟内未收到新报告时，Hub 会将这两步显示为等待桌面端报告。
+
 ## 快速开始（本地 SQLite，零配置）
 
 ```bash
@@ -21,6 +23,47 @@ python3 -m venv .venv
 ```
 
 打开 http://127.0.0.1:9080/docs 查看 API 文档，健康检查为 `GET /healthz`。
+
+### 升级本地附件存储
+
+停止所有能写入 uploads 卷的 Hub 进程，同时备份数据库和整个卷。早于 #336 的 Windows 部署应使用能保留 NTFS 命名流的备份。先用这组数据库与卷启动一个新版 Hub，确认成功后再启动其余写入进程。
+
+Hub 在接收请求前核对附件和会话交接包的本地引用，检查旧平铺名及两种旧哈希布局。归属唯一的文件移至 `uploads/objects-v2/<逻辑键原文按 UTF-8 计算的 SHA-256>`。数据库键和显示名保持原值。多条记录可以引用同一逻辑键。不同键共用一个物理文件、同一键有冲突来源，或活动记录缺少文件时，预检保留原件并报告。搬移中断后可重新启动继续。卷上写入迁移完成标记后，读写及删除只访问 v2。搬迁卷时应包含该标记。
+
+旧版 Hub 删除任务和归档后可能仍保留交接回执。如果归档已经删除，且没有活动记录引用它，启动可继续；归档还在时，迁移会保留文件。消息附件即使没有所属任务，也需要保留内容。
+
+如报告活动对象缺失，请根据逻辑键找到对应数据库记录及同一部署的可信备份。早期 Windows 部署的内容可能保存在 NTFS 命名流中。确认归属，将恢复出的普通文件与已有长度和 SHA-256 记录核对。保持 Hub 停机，把已核实的副本放入恢复卷上该逻辑键对应的 v2 路径，并保留原备份。归属或内容无法核实的原件应留待人工核查。启动成功后，通过下载核对原始字节。回滚时先停机，同时恢复旧数据库和 uploads 卷，再启动旧版本。
+
+### 自动化只读查询
+
+脚本应连接配置中的 Hub 地址。以下本地开发示例使用 9080 端口。健康检查允许匿名访问。查询账号可见的项目时，通过 `POST /api/v1/admin/login` 获取该账号的访问令牌，由环境变量或 CI 密钥存储提供 `HUB_TOKEN`。账号需要 `task.view` 权限。
+
+```sh
+HUB_URL=http://127.0.0.1:9080
+curl --fail --silent --show-error "$HUB_URL/healthz"
+curl --fail --silent --show-error -H "Authorization: Bearer $HUB_TOKEN" "$HUB_URL/api/v1/admin/projects"
+```
+
+项目响应是 JSON 数组。空数组表示该账号没有可见项目。HTTP 401 表示令牌缺失、无效或已过期，HTTP 403 表示已登录账号缺少所需权限。
+
+## 排查派活排队
+
+Runner 首次接收派活时会在日志中记录执行引用和队列位置。任务排队期间，
+`GET /api/v1/tasks/{tid}/ai-status` 可返回 `runner.waitReason`。
+`resource_pressure` 表示资源准入策略暂停启动新任务。
+`execution_slot` 表示这项工作可用的执行槽已被占用。
+内存使用率达到 92%，或上报的可用内存低于 768 MiB 时，Runner 会暂停启动新任务。
+在上报的内存充足时，如果 CPU 使用率连续至少一秒保持在 95% 或以上，Runner 允许一次执行一个任务。
+采样值低于 95% 后重新计时。CPU 持续高压期间，内存保护仍然优先。
+该字段为可选项。再次查询同一任务即可看到当前等待原因或已开始执行的状态。
+
+对于直接派活，Hub 根据执行引用和准入键向原 Runner 核对持久化回执。匹配的回执或任务专属心跳会续约 90 秒，
+包括因内存压力持续排队的情况。失去确认后，租约检查会返回 `queueLeaseStatus=unconfirmed` 和
+`queueLeaseReason=no_runner_ack`。设备端 ai-status 在 `runner` 下返回这两个字段，管理端在顶层返回。
+Runner 重连会触发持久化队列核对。等待确认期间应保留原派活，以免同一任务重复执行。
+
+队列因资源压力暂停时，Runner 会定期记录 CPU 使用率、可用内存和队列深度。第二个进程尝试打开同一队列时，
+会退出并报告上次登记的持有者 PID 和 Runner 启动标识。
 
 ## 桌面本地 Runner 事件恢复
 
@@ -47,6 +90,8 @@ outbox 移除；Windows 载荷保留 DPAPI 保护，采集标记保持不变。�
 DeepSeek 原生包按所选 Node 的平台、架构和 Linux libc 校验，覆盖 Rosetta 与混合运行时安装；无法确认 Node 身份时拒绝启动。正式启动和版本探测的子进程继承所选 Node 目录，不修改 Runner 全局 PATH；Windows 带引号的 PATH 项仍保持原有优先级。
 
 模型能力报告 v3 验证合成工具结果后的流式续答，保留工具且不追加用户消息。已有 v2 工具成功结论需要重新检测，独立证据仍保留；请部署配套桌面更新。模型拒绝错误在 JSON、SSE 和传输日志中共享不透明的 `soduwork-trace` 编号；经过校验的上游请求编号仅用于关联，不参与错误分类。一般 403 的提示不再仅凭状态推断密钥权限。
+
+读取旧模型配置时，个别字段不兼容不会清除其他有效的手工能力声明，读取过程不会回写数据库。保存仍校验配置字段，并拒绝数组、字符串等非对象值；显式传入 `config: null` 保留原有重置行为。读取或升级不会把未确认能力提升为支持，未能确认的能力检测也不会替换手工声明。
 
 模型传输拒绝日志区分已识别的限流、计费错误和未分类的 429，不记录供应商响应正文。数字及 HTTP 日期格式的 `Retry-After` 通过既有 JSON/SSE 错误协议传递；超过一天的等待按一天传递，已超出桌面重试预算。计费错误不附带重试等待提示。Hub 不增加重试循环；配套桌面更新仅在既有单轮预算内遵守供应商等待时间。
 
@@ -252,7 +297,15 @@ python3 e2e_runner_tls.py --output /absolute/evidence/directory
 
 ## API 概览
 
-- 客户端契约（设备登记 → 管理员激活 → 短期 `Device` 会话；长期设备密钥在 Hub 只存摘要）
+AI 代理的图片和视频生成接口按媒体类型接收创作参数，例如图片尺寸或视频时长。模型配置的 `defaults` 优先于请求参数。供应商专用参数可以在模型目录的 `defaults` 中设置。代理会忽略未识别的请求字段。
+
+通过 `POST /api/v1/usage/events` 上报用量时，省略 `occurredAt` 表示使用 Hub 收到事件的时间。上报历史事件时可填写 ISO 8601 时间戳。没有时区偏移的时间戳按 UTC 解释。如果任一事件的时间戳无效，Hub 返回 HTTP 422，整批事件均不入账。 例如，不带偏移量的 16:30 对应北京时间次日 00:30。若要上报北京时间 16:30，请带上 `+08:00`。
+
+省略 `sourceType` 时使用 `chat`。允许的类型为 `chat`、`task`、`workflow`、`automation` 和 `system`，使用所列的小写拼写。任务和工作流上报须关联本设备拥有或当前账号获派的任务。无效类型返回 HTTP 422。每条回执均包含已入账的累计计数，以及 `created`（新建）、`updated`（计数增长）或 `duplicate`（计数没有增长）状态。
+
+聊天用量的 `sourceId` 和 `conversationId` 均表示本地会话 ID，可任选其一，同时提供时两者必须一致。同一回执在重试时保留首次上报的会话，归属冲突时整批返回 HTTP 422。仅提供幂等键也可以累计用量。Hub 按账号、设备和本地会话核对会话目录，匹配后，回执和用量明细返回会话 ID 及 `sourceVerification: "verified"`。尚未匹配时返回空 ID 和 `"unverified"`。如果会话晚于用量同步，下次查询即可看到核验结果。
+
+- 客户端契约（员工登录或管理员配对 → 短期 `Device` 会话，Hub 只保存设备密钥摘要）
   - `GET/POST /api/v1/tasks`、`GET/PATCH/DELETE /api/v1/tasks/{id}`
   - `POST /api/v1/tasks/batch-update`、`POST /api/v1/tasks/clear-done`（只清 done）
   - `POST /api/v1/tasks/{id}/agent/{run|retry|takeover}`
@@ -268,13 +321,18 @@ python3 e2e_runner_tls.py --output /absolute/evidence/directory
 
 在 `/api/v1` 下，`admin/users`、`admin/orgs`、`admin/roles`、`admin/domains`、`tasks` 和 `schedules` 在省略分页参数时保留原有数组。传入 `limit`（1–200）或 `offset`（从 0 开始）即可获取 `{items, total}`。只传偏移量时每页默认 50 条。总数按当前身份可见的记录计算，偏移量超过末尾会返回空页。
 
+`GET /api/v1/admin/ai-schedules/{sid}/runs` 默认返回最近 20 条运行记录。整数参数 `limit` 可取 1 至 200，越界返回 HTTP 422。
+
 需要固定响应结构时，使用 `GET /api/v1/admin/client-inventory`。每次响应都包含 `items`、`total`、`counts`、`page`、`pageSize` 和 `offset`。可使用 `page` 和 `pageSize`（1–100，默认 25），或使用 `offset` 和 `limit`。旧的 `admin/clients` 调用仍可获取原有数组，也可通过 `paged=1` 获取对象。
 
 资料库同样支持可选的条数和偏移量，先排列文件夹，再排列文件。返回体保留独立的 `folders` 和 `items` 数组，分页时提供两者合计的 `total`。审批和交付列表接受正整数条数和从 0 开始的偏移量。
 
 ## 客户端接入
 
-设备长期密钥只由 Electron 主进程持有。客户端通过 `POST /api/v1/clients/enroll` 登记并轮换短期会话，
+新安装可先连接 Hub。员工成功登录或管理员配对后，Hub 才保存设备 ID 和密钥摘要。旧版客户端在兼容模式下可继续使用已登记的密钥，新安装的旧版客户端需升级到当前桌面版。
+员工可在登录页或账号安全页复制设备配对码，直接交给管理员。管理员在设备列表选择“配对设备”，选定员工，并在十分钟内粘贴配对码。配对完成后，员工可在桌面端点击“重试连接”。激活待登记设备或变更归属时也需要新的配对码。已停用设备须先重新登记，再获取配对码。
+
+设备长期密钥只由 Electron 主进程持有。已绑定设备通过 `POST /api/v1/clients/enroll` 轮换短期会话，
 业务请求使用 `Authorization: Device <session>`，WebSocket 使用同一短期会话；长期密钥不得进入渲染进程、日志或 URL。
 任务与流程状态以 Hub 为唯一事实源，本地缓存只用于断网展示和待同步命令，不能反向覆盖服务端新状态。
 
@@ -351,3 +409,7 @@ python3 e2e_dsh_private_probe.py \
 ```
 
 此显式检查使用生产私有探测作业和 ACP 桥接、实际安装的适配器与运行时，以及合成本机回环模型。先重现旧安装路径错误，再要求修正路径后出现真实模型请求并由 Agent 返回预期响应。检查使用可清理的用户目录、状态和临时目录，阻止 Node 连接非回环地址，并清理自身子进程；不会安装或更新依赖，也不使用真实凭据，不覆盖桌面界面、生产 Hub 或模型服务行为。由于需要已有原生安装，请在离线质量门禁之外单独运行。
+
+## 删除模型服务
+
+持有 `integration.manage` 权限时，通过 `GET /api/v1/admin/model-providers/{id}/deletion-impact` 获取服务版本、影响清单版本、子模型及可见的已保存模型选择。成员名称需要 `user.manage`，需求标题需要 `task.view`，两者均遵守部门可见范围。调用已有的 `DELETE /api/v1/admin/model-providers/{id}` 时，以 `expectedRevision`、`expectedImpact` 传入预览返回的版本，另以 `confirmId` 传入完整服务 ID。旧版请求未预览会返回 HTTP 428。遇到 HTTP 409 时，应重新获取清单并再次确认。内置服务禁止删除。

@@ -74,13 +74,26 @@
   function loginAccountKey() {
     return 'soduwork_work_last_login_account_v1@' + encodeURIComponent(normalizeHub(base()));
   }
-  function rememberLoginAccount(value, result) {
+  function storedLoginAccount() {
+    // A missing key is a legacy profile. An empty value is an explicit opt-out.
+    try { return localStorage.getItem(loginAccountKey()); } catch (_) { return null; }
+  }
+  function rememberLoginAccount(value, result, remember) {
+    if (!result?.ok || !result.user?.id) return;
+    if (remember === false) {
+      writeLocal(loginAccountKey(), '');
+      return;
+    }
     var account = loginAccount(value);
-    if (account && result?.ok && result.user?.id) writeLocal(loginAccountKey(), account);
+    if (account && (remember === true || storedLoginAccount() !== '')) writeLocal(loginAccountKey(), account);
   }
   function normalizeHub(raw) {
     var value = String(raw || '').trim();
     if (!value) throw new Error('请填写 SoduWork 服务地址');
+    // URL interprets a single integer as IPv4. Reject it before the original host is lost.
+    if (/^(?:https?:\/\/)?\d+\.?(?=[:/?#]|$)/i.test(value)) {
+      throw new Error('主机名不能只包含数字，请填写完整 IP 地址或域名');
+    }
     if (!/^https?:\/\//i.test(value)) value = 'http://' + value;
     value = value.replace(/\/+$/, '');
     try {
@@ -932,15 +945,18 @@
   function domainScope() {
     return { hub: base().replace(/\/+$/, ''), clientId: device(), userId: String(_clientUser?.id || '') };
   }
+  function failedModelScope() {
+    return JSON.stringify([_registrationEpoch, _deviceAuthState, taskStorageKey('ops')]);
+  }
   function sameDomainScope(value) {
     var current = domainScope();
     return value && value.hub === current.hub && value.clientId === current.clientId && value.userId === current.userId;
   }
-  async function domainRead(domain, path) {
+  async function domainRead(domain, path, fresh = false) {
     var bridge = global.soduWorkAPI, scope = domainScope();
     if (!bridge?.clientDomainRead || !scope.userId) return jfetch(path);
     var auth = requestAuth();
-    var result = await bridge.clientDomainRead(domain, scope);
+    var result = await bridge.clientDomainRead(domain, scope, fresh);
     if (!sameDomainScope(scope)) throw staleTaskScope();
     if (result?.code === 'DOMAIN_POLL_FALLBACK') return jfetch(path);
     // A local snapshot or replayed backoff error does not prove current reachability.
@@ -1299,6 +1315,12 @@
     connectHub: connectHub,
     normalizeHub: normalizeHub,
     taskStorageKey: taskStorageKey,
+    async reportFirstChatReadiness(scope, runtimeReady, modelReady) {
+      if (!hasValidDeviceSession() || !_clientUser || scope !== taskStorageKey('ops')) return false;
+      await jfetch('/first-chat-readiness', { method: 'PUT', taskScope: scope, sessionRead: true,
+        body: JSON.stringify({ runtimeReady, modelReady }) });
+      return true;
+    },
     adoptVerifiedTaskOperations: adoptVerifiedTaskOperations,
 
     /*
@@ -1679,7 +1701,8 @@
       localCatalog = localCatalog || { providers: [], usable: [], myModels: [], mediaUsable: {} };
       var r, managedCatalogUnavailable = false;
       try {
-        r = await domainRead('models', '/my-models');
+        if (!sameDomainScope(scope)) throw staleTaskScope();
+        r = await domainRead('models', '/my-models', options?.fresh === true);
         if (r?.ok === false) throw new Error('Hub 模型目录暂时无法读取');
         managedCatalogUnavailable = !Array.isArray(r?.usable);
       }
@@ -1853,6 +1876,49 @@
         body: JSON.stringify({ providerId: providerId }) });
       mark(true); return r;
     },
+    // A chat failure belongs to the configuration that served its request.
+    // Re-resolve on click so neither a new selection nor a replacement catalog
+    // row can inherit the original user's permission to run a probe.
+    failedModelScope,
+    async inspectFailedModel(target, options = {}) {
+      var scope = domainScope(), owner = failedModelScope();
+      if (_deviceAuthState !== 'active' || !scope.userId || !target.scope) return { state: 'account' };
+      var bytes = new TextEncoder().encode(JSON.stringify([scope.hub, scope.clientId, scope.userId]));
+      var hash = Array.from(new Uint8Array(await global.crypto.subtle.digest('SHA-256', bytes)),
+        byte => byte.toString(16).padStart(2, '0')).join('');
+      if (hash !== target.scope || failedModelScope() !== owner) return { state: 'account' };
+      if (!target.model || !target.local && !target.provider) return { state: 'unversioned' };
+      var catalog = target.local ? await this.localModels() : await jfetch('/my-models', { cache: 'no-store', signal: options.signal });
+      if (failedModelScope() !== owner) return { state: 'account' };
+      if (catalog?.ok === false || !Array.isArray(catalog?.providers)) return { state: 'unavailable' };
+      var rows = target.local ? catalog.myModels : catalog.usable;
+      var row = (rows || []).find(item => (item.localOnly === true) === target.local && (target.local
+        ? item.id === target.model : item.providerId === target.provider && item.name === target.model));
+      if (!row) return { state: 'changed' };
+      var provider = catalog.providers.find(item => item.id === row.providerId);
+      if (!provider) return { state: 'changed' };
+      if (target.revision && target.revision !== row.configRevision) return { state: 'changed' };
+      var labels = { service: provider.name || provider.id, model: row.name };
+      if (!target.local && provider.personal !== true) return { ...labels, state: 'managed' };
+      if (!target.revision) return { ...labels, state: 'unversioned' };
+      if (!options.check) return { ...labels, state: 'ready' };
+      options.signal?.throwIfAborted();
+      var requestId = target.local && options.signal ? global.crypto.randomUUID() : '';
+      var cancel = () => global.soduWorkAPI?.localModels?.cancelCapabilities?.({ modelRef: target.model, requestId })?.catch(() => {});
+      if (requestId) options.signal.addEventListener('abort', cancel, { once: true });
+      var report;
+      try {
+        report = await this.checkMyModelCapabilities({ providerId: row.providerId, model: row.name,
+          localOnly: target.local, ...(target.local ? { expectedModelRef: target.model, requestId } : {}),
+          expectedConfigRevision: target.revision, checks: ['connection', 'streaming', 'toolCalling'] },
+          { signal: options.signal, failureOwner: owner });
+      } finally {
+        if (requestId) options.signal.removeEventListener('abort', cancel);
+      }
+      if (failedModelScope() !== owner) return { state: 'account' };
+      if (!report?.checks) return { ...labels, state: 'failed' };
+      return { ...labels, state: 'ready', report };
+    },
     async checkMyModelCapabilities(body, options) {
       body = body || {};
       options?.signal?.throwIfAborted();
@@ -1861,12 +1927,14 @@
       var localCatalog = await localModelCatalog();
       options?.signal?.throwIfAborted();
       if (!sameDomainScope(scope)) throw staleTaskScope();
+      if (options?.failureOwner && options.failureOwner !== failedModelScope()) throw staleTaskScope();
       var nativeId = deviceProviderId(body.providerId);
       var localProvider = (localCatalog?.providers || []).find(row => row?.id === nativeId);
       if (deviceProvider(body.providerId) || body.localOnly === true) {
         if (!localProvider) throw new Error('本地模型服务已不可用，请刷新目录后重试');
         var localModel = (localCatalog?.myModels || []).find(row => row.providerId === nativeId && row.name === String(body.model || '').trim());
-        if (!localModel) throw new Error('本地模型不存在或已不可用，请刷新目录后重试');
+        if (!localModel || body.expectedModelRef && body.expectedModelRef !== localModel.id)
+          throw new Error('本地模型不存在或已不可用，请刷新目录后重试');
         if (body.expectedConfigRevision && body.expectedConfigRevision !== localModel.configRevision)
           throw new Error('模型配置在检测期间已变更，请重新检测');
         if (typeof local?.checkCapabilities !== 'function') throw new Error('当前客户端尚未提供本机能力检测，请更新客户端');
@@ -1881,6 +1949,7 @@
       if (!sameDomainScope(scope)) throw staleTaskScope();
       requirePersonalProvider(body.providerId, await managedModelOwners(scope, options?.signal));
       options?.signal?.throwIfAborted();
+      if (options?.failureOwner && options.failureOwner !== failedModelScope()) throw staleTaskScope();
       var result = await jfetch('/my-models/capabilities/check', { method: 'POST',
         body: JSON.stringify({ providerId: body.providerId, model: body.model,
           ...(body.expectedConfigRevision ? { expectedConfigRevision: body.expectedConfigRevision } : {}),
@@ -1895,7 +1964,9 @@
     async agentSetup(runnerId) {
       var requestScope = taskStorageKey('ops');
       var target = typeof runnerId === 'string' ? '?runnerId=' + encodeURIComponent(runnerId) : '';
-      var r = await jfetch('/agent-setup' + target, { taskScope: requestScope }) || { env: {}, agents: [], modelCount: 0 };
+      // The Hub probe runs local CLI detection per machine (measured 20-38s);
+      // the default 8s timeout aborted the request before the list could load.
+      var r = await jfetch('/agent-setup' + target, { taskScope: requestScope, signal: _abortSignal(90000) }) || { env: {}, agents: [], modelCount: 0 };
       if (!(r.machines || []).length && !(r.agents || []).length) {
         var reason = await localRunnerReason();
         if (reason) r.env = Object.assign({}, r.env, { why: reason });
@@ -1954,7 +2025,8 @@
       var selectedId = runnerId(selected);
       // Keep the captured identity through both requests; an older Hub may ignore runnerId.
       var setupQuery = '?runnerId=' + encodeURIComponent(selectedId) + (hasLocalModel ? '&hasLocalModel=1' : '');
-      var data = await jfetch('/agent-setup' + setupQuery, { taskScope: requestScope }) || {};
+      // Same slow local probe as agentSetup; keep the 90s budget.
+      var data = await jfetch('/agent-setup' + setupQuery, { taskScope: requestScope, signal: _abortSignal(90000) }) || {};
       currentRequest();
       var machine = (Array.isArray(data.machines) ? data.machines : []).find(function (row) {
         if (runnerId(row) !== selectedId || row.execution === 'backend' || row.online === false) return false;
@@ -1977,7 +2049,8 @@
           (savedModel && !models.some(row => row.name === savedModel));
         // Use the first available model only when no valid preference remains.
         // Resolve from the displayed local-first catalog without rewriting it.
-        var automatic = agent.modelPick === true && firstModel && (!savedModel || missing);
+        var pinnedHubModel = !selected?.configured && Boolean(agent.modelProviderId);
+        var automatic = !pinnedHubModel && agent.modelPick === true && firstModel && (!savedModel || missing);
         if (automatic && (firstModel.localOnly !== true ||
             localDefaults && global.soduWorkAPI?.localAgentModels?.probe)) {
           selected = { configured: true, modelName: firstModel.name, unavailable: false,
@@ -1995,7 +2068,7 @@
         var readiness = modelOnly ? { state: state, setupState: state, displayState: state,
           ...(selected.unavailable ? { why: '原本地默认模型已删除或不可用，请重新选择' }
             : modelMissing ? { why: '' } : {}) } : {};
-        return { ...agent, model: savedModel, modelEffective: selected.modelName,
+        return { ...agent, model: savedModel, modelEffective: selected.modelName, modelProviderId: '',
           ...(selected.automatic ? { modelAutomatic: true } : {}),
           modelGone: selected.unavailable, localModelDefault: selected.localOnly !== false,
           ...(selected.localOnly !== false ? { configRevision: 'local:' + String(localCatalog?.revision ?? 'unavailable') } : {}),
@@ -2042,12 +2115,13 @@
         var inheritedModel = !model;
         if (isCurrentRunner && inheritedModel) {
           if (agent?.modelGone || preferred?.unavailable && !agent?.modelAutomatic) {
-            throw new Error('原本地默认模型已删除或不可用，请重新选择');
+            throw new Error(agent?.modelProviderId ? '请主动选择可用模型后再执行，不会自动切换模型'
+              : '原本地默认模型已删除或不可用，请重新选择');
           }
           model = agent?.modelEffective || preferred?.modelName || '';
           if (agent) {
             // Bind test evidence to the freshly resolved model and runtime.
-            probeAgent = Object.fromEntries(['key', 'version', 'bin', 'model', 'modelEffective',
+            probeAgent = Object.fromEntries(['key', 'version', 'bin', 'model', 'modelEffective', 'modelProviderId',
               'modelGone', 'configRevision', 'runtimeRevision'].map(field => [field, agent[field]]));
           }
         }
@@ -2068,7 +2142,7 @@
       mark(true); return r;
     },
 
-    async setAgentModel(key, model) {
+    async setAgentModel(key, model, providerId) {
       var scope = domainScope(), requestScope = taskStorageKey('ops');
       var defaults = await localAgentDefaults(scope);
       if (isLocalModelChoice(model)) {
@@ -2080,7 +2154,8 @@
         return localResult;
       }
       var r = await jfetch('/agent-setup/model', {
-        method: 'PUT', taskScope: requestScope, body: JSON.stringify({ key: key, model: model || '' })
+        method: 'PUT', taskScope: requestScope, body: JSON.stringify({ key: key, model: model || '',
+          ...(providerId ? { providerId } : {}) })
       });
       if (!sameDomainScope(scope)) throw staleTaskScope();
       if (defaults?.selections?.[key]?.configured) {
@@ -2864,6 +2939,10 @@
         { method: 'POST', body: JSON.stringify({ note: note || '' }) });
       mark(true); return acceptTaskResult(r);
     },
+    async setReviewRecipient(tid, userId) {
+      return jfetch('/tasks/' + encodeURIComponent(tid) + '/review-recipient',
+        {method:'PUT', body:JSON.stringify({userId}), taskScope:taskStorageKey('ops')});
+    },
     /* Evaluate the frozen delivery evidence under server-side reviewer permissions and quality gates. */
     async autoReviewTask(tid, note) {
       var r = await jfetch('/tasks/' + encodeURIComponent(tid) + '/auto-review', {
@@ -3337,7 +3416,7 @@
               try { if (readLocal(LEGACY_AUTH_HUB_KEY) === base()) localStorage.removeItem('soduwork_work_device_secret'); } catch (e) {}
             }
             // Existing signed-in profiles may predate the explicit account preference.
-            if (secure.ok && secure.session && secure.user?.id && !secure.activationRequired && !SoduWorkAPI.rememberedLoginAccount()) {
+            if (secure.ok && secure.session && secure.user?.id && !secure.activationRequired && storedLoginAccount() === null) {
               rememberLoginAccount(loginAccount(secure.user.email) || loginAccount(secure.user.username), secure);
             }
             rememberSession(secure);
@@ -3390,6 +3469,7 @@
       checkLogin();
       var result = await window.soduWorkAPI.deviceAuthLogin({
         hub: loginHub, clientId: device(), preserveLegacyIdentity: !!secret(),
+        autoLogin: credentials?.autoLogin,
         account: String(credentials && credentials.account || '').trim(),
         password: String(credentials && credentials.password || ''),
         displayName: String(credentials && credentials.displayName || '').trim(),
@@ -3400,7 +3480,7 @@
       checkLogin();
       invalidateRegistrations();
       var acceptedEpoch = _registrationEpoch;
-      rememberLoginAccount(account, result);
+      rememberLoginAccount(account, result, credentials?.rememberAccount);
       rememberSession(result || {}, { interactiveLogin: true });
       if (result && result.ok) {
         await syncRunnerConfig(root);
@@ -3437,7 +3517,7 @@
       if (signsIn && result && result.ok) {
         invalidateRegistrations();
         var acceptedEpoch = _registrationEpoch;
-        rememberLoginAccount(account, result);
+        rememberLoginAccount(account, result, payload?.rememberAccount);
         rememberSession(result, { interactiveLogin: true });
         await syncRunnerConfig(root);
         if (acceptedEpoch !== _registrationEpoch || hub !== base()) throw staleTaskScope();
@@ -3569,7 +3649,11 @@
         clientId: device(), online: _online, requestsAllowed: requestsAllowed() };
     },
     rememberedLoginAccount() {
-      return loginAccount(readLocal(loginAccountKey()));
+      return loginAccount(storedLoginAccount());
+    },
+    loginPreferences() {
+      // A manual sign-in requires fresh consent to restore this account on restart.
+      return { rememberAccount: !!SoduWorkAPI.rememberedLoginAccount(), autoLogin: false };
     },
     im: {
       catalog: opts => jfetch('/im', Object.assign({cache: 'no-store'}, opts)),

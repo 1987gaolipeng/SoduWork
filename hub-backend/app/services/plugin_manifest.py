@@ -9,12 +9,23 @@ import json
 import os
 import re
 
-from . import (execution_capabilities, execution_policy, plugin_input_contracts,
-               plugin_route_contracts, preflight_evidence, plugin_setup_contracts,
-               plugin_ui_contracts, plugin_icons, workflow_contracts, plugin_platforms)
+from . import (
+    execution_capabilities,
+    execution_policy,
+    plugin_app_contracts,
+    plugin_covers,
+    plugin_icons,
+    plugin_input_contracts,
+    plugin_platforms,
+    plugin_route_contracts,
+    plugin_setup_contracts,
+    plugin_ui_contracts,
+    plugin_window_contracts,
+    preflight_evidence,
+    workflow_contracts,
+)
 from .plugin_builtin import is_virtual_mcp
-from . import plugin_app_contracts, plugin_covers, plugin_window_contracts
-
+from .workflow_contracts import validate_dependency_graph as _dag
 
 _KEY = re.compile(r"^[a-z][a-z0-9-]{1,62}$")
 _NODE_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
@@ -401,28 +412,6 @@ def _capability_report(report: dict, adapter: dict,
     return merged
 
 
-def _dag(nodes: list[dict]) -> None:
-    keys = {n["key"] for n in nodes}
-    deps = {n["key"]: set(n.get("dependsOn") or []) for n in nodes}
-    for key, values in deps.items():
-        missing = values - keys
-        if missing:
-            raise ValueError(f"节点 {key} 依赖不存在的节点：{', '.join(sorted(missing))}")
-        if key in values:
-            raise ValueError(f"节点 {key} 不能依赖自己")
-    ready = [key for key, values in deps.items() if not values]
-    seen = []
-    while ready:
-        key = ready.pop(0)
-        seen.append(key)
-        for other, values in deps.items():
-            values.discard(key)
-            if not values and other not in seen and other not in ready:
-                ready.append(other)
-    if len(seen) != len(nodes):
-        raise ValueError("首版插件工作流必须是无环图；返工请用节点 retry 策略表达")
-
-
 def _validate_rework_policies(node: dict, node_keys: set[str]) -> None:
     config = node["config"]
     for field in ("onFailure", "onReject"):
@@ -568,6 +557,11 @@ def normalize(manifest: dict, workflow: dict | None = None) -> tuple[dict, dict,
                     f"（当前可用：{'、'.join(workflow_tools.known_tools())}）")
         if node_type == "deploy" and not (config.get("environmentKey") or config.get("environmentId")):
             raise ValueError(f"部署节点 {node_key} 没指定环境")
+        when = config.get("when")
+        if when is not None and (not isinstance(when, dict)
+                or not isinstance(when.get("node"), str) or not when["node"]
+                or "equals" not in when):
+            raise ValueError(f"节点 {node_key} 的 when 必须指定 node 和 equals")
         depends = [_text(x, 64) for x in (item.get("dependsOn") or [])]
         outputs = workflow_contracts.normalize_outputs(item.get("outputs"), node_key)
         node_capabilities = _node_capabilities(
@@ -581,6 +575,7 @@ def normalize(manifest: dict, workflow: dict | None = None) -> tuple[dict, dict,
                                dict(item.get("retry") or {}).get("maxAttempts") or 1)))}}
         if node_capabilities is not None:
             normalized_node["capabilities"] = node_capabilities
+        normalized_node["dependsOn"] = workflow_contracts.direct_dependencies(normalized_node)
         nodes.append(normalized_node)
         keys.add(node_key)
     _dag(nodes)

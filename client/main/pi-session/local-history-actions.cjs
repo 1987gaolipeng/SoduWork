@@ -86,6 +86,7 @@ function create({ app, session, history, BrowserWindow, shell, trash, resolveAli
       await options.assertCurrent?.(true);
       const deleted = await history.lifecycle(row.id, 'delete', identity);
       await assertResponseCurrent(row, captured, options);
+      require('./skill-failure-context.cjs').remove(app, captured.readScope, [row.id, ...(row.historyAliasIds || [])]);
       publish(deleted.conversation);
       return { ...deleted, id: row.id, aliasIds: row.historyAliasIds, localOnly: true, deleted: true };
     }

@@ -6,6 +6,7 @@ import asyncio
 import os
 import sys
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 from sqlalchemy import func, select
 
@@ -101,6 +102,17 @@ async def runner_protocol() -> None:
             with ai_local._LOCK:
                 ai_local._RUNS[ref] = previous
 
+    workers = runtime._network_rpc_workers()
+    request = workers.accept("work", ref, "job.dispatch")
+    try:
+        data = (await runtime._job({"op": "job.has", "ref": ref, "admissionKey": "dispatch:" + ref}))["data"]
+        chk("the exact network dispatch in preflight is visible before its journal receipt",
+            data["ref"] == ref and data["admissionKey"] == "dispatch:" + ref
+            and data["has"] and data["inflight"] and not data["persisted"], data)
+    finally:
+        workers.finish(request)
+        workers.close()
+
     socket = object()
     registered = runner_hub._Runner(socket, {
         "runnerId": RUNNER_ID, "host": "可靠派活测试机", "bootId": BOOT_ID})
@@ -111,6 +123,7 @@ async def runner_protocol() -> None:
 
 class FakeRunner:
     id = RUNNER_ID
+    client_id = CID
     host = "可靠派活测试机"
     boot_id = BOOT_ID
 
@@ -128,22 +141,27 @@ class FakeRunner:
 async def probe_contract() -> None:
     old_get = runner_hub.get
     item = candidate("t-probe", "b" * 32)
+    runner = FakeRunner()
     try:
-        runner_hub.get = lambda _rid: FakeRunner({
-            "has": True, "persisted": True, "inflight": False, "bootId": BOOT_ID})
+        runner_hub.get = lambda _rid: runner
+        runner.data = {"has": True, "persisted": True, "inflight": False, "bootId": BOOT_ID}
         confirmed = await dispatch_reconcile.probe(item)
         chk("a durable run is authoritative success",
             confirmed.get("state") == "confirmed", confirmed)
 
-        runner_hub.get = lambda _rid: FakeRunner({
-            "has": False, "persisted": False, "inflight": False, "bootId": BOOT_ID})
+        runner.data = {"has": False, "persisted": False, "inflight": False, "bootId": BOOT_ID}
         missing = await dispatch_reconcile.probe(item)
         chk("same-process negative is authoritative non-start",
             missing.get("state") == "not-started", missing)
+        for malformed in ({}, {"has": False}, {"bootId": BOOT_ID}, {"has": "false", "bootId": BOOT_ID},
+                          {"has": False, "bootId": BOOT_ID, "admissionDurable": True}):
+            runner.data = malformed
+            result = await dispatch_reconcile.probe(item)
+            chk("an incomplete negative receipt cannot release the task", result["state"] == "ambiguous", malformed)
 
-        runner_hub.get = lambda _rid: FakeRunner({
+        runner.data = {
             "has": False, "persisted": False, "inflight": False,
-            "bootId": "boot-generation-two"})
+            "bootId": "boot-generation-two"}
         restarted = await dispatch_reconcile.probe(item)
         chk("a restarted Runner can never prove the old process did not start",
             restarted.get("state") == "ambiguous"
@@ -158,17 +176,16 @@ async def probe_contract() -> None:
         runner_hub.get = old_get
 
 
-async def persistence_contract() -> None:
-    await init_db()
+async def persistence_contract(runner) -> None:
     old = NOW - timedelta(seconds=dispatch_reconcile.ATTENTION_AFTER_SECONDS + 30)
     ids = {
         "confirmed": ("t-rec-confirmed", "c" * 32),
+        "terminal": ("t-rec-terminal", "1" * 32),
         "released": ("t-rec-released", "d" * 32),
         "attention": ("t-rec-attention", "e" * 32),
         "stale": ("t-rec-stale", "f" * 32),
     }
     async with SessionLocal() as session:
-        session.add(models.Client(id=CID, secret="smoke"))
         for name, (task_id, attempt) in ids.items():
             session.add(models.Task(
                 id=task_id, title="派活对账 " + name,
@@ -183,15 +200,16 @@ async def persistence_contract() -> None:
         rows = await dispatch_reconcile.candidates(session, now=NOW, limit=20)
         found = {row.task_id for row in rows}
         chk("candidate query selects only the latest uncertain state",
-            found == {ids["confirmed"][0], ids["released"][0], ids["attention"][0]},
+            found == {task_id for name, (task_id, _) in ids.items() if name != "stale"},
             found)
 
     task_id, attempt = ids["confirmed"]
+    runner.data = {"has": True, "persisted": True, "inflight": False, "bootId": BOOT_ID}
+    item = candidate(task_id, attempt, at=old)
+    result = await dispatch_reconcile.probe(item)
     async with SessionLocal() as session:
         action, _task = await dispatch_reconcile.apply_probe(
-            session, candidate(task_id, attempt, at=old),
-            {"state": "confirmed", "runnerOnline": True,
-             "observedBootId": BOOT_ID, "persisted": True}, now=NOW)
+            session, item, result, now=NOW)
         await session.commit()
         task = await session.get(models.Task, task_id)
         event = await dispatch_reconcile._latest_state(session, task_id)
@@ -202,12 +220,28 @@ async def persistence_contract() -> None:
             and execution is not None and execution.ref == dispatch_identity.execution_ref(attempt)
             and task.status == "doing", (action, event.kind, execution and execution.ref))
 
+    task_id, attempt = ids["terminal"]
+    item = candidate(task_id, attempt, at=old)
+    receipt = {"has": True, "persisted": True, "bootId": BOOT_ID,
+               "ref": item.expected_ref, "admissionKey": "dispatch:" + item.expected_ref,
+               "state": "failed", "error": "workspace unavailable", "queuePosition": 0}
+    runner.data = receipt
+    terminal = await dispatch_reconcile.probe(item)
+    async with SessionLocal() as session:
+        await dispatch_reconcile.apply_probe(session, item, terminal)
+        await session.commit()
+        row = await session.scalar(select(am.ExecutionSession).where(am.ExecutionSession.task_id == task_id))
+        chk("a refused launch recovered after ACK loss retains its terminal state and diagnostic",
+            row.state == "failed" and row.finished_at and not row.started_at
+            and row.metadata_.get("error") == receipt["error"], row.state)
+
     task_id, attempt = ids["released"]
+    runner.data = {"has": False, "persisted": False, "inflight": False, "bootId": BOOT_ID}
+    item = candidate(task_id, attempt, at=old)
+    result = await dispatch_reconcile.probe(item)
     async with SessionLocal() as session:
         action, _task = await dispatch_reconcile.apply_probe(
-            session, candidate(task_id, attempt, at=old),
-            {"state": "not-started", "runnerOnline": True,
-             "observedBootId": BOOT_ID}, now=NOW)
+            session, item, result, now=NOW)
         await session.commit()
         task = await session.get(models.Task, task_id)
         event = await dispatch_reconcile._latest_state(session, task_id)
@@ -263,8 +297,16 @@ async def persistence_contract() -> None:
 
 async def main() -> None:
     await runner_protocol()
+    await init_db()
+    async with SessionLocal() as session:
+        session.add_all([models.Client(id=CID, secret="smoke"),
+                         models.Task(id="t-probe", title="Probe", owner_client_id=CID),
+                         am.RunnerNode(id=RUNNER_ID, client_id=CID)])
+        await session.commit()
     await probe_contract()
-    await persistence_contract()
+    runner = FakeRunner()
+    with patch.object(runner_hub, "get", return_value=runner):
+        await persistence_contract(runner)
     await engine.dispose()
 
 

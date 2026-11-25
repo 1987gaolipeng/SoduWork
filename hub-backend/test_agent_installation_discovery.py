@@ -1,6 +1,7 @@
 """Installation selection must retain the executable's own package identity."""
 import json
 import os
+import plistlib
 from pathlib import Path
 import shutil
 import subprocess
@@ -72,6 +73,85 @@ class InstallationDiscoveryTests(unittest.TestCase):
                 patch.object(N, 'private_root', return_value=''), \
                 patch.object(N, 'runtime_target', return_value=('win32', 'x64')):
             self.assertEqual(L._codex_bin(), str(valid / 'codex.exe'))
+
+    def test_macos_gui_standalone_codex_version_and_launch_use_selected_executable(self):
+        from app.services import agent_installation
+        directories = [self.root / name for name in ('directory', 'nonexecutable', 'standalone')]
+        for directory in directories:
+            directory.mkdir()
+        (directories[0] / 'codex').mkdir()
+        rejected = directories[1] / 'codex'
+        rejected.write_bytes(b'not executable')
+        executable = directories[2] / 'codex'
+        executable.write_bytes(b'fixture cli')
+        executable.chmod(0o700)
+        real_access = os.access
+
+        def access(path, mode):
+            return Path(path) != rejected and real_access(path, mode)
+
+        with patch.object(L, '_WIN', False), patch.object(N.sys, 'platform', 'darwin'), \
+                patch.object(N, 'runtime_target', return_value=('darwin', 'arm64')), \
+                patch.object(N, 'private_bin', return_value=''), patch.object(N, 'private_root', return_value=''), \
+                patch.object(L, '_npm_root', return_value=''), patch.object(L, '_npm_roots', return_value=[]), \
+                patch.dict(os.environ, {'PATH': ''}, clear=True), patch.object(L.shutil, 'which', return_value=None) as which, \
+                patch.object(agent_installation, 'known_bin_dirs', return_value=list(map(str, directories))), \
+                patch.object(os, 'access', side_effect=access), patch.object(A, '_short', return_value='codex-cli 1.0.0') as probe:
+            with patch.object(A, '_npm_root', return_value=''), patch.object(A, 'node_env', return_value={'ok': True}):
+                personal = A.detect('codex', probes={})
+                self.assertTrue(personal['present'])
+                self.assertEqual(personal['bin'], str(executable))
+                # A CLI by itself cannot start policy-controlled sessions without the permission bridge.
+                self.assertEqual(personal['setupState'], 'broken')
+                self.assertIn('Codex 缺少安全权限适配器', personal['runtimeIssue'])
+                for other in ('dsh', 'codex-harness', 'qwen', 'kimi'):
+                    self.assertEqual(A.detect(other, probes={})['setupState'], 'missing', other)
+            self.assertEqual(A._version_of('codex')[:2], ('codex-cli 1.0.0', 'cli'))
+            self.assertEqual(probe.call_args.args[:2], (str(executable), ['--version']))
+            profile = L._PROFILES['codex']
+            self.assertEqual(profile['command'](profile['bin'](), ['exec'], str(self.root), {}), [str(executable), 'exec'])
+            executable.unlink()
+            self.assertIsNone(profile['bin']())
+            executable.write_bytes(b'fixture cli')
+            which.return_value = str(self.root / 'preferred/codex')
+            self.assertEqual(profile['bin'](), which.return_value)
+
+    def test_macos_codex_from_user_package_manager_without_shell_path(self):
+        from app.services import agent_installation
+        with patch.object(agent_installation.sys, 'platform', 'darwin'), patch.object(os.path, 'expanduser', return_value=str(self.root)), \
+                patch.object(L, '_WIN', False), patch.object(N, 'runtime_target', return_value=('darwin', 'arm64')), \
+                patch.object(N, 'private_bin', return_value=''), patch.object(L, '_npm_root', return_value=''), \
+                patch.object(L, '_npm_roots', return_value=[]), patch.object(L, '_real_bin', return_value=None), \
+                patch.object(agent_installation, 'known_bin_dirs', return_value=[]), \
+                patch.dict(os.environ, {}, clear=True):
+            for directory in (self.root / 'Library/pnpm', self.root / 'Library/pnpm/bin', self.root / '.bun/bin'):
+                directory.mkdir(parents=True)
+                binary = directory / 'codex'
+                binary.touch()
+                binary.chmod(0o755)
+                self.assertEqual(L._codex_bin(), str(binary))
+                binary.unlink()
+
+    def test_macos_desktop_app_without_adapter_is_recognized_but_not_runnable(self):
+        from app.services import agent_installation
+        contents = self.root / 'Applications/DeepSeek Harness.app/Contents'
+        contents.mkdir(parents=True)
+        binary = contents / 'MacOS/DeepSeek Harness'
+        binary.parent.mkdir()
+        binary.touch()
+        binary.chmod(0o755)
+        with patch.object(agent_installation.sys, 'platform', 'darwin'), patch.object(os.path, 'expanduser', return_value=str(self.root)), \
+                patch.object(agent_installation, '_SYSTEM_APPLICATIONS', self.root / 'System Apps'), \
+                patch.object(A, '_bin_of', return_value=''), patch.object(A, '_version_of', return_value=('', '', '')):
+            for identifier, found in [('other.app', False), ('com.deepseek.dsh', True)]:
+                (contents / 'Info.plist').write_bytes(plistlib.dumps({
+                    'CFBundleIdentifier': identifier, 'CFBundleExecutable': binary.name}))
+                row = A.detect('dsh', probes={})
+                self.assertEqual(row.get('desktopAppDetected', False), found)
+                self.assertFalse(row['installed'])
+                self.assertEqual(row['setupState'], 'missing')
+            binary.unlink()
+            self.assertFalse(A.detect('dsh', probes={}).get('desktopAppDetected'))
 
     def test_selected_external_package_is_not_shadowed_by_private_metadata(self):
         private = self.root / 'private/node_modules'

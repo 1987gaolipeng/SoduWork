@@ -25,7 +25,7 @@ def main():
     root = Path(__file__).resolve().parents[1]
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    browser = next((p for p in [r'C:\Program Files\Google\Chrome\Application\chrome.exe', r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe', '/usr/bin/chromium', '/usr/bin/google-chrome'] if Path(p).exists()), None)
+    browser = next((p for p in [r'C:\Program Files\Google\Chrome\Application\chrome.exe', r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe', '/usr/bin/chromium', '/usr/bin/google-chrome', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'] if Path(p).exists()), None)
     if not browser:
         raise SystemExit('Chrome or Edge is required for rendering tests')
     with socket.socket() as sock:
@@ -52,6 +52,7 @@ def main():
                 variants += [('catalog-tabs', 1440, 1000, 'light'), ('catalog-tabs', 390, 1000, 'dark')]
                 variants += [('catalog', 1280, 1000, 'light'), ('catalog', 1920, 1000, 'light')]
                 variants += [('featured-cover', 1440, 1000, 'light'), ('featured-cover', 390, 1000, 'dark')]
+                variants += [('bulk-import', 1440, 1000, 'light'), ('simulation', 1440, 1000, 'light')]
                 unknown = set(args.variant or []) - {f'{v}-{w}-{t}' for v, w, _, t in variants}
                 if unknown:
                     raise ValueError('Unknown render variants: ' + ', '.join(sorted(unknown)))
