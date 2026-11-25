@@ -228,6 +228,8 @@
     "model.detail.模型服务余额不足或计费额度不可用（供应商错误码 1113）；请检查供应商账单、API Key 类型和接口地址": "The model service has insufficient balance or unavailable billing allowance (provider error 1113). Check the provider's billing, API key type, and endpoint.",
     "workspace.history.more": "Load more",
     "workspace.history.retry": "Reload",
+    "workspace.firstSend.checkFiles": "Could not read the following attachment(s): {files}. Please select them again.",
+    "workspace.firstSend.skippedFiles": "Skipped unreadable attachments: {files}.",
     "workspace.firstSend.opening": "Opening",
     "workspace.firstSend.sending": "Sending",
     "workspace.firstSend.accepted": "Sent",

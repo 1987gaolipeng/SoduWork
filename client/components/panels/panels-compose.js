@@ -547,7 +547,16 @@
     }
     if (resolveSeq !== _pluginResolveSeq) return false;
     if (!current()) return false;
-    const attachmentRefs = _attachments ? await _attachments.refs(_setupApi()) : [];
+    const unreadable = homeDraft?.files?.length && !intentOptions?.intent ? [] : undefined;
+    const attachmentRefs = _attachments ? await _attachments.refs(_setupApi(), { unreadable }) : [];
+    if (!current() || homeDraft && !homeDraft.isCurrent()) return false;
+    if (unreadable?.length || unreadable && !attachmentRefs.length) {
+      const files = (unreadable.length ? unreadable : homeDraft.files.map(file => file.name)).join('、');
+      const key = attachmentRefs.length ? 'workspace.firstSend.skippedFiles' : 'workspace.firstSend.checkFiles';
+      const template = attachmentRefs.length ? '已跳过无法读取的附件「{files}」。' : '无法读取附件「{files}」，请重新选择。';
+      global.petSay?.(global.SoduWorkI18n?.t?.(key, template, { files }) || template.replace('{files}', () => files));
+      if (!attachmentRefs.length) return false;
+    }
     const libraryItemIds = _attachments ? _attachments.libraryItems() : [];
     await global.ComposeRuntime?.ready?.();
     if (await global.ComposeModelPicker?.ready?.() === false) {

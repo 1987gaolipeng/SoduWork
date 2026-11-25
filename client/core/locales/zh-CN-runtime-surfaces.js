@@ -32,6 +32,8 @@
     '执行已安排，可在“与我相关”查看进展': '执行已安排，可在“与我相关”查看进展',
     "workspace.history.more": "加载更多",
     "workspace.history.retry": "重新加载",
+    "workspace.firstSend.checkFiles": "无法读取附件「{files}」，请重新选择。",
+    "workspace.firstSend.skippedFiles": "已跳过无法读取的附件「{files}」。",
     "workspace.firstSend.opening": "正在启动",
     "workspace.firstSend.sending": "正在发送",
     "workspace.firstSend.accepted": "已发送",

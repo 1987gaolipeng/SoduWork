@@ -171,6 +171,28 @@ test('ordinary attachment preparation cannot start a stale first send after new-
   assert.equal(f.draft(), 'new attachment draft');
 });
 
+for (const change of ['none', 'edit', 'navigate']) test('unreadable starter attachments cannot dispatch or overwrite another draft: ' + change, async t => {
+  const reading = deferred(), notices = [];
+  let checking = false, requests = 0;
+  const f = fixture(t, { firstSendApi: { startFirstSend: async () => { requests++; } } });
+  f.g.petSay = message => notices.push(message);
+  const file = { name: 'moved.txt' };
+  f.compose._attachments = { files: () => [file], has: () => true, clear() {}, add() {}, names: () => [file.name],
+    analysis: async () => [], libraryItems: () => [],
+    async refs(_api, { unreadable }) { checking = true; await reading.promise; unreadable.push(file.name); return []; } };
+  f.type('read the file');
+  const pending = f.submit(); await until(() => checking);
+  if (change === 'navigate') f.newSession();
+  if (change !== 'none') f.type('my new text');
+  reading.resolve(); await pending;
+  assert.equal(requests, 0); assert.equal(f.opens.length, 0); assert.equal(f.calls.length, 0);
+  assert.equal(f.panel.dataset.stage, 'compose');
+  assert.equal(f.input.value, change === 'none' ? 'read the file' : 'my new text');
+  assert.equal(f.compose._attachments.files()[0], file);
+  if (change === 'none') assert.match(notices.join(' '), /moved.txt/);
+  else assert.deepEqual(notices, []);
+});
+
 test('a normal accepted first send consumes only its original draft and plugin selection', async t => {
   const f = fixture(t); f.type('normal request', [oldPlugin]); await f.submit();
   assert.equal(f.calls.length, 1);

@@ -50,6 +50,39 @@ function createPicker(api, options = {}) {
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
 
+test('starter checks large path-backed files without buffering them and keeps unreadable selections editable', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-starter-input-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const original = path.join(root, 'original.txt'), moved = path.join(root, 'moved.txt');
+  const size = 33 * 1024 * 1024, reads = [];
+  fs.writeFileSync(original, 'input'); fs.truncateSync(original, size);
+  const large = { name: 'original.txt', type: 'text/plain', size,
+    slice(start, end) {
+      reads.push(end - start);
+      return { async arrayBuffer() {
+        const handle = await fs.promises.open(original, 'r');
+        try { return (await handle.read(Buffer.alloc(end - start), 0, end - start, start)).buffer; }
+        finally { await handle.close(); }
+      } };
+    },
+    arrayBuffer() { throw new Error('whole file read'); } };
+  const picker = createPicker(loadComponent()), bridge = { pathForFile: file => file === large ? original : '' };
+  picker.add([large]); await tick();
+  assert.equal((await picker.refs(bridge, { unreadable: [] }))[0].path, original);
+  fs.renameSync(original, moved);
+  const missing = [];
+  assert.equal((await picker.refs(bridge, { unreadable: missing })).length, 0);
+  assert.deepEqual(missing, ['original.txt']); assert.equal(picker.files()[0], large);
+  picker.add([new File(['keep me'], 'valid.txt')]); await tick();
+  const partial = [], files = await picker.refs(bridge, { unreadable: partial });
+  assert.deepEqual(partial, ['original.txt']); assert.equal(files.length, 1);
+  assert.equal(files[0].name, 'valid.txt'); assert.equal(Buffer.from(files[0].data).toString(), 'keep me');
+  assert.deepEqual(reads, [512, 1, 1, 1]);
+  const virtual = [];
+  assert.equal((await picker.refs({ pathForFile: () => '' }, { unreadable: virtual })).length, 1);
+  assert.deepEqual(virtual, ['original.txt']);
+});
+
 test('draft identity survives hydration and native cloning but never merges distinct same-name files', async () => {
   const api = loadComponent(), picker = createPicker(api);
   const file = new File(['one'], 'same.txt', { lastModified: 1 });
@@ -86,7 +119,9 @@ test('a dropped directory retains its original File and path without reading fil
   assert.equal(reads, 0);
   assert.deepEqual(warnings, []);
   assert.match(picker.tray.innerHTML, /文件夹/);
-  const refs = await picker.refs({ pathForFile: file => file === folder ? folderPath : '' });
+  const unreadable = [];
+  const refs = await picker.refs({ pathForFile: file => file === folder ? folderPath : '' }, { unreadable });
+  assert.deepEqual(unreadable, []); assert.equal(reads, 0);
   assert.equal(refs[0].path, folderPath);
   const staged = await require('../main/pi-session/attachments').stage(cwd, refs);
   assert.equal(staged.files[0].kind, 'dir');

@@ -310,6 +310,8 @@
     '执行已安排，可在“与我相关”查看进展': '실행이 예정되어 있습니다. “나와 관련”에서 진행 상황을 확인할 수 있습니다.',
     "workspace.history.more": "더 불러오기",
     "workspace.history.retry": "새로고침",
+    "workspace.firstSend.checkFiles": "첨부 파일 ‘{files}’을(를) 읽을 수 없습니다. 다시 선택하세요.",
+    "workspace.firstSend.skippedFiles": "읽을 수 없는 첨부 파일 ‘{files}’을(를) 건너뛰었습니다.",
     "workspace.firstSend.opening": "시작 중",
     "workspace.firstSend.sending": "전송 중",
     "workspace.firstSend.accepted": "전송됨",

@@ -626,7 +626,7 @@
       view.text(text.slice(0, 200000));
     }
 
-    async function refs(api) {
+    async function refs(api, { unreadable } = {}) {
       const out = [];
       for (const row of rows.slice()) {
         if (row.nativePath) {
@@ -637,15 +637,24 @@
         try { localPath = api && typeof api.pathForFile === 'function' ? api.pathForFile(row.file) : ''; }
         catch (_) { localPath = ''; }
         if (localPath) {
+          // Browser-backed large files still refer to the original path. Check one
+          // byte while the starter can keep its draft. Directories are references.
+          if (unreadable && row.kind !== 'dir' && row.file?.slice) {
+            try { await row.file.slice(0, 1).arrayBuffer(); }
+            catch { unreadable.push(row.name); continue; }
+          }
           out.push({ name: row.name, size: row.size, type: row.type, path: localPath,
             ...(row.kind === 'dir' ? { kind: 'dir' } : {}) });
           continue;
         }
         if (row.kind === 'dir') {
-          notify('文件夹「' + row.name + '」无法取得本地路径，请从文件管理器重新拖入');
+          if (unreadable) unreadable.push(row.name);
+          else notify('文件夹「' + row.name + '」无法取得本地路径，请从文件管理器重新拖入');
           continue;
         }
-        if (!row.file || typeof row.file.arrayBuffer !== 'function') continue;
+        if (!row.file || typeof row.file.arrayBuffer !== 'function') {
+          unreadable?.push(row.name); continue;
+        }
         let data;
         try { data = new Uint8Array(await row.file.arrayBuffer()); }
         catch (_) {
@@ -653,7 +662,8 @@
            * Report the specific attachment that disappeared after initial validation instead of
            * silently omitting it at send time.
            */
-          notify('附件「' + row.name + '」读取失败已跳过：可能来自企业微信临时缓存，请另存后拖入');
+          if (unreadable) unreadable.push(row.name);
+          else notify('附件「' + row.name + '」读取失败已跳过：可能来自企业微信临时缓存，请另存后拖入');
           continue;
         }
         out.push({ name: row.name, size: data.byteLength, type: row.type, data });

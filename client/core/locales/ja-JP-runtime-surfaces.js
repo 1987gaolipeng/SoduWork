@@ -310,6 +310,8 @@
     '执行已安排，可在“与我相关”查看进展': '実行が予定されています。「自分に関連」で進捗を確認できます。',
     "workspace.history.more": "さらに読み込む",
     "workspace.history.retry": "再読み込み",
+    "workspace.firstSend.checkFiles": "添付ファイル「{files}」を読み取れません。もう一度選択してください。",
+    "workspace.firstSend.skippedFiles": "読み取れない添付ファイル「{files}」をスキップしました。",
     "workspace.firstSend.opening": "起動中",
     "workspace.firstSend.sending": "送信中",
     "workspace.firstSend.accepted": "送信済み",
