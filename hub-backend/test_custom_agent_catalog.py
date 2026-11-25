@@ -188,7 +188,8 @@ async def run_fixture(directory):
     try:
         opened = await machine._local_rpc_dispatch({"op": "job.dispatch", "cli": agent,
             "dispatchId": "custom-first", "task": {"id": "custom-test", "title": "Write a report"},
-            "ctx": {"workDir": str(workspace), "conversationMode": "adaptive", "conversationUserText": "Write a report"},
+            "ctx": {"workDir": str(workspace), "conversationMode": "adaptive", "conversationUserText": "Write a report",
+                    "conversationSubmissionId": "first-runner-test"},
             "cfg": cfg})
         assert opened["ok"], opened
         ref = opened["data"]["ref"]; refs.add(ref)
@@ -198,6 +199,8 @@ async def run_fixture(directory):
                 raise AssertionError(data)
             return data if data.get("status") == "done" else None
         initial = await until(done)
+        users = [item for item in initial["items"] if item["kind"] == "user"]
+        assert [item.get("submissionId") for item in users] == ["first-runner-test"], users
         assert initial["cliSid"] == "custom-fixture-session", initial
         assert "First turn delivered" in (workspace / "custom-result.md").read_text(encoding="utf-8")
         assert "custom-result.md" in json.dumps(initial, ensure_ascii=False)

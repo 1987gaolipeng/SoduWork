@@ -175,8 +175,10 @@ function install({ app, ipcMain, session, identityOf, skillDirs, deviceGrants, m
     const handle = owned(event, ref);
     return invokeHandle(handle, options);
   }
-  async function invokeHandle(handle, options) {
+  async function invokeHandle(handle, options, beforeDispatch) {
     const optionsSafe = options || {}, command = optionsSafe.command;
+    if (handle.verifyRecoverySend && ['start', 'resume'].includes(command))
+      throw Error('请在打开这条历史的桌面普通会话中发送。');
     const existing = controllers.get(handle.sessionId)?.record || journal(handle).read();
     const { owner } = await checkedIdentity(handle, existing);
     if (command === 'get') return snapshot(handle);
@@ -192,6 +194,7 @@ function install({ app, ipcMain, session, identityOf, skillDirs, deviceGrants, m
         if (!/^[a-zA-Z0-9_-]{12,80}$/.test(optionsSafe.requestId || '')) throw new Error('缺少有效的协作请求标识');
         const accepted = receipt(handle, owner, optionsSafe.requestId).read();
         if (accepted) {
+          beforeDispatch?.();
           const prior = core.store(path.join(root, 'archive'), accepted.runId).read();
           if (!prior || prior.owner !== owner) throw new Error('协作回执无法核对，请保留记录后重试');
           return { ok: true, duplicate: true, run: core.view(prior),
@@ -212,6 +215,8 @@ function install({ app, ipcMain, session, identityOf, skillDirs, deviceGrants, m
         record.inputAttachments = await stageInputs(handle, record, Array.isArray(optionsSafe.attachments) ? optionsSafe.attachments : []);
         await captureContext(handle, record);
         await checkedIdentity(handle, record);
+        // From the first durable mutation onward a failed response cannot prove non-admission.
+        beforeDispatch?.();
         persist(handle, record);
         controller = make(handle, record);
         await queue(handle, controller);
@@ -241,7 +246,7 @@ function install({ app, ipcMain, session, identityOf, skillDirs, deviceGrants, m
     catch (error) { return { ok: false, reason: error.message || '插件调试暂时不可用' }; }
   });
   return {
-    async submitConversation(handle, text, files, options, selections) {
+    async submitConversation(handle, text, files, options, selections, beforeDispatch) {
       const explicit = Array.isArray(selections) ? selections : [];
       const workflows = explicit.filter(item => String(item?.pluginId || '').startsWith('local:'))
         .map(item => ({ selection: item, plugin: personal.get(app, item.pluginId) }))
@@ -253,7 +258,7 @@ function install({ app, ipcMain, session, identityOf, skillDirs, deviceGrants, m
       if (item.plugin.conversationUse?.available === false) throw new Error(item.plugin.conversationUse.reason || '请先完成插件设置');
       const result = await invokeHandle(handle, { command: 'start', mode: 'conversation',
         pluginId: item.plugin.pluginId, requestId: options.submissionId, prompt: text,
-        parameters: item.selection.inputValues || {}, includeContext: true, attachments: files });
+        parameters: item.selection.inputValues || {}, includeContext: true, attachments: files }, beforeDispatch);
       const submitted = result.submitted || { accepted: true, queued: false, completion: Promise.resolve({ ok: true, duplicate: true }) };
       return { ...submitted, workflowRun: result.run };
     },

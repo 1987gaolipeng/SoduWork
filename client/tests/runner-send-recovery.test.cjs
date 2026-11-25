@@ -23,6 +23,7 @@ async function fixture(t, config = {}) {
     }
     if (op === 'job.comment') { comments++; return config.comment ? config.comment(input) : { ok: true, data: { ok: true } }; }
     if (op === 'job.stop') return config.stop ? config.stop(input) : { ok: true, data: { ok: true } };
+    if (op === 'job.has' && config.has) return config.has(input);
     if (op === 'job.session') return read ? read(input) : { ok: true, data: { ok: true, ref, status,
       items: status === 'done' ? [{ seq: comments + 1, kind: 'say', text: 'Recovered reply ' + comments }] : [] } };
     throw Error('Unexpected recovery operation: ' + op);
@@ -81,12 +82,128 @@ test('a dispatch admitted after close still sends stop without writing a closed 
   finally { log.close(); }
 });
 
+for (const action of ['cancel', 'close']) test(action + ' while a follow-up is awaiting admission stops the accepted turn', async t => {
+  let admitted = false;
+  const ack = deferred(), f = await fixture(t, { comment: () => ack.promise,
+    stop: async () => admitted ? { ok: true, data: { ok: true } }
+      : { ok: true, data: { ok: false, error: 'No current execution' } } });
+  await f.handle.submit('First', []).completion;
+  const pending = f.handle.submit('Follow-up', []);
+  await until(() => f.comments === 1);
+  f.handle[action]();
+  await pending.completion;
+  const { conversationTranscriptMessages } = require('../main/conversation/conversation-transcript.cjs');
+  assert.ok(conversationTranscriptMessages(f.handle.snapshot().messages).some(row => row.text === 'Follow-up'),
+    'the original input stays in history when the native acknowledgement is still outstanding');
+  if (action === 'cancel') assert.equal(f.handle.snapshot().statusText, '正在停止…');
+  assert.equal(f.calls.filter(row => row.op === 'job.stop').length, 0);
+  admitted = true;
+  ack.resolve({ ok: true, data: { ok: true, state: 'running' } });
+  await until(() => f.calls.some(row => row.op === 'job.stop'));
+  assert.deepEqual(f.calls.filter(row => row.op === 'job.stop').map(row => row.input.ref), [f.ref]);
+  assert.equal(f.comments, 1);
+});
+
+test('cancelling local follow-up preparation leaves the completed execution alone and permits a fresh request', async t => {
+  const prepare = deferred(), entered = deferred(), f = await fixture(t);
+  await f.handle.submit('Completed', []).completion;
+  const pending = f.handle.submit('Waiting for preparation', [], {
+    beforeTurn: () => { entered.resolve(); return prepare.promise; },
+  });
+  await entered.promise;
+  f.handle.cancel();
+  const next = f.handle.submit('Fresh user request', []);
+  assert.equal(next.queued, true);
+  assert.equal(f.comments, 0);
+  prepare.resolve();
+  assert.equal((await pending.completion).cancelled, true);
+  assert.equal((await next.completion).ok, true);
+  assert.deepEqual(f.calls.filter(row => row.op === 'job.comment').map(row => row.input.text), ['Fresh user request']);
+  assert.equal(f.calls.some(row => row.op === 'job.stop'), false);
+});
+
+for (const followUp of [false, true]) test('stopping a preparing ' + (followUp ? 'follow-up' : 'first turn') +
+    ' drops only the unsubmitted input from live and independent history', async t => {
+  const f = await fixture(t);
+  const text = 'The same request';
+  if (followUp) await f.handle.submit(text, [], { submissionId: 'earlier' }).completion;
+  const { conversationTranscriptMessages } = require('../main/conversation/conversation-transcript.cjs');
+  const gate = require('../main/pi-session/plugin-generation-gate.cjs'), begin = gate.begin;
+  const entered = deferred(), release = deferred();
+  t.mock.method(gate, 'begin', async (...args) => {
+    entered.resolve();
+    await release.promise;
+    return begin(...args);
+  });
+  const pending = f.handle.submit(text, [], { submissionId: 'cancel-this' });
+  await entered.promise;
+  const dialogue = () => conversationTranscriptMessages(f.handle.snapshot().messages);
+  try {
+    assert.ok(f.handle.snapshot().messages.some(row => row.submissionId === 'cancel-this'));
+    assert.equal(dialogue().filter(row => row.text === text).length, Number(followUp));
+    assert.equal(f.handle.cancel().cancelledBeforeDispatch, 'cancel-this');
+  } finally { release.resolve(); }
+  assert.equal((await pending.completion).cancelled, true);
+  assert.equal(f.handle.snapshot().messages.some(row => row.submissionId === 'cancel-this'), false);
+  assert.equal(dialogue().filter(row => row.text === text).length, Number(followUp));
+  assert.equal(f.dispatches, Number(followUp));
+  assert.equal(f.comments, 0);
+});
+
+test('a cancelled follow-up explicitly refused before admission releases the next user request', async t => {
+  const ack = deferred();
+  let firstComment = true;
+  const f = await fixture(t, { comment: () => {
+    if (!firstComment) return { ok: true, data: { ok: true } };
+    firstComment = false;
+    return ack.promise;
+  } });
+  await f.handle.submit('First', []).completion;
+  const refused = f.handle.submit('Follow-up', []);
+  await until(() => f.comments === 1);
+  f.handle.cancel();
+  await refused.completion;
+  ack.resolve({ ok: false, error: 'Refused before admission' });
+  await until(() => !f.handle.inFlight());
+  assert.equal(f.calls.filter(row => row.op === 'job.stop').length, 0);
+  const next = f.handle.submit('New instruction', []);
+  assert.equal(next.queued, false);
+  assert.equal((await next.completion).ok, true);
+  assert.equal(f.comments, 2);
+});
+
+test('cancel before a lost follow-up acknowledgement waits for evidence of that specific turn', async t => {
+  const ack = deferred(), f = await fixture(t, { comment: () => ack.promise });
+  await f.handle.submit('First', []).completion;
+  const pending = f.handle.submit('Follow-up', []);
+  await until(() => f.comments === 1);
+  f.handle.cancel();
+  await pending.completion;
+  ack.reject(Error('Unknown comment admission'));
+  await new Promise(setImmediate);
+  f.setRead(async () => ({ ok: true, data: { ok: true, ref: f.ref, status: 'done', admissionKey: 'old', items: [] } }));
+  f.handle.updateQueue('', 'resume'); await new Promise(setImmediate);
+  assert.equal(f.handle.snapshot().execution.recoveryRequired, true);
+  assert.equal(f.calls.filter(row => row.op === 'job.stop').length, 0);
+  const key = 'comment:' + f.calls.find(row => row.op === 'job.comment').input.turnId;
+  let status = 'running';
+  f.setRead(async () => ({ ok: true, data: { ok: true, ref: f.ref, status, admissionKey: key, items: [] } }));
+  f.handle.updateQueue('', 'resume');
+  await until(() => f.calls.some(row => row.op === 'job.stop'));
+  status = 'stopped';
+  f.handle.updateQueue('', 'resume');
+  await until(() => !f.handle.snapshot().execution.recoveryRequired);
+  assert.equal(f.handle.inFlight(), false);
+  assert.equal(f.comments, 1);
+});
+
 test('the real offline Runner proves no write occurred and never traps a new explicit submission', async t => {
   const f = await fixture(t, { realRunner: true });
   const first = f.handle.submit('Hello', []);
   const result = await first.completion;
   assert.equal(result.ok, false);
   assert.equal(result.retrySafe, true);
+  assert.equal(result.notSent, true);
   await new Promise(setImmediate);
   assert.equal(f.handle.snapshot().execution.recoveryRequired, false);
   assert.equal(Boolean(busy(f.handle)), false);
@@ -97,7 +214,7 @@ test('the real offline Runner proves no write occurred and never traps a new exp
 
 test('a definite admission refusal is switchable after settling while generic unknown failure stays fenced', async t => {
   const f = await fixture(t, { dispatch: async () => ({ ok: false, error: 'Admission refused' }) });
-  await f.handle.submit('Hello', []).completion;
+  assert.equal((await f.handle.submit('Hello', []).completion).notSent, true);
   await new Promise(setImmediate);
   assert.equal(Boolean(busy(f.handle)), false);
   assert.equal(Boolean(busy({ snapshot: () => ({ status: 'unreachable' }), inFlight: () => false })), true);
@@ -111,6 +228,7 @@ test('lost dispatch ACK recovers the same active session without replay or resum
   const failure = await first.completion;
   assert.equal(failure.ok, false);
   assert.notEqual(failure.retrySafe, true);
+  assert.notEqual(failure.notSent, true);
   await new Promise(setImmediate);
   assert.equal(f.handle.snapshot().execution.recoveryRequired, true);
   const result = await f.handle.updateQueue('', 'resume');
@@ -337,6 +455,43 @@ test('a cancelled unknown admission stays fenced when verification still cannot 
   assert.equal(f.handle.inFlight(), true);
   assert.equal(f.calls.filter(row => row.op === 'job.stop').length, 0);
   assert.equal(f.dispatches, 1);
+});
+
+test('after cancelling an unacknowledged first dispatch only ordered durable absence releases it', async t => {
+  const ack = deferred();
+  let workPending = true, samePipe = true, oldRunner = false;
+  const f = await fixture(t, { dispatch: (_, n) => n === 1 ? ack.promise : { ok: true, data: { ref: f.ref } },
+    has: async input => ({ ok: true, data: {
+      has: false, inflight: false, persisted: false, admissionDurable: true, bootId: 'boot',
+      admissionKey: input.admissionKey || '',
+      ...(!oldRunner && input.checkPendingWork ? { localWorkPending: workPending } : {}),
+    } }) });
+  const missing = { ok: true, data: { ok: false, code: 'NATIVE_HISTORY_MISSING', ref: f.ref, items: [] } };
+  f.setRead(async () => missing);
+  const first = f.handle.submit('Original request', []);
+  await until(() => f.dispatches === 1);
+  f.handle.cancel(); await first.completion;
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  ack.reject(Object.assign(Error('Runner request timed out'), { sameDispatchConnection: () => samePipe }));
+  await new Promise(setImmediate);
+  const verify = async () => { f.handle.updateQueue('', 'resume'); await new Promise(setImmediate); };
+  t.mock.timers.tick(10000); await new Promise(setImmediate);
+  assert.equal(f.calls.find(row => row.op === 'job.session').input.historyRead, true);
+  assert.equal(f.handle.inFlight(), true, 'a request can still be waiting on the work lane');
+  workPending = false; oldRunner = true; await verify();
+  assert.equal(f.handle.inFlight(), true, 'older Runners cannot certify transport absence');
+  oldRunner = false; samePipe = false; await verify();
+  assert.equal(f.handle.inFlight(), true, 'a fresh empty Runner cannot certify the original write');
+  samePipe = true; await verify();
+  assert.equal(f.handle.inFlight(), false);
+  assert.equal(f.dispatches, 1); assert.equal(f.comments, 0);
+  assert.equal(f.calls.some(row => row.op === 'job.stop'), false);
+  t.mock.timers.reset();
+  f.setRead(null);
+  const next = f.handle.submit('Fresh request', []);
+  assert.equal(next.queued, false); assert.equal((await next.completion).ok, true);
+  assert.deepEqual(f.calls.filter(row => row.op === 'job.dispatch').map(row => row.input.ctx.conversationUserText),
+    ['Original request', 'Fresh request']);
 });
 
 test('all 501 recovered events and the native status remain fenced until pagination is applied', async t => {

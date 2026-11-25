@@ -2,7 +2,7 @@
 
 // Native history and cached copies retain their account and Hub authority.
 // Local lifecycle management does not require a Hub mutation.
-function create({ app, session, history, BrowserWindow, shell, trash, resolveAlias,
+function create({ app, session, history, BrowserWindow, shell, trash, resolveAlias, retireFirstSends,
   identityOf = () => require('../conversation/requirement-context').cachedIdentity(app) }) {
   const queues = new Map();
   function publish(row) {
@@ -127,6 +127,11 @@ function create({ app, session, history, BrowserWindow, shell, trash, resolveAli
         if (!current || current.id !== row.id) throw Error('会话已在其他窗口更新，请刷新后重试');
       } } : settings;
       const result = await run(action, row.id, guarded, captured);
+      if (retireFirstSends && action === 'delete' && result?.ok) {
+        await guarded.assertCurrent(true);
+        require('../conversation/history-access').assertLocalCurrent(app, captured, row, identityOf());
+        retireFirstSends(captured, row.id);
+      }
       // The directory ID is only a display alias for this response. Persisting
       // it as a native identity would incorrectly outlive a later migration.
       return accountAlias && result ? { ...result, aliasIds: [...new Set([id, ...(result.aliasIds || [])])] } : result;

@@ -41,6 +41,8 @@ function withTranscript(data, dialogue) {
 
   const extra = dialogue.slice(matched).map(({ role, text }) => ({ role, text }));
   const conflict = index < visible.length;
+  const unconfirmedUserTail = !conflict && !consumed && matched > 0 && extra.length === 1 &&
+    extra[0].role === 'user' && extra[0].text.trim() && dialogue[matched - 1].role === 'assistant';
   if (conflict) {
     // Independent records that disagree stay visibly separate. Neither can
     // prove the order or execution state of the other version.
@@ -50,6 +52,6 @@ function withTranscript(data, dialogue) {
     extra[0].text = extra[0].text.slice(consumed);
   }
   return { ...data, snapshot: { ...data?.snapshot, messages: [...native, ...extra], tools: data?.snapshot?.tools || [] },
-    coverage: { ...data?.coverage, complete: false } };
+    coverage: { ...data?.coverage, complete: false }, ...(unconfirmedUserTail ? { unconfirmedUserTail: true } : {}) };
 }
 module.exports = { withTranscript };

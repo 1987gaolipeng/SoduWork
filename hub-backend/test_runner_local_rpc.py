@@ -56,6 +56,31 @@ class LocalRpcTests(unittest.IsolatedAsyncioTestCase):
         machine._drop_message_transfers = AsyncMock()
         return machine
 
+    async def test_local_absence_query_counts_dispatch_waiting_before_admission(self):
+        from app.services.dispatch_identity import execution_ref
+        machine = self.runner()
+        machine._dispatching_refs = set()
+        machine.boot_id = "fixture"
+        async def dispatch(message):
+            if message["op"] == "job.dispatch":
+                return {"ok": False, "error": "Rejected before admission"}
+            return await machine._local_rpc_dispatch(message)
+        server = self.create(dispatch)
+        machine._pending_rpc_requests = server.workers.pending
+        gate = server.semaphores["work"] = asyncio.Semaphore(0)
+        ref = execution_ref("fixture-waiting")
+        query = {"op": "job.has", "ref": ref, "admissionKey": "dispatch:" + ref}
+        await server.submit("first", {"op": "job.dispatch", "dispatchId": "fixture-waiting"})
+        self.assertNotIn("localWorkPending", (await machine._job(query))["data"])
+        await server.submit("blocked", {**query, "checkPendingWork": True})
+        blocked = (await self.reply("blocked"))["result"]["data"]
+        self.assertFalse(blocked["has"])
+        self.assertTrue(blocked["localWorkPending"])
+        gate.release()
+        await asyncio.gather(*server.tasks)
+        await server.submit("finished", {**query, "checkPendingWork": True})
+        self.assertFalse((await self.reply("finished"))["result"]["data"]["localWorkPending"])
+
     async def test_image_receipts_run_on_the_local_query_lane_with_the_runner_store(self):
         server = self.create(self.runner()._local_rpc_dispatch)
         request = {"op": "runtime.history.imageReceipts", "ref": "synthetic-local-chat",

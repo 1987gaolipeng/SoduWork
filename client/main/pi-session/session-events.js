@@ -139,7 +139,7 @@ function _execution() {
 
 function _thinkingView() { return thinkingCapabilities.view(ctx.piSession); }
 
-function _snapshot(options) {
+function _snapshot(options, archiveSnapshot) {
     // taskBinding is updated whenever a binding is appended. Re-scanning the
     // complete JSONL entry list for every streamed token made long sessions
     // increasingly expensive and could block the Electron main process.
@@ -148,8 +148,8 @@ function _snapshot(options) {
     const controlled = active && active.options.controlled && (active.options.pluginDebug ? ctx.handle.pluginDebug : ctx.taskExecutions.get(active.options.taskId));
     const controlledView = !active?.options.pluginDebug &&
       require('./controlled-execution-snapshot.cjs').project(controlled, active?.id);
-    const transcript = ctx.liveAccess.view(options && typeof ctx.acc.uiSnapshot === 'function'
-      ? ctx.acc.uiSnapshot(options) : ctx.acc.snapshot());
+    const transcript = ctx.liveAccess.view(archiveSnapshot || (options && typeof ctx.acc.uiSnapshot === 'function'
+      ? ctx.acc.uiSnapshot(options) : ctx.acc.snapshot()));
     const queue = ctx.turnQueue.state();
     // A failed preflight has no SDK message to update the transcript status.
     // Project its queue receipt on every snapshot, including refresh/reopen,
@@ -164,6 +164,7 @@ function _snapshot(options) {
       modelSelection: ctx.modelSelection.view(),
       thinking: _thinkingView(),
       execution: { ..._execution(), ...(failedBeforeOutput ? { running: false } : {}),
+        ...(active?.preparingAt && !active.stopRequested ? { waitingForStart: true, startupWaitSince: active.preparingAt } : {}),
         ...controlledView?.execution,
         turnQueue: queue, taskExecutions: Array.from(ctx.taskExecutions.values()),
         queueImmediate: ctx.immediate.view(),

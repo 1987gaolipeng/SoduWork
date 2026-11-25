@@ -176,6 +176,29 @@ test('a late preflight error cannot overwrite a different conversation or accoun
   }
 });
 
+test('a receipt change immediately before dispatch retires only that handle and restores the edited draft and files', async () => {
+  const refused = deferred(), f = fixture({ send: () => refused.promise });
+  const source = fs.readFileSync(path.join(__dirname, '../components/panels/chat-session-controller.js'), 'utf8');
+  vm.runInContext(source, f.ctx);
+  const controller = f.ctx.window.ChatSessionController.create(f.ctx);
+  const released = [];
+  f.ctx._api().release = ref => { released.push(ref); };
+  f.input.value = 'edited pending draft';
+  const sending = controller._sendCore();
+  await flush();
+  assert.equal(f.requests.length, 1); assert.equal(f.input.value, '');
+  refused.resolve({ ok: false, notSent: true, accepted: false, code: 'HISTORY_PENDING_USER_TAIL_CHANGED',
+    reason: 'check the updated history' });
+  assert.equal(await sending, false); await flush();
+  assert.deepEqual(released, ['ref-a']); assert.equal(f.ctx._ref, '');
+  assert.equal(f.ctx._sessionId, 'archive-a'); assert.equal(f.ctx._snap.openBlocked, true);
+  assert.equal(f.ctx._snap.sessionOpenCode, 'HISTORY_PENDING_USER_TAIL_CHANGED');
+  assert.equal(f.input.value, 'edited pending draft');
+  assert.equal(f.added.at(-1)[0][0].name, 'only-a.txt');
+  assert.equal(await controller._sendCore(), false);
+  assert.equal(f.requests.length, 1);
+});
+
 test('failed preflight for a queued message does not mark the active execution as failed', async () => {
   const f = fixture(); f.ctx._snap.status = 'streaming';
   const snapshot = f.ctx._snap;
@@ -503,6 +526,18 @@ test('a known background session keeps its original ref and project while attach
   upload.resolve([{ id: 'attachment-a' }]); assert.equal(await pending, true);
   assert.equal(f.requests[0][0], 'ref-a'); assert.equal(f.requests[0][3].projectId, 'project-a');
   assert.equal(f.ctx._snap, snapshot); assert.equal(f.ctx._retryDraft.text, 'B retry'); assert.equal(f.input.value, 'B draft');
+});
+test('a refused late A open cannot clear the optimistic send and attachment names in B', async () => {
+  const open = deferred(), accepted = deferred(), f = fixture({ fresh: true, send: () => accepted.promise });
+  f.ctx._ensure = () => open.promise;
+  f.input.value = 'opening A'; const a = f.ctx._sendCore(); await flush();
+  f.switchTo('b', 'sending B'); const b = f.ctx._sendCore(); await flush();
+  const attachments = f.ctx._pendingAttachmentNames.slice();
+  assert.equal(f.ctx._pending, 'sending B'); assert.ok(attachments.length);
+  open.resolve(false); await a; await flush();
+  assert.equal(f.ctx._pending, 'sending B'); assert.deepEqual(f.ctx._pendingAttachmentNames, attachments);
+  assert.deepEqual(f.requests[0].slice(0, 2), ['ref-b','sending B']);
+  accepted.resolve({ ok: true }); await b;
 });
 for (const waiting of ['attachments', 'prior-send']) {
   for (const taskId of ['', 'task-a']) {

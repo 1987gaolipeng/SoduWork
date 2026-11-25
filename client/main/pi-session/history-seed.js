@@ -5,7 +5,11 @@ const messageTime = require('../conversation/message-time');
 const snapshotWindow = require('./snapshot-window');
 const goalFinalizer = require('../conversation/goal-finalizer');
 const agentSource = require('../conversation/agent-source.cjs');
+const nativeAgentSource = require('../conversation/native-agent-source.cjs');
+const usageValues = require('../agent-runtime/usage-values');
+const localImage = require('./local-image-turn.cjs');
 const turnOutcome = require('./turn-outcome');
+const turnMetrics = require('./turn-metrics');
 const SCOPE_ENTRY_TYPE = 'soduwork.message.scope';
 
 // Keep financial facts independently of the bounded presentation replay. Do
@@ -13,12 +17,11 @@ const SCOPE_ENTRY_TYPE = 'soduwork.message.scope';
 function accountingReceipt(entry, nativeAgentId) {
   const message = messageTime.storedMessage(entry);
   if (message?.role !== 'assistant' || !message.usage || typeof message.usage !== 'object') return null;
-  const values = require('../agent-runtime/usage-values');
-  const usage = values.empty();
+  const usage = usageValues.empty();
   const raw = message.usage.cost?.total === 0 && message.usage.costKnown === undefined
     ? { ...message.usage, costKnown: false } : message.usage;
-  values.add(usage, raw);
-  const source = require('../conversation/native-agent-source.cjs').fields(message, nativeAgentId);
+  usageValues.add(usage, raw);
+  const source = nativeAgentSource.fields(message, nativeAgentId);
   // Older local and managed calls shared the SDK provider name. Without an
   // ownership marker or resolved Hub attribution their origin is unknowable;
   // do not disclose ambiguous legacy usage when an archive is reopened.
@@ -49,39 +52,94 @@ function _seed(acc, piSession, options) {
   try { entries = piSession.sessionManager && piSession.sessionManager.getEntries() || []; } catch (e) { entries = []; }
   const hasEntryMessages = entries.some((item) => item && item.type === 'message' && item.message);
   const sequence = hasEntryMessages ? entries : msgs.map((message) => ({ type: 'message', message }));
-  const bounds = snapshotWindow.seedBounds(sequence, opts.maxMessages, goalFinalizer.ENTRY_TYPE);
+  const page = opts.page;
+  const bounds = page ? { tailStart: page.from, lastFinalEntry: -1 } :
+    snapshotWindow.seedBounds(sequence, opts.maxMessages, goalFinalizer.ENTRY_TYPE);
   const { tailStart, lastFinalEntry } = opts.completeHistory === true ? { ...bounds, tailStart: 0 } : bounds;
   // Keep only the clipped turn's identity/receipt, not its old content. A
   // long tool turn can otherwise lose its outcome when its user is windowed out.
   const prefix = stream.create();
+  const indexed = (opts.archivePages || page) && tailStart > 0;
+  const positions = opts.archivePages ? [] : null;
+  const hasStoredScopes = page?.hasStoredScopes ?? entries.some(item => item?.type === 'custom' && item.customType === SCOPE_ENTRY_TYPE);
+  const legacyInternalGoal = !hasStoredScopes && Boolean(opts.internalGoal);
+  let legacyGoalStarted = false, finalRestored = false;
+  let earlierMessages = 0, leadingMetrics = null;
+  const earlierTools = new Set();
   for (let index = 0; index < tailStart; index++) {
     const entry = sequence[index];
     if (entry?.type === 'message' && entry.message?.role === 'user') {
-      prefix.push({ type: 'message_end', message: messageTime.storedMessage(entry), replay: true });
+      const event = prefix.push({ type: 'message_end', message: messageTime.storedMessage(entry), replay: true });
+      if (indexed && event.kind === 'message') {
+        positions?.push(index);
+        leadingMetrics = turnMetrics.userTurn(prefix.state.messages.at(-1), earlierMessages++);
+      }
+      if (indexed && legacyInternalGoal && !legacyGoalStarted && !finalRestored) {
+        prefix.beginGoalTurn(); legacyGoalStarted = true;
+      }
       prefix.state.messages = prefix.state.messages.slice(-1);
     } else if (entry?.customType === turnOutcome.ENTRY_TYPE) {
       turnOutcome.record(prefix.state, entry.data);
+    } else if (indexed && entry?.type === 'message' && entry.message?.role === 'assistant') {
+      prefix.state.continuationPending = false;
+      positions?.push(index);
+      earlierMessages++;
+      if (leadingMetrics) turnMetrics.addAssistant(leadingMetrics, messageTime.storedMessage(entry), true);
+    } else if (indexed && !page && entry?.type === 'message' && entry.message?.role === 'toolResult') {
+      earlierTools.add(entry.message.toolCallId);
+    } else if (indexed && !page && entry?.customType === 'soduwork.task.tool' && entry.data?.event?.toolCallId) {
+      earlierTools.add(entry.data.event.toolCallId);
+    } else if (indexed && entry?.customType === SCOPE_ENTRY_TYPE) {
+      _applyStoredScope(prefix, entry.data || {});
+    } else if (indexed && entry?.customType === goalFinalizer.ENTRY_TYPE && goalFinalizer.fromEntries([entry])) {
+      prefix.endGoalTurn(); finalRestored = true;
+      if (index !== lastFinalEntry && index !== page?.skip) {
+        positions?.push(index);
+        earlierMessages++;
+      }
     }
   }
   const leading = prefix.state.messages.at(-1);
   acc.state.leadingTurn = leading ? { sentAt: leading.sentAt, submissionId: leading.submissionId,
     turnOutcome: leading.turnOutcome } : null;
-  const hasStoredScopes = entries.some((item) => item && item.type === 'custom' &&
-    item.customType === SCOPE_ENTRY_TYPE);
-  const legacyInternalGoal = !hasStoredScopes && Boolean(opts.internalGoal);
-  let legacyGoalStarted = false;
-  let finalRestored = false;
   let n = 0;
   const toolCalls = new Map(), accountingHistory = [];
   sequence.forEach((entry, sequenceIndex) => {
-    if (entry?.type === 'message') {
+    if (indexed && sequenceIndex === tailStart) {
+      // Scope controls (including legacy hidden user turns) may precede
+      // the requested page. Carry their state without replaying old bodies.
+      acc.state.goalActive = prefix.state.goalActive;
+      acc.state.currentScope = prefix.state.currentScope;
+      acc.state.continuationPending = prefix.state.continuationPending;
+      acc.state.auditFrom = prefix.state.auditFrom >= 0 && prefix.state.auditUntil < 0 ? acc.state.messages.length : -1;
+      acc.state.auditUntil = -1;
+    }
+    if (page && sequenceIndex === page.skip) return;
+    if (page && sequenceIndex >= page.to) {
+      // Only the terminal receipts of a turn crossing the page end are needed.
+      // Never rebuild its off-page tool arguments, results or Markdown.
+      if (entry?.message?.role === 'assistant') {
+        const m = messageTime.storedMessage(entry);
+        const hasText = Array.isArray(m.content) && m.content.some(block =>
+          block?.type === 'text' && typeof block.text === 'string' && block.text.trim());
+        acc.state.messages.push({ role: 'assistant', done: true, blocks: hasText ? [{ kind: 'text', text: '…' }] : [],
+          completedAt: m.completedAt, usage: m.usage, stopReason: m.stopReason });
+      } else if (entry?.customType === turnOutcome.ENTRY_TYPE) turnOutcome.record(acc.state, entry.data);
+      else if (entry?.customType === SCOPE_ENTRY_TYPE) _applyStoredScope(acc, entry.data || {});
+      else if (entry?.customType === goalFinalizer.ENTRY_TYPE && goalFinalizer.fromEntries([entry])) {
+        acc.state.messages.push({ role: 'assistant', done: true, blocks: [],
+          completedAt: messageTime.epoch(entry.data?.at) || messageTime.epoch(entry.timestamp) });
+      }
+      return;
+    }
+    if (!page && entry?.type === 'message') {
       const receipt = accountingReceipt(entry, opts.nativeAgentId);
       if (receipt) accountingHistory.push(receipt);
     }
     const inTail = sequenceIndex >= tailStart;
     if (entry && entry.type === 'custom') {
-      if (entry.customType === require('./local-image-turn.cjs').USAGE_ENTRY) {
-        const receipt = require('./local-image-turn.cjs').imageReceipt(entry.data?.model, entry.data?.usage, entry.data?.at);
+      if (entry.customType === localImage.USAGE_ENTRY) {
+        const receipt = !page && localImage.imageReceipt(entry.data?.model, entry.data?.usage, entry.data?.at);
         if (receipt) accountingHistory.push(receipt);
         return;
       }
@@ -113,7 +171,7 @@ function _seed(acc, piSession, options) {
     }
     if (!inTail) return;
     const stored = entry && entry.type === 'message' ? messageTime.storedMessage(entry) : null;
-    const m = require('../conversation/native-agent-source.cjs').message(stored, opts.nativeAgentId);
+    const m = nativeAgentSource.message(stored, opts.nativeAgentId);
     if (!m || !m.role) return;
     try {
       if (m.role === 'user') {
@@ -205,6 +263,66 @@ function _seed(acc, piSession, options) {
   }
   if (n) acc.push({ type: 'agent_settled' });      // Mark restored history as settled rather than actively thinking.
   turnOutcome.restore(acc.state);
+  if (indexed && earlierMessages) {
+    if (page) earlierMessages = page.start;
+    if (leadingMetrics && acc.state.leadingTurn) {
+      leadingMetrics.fromMessage -= earlierMessages;
+      acc.state.leadingTurn.metrics = leadingMetrics;
+    }
+    for (const tool of acc.state.tools) earlierTools.delete(tool.id);
+    const toolOffset = earlierTools.size;
+    acc.state.archivePrefix = { messages: earlierMessages, tools: toolOffset };
+    if (page) return n;
+    acc.completeArchiveSnapshot = () => {
+      // Freeze the complete native record once, when retiring the live Pi segment.
+      // The bounded UI pages intentionally omit tool bodies and cannot be joined for handover.
+      const complete = stream.create();
+      _seed(complete, piSession, { ...opts, archivePages: false, completeHistory: true });
+      if (complete.state.messages.length < earlierMessages + acc.state.messages.length ||
+          complete.state.tools.length < toolOffset + acc.state.tools.length)
+        throw Error('尚未完整保存本段会话，请稍后再切换 Agent');
+      return complete.snapshot();
+    };
+    const live = acc.uiSnapshot;
+    acc.uiSnapshot = options => {
+      const end = snapshotWindow.requestedEnd(options);
+      if (end === null) return live(options);
+      const limits = snapshotWindow.limits(options);
+      const total = earlierMessages + acc.state.messages.length;
+      const until = Math.min(end, total), start = Math.max(0, until - limits.messageLimit);
+      if (start >= earlierMessages) return live({ ...options, messageEnd: until - earlierMessages });
+      const before = Math.min(earlierMessages, until);
+      const from = positions[start] ?? tailStart, to = positions[before] ?? tailStart;
+      let through = to;
+      while (through < sequence.length) {
+        const item = sequence[through];
+        if (item?.message?.role === 'user' && stream.visibleUser(item.message.content)) break;
+        through++;
+      }
+      const reader = stream.create(), entries = sequence.slice(0, through);
+      _seed(reader, { state: {}, sessionManager: { getEntries: () => entries } }, {
+        ...opts, archivePages: false, page: { from, to, start, hasStoredScopes, skip: lastFinalEntry < tailStart ? lastFinalEntry : -1 } });
+      const result = reader.uiSnapshot({ ...limits, messageEnd: before - start });
+      if (until > before) {
+        const recent = live({ ...limits, messageEnd: until - before, messageLimit: until - before });
+        const firstRaw = recent.history.messageIndices[0] - earlierMessages;
+        const merged = recent.messages[0] && require('./event-snapshot').mergeContinuation(result.messages.at(-1),
+          recent.messages[0], acc.state.messages[firstRaw]?.continuation);
+        if (merged) result.messages[result.messages.length - 1] = merged;
+        const offset = result.messages.length - (merged ? 1 : 0);
+        result.messages.push(...recent.messages.slice(merged ? 1 : 0));
+        result.history.messageIndices.push(...recent.history.messageIndices.slice(merged ? 1 : 0));
+        result.tools.push(...recent.tools.map(tool => ({ ...tool, after: tool.after + offset })));
+        result.toolPreparations.push(...recent.toolPreparations.map(row => ({ ...row, after: row.after + offset })));
+        result.tools = snapshotWindow.selectTools(result.tools, 0, limits.toolLimit);
+        const turns = new Map([...result.turnMetrics, ...recent.turnMetrics].map(row => [row.fromMessage, row]));
+        result.turnMetrics = [...turns.values()];
+      }
+      Object.assign(result.history, { totalMessages: total, totalTools: toolOffset + acc.state.tools.length,
+        messageStart: start, messageEnd: until, loadedMessages: result.messages.length, loadedTools: result.tools.length, truncated: true });
+      return result;
+    };
+  }
   return n;
 }
 

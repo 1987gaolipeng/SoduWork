@@ -27,7 +27,7 @@ test('limitSnapshot keeps the tail and remaps tool positions', () => {
     totalTools: 120,
     loadedMessages: 20,
     loadedTools: 20,
-    messageStart: 100,
+    messageStart: 100, messageEnd: 120,
     messageLimit: 20, messageIndices: Array.from({ length: 20 }, (_, index) => 100 + index),
   });
 });
@@ -70,6 +70,19 @@ function windowState() {
 }
 
 for (const [name, project] of Object.entries(projectors)) {
+  test(name + ' serves an absolute historical page without live tools or newer messages', () => {
+    const state = windowState();
+    state.tools = [{ id: 'older', after: 5, state: 'running' }, { id: 'page', after: 12, state: 'done' },
+      { id: 'newer', after: 95, state: 'running' }];
+    const result = project(state, { messageLimit: 10, messageEnd: 20 });
+    assert.deepEqual(result.history.messageIndices, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+    assert.equal(result.history.messageEnd, 20);
+    assert.deepEqual(result.tools.map(tool => [tool.id, tool.after]), [['page', 2]]);
+    assert.equal(result.history.totalMessages, 100);
+    assert.equal(project(state, { messageLimit: 10, messageEnd: 0 }).messages.length, 0);
+    assert.equal(project(state, { messageLimit: 10 }).history.messageEnd, 100);
+  });
+
   test(name + ' does not duplicate old running tools or overflow a saturated running budget', () => {
     const state = windowState();
     state.tools = [{ id: 'old', after: 2, state: 'running' },

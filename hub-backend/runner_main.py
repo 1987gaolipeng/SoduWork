@@ -790,6 +790,10 @@ class Runner:
             from app.services import local_base, qwen_tool_history
             receipts = await runner_local_rpc.to_thread(qwen_tool_history.lookup, local_base._STORE, message)
             return {"ok": True, "data": receipts}
+        if op == "runtime.history.acpPlans":
+            from app.services import acp_plan_history, local_base
+            receipts = await runner_local_rpc.to_thread(acp_plan_history.lookup, local_base._STORE, message)
+            return {"ok": True, "data": receipts}
         if op == "runtime.sessions":
             from app.services import ai_local
             return {"ok": True, "data": await runner_local_rpc.to_thread(
@@ -818,6 +822,20 @@ class Runner:
             return {"ok": False, "error": "\u672c\u673a\u63a7\u5236\u901a\u9053\u4e0d\u5141\u8bb8\u8fd9\u4e2a\u64cd\u4f5c"}
         local_message = dict(message)
         local_message["_localParent"] = True
+        if op == "job.has" and message.get("checkPendingWork") is True:
+            # The parent pipe registers lines in order. Capture work reserved
+            # before admission as well as the journal checked inside _job.
+            ref = str(message.get("ref") or "")
+            pending = any(req.lane == "work" and req.key == ref
+                          for req in self._pending_rpc_requests.values())
+            reply = await self._job(local_message)
+            if reply.get("ok"):
+                reply["data"]["localWorkPending"] = pending or any(
+                    req.lane == "work" and req.key == ref for req in self._pending_rpc_requests.values())
+                # A later terminal receipt can coexist with an earlier active
+                # admission for the same native session.
+                reply["data"]["localAdmissionsPending"] = self._admission.latest_for_ref(ref) is not None
+            return reply
         return await self._job(local_message)
 
     def _ensure_admission_loop(self) -> None:

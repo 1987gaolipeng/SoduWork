@@ -3,9 +3,20 @@ const goalQuality = require('../conversation/goal-quality');
 const modelErrors = require('./model-errors');
 const preparation = require('./tool-preparation');
 const toolDetail = require('./tool-detail');
-const { selectTools } = require('./snapshot-window');
+const { selectTools, requestedEnd } = require('./snapshot-window');
 const agentSource = require('../conversation/agent-source.cjs');
 const turnMetrics = require('./turn-metrics');
+
+// Never mutate a cached projection. The same completed message can appear in
+// a later live snapshot or on a page with a different continuation boundary.
+function mergeContinuation(previous, visible, continuation) {
+  if (!continuation || !previous || previous.role !== 'assistant' || previous.scope !== visible.scope ||
+      !agentSource.same(previous.sourceAgent, visible.sourceAgent)) return null;
+  const blocks = previous.blocks.concat(visible.blocks.map((block, index) => ({ ...block, index: previous.blocks.length + index })));
+  return { ...previous, blocks, done: visible.done, completedAt: visible.done ? visible.completedAt || 0 : 0,
+    usage: visible.usage || previous.usage, stopReason: visible.stopReason || previous.stopReason,
+    errorMessage: visible.errorMessage || previous.errorMessage };
+}
 /* Project blocks in contentIndex order and place tools after their owning messages. */
 function _snapshotCache(state) {
   if (!state._snapshotCache) {
@@ -76,10 +87,12 @@ function snapshot(state, options, { SCOPES, deriveStatus, statusText }) {
     cache.messages = new WeakMap();
     cache.tools = new WeakMap();
   }
+  const cursor = bounded ? requestedEnd(opts) : null;
+  const messageEnd = Math.min(cursor ?? state.messages.length, state.messages.length);
   let startRawIndex = 0;
-  if (bounded && state.messages.length > messageLimit) {
+  if (bounded && messageEnd > messageLimit) {
     let remaining = 0;
-    for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+    for (let index = messageEnd - 1; index >= 0; index -= 1) {
       const message = state.messages[index];
       if (message && (message.role === 'user' || message.role === 'assistant')) {
         remaining += 1;
@@ -92,13 +105,13 @@ function snapshot(state, options, { SCOPES, deriveStatus, statusText }) {
   }
   const messages = [];
   const messageIndices = [];
-  const metrics = turnMetrics.collector(state, cache, startRawIndex);
+  const metrics = turnMetrics.collector(state, cache, startRawIndex, messageEnd);
   const visibleAfter = bounded ? new Map() : [];
   const markVisibleAfter = (index, value) => {
     if (bounded) visibleAfter.set(index, value);
     else visibleAfter[index] = value;
   };
-  for (let messageIndex = startRawIndex; messageIndex < state.messages.length; messageIndex += 1) {
+  for (let messageIndex = startRawIndex; messageIndex < messageEnd; messageIndex += 1) {
     const m = state.messages[messageIndex];
     metrics.visit(m, messageIndex);
     if (messageIndex === state.auditPreliminary || state.auditHidden.includes(messageIndex)) {
@@ -142,31 +155,17 @@ function snapshot(state, options, { SCOPES, deriveStatus, statusText }) {
       if (m.done === true) cache.messages.set(m, visible);
     }
     const previous = messages[messages.length - 1];
-    const mergeContinuation = Boolean(m.continuation) && previous &&
-      previous.role === 'assistant' && previous.scope === visible.scope &&
-      agentSource.same(previous.sourceAgent, visible.sourceAgent);
-    if (mergeContinuation) {
-      /* Never mutate a cached projection: it may be reused by the next
-         snapshot and must still represent only its source message. */
-      const merged = { ...previous, blocks: previous.blocks.slice() };
-      const offset = merged.blocks.length;
-      merged.blocks.push(...visible.blocks.map((block, index) => ({
-        ...block, index: offset + index,
-      })));
-      merged.done = visible.done;
-      merged.completedAt = visible.done ? visible.completedAt || 0 : 0;
-      merged.usage = visible.usage || merged.usage;
-      merged.stopReason = visible.stopReason || merged.stopReason;
-      merged.errorMessage = visible.errorMessage || merged.errorMessage;
+    const merged = mergeContinuation(previous, visible, m.continuation);
+    if (merged) {
       messages[messages.length - 1] = merged;
     } else if (visible.role !== 'assistant' || visible.blocks.length) {
       messages.push(visible);
-      if (bounded) messageIndices.push(messageIndex);
+      if (bounded || state.archivePrefix) messageIndices.push(messageIndex);
     }
     markVisibleAfter(messageIndex, messages.length - 1);
   }
-  // Retain running tools even when historical messages are windowed for the UI.
-  const selectedTools = bounded ? selectTools(state.tools, startRawIndex, toolLimit) : state.tools;
+  // The live tail owns active calls; a one-time history page owns only its own receipts.
+  const selectedTools = bounded ? selectTools(state.tools, startRawIndex, toolLimit, cursor === null ? null : messageEnd) : state.tools;
   const tools = selectedTools.map((tool) => {
     const rawAfter = Math.max(0, Number(tool.after) || 0);
     const mapped = bounded
@@ -181,6 +180,7 @@ function snapshot(state, options, { SCOPES, deriveStatus, statusText }) {
     }
     return { ...(bounded ? toolDetail.project(tool) : normalized), after: Math.max(0, mapped) };
   });
+  const rawMetrics = metrics.finish();
   const result = {
     // Accounting must include hidden audit/tool-only responses and every
     // continuation receipt. The presentation transcript intentionally merges
@@ -193,10 +193,11 @@ function snapshot(state, options, { SCOPES, deriveStatus, statusText }) {
     messages,
     // Bounded owners use history.messageIndices. Full snapshots have no raw
     // index map and are also persisted as visible runtime-handoff prefixes.
-    turnMetrics: bounded ? metrics.finish() : metrics.finish().map(row => ({ ...row,
-      fromMessage: visibleAfter[row.fromMessage], toMessage: visibleAfter[row.toMessage] })),
+    turnMetrics: bounded ? rawMetrics : rawMetrics.map(row => ({ ...row,
+      fromMessage: visibleAfter[Math.max(0, row.fromMessage)], toMessage: visibleAfter[row.toMessage] })),
     tools,
-    toolPreparations: preparation.list(state).map(row => ({ ...row, after: Math.max(0,
+    toolPreparations: preparation.list(state).filter(row => cursor === null || row.after >= startRawIndex && row.after < messageEnd)
+      .map(row => ({ ...row, after: Math.max(0,
       (bounded ? visibleAfter.get(row.after) : visibleAfter[row.after]) ?? messages.length - 1) })),
     notices: state.notices.map((item) => ({
       message: item.message, level: item.level, count: item.count,
@@ -223,16 +224,28 @@ function snapshot(state, options, { SCOPES, deriveStatus, statusText }) {
   };
   if (bounded) {
     result.history = {
-      truncated: startRawIndex > 0 || state.tools.length > tools.length,
+      truncated: startRawIndex > 0 || messageEnd < state.messages.length || state.tools.length > tools.length,
       totalMessages: state.messages.length,
       totalTools: state.tools.length,
       loadedMessages: messages.length,
       loadedTools: tools.length,
-      messageStart: startRawIndex,
+      messageStart: startRawIndex, messageEnd,
       messageLimit, messageIndices,
     };
+  }
+  if (state.archivePrefix) {
+    const offset = state.archivePrefix.messages;
+    const archive = { totalMessages: offset + state.messages.length,
+      totalTools: state.archivePrefix.tools + state.tools.length,
+      messageIndices: messageIndices.map(index => offset + index),
+      turnMetrics: rawMetrics.map(row => ({ ...row, fromMessage: offset + row.fromMessage, toMessage: offset + row.toMessage })) };
+    if (bounded) {
+      Object.assign(result.history, { totalMessages: archive.totalMessages, totalTools: archive.totalTools,
+        messageStart: offset + startRawIndex, messageEnd: offset + messageEnd, messageIndices: archive.messageIndices, truncated: true });
+      result.turnMetrics = archive.turnMetrics;
+    } else result.archiveWindow = archive;
   }
   return result;
 }
 
-module.exports = { snapshot };
+module.exports = { snapshot, mergeContinuation };

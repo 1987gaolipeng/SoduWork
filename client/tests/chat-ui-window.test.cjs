@@ -59,3 +59,12 @@ test('projection bookmarks identify the original message across hidden rows and 
   assert.equal(snap.history.messageIndices[20], 100);
   assert.equal(snap.history.messageIndices[21], 102);
 });
+
+test('a historical page leaves the attached window on its current live tail', () => {
+  const { acc, handle, win, windows } = fixture();
+  assert.equal(windows.request(handle, win, { messageEnd: 75, messageLimit: 2000 }), false);
+  const page = acc.uiSnapshot({ messageEnd: 75, messageLimit: 20 });
+  assert.equal(page.history.messageStart, 55);
+  assert.equal(page.history.messageEnd, 75);
+  assert.equal(windows.snapshot(handle).history.messageStart, 140);
+});

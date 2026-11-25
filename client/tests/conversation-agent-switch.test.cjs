@@ -10,6 +10,85 @@ const { goalSwitchBlocked } = require('../main/agent-runtime/switchable-conversa
 const identity = uid => ({ hub: 'http://127.0.0.1:9', clientId: 'test-device', session:
   Buffer.from(JSON.stringify({ typ: 'device', uid, cid: 'test-device', iat: Math.floor(Date.now()/1000)-10, exp: Math.floor(Date.now()/1000)+3600 })).toString('base64url') + '.' + 'a'.repeat(64) });
 
+test('a bounded handover carries the opening request as well as the newest turn', () => {
+  const brief = require('../main/conversation/runtime-segments').brief({ messages: [
+    { role: 'user', text: 'Opening task' }, ...Array.from({ length: 9 }, () => ({ role: 'assistant', text: 'x'.repeat(6000) })),
+    { role: 'user', text: 'Newest task' },
+  ] });
+  const excerpt = brief.split('older details.\n')[1].split('\nRecent operations:')[0];
+  assert.equal(excerpt.length, 28000);
+  assert.ok(excerpt.startsWith('user: Opening task\n'));
+  assert.ok(excerpt.endsWith('user: Newest task'));
+});
+
+test('a restored multi-agent chat pages its frozen prefix and bounded Pi archive in one coordinate space', async () => {
+  const acc = require('../main/pi-session/event-stream').create(), base = 1700000000000;
+  const entries = Array.from({ length: 400 }, (_, index) => {
+    const timestamp = base + index * 6000, role = index % 2 ? 'assistant' : 'user';
+    // Usage-only messages have a native index but no visible UI row.
+    const content = index === 3 || index === 381 ? [] : [{ type: 'text', text: 'Active ' + index }];
+    if (index === 5) content.push({ type: 'toolCall', id: 'active-tool', name: 'read', arguments: { path: 'a.txt' } });
+    return { type: 'message', message: { role, content, timestamp, completedAt: timestamp + 500, stopReason: 'stop' } };
+  });
+  entries.splice(6, 0, { type: 'message', message: { role: 'toolResult', toolName: 'read', toolCallId: 'active-tool',
+    content: [{ type: 'text', text: 'Active result' }], timestamp: base + 30500 } });
+  require('../main/pi-session/history-seed').seed(acc, { state: {}, sessionManager: { getEntries: () => entries } },
+    { maxMessages: 240, archivePages: true, nativeAgentId: 'pi' });
+  const native = { ref: 'native', adapterId: 'pi', sessionId: 'active',
+    snapshot: () => acc.snapshot(), uiSnapshot: options => acc.uiSnapshot(options), status: () => 'idle',
+    inFlight: () => false, historyRow: () => null, goalView: () => ({}), resumeLocation: () => '' };
+  const calls = [], mirror = require('../main/agent-runtime/process-handle').createProcessHandle({
+    ref: native.ref, invoke: async (_ref, method, [options]) => {
+      assert.equal(method, 'readHistoryPage');
+      calls.push(options.messageEnd);
+      return native.uiSnapshot(options);
+    } });
+  mirror.update(require('../main/agent-runtime/process-projection').createPublisher(native).capture());
+  const prefix = { messages: [{ role: 'user', text: 'Earlier user' }, { role: 'assistant', text: 'Earlier reply' },
+    { role: 'user', text: 'Earlier follow-up' }], tools: [{ id: 'prefix-tool', name: 'read', state: 'done', after: 1 }],
+    turnMetrics: [{ fromMessage: 0, toMessage: 1, elapsedMs: 9000 }] };
+  const restore = raw => require('../main/agent-runtime/switchable-conversation').create({ raw, options: {},
+    restored: { id: 'original', originAdapter: 'qwen', segments: [{ adapterId: 'qwen' }], prefix } });
+  const handle = restore(mirror.handle);
+  const tail = handle.uiSnapshot({ messageLimit: 80 });
+  assert.equal(tail.history.totalMessages, 403);
+  assert.equal(tail.history.messageEnd, 403);
+  assert.equal(tail.history.messageIndices.at(-1), 402);
+  assert.ok(!tail.history.messageIndices.includes(384));
+  const capped = handle.uiSnapshot({ messageLimit: 320 });
+  assert.ok(capped.history.messageStart >= 163, 'An unavailable gap between the frozen prefix and the Pi tail is never filled with unrelated rows');
+  const first = await handle.readHistoryPage({ messageEnd: 2, messageLimit: 80 });
+  assert.equal(calls.at(-1), 0);
+  assert.equal(first.history.totalMessages, 403);
+  assert.equal(first.history.totalTools, 2);
+  assert.deepEqual(first.turnMetrics, prefix.turnMetrics);
+  assert.deepEqual(first.messages, prefix.messages.slice(0, 2));
+  assert.deepEqual(first.history.messageIndices, [0, 1]);
+  assert.equal(first.history.nextIsUser, true);
+  assert.equal(first.tools[0].after, 1);
+  const crossing = await handle.readHistoryPage({ messageEnd: 13, messageLimit: 12 });
+  assert.equal(calls.at(-1), 10, 'The native worker receives its segment-local end cursor');
+  assert.deepEqual(crossing.history.messageIndices, [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]);
+  assert.equal(crossing.messages[0].text, 'Earlier reply');
+  assert.equal(crossing.messages.at(-1).blocks[0].text, 'Active 9');
+  assert.equal(crossing.tools.find(tool => tool.id === 'prefix-tool').after, 0);
+  assert.equal(crossing.history.messageIndices[crossing.tools.find(tool => tool.id === 'active-tool').after], 8);
+  assert.ok(crossing.turnMetrics.some(turn => turn.fromMessage === 7 && turn.toMessage === 8));
+  const middle = await handle.readHistoryPage({ messageEnd: 123, messageLimit: 80 });
+  assert.equal(middle.messages[0].text, 'Active 40');
+  assert.equal(middle.history.messageStart, 43);
+  assert.equal(middle.history.totalMessages, 403);
+  assert.deepEqual(handle.uiSnapshot({ messageLimit: 80 }).history, tail.history);
+  assert.deepEqual(handle.runtimeAdapters, ['qwen', 'pi']);
+  // The in-process Pi handle serves the same archive cursor synchronously.
+  const inProcess = restore(native);
+  assert.deepEqual(await inProcess.readHistoryPage({ messageEnd: 2, messageLimit: 80 }), first);
+  const direct = await inProcess.readHistoryPage({ messageEnd: 13, messageLimit: 12 });
+  assert.deepEqual(direct.messages, crossing.messages);
+  assert.deepEqual(direct.history, crossing.history);
+  assert.deepEqual(direct.turnMetrics, crossing.turnMetrics);
+});
+
 test('completed goal conversations can switch while active goals remain protected', () => {
   assert.equal(goalSwitchBlocked({ execution: { configured: false } }), false);
   assert.equal(goalSwitchBlocked({ execution: { configured: true, active: true } }), true);
@@ -22,7 +101,7 @@ function fixture(t, { nativeHistory = false, nativeOutputs = false, modelConfig 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-agent-switch-')), app = { getPath: () => root };
   const archives = new Map(), runs = new Map(), openings = [], requests = [];
   let serial = 0, unavailable = '', busy = false, gate = null, strictMissing = false;
-  let absence = { has: false, inflight: false, persisted: false, admissionDurable: true, bootId: 'test-boot' };
+  let absence = { has: false, inflight: false, persisted: false, admissionDurable: true, localWorkPending: false, bootId: 'test-boot' };
   const engine = {
     ...Object.fromEntries(['setArchived', 'isArchived', 'archiveState', 'archiveRoot'].map(k => [k, sessionArchive[k]])),
     probe: async () => ({ ok: true }),
@@ -94,9 +173,10 @@ function fixture(t, { nativeHistory = false, nativeOutputs = false, modelConfig 
     }
     if (op === 'job.comment') { const run = runs.get(input.ref); run.items.push({ seq: run.items.length+1, kind: 'say', text: 'Followup' }); return { ok: true, data: { ok: true } }; }
     if (op === 'job.session') { const run = runs.get(input.ref);
-      if (!run && strictMissing) return { ok: true, data: { ok: false, error: 'Native session does not exist' } };
+      if (!run && strictMissing) return { ok: true, data: { ok: false, ref: input.ref, items: [],
+        ...(input.historyRead ? { code: 'NATIVE_HISTORY_MISSING' } : {}), error: 'Native session does not exist' } };
       return { ok: true, data: { status: 'done', round: 1, items: (run?.items || []).filter(x => x.seq > (input.since || 0)) } }; }
-    if (op === 'job.has') { if (absence instanceof Error) throw absence; return { ok: true, data: { ...absence } }; }
+    if (op === 'job.has') { if (absence instanceof Error) throw absence; return { ok: true, data: { ...absence, admissionKey: input.admissionKey || '' } }; }
     if (op === 'runtime.sessions') return { ok: true, data: { runs: [...runs.values()] } };
     if (op === 'runtime.session.forget') { runs.delete(input.ref); return { ok: true, data: { ok: true } }; }
     if (op === 'job.stop') return { ok: true, data: { ok: true } };
@@ -114,6 +194,56 @@ function fixture(t, { nativeHistory = false, nativeOutputs = false, modelConfig 
     set strictMissing(v) { strictMissing = v; }, set absence(v) { absence = v; },
     set unavailable(v) { unavailable = v; }, set busy(v) { busy = v; }, set gate(v) { gate = v; } };
 }
+
+test('retiring a recovered segment waits for its actual user receipt before freezing the changed prompt', async t => {
+  const f = fixture(t);
+  const prefix = { messages: [{ role: 'user', text: 'earlier' }, { role: 'assistant', text: 'done' }], tools: [] };
+  const recovery = { mode: 'device-history', transcriptTail: { prefixLength: 2, digest: 'test-tail' } };
+  const row = { id: 'retained', adapterId: 'pi', title: 'retained' };
+  const opened = await f.bridge.open({ ...options(f), deviceHistoryRecovery: { row, prefix, historyRecovery: recovery } });
+  assert.equal(opened.ok, true, opened.reason);
+  const handle = opened.session;
+  let confirmed = prefix;
+  const checks = [];
+  f.bridge.setReplicaHistory({ prepareContinuation(id, opts) { checks.push({ id, opts }); return { prefix: confirmed }; } });
+  assert.equal((await handle.selectAgent('qwen')).ok, true);
+  assert.equal(checks.length, 0);
+  assert.deepEqual(segments.read(f.app, row.id).historyRecovery.transcriptTail, recovery.transcriptTail);
+  await send(handle, 'revised user message');
+  assert.equal((await handle.selectAgent('pi')).ok, false);
+  assert.equal(segments.read(f.app, row.id).active.adapterId, 'qwen');
+  confirmed = handle.snapshot();
+  assert.equal((await handle.selectAgent('pi')).ok, true);
+  assert.deepEqual(checks, [1, 2].map(() => ({ id: row.id, opts: { refresh: true } })));
+  assert.equal(segments.read(f.app, row.id).historyRecovery.transcriptTail, undefined);
+});
+
+test('retiring a Runner in a recovered chat carries its checked cursor through a switch and restart', async t => {
+  const f = fixture(t), prior = [{ id: 'old', adapterId: 'opencode', revision: '4' }];
+  const opened = await f.bridge.open({ ...options(f), deviceHistoryRecovery: {
+    row: { id: 'restored-runner', adapterId: 'pi' }, prefix: { messages: [], tools: [] },
+    historyRecovery: { mode: 'device-history', retiredRunnerSources: prior },
+  } });
+  assert.ok(opened.ok, opened.reason);
+  const handle = opened.session;
+  assert.ok((await handle.selectAgent('qwen')).ok);
+  await send(handle, 'A new turn');
+  const id = handle.nativeSessionId;
+  let verified = false;
+  const check = { id, adapterId: 'qwen', revision: '7' };
+  f.bridge.setReplicaHistory({ checkpointRetiringRunner(publicId, nativeId) {
+    assert.equal(publicId, handle.sessionId); assert.equal(nativeId, id);
+    if (!verified) throw Error('native history unavailable');
+    return [...prior, check];
+  } });
+  const refused = await handle.selectAgent('pi');
+  assert.equal(refused.ok, false); assert.equal(handle.nativeSessionId, id);
+  assert.deepEqual(segments.read(f.app, handle.sessionId).historyRecovery.retiredRunnerSources, prior);
+  verified = true;
+  assert.ok((await handle.selectAgent('pi')).ok);
+  await f.restart();
+  assert.deepEqual(segments.read(f.app, handle.sessionId).historyRecovery.retiredRunnerSources, [...prior, check]);
+});
 
 test('successful execution stays completed after switching away from and back to a retained failed Pi conversation', async t => {
   const f = fixture(t, { nativeHistory: true }), actor = identity('owner');
@@ -154,7 +284,10 @@ test('history and live presence retain used runtimes across switches and exclude
   assert.deepEqual(handle.historyRow().usedHarnesses, []);
   await send(handle, 'Use Pi');
   assert.deepEqual(handle.historyRow().usedHarnesses, ['pi']);
+  assert.equal(handle.nativeSessionId, id);
   assert.equal((await handle.selectAgent('qwen')).ok, true);
+  assert.equal(handle.sessionId, id); assert.notEqual(handle.nativeSessionId, id);
+  assert.equal(handle.nativeSessionId, segments.read(f.app, id).active.sessionId);
   assert.deepEqual(handle.historyRow().usedHarnesses, ['pi'], 'selecting an idle runtime is not usage');
   await send(handle, 'Use Qwen');
   assert.deepEqual(handle.historyRow().usedHarnesses, ['pi', 'qwen']);
@@ -337,6 +470,28 @@ test('retired runtime switches preserve the active runtime and transcript withou
 const options = f => ({ app: f.app, ref: 'chat-switch', cwd: f.root, identity: identity('alice'), adapterId: 'pi', modelName: 'model-a',
   resolvePlugins: async ids => ({ items: ids.map(pluginId => ({ pluginId, name: 'Meeting', context: 'Fixture plugin context' })) }) });
 async function send(handle, text) { const sent = handle.submit(text, [], {}); assert.equal(sent.accepted, true); const done = await sent.completion; assert.equal(done.ok, true, JSON.stringify(done)); }
+
+test('a pending Pi archive read cannot publish after the logical conversation switches to another native Agent', async t => {
+  const f = fixture(t), opened = await f.bridge.open(options(f)), handle = opened.session;
+  await send(handle, 'Prefix before the switch');
+  assert.equal((await handle.selectAgent('qwen')).ok, true);
+  assert.equal((await handle.selectAgent('pi')).ok, true);
+  const pi = [...f.archives.values()].at(-1).raw, previous = pi.snapshot;
+  pi.snapshot = () => ({ ...previous(), archiveWindow: { totalMessages: 500, totalTools: 0, messageIndices: [], turnMetrics: [] } });
+  const wait = Promise.withResolvers();
+  pi.readHistoryPage = () => wait.promise;
+  const reading = handle.readHistoryPage({ messageEnd: 120, messageLimit: 80 });
+  const unavailable = await handle.selectAgent('qwen');
+  assert.equal(unavailable.ok, false);
+  assert.equal(handle.adapterId, 'pi');
+  const bounded = pi.snapshot;
+  const history = Array.from({ length: 500 }, (_, i) => ({ role: 'user', text: 'Archived ' + i }));
+  pi.snapshot = options => options?.completeHistory ? { ...previous(), messages: history } : bounded();
+  assert.equal((await handle.selectAgent('qwen')).ok, true);
+  assert.ok(segments.read(f.app, handle.sessionId).prefix.messages.some(message => message.text === 'Archived 0'));
+  wait.resolve({});
+  await assert.rejects(reading, /执行底座已变化/);
+});
 
 test('returning to each started chat restores its own runtime and next-turn model', async t => {
   const f = fixture(t);
@@ -603,6 +758,9 @@ test('legacy native repair remains retryable when the public manifest cannot be 
 for (const [name, evidence] of [
   ['offline', Error('Runner request timed out')],
   ['old Runner', { has: false }],
+  ['a ledger without a work-lane check', { has: false, inflight: false, persisted: false, admissionDurable: true, bootId: 'boot' }],
+  ['a registered request still awaiting admission', { has: false, inflight: false, persisted: false, admissionDurable: true,
+    localWorkPending: true, bootId: 'boot' }],
   ['active admission', { has: true, inflight: true, persisted: true, admissionDurable: true, bootId: 'boot' }],
   ['retained admission', { has: true, inflight: false, persisted: true, admissionDurable: true, bootId: 'boot' }],
 ]) test('missing legacy native archive stays fenced with ' + name, async t => {

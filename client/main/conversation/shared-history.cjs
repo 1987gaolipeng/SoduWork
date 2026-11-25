@@ -444,7 +444,8 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     if (!row || row.deleted) return null;
     let content = null, bodyMissing = false;
     if (!row.cached) {
-      try { content = await deviceHistory.saved(row.id, { refresh: true, preferRecorded: true }); }
+      try { content = await deviceHistory.saved(row.id, { refresh: true, preferRecorded: true,
+        allowUndispatchedTail: historyPreview && allowContinuation }); }
       catch (error) { if (error.code !== 'NATIVE_HISTORY_MISSING') throw error; bodyMissing = true; }
     }
     const nativeUnavailable = content?.nativeReadError && content.nativeReadError.code !== 'NATIVE_HISTORY_MISSING';
@@ -452,20 +453,30 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     const shared = access.assertDeviceReadable(app, row.id, actor, row)?.sharedOnDevice;
     let openingBody = content && !row.cached && !content.historyProtection && !shared ? content : null;
     const localArtifacts = content?.localArtifactHistory;
+    let retired, busyReason;
+    if (historyPreview && allowContinuation && !shared) {
+      try { retired = await deviceHistory.retiredRunnerSources(row, content); }
+      catch (error) {
+        if (error.code !== 'RUNNER_HISTORY_BUSY') throw error;
+        busyReason = error.message;
+      }
+    }
     const previewRow = { ...row,
       ...(localArtifacts && !content.historyProtection &&
         (localArtifacts.archivePending || localArtifacts.archive?.omitted > 0) ? { artifactBackupIncomplete: true } : {}),
-      ...(content ? { deviceHistory: true, historyContentState: !content.coverage?.complete ? 'partial' :
+      ...(content ? { deviceHistory: true, historyContentState: !content.coverage?.complete && !content.pendingUserTail ? 'partial' :
         require('./device-history-native.cjs').unresolvedTools(content.snapshot).length || content.coverage?.unresolvedTools?.length
-          ? 'unresolved-tools' : 'available' } : {}),
+          ? (retired ? 'available' : 'unresolved-tools') : 'available' } : {}),
       ...(bodyMissing ? { historyContentState: 'missing' } : {}) };
     const canContinue = allowContinuation && previewRow.historyContentState === 'available' &&
       !row.cached && !content?.historyProtection && !nativeUnavailable &&
       access.usesDeviceChatContext(app, { chatId: row.id }, row);
     const choice = historyPreview && canContinue ? await previewChoice(row, actor, shared) : null;
     const view = await require('./local-history-view.cjs').create({ historyPreview, allowContinuation: canContinue, choice,
-      previewReason: content?.nativeReadError?.code === 'TRANSCRIPT_CHECKSUM_MISMATCH' ? content.nativeReadError.reason :
-        nativeUnavailable ? '可查看已有本机记录。原始档案暂时无法核验，请恢复后再继续' : previewReason,
+      pendingUserTail: canContinue && !shared ? content?.pendingUserTail : null, retiredTools: Boolean(retired),
+      unconfirmedUserTail: content?.unconfirmedUserTail === true,
+      previewReason: busyReason || (['TRANSCRIPT_CHECKSUM_MISMATCH', 'NATIVE_SEGMENT_UNAVAILABLE', 'RUNNER_HISTORY_BUSY'].includes(content?.nativeReadError?.code)
+        ? content.nativeReadError.reason : nativeUnavailable ? '可查看已有本机记录。原始档案暂时无法核验，请恢复后再继续' : previewReason),
       row: previewRow,
       read: bodyMissing ? async () => ({ items: [], nextCursor: null }) : (id, options) => read(id, options, captured, openingBody) });
     openingBody = null;
@@ -488,7 +499,12 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
       }
     }
     const load = view.loadHistory;
-    view.loadHistory = async (...args) => { scoped.guard(captured); await load(...args); scoped.guard(captured); };
+    view.loadHistory = async (...args) => {
+      scoped.guard(captured);
+      const page = await load(...args);
+      scoped.guard(captured);
+      return page;
+    };
     return view;
   }
   async function preserveLegacyOutbox(job, identity) {
@@ -534,6 +550,7 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     if (!messages.length) return;
     const result = await store.saveConversationTranscript(row.id, messages, {
       expectedRevision: row.replicaRevision, expectedCatalogRevision: row.revision, expectedTransferId: '',
+      ...(snapshot.historyRecovery?.transcriptTail ? { pendingTailDigest: snapshot.historyRecovery.transcriptTail.digest } : {}),
     });
     // Native capture can advance the catalog while the worker is saving text.
     // Reauthorize the new row before retrying the same append once.
@@ -753,7 +770,9 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
       if (!observed.has(handle)) throw Error('本机会话尚未登记');
       return observed.get(handle).workspaceReady;
     },
-    bindContinuationArtifacts, prepareContinuation: deviceHistory.prepareContinuation, backfill: deviceHistory.refresh,
+    bindContinuationArtifacts, prepareContinuation: deviceHistory.prepareContinuation, verifyRecoverySend: deviceHistory.verifyRecoverySend,
+    verifyRetiredToolSend: deviceHistory.verifyRetiredToolSend, checkpointRetiringRunner: deviceHistory.checkpointRetiringRunner,
+    backfill: deviceHistory.refresh,
     captureScope: () => scoped.actor(), guardScope: captured => scoped.guard(captured),
     async indexedRow(id) {
       const captured = scoped.actor(), row = await store.get(id);

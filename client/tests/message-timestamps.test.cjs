@@ -163,7 +163,8 @@ test('Runner initial dispatch persists the optimistic send time separately from 
   });
   const session = await adapter.createSession({ native: { runner: { openOptions: { cwd: root, ref: 'timed-dispatch' } } } });
   t.after(() => session.dispose());
-  await session.send({ text: 'initial', options: { sentAt: start } }).completion;
+  await session.send({ text: 'initial', options: { sentAt: start, submissionId: 'first-runner-test' } }).completion;
   assert.equal(payload.ctx.conversationSentAt, start);
+  assert.equal(payload.ctx.conversationSubmissionId, 'first-runner-test');
   assert.equal(session.snapshot().messages[0].sentAt, start);
 });

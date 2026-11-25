@@ -39,7 +39,7 @@ function newAuth() {
   return require(file);
 }
 
-async function fixture(t, spec, legacySendIdentity = false) {
+async function fixture(t, spec, legacySendIdentity = false, confirmFullAccess) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-send-auth-'));
   const app = new EventEmitter();
   app.getPath = () => root;
@@ -196,6 +196,7 @@ async function fixture(t, spec, legacySendIdentity = false) {
   const ipcBridge = { ...bridge, archivedConversation: (...args) => archiveLookup
     ? archiveLookup(...args) : bridge.archivedConversation(...args) };
   installed = loadIpc(ipcBridge).install({ app, ipcMain, BrowserWindow, identityOf,
+    confirmFullAccess,
     // The explicit legacy shape is a negative control: the original production
     // callback returned a device key without the already-cached session.
     sendIdentityOf: legacySendIdentity ? (...args) => auth.identity(...args) : identityOf,
@@ -209,9 +210,9 @@ async function fixture(t, spec, legacySendIdentity = false) {
     assert.ok(handle);
     return handle;
   }
-  async function send(handle, text) {
+  async function send(handle, text, event = null, options = {}) {
     // Call the installed production IPC handler; there is no alternate test send path.
-    const result = await handlers.get('pi-session-send')(null, handle.ref, text, [], {});
+    const result = await handlers.get('pi-session-send')(event, handle.ref, text, [], options);
     if (result.ok) {
       // IPC deliberately returns before inference completes. Wait for the real
       // adapter's terminal snapshot before opening/closing the next fixture turn.
@@ -259,6 +260,99 @@ async function openCachedCopy(f) {
   assert.equal(handle.localReplica, true);
   return handle;
 }
+
+test('installed first-send IPC dispatches one native Pi turn, attaches it, and rejects a foreign window', async t => {
+  const f = await fixture(t, catalog.runtime('pi'));
+  await f.identity();
+  const request = { intentId: 'first-' + require('node:crypto').randomUUID(), text: 'new durable turn',
+    open: { adapterId: 'pi', modelName: 'fixture-model', cwd: f.root, capabilities: [] },
+    attachments: [], turn: {} };
+  const invoke = (name, input, sender = f.event) => f.handlers.get('pi-first-send-' + name)(sender, input);
+  assert.equal((await invoke('start', request, {})).ok, false);
+  const saved = await invoke('start', request); assert.equal(saved.ok, true, saved.reason);
+  const receipt = await invoke('wait', request.intentId);
+  assert.equal(receipt.row.status, 'accepted', receipt.row.reason);
+  const attached = await invoke('attach', request.intentId);
+  assert.equal(attached.ok, true, attached.reason); assert.equal(attached.sessionId, receipt.row.sessionId);
+  assert.equal((await invoke('start', request)).ok, true);
+  assert.equal(f.turns.filter(turn => turn.text === request.text).length, 1);
+  f.switchAccount(); await f.identity();
+  assert.equal((await invoke('list')).rows?.some(row => row.intentId === request.intentId), false);
+});
+
+test('a local workflow refuses an invalid first prompt before admission and accepts an edited retry', async t => {
+  const f = await fixture(t, catalog.runtime('pi'));
+  await f.identity();
+  const plugin = require('../main/personal-plugins').create(f.app, { template: 'workflow', key: 'first-workflow',
+    name: 'First workflow', version: '1.0.0', description: 'Prepare a short report', instructions: 'Write a short report.' }).plugin;
+  const intentId = 'first-' + require('node:crypto').randomUUID();
+  const turn = { plugins: [{ pluginId: plugin.pluginId }] };
+  const request = { intentId, text: 'a'.repeat(20001), open: { adapterId: 'pi', modelName: 'fixture-model',
+    cwd: f.root, capabilities: [] }, attachments: [], turn };
+  const call = (name, ...args) => f.handlers.get('pi-first-send-' + name)(f.event, ...args);
+  assert.equal((await call('start', request)).ok, true);
+  const refused = (await call('wait', intentId)).row;
+  assert.equal(refused.status, 'failed');
+  assert.equal(refused.canRetry, true);
+  assert.match(refused.reason, /20000/);
+  assert.equal(f.turns.length, 0);
+  const attached = await call('attach', intentId, refused.attemptId);
+  assert.equal(attached.ok, true);
+  const edited = await call('retry-in-place', intentId, refused.attemptId, attached.ref, 'Write a brief', [],
+    { ...turn, submissionId: 'ui-' + require('node:crypto').randomUUID() });
+  assert.equal(edited.ok, true, edited.reason);
+  assert.ok(edited.workflowRun);
+});
+
+test('ordinary first-send IPC forwards the entire long composer message to the native runtime', async t => {
+  const f = await fixture(t, catalog.runtime('pi'));
+  await f.identity();
+  const text = '文'.repeat(1_000_001) + '结束';
+  const request = { intentId: 'first-' + require('node:crypto').randomUUID(), text,
+    open: { adapterId: 'pi', modelName: 'fixture-model', cwd: f.root, capabilities: [] },
+    attachments: [], turn: { inputPreparation: { userText: text } } };
+  const saved = await f.handlers.get('pi-first-send-start')(f.event, request);
+  assert.equal(saved.ok, true, saved.reason);
+  const result = await f.handlers.get('pi-first-send-wait')(f.event, request.intentId);
+  assert.equal(result.row.status, 'accepted', result.row.reason);
+  assert.equal(f.turns.length, 1); assert.ok(f.turns[0].text === text);
+});
+
+test('ordinary first-send accepts the original foreground full-access receipt and never persists it for a later retry', async t => {
+  let confirmations = 0;
+  const f = await fixture(t, catalog.runtime('pi'), false, async () => { confirmations++; return true; });
+  await f.identity();
+  const events = new EventEmitter(); f.event.sender.on = events.on.bind(events);
+  const draftId = 'sample-first-send';
+  const consent = await f.handlers.get('pi-session-confirm-new-chat-access')(f.event, { draftId, adapterId: 'pi' });
+  assert.equal(consent.ok, true, consent.reason);
+  const base = { intentId: 'first-' + require('node:crypto').randomUUID(), text: 'full access first turn',
+    open: { adapterId: 'pi', modelName: 'fixture-model', cwd: f.root, accessMode: 'full', accessDraftId: draftId,
+      accessConsentId: consent.consentId }, attachments: [], turn: {} };
+  const start = f.handlers.get('pi-first-send-start'), wait = f.handlers.get('pi-first-send-wait');
+  assert.equal((await start(f.event, base)).ok, true);
+  const result = await wait(f.event, base.intentId); assert.equal(result.row.status, 'accepted', result.row.reason);
+  assert.equal(confirmations, 1); assert.equal(f.turns.length, 1);
+  const second = { ...base, intentId: 'first-' + require('node:crypto').randomUUID() };
+  await start(f.event, second);
+  assert.equal((await wait(f.event, second.intentId)).row.status, 'failed', 'one-shot grant cannot start a second chat');
+  assert.equal(f.turns.length, 1);
+  const root = path.join(f.root, 'first-send-requests');
+  for (const owner of fs.readdirSync(root)) for (const file of fs.readdirSync(path.join(root, owner))) {
+    if (file.endsWith('.json')) assert.ok(!fs.readFileSync(path.join(root, owner, file), 'utf8').includes(consent.consentId));
+  }
+});
+
+test('refreshing ordinary history and first-send associations cannot renew expired desktop credentials', async t => {
+  const f = await fixture(t, catalog.runtime('pi'));
+  await f.identity(); f.expire();
+  const enrollments = f.enrollments();
+  const lists = await Promise.all(['list', 'associations'].map(action => f.handlers.get('pi-first-send-' + action)(f.event)));
+  const ack = await f.handlers.get('pi-first-send-ack-associations')(f.event, 'first-' + require('node:crypto').randomUUID(), '');
+  assert.equal(ack.ok, false);
+  assert.equal(f.enrollments(), enrollments, 'history reads must stay offline');
+  assert.ok(lists.every(reply => reply.ok && reply.rows.length === 0));
+});
 
 test('production installed cached readonly snapshots load the original transcript without invoking a model', async t => {
   const f = await fixture(t, catalog.runtime('pi')), handle = await openCachedCopy(f);
@@ -312,6 +406,29 @@ test('a second account can page its desktop preview without granting embedded wi
   await assert.rejects(history.exportPortable(id), /账号|归属/);
   assert.equal(f.frames.some(frame => frame.channel === 'pi-session-event' && frame.data.ref === opened.ref), false);
   assert.deepEqual(f.turns, []);
+});
+
+test('a native archive page belongs to the attached desktop frame through delivery', async t => {
+  const f = await fixture(t, catalog.runtime('pi'));
+  const opened = await f.openInstalled({ adapterId: 'pi' });
+  assert.equal(opened.ok, true, opened.reason);
+  const handle = f.bridge.get(opened.ref);
+  const page = event => f.handlers.get('pi-session-snapshot')(event, handle.ref, { messageEnd: 1 });
+  const original = handle.readHistoryPage.bind(handle);
+  let release, calls = 0;
+  handle.readHistoryPage = async options => {
+    calls++;
+    if (calls === 2) await new Promise(resolve => { release = resolve; });
+    return original(options);
+  };
+  assert.equal((await page({ ...f.event, senderFrame: {} })).ok, false);
+  assert.equal(calls, 0);
+  assert.equal((await page(f.event)).ok, true);
+  const pending = page(f.event);
+  f.closeWindow(); release();
+  await assert.rejects(pending, /会话已变化/);
+  assert.equal((await page(f.event)).ok, false);
+  assert.equal(calls, 2);
 });
 
 test('an expired cached readonly view cannot publish a transcript before credentials are renewed', async t => {
@@ -544,6 +661,35 @@ test('native archive absence remains distinct from an archive read failure', asy
   assert.equal(denied.ok, false); assert.notEqual(denied.notFound, true);
   assert.match(denied.reason, /Synthetic archive read failure/);
   assert.equal(f.bridge.list().length, 0); assert.deepEqual(f.turns, []);
+});
+
+test('the first actual send after a tail recovery checks late admission and preserves later ordinary sends', async t => {
+  const f = await fixture(t, catalog.runtime('pi'));
+  const opened = await f.openInstalled({ adapterId: 'pi', cwd: f.root });
+  assert.equal(opened.ok, true, opened.reason);
+  const handle = f.bridge.get(opened.ref);
+  let begin, release, changed = true, checks = 0;
+  const checking = new Promise(resolve => { begin = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  handle.verifyRecoverySend = async () => {
+    checks++; begin(); await blocked;
+    if (changed) throw Object.assign(Error('Reopen this history'), { code: 'HISTORY_PENDING_USER_TAIL_CHANGED' });
+  };
+  for (const result of [await f.installed.send(handle.ref, 'background relay', [], {}),
+    await f.send(handle, 'task page', f.event, { taskId: 'other-task' }),
+    await f.send(handle, 'embedded frame', { ...f.event, senderFrame: {} })])
+    assert.equal(result.code, 'HISTORY_RECOVERY_DESKTOP_ONLY');
+  assert.equal(checks, 0);
+  const first = f.send(handle, 'edited draft', f.event); await checking;
+  const duplicate = await f.send(handle, 'second window', f.event);
+  assert.equal(duplicate.accepted, false); assert.equal(duplicate.notSent, true);
+  release(); const denied = await first;
+  assert.equal(denied.code, 'HISTORY_PENDING_USER_TAIL_CHANGED'); assert.equal(denied.notSent, true);
+  assert.equal(f.turns.length, 0);
+  changed = false;
+  assert.equal((await f.send(handle, 'confirmed input', f.event)).accepted, true);
+  assert.equal((await f.send(handle, 'ordinary later turn')).accepted, true);
+  assert.equal(checks, 2); assert.equal(f.turns.length, 2);
 });
 
 for (const spec of catalog.runtimes()) {

@@ -3,8 +3,16 @@ const electron = require('electron');
 if (typeof electron === 'string') {
   const env = {...process.env};
   for (const key of ['ELECTRON_RUN_AS_NODE','NODE_OPTIONS']) delete env[key];
-  const child = require('node:child_process').spawnSync(electron,[__filename,...process.argv.slice(2)],
-    {env,stdio:'inherit',timeout:90000});
+  // Chromium can retain profile locks until Electron exits on Windows.
+  const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-queue-chromium-'));
+  let child;
+  try {
+    child = require('node:child_process').spawnSync(electron,[__filename,...process.argv.slice(2)],
+      {env:{...env,SODUWORK_QUEUE_E2E_PROFILE:profile},stdio:'inherit',timeout:90000});
+  } finally {
+    fs.rmSync(profile,{recursive:true,force:true,maxRetries:8,retryDelay:200});
+  }
   process.exit(child.status ?? 1);
 }
 const {app,BrowserWindow,ipcMain} = electron;
@@ -15,20 +23,24 @@ const catalog = require('../main/agent-runtime/runtime-catalog');
 const client = path.resolve(__dirname,'..'), output = process.argv[2];
 assert.ok(output && path.isAbsolute(output),'Absolute evidence directory required');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(),'soduwork-runner-queue-ui-'));
-fs.mkdirSync(output,{recursive:true}); app.setPath('userData',path.join(temporary,'profile')); app.disableHardwareAcceleration();
+fs.mkdirSync(output,{recursive:true}); app.setPath('userData',process.env.SODUWORK_QUEUE_E2E_PROFILE || path.join(temporary,'profile')); app.disableHardwareAcceleration();
 const report = {ok:false,platform:process.platform,electron:process.versions.electron,chromium:process.versions.chrome,
   checks:[],errors:[],network:[],cleanup:{ok:false},
   boundary:'Real Electron Chromium, NativeChat composer bindings and message renderer, status helpers, and production Runner adapters. Pointer input uses Chromium sendInputEvent. Runner admission/session RPC, model catalog, account and unrelated shell surfaces are synthetic. Clock is deterministic. No real provider, Windows execution, remote Runner, or production profile.'};
 const read = file => fs.readFileSync(path.join(client,file),'utf8');
 const realNow = Date.now;
 let now = realNow(), win, holdNextComment = false;
+let releasePreparation;
 const sessions = new Map(), native = new Map(), calls = [];
 const delay = ms => new Promise(resolve=>setTimeout(resolve,ms));
 const js = code => win.webContents.executeJavaScript(code,true);
 async function until(code,timeout=7000) {
   const end = realNow()+timeout;
   while(realNow()<end) {if(await js(code))return;await delay(20);}
-  throw Error('Timed out: '+code+'\n'+await js('document.body.innerText'));
+  throw Error('Timed out: '+code+'\n'+await js(`JSON.stringify({
+    status:fixtureContext?._snap?.status,pending:fixtureContext?._pending,baseline:fixtureContext?._pendingBaseline,
+    queue:fixtureContext?._snap?.execution?.turnQueue,stop:fixtureContext?._stopState,send:document.querySelector('#nchatSend')?.title
+  })`));
 }
 async function click(selector) {
   const p = await js(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing control');
@@ -98,6 +110,8 @@ app.whenReady().then(async()=>{
     });
     ipcMain.handle('queue-ui-send',(_event,ref,text,attachments,options)=>{
       const entry=sessions.get(ref);assert.ok(entry,'Only fixture-owned sessions can send');
+      if (text === 'Wait in local preflight') options = {...options,
+        beforeTurn: () => new Promise(resolve => { releasePreparation = resolve; })};
       const receipt=entry.handle.submit(text,attachments,options);
       void receipt.completion;
       return {ok:receipt.accepted,queued:receipt.queued,queueId:receipt.queueId,snapshot:entry.handle.snapshot()};
@@ -161,6 +175,27 @@ app.whenReady().then(async()=>{
     await until(`fixtureContext._snap.status==='aborted'`);
     assert.ok(calls.some(row=>row.op==='job.stop'&&row.ref===first.session.id));
     report.checks.push('A queued admission retains a working native pointer stop action without claiming the model is running');
+    await js(`NativeChat.enter('',${JSON.stringify(second.session.id)},{adapterId:'qwen',modelName:'synthetic'})`);
+    await submit('Wait in local preflight');
+    await until(`fixtureContext._snap.execution.waitingForStart && document.querySelector('#nchatSend').title==='停止生成'`);
+    await setTime(now+37000);
+    await js(`NativeChat.enter('',${JSON.stringify(first.session.id)},{adapterId:'opencode',modelName:'synthetic'})`);
+    await js(`NativeChat.enter('',${JSON.stringify(second.session.id)},{adapterId:'qwen',modelName:'synthetic'})`);
+    await until(`document.querySelector('[data-thinking-label]')?.textContent==='等待启动' && document.querySelector('[data-thinking-elapsed]')?.textContent==='37s'`);
+    const beforeStop=calls.length;
+    await click('#nchatSend');
+    await until(`fixtureContext._snap.execution.manualStopPending === true`);
+    releasePreparation();
+    await until(`!fixtureContext._snap.execution.turnQueue.activeQueueId && document.querySelector('#nchatSend').title==='发送'`);
+    assert.ok(!calls.slice(beforeStop).some(call=>call.op==='job.comment'||call.op==='job.stop'));
+    report.checks.push('Reopening during local preparation retains 37 seconds; a pointer stop cancels the new turn before dispatch and releases the composer');
+    await submit('Wait in local preflight');
+    await until(`fixtureContext._snap.execution.waitingForStart && document.querySelector('#nchatSend').title==='停止生成'`);
+    await click('#nchatSend');
+    await until(`fixtureContext._snap.execution.manualStopPending === true`);
+    releasePreparation();
+    await until(`!fixtureContext._pending && !fixtureContext._snap.execution.turnQueue.activeQueueId && document.querySelector('#nchatSend').title==='发送'`);
+    report.checks.push('Stopping without navigation also clears the optimistic pending turn and releases the composer');
     assert.deepEqual(await js('errors'),[]);assert.deepEqual(report.network,[]);
     report.checks.push('The queued follow-up runs once after settlement, with no external network or renderer errors');
     report.ok=true;

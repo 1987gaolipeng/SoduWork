@@ -252,7 +252,7 @@
     });
     old.forEach((node) => node.remove());
   }
-  const api = { patchContent, patchHtml, patchList, findDataNode, _syncMessage };
+  const api = { htmlFragment, patchContent, patchHtml, patchList, findDataNode, _syncMessage };
   global.ChatDomPatch = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

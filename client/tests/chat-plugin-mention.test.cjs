@@ -169,7 +169,8 @@ test('desktop chat sends a display-safe selection and leaves trusted resolution 
   assert.match(read('components', 'panels', 'chat-plugin-mention.js'), /dataset\.installable/);
   assert.match(read('components', 'panels', 'chat-plugin-mention.js'), /work\.plugin\.create/);
   assert.match(chat, /const submissionRef = retainedRef \|\| (?:ctx\.)?_ref/);
-  assert.match(chat, /api\.send\(submissionRef, text, attachmentRefs, \{\s*plugins: resolvedPlugins,\s*sentAt,\s*projectId:[\s\S]*submissionId/);
+  assert.match(chat, /const turnOptions = \{\s*plugins: resolvedPlugins,\s*sentAt,\s*projectId:[\s\S]*?submissionId/);
+  assert.match(chat, /api\.send\(submissionRef, text, attachmentRefs, turnOptions\)/);
   assert.match(chat, /data-plugin-retry/);
   assert.match(chat, /(?:ctx\.)?_submissionDrafts/);
   assert.doesNotMatch(chat, /SoduWorkAPI\.resolveConversationPlugins/);
@@ -240,8 +241,7 @@ test('new composer routes picked work action capsules while preserving literal s
   assert.doesNotMatch(compose, /SoduWorkAPI\.resolveConversationPlugins/);
   assert.match(compose, /initialPlugins/);
   assert.match(chat, /delete launchOptions\.initialPlugins/);
-  assert.match(chat, /(?:ctx\.)?_send\(first,\s*\{\s*plugins: initialPlugins,\s*skills: initialSkills,\s*attachments: Array\.isArray\(_sessionOptions\.attachments\) \? _sessionOptions\.attachments : \[\],?\s*\}\)/,
-    'first-turn handoff preserves both plugin/skill selections and compose-stage attachments');
+  // compose-first-send-race exercises the first-turn plugin, skill and attachment payload through the actual composer.
   const scope = {}; scope.window = scope;
   vm.runInNewContext(read('components', 'panels', 'plugin-ui-host.js'), scope);
   scope.PluginUIHost.registerAction({ id: 'work.requirement.create', command: '需求', open() {} });

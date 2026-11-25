@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { create, createWorker } = require('../main/conversation/replica-store.cjs');
+const { recoveryTail } = require('../main/conversation/conversation-transcript.cjs');
 
 const user = text => ({ role: 'user', text });
 const reply = text => ({ role: 'assistant', text });
@@ -16,6 +17,63 @@ function fixture(t) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return path.join(root, 'history.sqlite');
 }
+
+test('only a newly confirmed native user can replace the exact retained tail, even across different answer splits', t => {
+  const file = fixture(t);
+  let store = create(file);
+  try {
+    const [row] = store.register([{ id: 'circle' }]);
+    const prefix = [user('circle'), reply('one answer')];
+    const retained = [prefix[0], reply('one '), reply('answer'), user('earlier attempt')];
+    const marker = recoveryTail(retained, prefix);
+    store.saveConversationTranscript(row.id, retained, guard(row));
+    const archive = (messages, coverage = {}) => ({ snapshot: { messages, tools: [] }, coverage: { complete: true, ...coverage } });
+    const save = (value, options = {}) => store.saveDeviceHistory(row.id, value, {
+      ...guard(row), transcriptTail: marker, expectedHistoryDigest: store.deviceHistoryVersion(row.id) ?? null, ...options });
+    const different = [...prefix, user('changed question')];
+    for (const [value, options] of [
+      [archive(prefix)], [archive([...prefix, reply('not a user')])],
+      [archive([user('different prefix'), ...different.slice(1)])], [archive(different, { complete: false })],
+      [archive(different, { unresolvedTools: ['unfinished'] })], [{ ...archive(different), imported: { transferId: 'x' } }],
+      [archive(different), { transcriptTail: { ...marker, digest: 'stale' } }],
+      [archive(different), { expectedCatalogRevision: row.revision + 1 }], [archive(different), { expectedTransferId: 'stale' }],
+      [archive(different), { expectedHistoryDigest: 'stale' }], [archive(different), { transcriptTail: undefined }],
+    ]) {
+      save(value, options);
+      assert.deepEqual(store.conversationTranscript(row.id), retained);
+    }
+    assert.equal(store.saveConversationTranscript(row.id, different, guard(row)).diverged, true);
+    const optimistic = [...retained, reply('unconfirmed reply')];
+    assert.equal(store.saveConversationTranscript(row.id, optimistic, { ...guard(row), pendingTailDigest: marker.digest }).unchanged, true);
+    assert.deepEqual(store.conversationTranscript(row.id), retained);
+    // Identical user text can occur again at a different position.
+    const confirmed = [...different, reply('answer'), user('changed question'), { ...reply('stream'), done: false }];
+    assert.equal(save(archive(confirmed)).ok, true);
+    store.close();
+    store = create(file);
+    assert.deepEqual(store.conversationTranscript(row.id, { includeDraftState: true }), confirmed);
+    assert.deepEqual(store.deviceHistory(row.id).snapshot.messages, confirmed);
+    save(archive([...prefix, user('stale second writer')]));
+    assert.deepEqual(store.conversationTranscript(row.id, { includeDraftState: true }), confirmed);
+  } finally { store.close(); }
+});
+
+test('a damaged independent prefix rolls back the native replacement', t => {
+  const file = fixture(t), store = create(file);
+  try {
+    const [row] = store.register([{ id: 'damaged' }]);
+    const prefix = [user('first'), reply('answer')], original = [...prefix, user('pending')];
+    store.saveConversationTranscript(row.id, original, guard(row));
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(file);
+    try { db.prepare('UPDATE conversation_transcript SET data=? WHERE replica=? AND position=0')
+      .run(JSON.stringify(user('damaged')), row.id); } finally { db.close(); }
+    const archive = { snapshot: { messages: [...prefix, user('edited')], tools: [] }, coverage: { complete: true } };
+    assert.throws(() => store.saveDeviceHistory(row.id, archive, { ...guard(row), transcriptTail: recoveryTail(original, prefix) }),
+      { code: 'TRANSCRIPT_CHECKSUM_MISMATCH' });
+    assert.equal(store.deviceHistoryVersion(row.id) ?? null, null);
+  } finally { store.close(); }
+});
 
 test('public text survives restart and a runtime change without copying private fields', async t => {
   const file = fixture(t);

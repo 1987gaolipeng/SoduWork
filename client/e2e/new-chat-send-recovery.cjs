@@ -20,12 +20,12 @@ if (typeof electron === 'string') {
   const {createRunnerRuntimeAdapter, getRunnerSessionDetails, _uuidV5} = require('../main/agent-runtime/runner-adapter');
   const catalog = require('../main/agent-runtime/runtime-catalog');
   const localRunner = require('../main/runner-runtime');
-  const handles = new Map(), sessions = [], calls = [], sendCalls = [], queueCalls = [];
+  const handles = new Map(), attached = new Set(), scenarios = new Map(), sessions = [], calls = [], sendCalls = [], queueCalls = [];
   const support = {supported:true, schema:'soduwork.access-policy/v1', modes:['standard', 'readonly', 'full'],
     canChangeDuringSession:true, changeTakesEffect:'current-turn'};
   const report = {ok:false, cases:[], errors:[], screenshots:[],
-    boundary:'Hidden isolated Electron; production preload, NativeChat renderer/composer mouse controls and main-process Runner adapter/turn queue. IPC routes delegate to real handle.submit/updateQueue and publish real snapshots. Model credentials, account/inventory and Runner RPC receipts are fixtures; the first offline error comes from the real unstarted Runner RPC. No installed profile, backend, model execution or physical-mouse evidence.'};
-  let win, activeScenario, available = false;
+    boundary:'Hidden isolated Electron with the production preload, NativeChat mouse controls, first-send IPC and journal, Runner adapter and turn queue. The session registry delegates to real handles. Account, model and Runner responses use fixtures, including the native receipt store. The first offline failure comes from the real unstarted Runner RPC.'};
+  let win, activeScenario, available = false, holdList;
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   const js = source => win.webContents.executeJavaScript(source, true);
   const read = file => fs.readFileSync(path.join(client, file), 'utf8');
@@ -56,10 +56,21 @@ if (typeof electron === 'string') {
         /^(?:data:|https?:|file:)/.test(relative) ? match : 'url("' + pathToFileURL(path.resolve(path.dirname(file), relative)).href + '")');
   }
   function publish(handle, event, snapshot) {
-    if (!win.isDestroyed()) win.webContents.send('pi-session-event', {ref:handle.ref, ...event, snapshot:snapshot || handle.snapshot()});
+    if (attached.has(handle.ref) && !win.isDestroyed())
+      win.webContents.send('pi-session-event', {ref:handle.ref, ...event, snapshot:snapshot || handle.snapshot()});
+  }
+  function openReply(handle) {
+    return {ok:true, ref:handle.ref, sessionId:handle.sessionId, adapterId:handle.adapterId,
+      displayName:handle.displayName, cwd:handle.cwd, accessControl:support,
+      model:{id:'fixture-model', label:'Isolated fixture'}, snapshot:handle.snapshot()};
   }
   async function open(options) {
-    assert.ok(!options.chatId, 'This fixture must create a new native session through the first send');
+    if (options.chatId) {
+      const handle = scenarios.get(options.chatId)?.handle;
+      assert.ok(handle, 'Sidebar navigation can only attach an existing session');
+      attached.add(handle.ref);
+      return openReply(handle);
+    }
     assert.equal(options.adapterId, 'kimi');
     const scenario = activeScenario;
     assert.equal(scenario.opens++, 0, 'Only one native session may be opened per new conversation');
@@ -82,15 +93,16 @@ if (typeof electron === 'string') {
         scenario.successfulDispatches++;
         scenario.sentAt = input.ctx.conversationSentAt;
         scenario.text = input.ctx.conversationUserText;
-        if (scenario.name === 'unknown-ack') throw Error('Synthetic Runner dispatch ACK lost');
+        scenario.submissionId = input.ctx.conversationSubmissionId;
+        if (scenario.name.includes('unknown-ack')) throw Error('Synthetic Runner dispatch ACK lost');
         return {ok:true, data:{ok:true, ref, state:'running'}};
       }
       if (op === 'job.session') {
         scenario.reads++;
         assert.equal(input.ref, ref, 'Recovery must query the original deterministic native reference');
-        if (scenario.name === 'unknown-ack') await scenario.readGate;
+        if (scenario.name.includes('unknown-ack')) await scenario.readGate;
         return {ok:true, data:{ok:true, ref, status:'done', items:[
-          {seq:1, kind:'user', text:scenario.text, sentAt:scenario.sentAt},
+          {seq:1, kind:'user', text:scenario.text, sentAt:scenario.sentAt, submissionId:scenario.submissionId},
           {seq:2, kind:'say', text:scenario.name === 'unknown-ack' ? '已核实原会话完成，没有重新发送。' : '你好，连接已恢复。'},
         ].filter(item => item.seq > Number(input.since || 0))}};
       }
@@ -104,11 +116,11 @@ if (typeof electron === 'string') {
     sessions.push(session);
     const handle = getRunnerSessionDetails(session).handle;
     scenario.handle = handle;
+    scenarios.set(handle.sessionId, scenario);
+    attached.add(handle.ref);
     handles.set(handle.ref, handle);
     handle.on((event, snapshot) => publish(handle, event, snapshot));
-    return {ok:true, ref:handle.ref, sessionId:handle.sessionId, adapterId:handle.adapterId,
-      displayName:handle.displayName, cwd:handle.cwd, accessControl:support,
-      model:{id:'fixture-model', label:'Isolated fixture'}, snapshot:handle.snapshot()};
+    return openReply(handle);
   }
   function scenario(name) {
     let releaseRead, releaseFailure;
@@ -134,26 +146,64 @@ if (typeof electron === 'string') {
       backgroundThrottling:false, offscreen:true}});
     win.webContents.session.webRequest.onBeforeRequest({urls:['http://*/*', 'https://*/*']}, (_, done) => done({cancel:true}));
     win.webContents.on('console-message', event => { if (event.level === 'error') report.errors.push(event.message); });
+    const identity = require('../tests/helpers/platform-session-fixture.cjs').identity();
+    require('../main/conversation/requirement-context').cachedIdentity = () => identity;
+    const realRpc = localRunner.rpc;
+    localRunner.rpc = (op, input, timeoutMs) => {
+      if (op !== 'job.session' || !input.historyRead) return realRpc(op, input, timeoutMs);
+      const scenario = scenarios.get(input.ref);
+      assert.ok(scenario, 'first-send receipt probes must read the original native session');
+      return Promise.resolve({ok:true, data:{ok:true, ref:input.ref, items:scenario.submissionId && scenario.name !== 'sidebar-unknown-ack'
+        ? [{kind:'user', text:scenario.text, submissionId:scenario.submissionId}] : []}});
+    };
     ipcMain.handle('pi-session-open', (_event, options) => open(options));
     ipcMain.handle('pi-session-snapshot', (_event, ref) => ({ok:true, snapshot:handles.get(ref).snapshot()}));
-    ipcMain.handle('pi-session-send', (_event, ref, text, files, options) => {
+    async function send(ref, text, files, options, observe, _request, guard) {
       const handle = handles.get(ref); assert.ok(handle);
+      if (guard) { await guard(); guard.beforeDispatch(); }
       sendCalls.push({ref, text, submissionId:options.submissionId});
       const submitted = handle.submit(text, files, options);
       if (!submitted.accepted) return submitted.result;
-      Promise.resolve(submitted.completion).then(result => publish(handle, result?.ok
-        ? {kind:'settled', submissionId:options.submissionId}
-        : {kind:'error', reason:result?.reason, retrySafe:!!result?.retrySafe, failureKind:result?.failureKind,
-          submissionId:options.submissionId}));
+      observe?.(Promise.resolve(submitted.completion));
+      const scenario = scenarios.get(handle.sessionId);
+      scenario.published = Promise.resolve(submitted.completion).then(result => {
+        if (!result?.ok && !attached.has(ref)) scenario.failedWhileDetached = true;
+        publish(handle, result?.ok ? {kind:'settled', submissionId:options.submissionId}
+          : {kind:'error', reason:result?.reason, retrySafe:!!result?.retrySafe, failureKind:result?.failureKind,
+            submissionId:options.submissionId});
+      });
       return {ok:true, accepted:true, queued:submitted.queued, queueId:submitted.queueId, snapshot:handle.snapshot()};
-    });
+    }
+    ipcMain.handle('pi-session-send', (_event, ...args) => send(...args));
+    const journalIpc = { handle(channel, handler) {
+      ipcMain.handle(channel, async (...args) => {
+        const result = await handler(...args);
+        if (channel === 'pi-first-send-list' && holdList) {
+          const held = holdList; holdList = null;
+          await held.promise;
+        }
+        return result;
+      });
+    } };
+    require('../main/conversation/first-send-ipc.cjs').install({app, ipcMain:journalIpc, BrowserWindow, session:handles,
+      identityOf:async () => identity, openConversation:(_event, options) => open(options), sendConversation:send,
+      detach:ref => attached.delete(ref),
+      async attach(_event, id) {
+        const scenario = scenarios.get(id), handle = scenario?.handle;
+        if (scenario?.name === 'failure-before-attach') await scenario.published;
+        assert.ok(handle); attached.add(handle.ref); return openReply(handle);
+      }});
     ipcMain.handle('pi-session-queue-update', (_event, ref, id, action, value) => {
       queueCalls.push({ref, id, action}); return handles.get(ref).updateQueue(id, action, value);
     });
+    const runtimeRows = [{id:'kimi', displayName:'Kimi Code', modelMode:'managed', accessControl:support}];
+    ipcMain.handle('pi-session-history', () => ({ok:true, chats:[...scenarios.values()].map(s => s.handle.historyRow())}));
     for (const [channel, value] of Object.entries({
-      'pi-session-history':{ok:true, chats:[]}, 'pi-session-release':{ok:true},
+      'pi-session-release':{ok:true},
+      'pi-session-open-application':{ok:true, handled:false},
       'pi-session-outputs':{ok:true, items:[], artifacts:[]},
-      'pi-session-runtimes':{ok:true, runtimes:[{id:'kimi', displayName:'Kimi Code', modelMode:'managed', accessControl:support}]},
+      'pi-session-runtimes':{ok:true, runtimes:runtimeRows},
+      'pi-session-conversation-runtimes':{ok:true, runtimes:runtimeRows, availableRuntimes:runtimeRows, missing:[]},
       'access-preferences-get':{ok:true, mode:'standard', revision:0},
       'conversation-delivery-inspect':{ok:false, reason:'Not exercised by this isolated fixture'},
       'work-preview-show':{ok:true}, 'work-preview-hide':{ok:true}, 'work-preview-destroy':{ok:true}, 'work-preview-reset-embedded':{ok:true},
@@ -164,10 +214,11 @@ if (typeof electron === 'string') {
       if (src?.[1].endsWith('chat-composer-controls.js')) scripts.push(read('components/panels/chat-runtime-picker.js'));
       scripts.push(src ? fs.readFileSync(path.resolve(path.dirname(fixture), src[1]), 'utf8') : body); return '';
     });
-    const page = path.join(root, 'chat.html');
-    fs.writeFileSync(page, html.replace(/<link\b[^>]*rel="stylesheet"[^>]*>/gi, '')
-      .replace('<meta charset="utf-8">', '<meta charset="utf-8"><base href="' + pathToFileURL(client + path.sep).href + '">'));
-    await win.loadFile(page);
+    const page = pathToFileURL(path.join(client, 'desk.html')).href;
+    win.webContents.session.protocol.handle('file', request => request.url === page
+      ? new Response(html.replace(/<link\b[^>]*rel="stylesheet"[^>]*>/gi, ''), {headers:{'Content-Type':'text/html; charset=utf-8'}})
+      : electron.net.fetch(request.url, {bypassCustomProtocolHandlers:true}));
+    await win.loadURL(page);
     for (const file of ['theme/variables.css', 'components/panels/work-composer.css', 'components/panels/panels-chat.css',
       'components/panels/chat-collaboration.css', 'components/panels/conversation-attachments.css', 'components/panels/agent-brand.css'])
       await win.webContents.insertCSS(css(path.join(client, file)));
@@ -199,6 +250,15 @@ if (typeof electron === 'string') {
     assert.equal(offline.opens, 1); assert.equal(offline.dispatchAttempts, 2); assert.equal(offline.successfulDispatches, 1);
     assert.equal(offline.comments, 0); assert.equal(sendCalls.length, 2);
     assert.notEqual(sendCalls[0].submissionId, sendCalls[1].submissionId);
+    assert.match(sendCalls[0].submissionId, /^first-/);
+    // Let the original queue failure settle in the journal before checking the
+    // sidebar action that another window could still have on screen.
+    await delay(1000);
+    const initialId = JSON.stringify(sendCalls[0].submissionId);
+    assert.equal(await js(`soduWorkAPI.piSession.firstSends().then(r => r.rows.some(row => row.intentId === ${initialId} && row.canRetry))`),
+      false, 'a successful foreground resend must retire the original sidebar retry');
+    assert.equal((await js(`soduWorkAPI.piSession.retryFirstSend(${initialId})`)).ok, false);
+    assert.equal(offline.opens, 1); assert.equal(offline.successfulDispatches, 1);
     assert.equal(await js('document.querySelector("#nchatInput").value'), '');
     await shot('02-explicit-send-succeeded');
     report.cases.push('New empty chat opens its real Runner handle only on mouse send. The actual unstarted Runner rejects before write; input and failure remain visible without permanent busy. Making fixture Runner available does not auto-send; a second mouse send succeeds in the same view/ref with exactly one successful dispatch.');
@@ -238,6 +298,106 @@ if (typeof electron === 'string') {
     assert.equal(sendCalls.length, beforeNewer + 1);
     await shot('05-newer-draft-preserved');
     report.cases.push('When a definite pre-write failure arrives after the local echo and after the user types a new draft, the original failed submission cannot overwrite or auto-send that newer input.');
+
+    const early = scenario('failure-before-attach'), beforeEarly = sendCalls.length;
+    early.releaseFailure();
+    await prepare(); await click('#nchatInput'); await win.webContents.insertText('早到的失败'); await click('#nchatSend');
+    await until('document.querySelector("#nchatInput").value==="早到的失败"&&document.querySelector(".nbad-copy")?.textContent.includes("Runner is not running")&&!NativeChat.isBusy()',
+      'a definite failure before attach remains visible and editable');
+    assert.equal(early.failedWhileDetached, true); assert.equal(early.successfulDispatches, 0);
+    const earlyRef = await js('NativeChat.sessionInfo().ref');
+    await click('#nchatInput'); await win.webContents.insertText('，补充后重试');
+    const edited = await js('document.querySelector("#nchatInput").value');
+    assert.ok(edited.includes('早到的失败') && edited.includes('补充后重试'));
+    available = true; await click('#nchatSend');
+    await until('document.querySelector("#nchatList").textContent.includes("你好，连接已恢复。")&&!NativeChat.isBusy()', 'retry after a failure before attach');
+    assert.equal(await js('NativeChat.sessionInfo().ref'), earlyRef);
+    assert.equal(early.opens, 1); assert.equal(early.dispatchAttempts, 2); assert.equal(early.successfulDispatches, 1);
+    assert.equal(early.comments, 0); assert.equal(sendCalls.length, beforeEarly + 2); assert.equal(sendCalls.at(-1).text, edited);
+    await shot('06-early-failure-edited-retry');
+    report.cases.push('A definite failure while the handle is detached remains visible after attach. The edited retry runs once in the original session.');
+
+    available = false;
+    const sidebar = scenario('sidebar-edit');
+    sidebar.releaseFailure();
+    await prepare(); await click('#nchatInput'); await win.webContents.insertText('从侧栏修改这句'); await click('#nchatSend');
+    await until('document.querySelector("#nchatInput").value==="从侧栏修改这句"&&!NativeChat.isBusy()', 'definite failed sidebar source');
+    const sidebarId = sendCalls.at(-1).submissionId;
+    const newerId = sendCalls[beforeNewer].submissionId;
+    available = true;
+    const ambiguous = scenario('sidebar-unknown-ack');
+    await prepare(); await click('#nchatInput'); await win.webContents.insertText('待确认的首发'); await click('#nchatSend');
+    await until('Boolean(document.querySelector(".nqueue-paused"))', 'uncertain source');
+    const ambiguousId = sendCalls.at(-1).submissionId;
+    const beforeSidebar = sendCalls.length;
+
+    for (const file of ['workspace-chat-history', 'workspace-first-sends', 'workspace-chat-list', 'workspace-shell'])
+      await js(read('components/workspace/' + file + '.js') + '\nvoid 0;');
+    await win.webContents.insertCSS(css(path.join(client, 'components/workspace/workspace-navigation.css')));
+    await js(`document.documentElement.dataset.deskPanel='workspace';
+      window.WorkspaceHost={open(view,payload) {
+        const host=document.getElementById('cpChat');
+        if (payload.firstSendIntentId) {
+          NativeChat.reset(); WorkspaceShell.setActiveChat('');
+          return WorkspaceShell.mountFirstSend(payload.firstSendIntentId,host);
+        }
+        if (payload.chatId) {
+          host.querySelector('[data-first-send-record]')?.remove();
+          return NativeChat.enter('',payload.chatId);
+        }
+      }};
+      WorkspaceShell.setActive('create'); document.getElementById('wsCanvas').append(document.getElementById('cpChat'));
+      WorkspaceShell.refreshConversationHistory(); void 0;`);
+    const sidebarButton = id => '.ws-chat[data-first-send="' + id + '"]';
+    const recordAction = '[data-first-send-record] [data-send-action]';
+    async function showRecord(id, actionText) {
+      const button = sidebarButton(id);
+      await until(`document.querySelector(${JSON.stringify(button)})`, 'sidebar entry');
+      await click(button);
+      await until(`document.querySelector('[data-first-send-record]')?.dataset.firstSendRecord === ${JSON.stringify(id)}
+        && document.querySelector(${JSON.stringify(recordAction)})?.textContent === ${JSON.stringify(actionText)}`, actionText);
+    }
+    await showRecord(ambiguousId, '打开会话');
+    assert.equal((await js(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(ambiguousId)})`)).row.status, 'uncertain');
+    assert.equal((await js(`soduWorkAPI.piSession.retryFirstSend(${JSON.stringify(ambiguousId)})`)).ok, false);
+    await click(recordAction);
+    await until(`NativeChat.sessionInfo()?.sessionId === ${JSON.stringify(ambiguous.handle.sessionId)} &&
+      !document.querySelector('[data-first-send-record]')`, 'open the uncertain original for inspection');
+    assert.equal(ambiguous.dispatchAttempts, 1); assert.equal(sendCalls.length, beforeSidebar);
+
+    await showRecord(sidebarId, '编辑后发送');
+    const held = Promise.withResolvers();
+    holdList = held;
+    await click(recordAction);
+    await until(() => holdList === null, 'pending journal recheck');
+    try { await showRecord(newerId, '打开会话'); }
+    finally { held.resolve(); }
+    await delay(100);
+    assert.equal(await js('document.querySelector("[data-first-send-record]")?.dataset.firstSendRecord'), newerId);
+    assert.equal(sendCalls.length, beforeSidebar);
+    await click(recordAction);
+    await until(`NativeChat.sessionInfo()?.sessionId === ${JSON.stringify(newer.handle.sessionId)} &&
+      document.querySelector('#nchatInput')?.value === '保留我刚输入的新内容'`, 'later composer draft takes precedence');
+    assert.equal(newer.successfulDispatches, 0); assert.equal(sendCalls.length, beforeSidebar);
+
+    await showRecord(sidebarId, '编辑后发送');
+    await click(recordAction);
+    await until(`NativeChat.sessionInfo()?.sessionId === ${JSON.stringify(sidebar.handle.sessionId)} &&
+      document.querySelector('#nchatInput')?.value === '从侧栏修改这句'`, 'editable input in the original session');
+    assert.equal(sendCalls.length, beforeSidebar, 'opening an editable draft cannot send it');
+    await click('#nchatInput'); await win.webContents.insertText('，明确修改');
+    const revised = await js('document.querySelector("#nchatInput").value');
+    assert.ok(revised.includes('明确修改') && revised.includes('从侧栏修改这句'));
+    await click('#nchatSend');
+    await until('document.querySelector("#nchatList").textContent.includes("你好，连接已恢复。")&&!NativeChat.isBusy()', 'edited sidebar retry completed');
+    assert.equal(sidebar.opens, 1); assert.equal(sidebar.dispatchAttempts, 2); assert.equal(sidebar.successfulDispatches, 1);
+    assert.equal(sidebar.comments, 0); assert.equal(sendCalls.length, beforeSidebar + 1); assert.equal(sendCalls.at(-1).text, revised);
+    const settled = (await js(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(sidebarId)})`)).row;
+    assert.equal(settled.status, 'accepted'); assert.equal(settled.sessionId, sidebar.handle.sessionId);
+    assert.equal(settled.canRetry, false);
+    assert.equal((await js(`soduWorkAPI.piSession.retryFirstSend(${JSON.stringify(sidebarId)})`)).ok, false);
+    ambiguous.releaseRead();
+    report.cases.push('Mouse navigation from the sidebar edits a proven refusal in its original conversation and submits the revision once. Another draft, an uncertain send and a superseded asynchronous record opening remain isolated.');
     assert.deepEqual(await js('errors'), []);
     assert.deepEqual(report.errors, []);
     report.rpcCalls = calls;

@@ -84,8 +84,12 @@ class AdmissionHistoryTests(unittest.IsolatedAsyncioTestCase):
         item = self.queue.submit("turn-two", self.ref, admission.INTERACTIVE, "comment", {})[2]
         for state in ("queued", "starting"):
             item.state = state
+            if state == "starting":
+                item.started_at = item.accepted_at + 5
             result = await self.runner._job({"op": "job.session", "ref": self.ref})
             self.assertEqual(result["data"].get("executionStartedAt"), 0, state)
+            self.assertEqual(result["data"].get("queueAcceptedAt"), item.accepted_at)
+            self.assertEqual(result["data"].get("startupWaitSince"), item.started_at)
 
     async def test_refused_followup_cannot_reuse_a_warm_previous_turn_start_marker(self):
         for state in ("failed", "cancelled"):

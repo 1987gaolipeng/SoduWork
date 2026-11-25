@@ -49,6 +49,7 @@ async function send(context) {
           '\n请不要假设附件内容已经读取；如需继续，请先说明处理目标或重新提供材料。' };
       }
     }
+    if (cancelled()) return { ok: true, cancelled: true };
     const materialPrompt = materialUnderstanding.eligible ? materialUnderstanding.prompt : '';
     const options = { ...next.options, plugins: prepared.badges,
       [TURN_SKILLS]: skillTurn.runnerRows(skillRows(state.selectedSkills), selectedSkills),

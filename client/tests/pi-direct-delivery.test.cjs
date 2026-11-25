@@ -41,6 +41,31 @@ async function capture(handle) {
   return packages.prepare(handle, files.map(file => file.artifactId), { completedTurn: true });
 }
 
+test('a Pi follow-up waiting for admission is stoppable without a native turn or a stale pending message', async t => {
+  const f = await fixture(t);
+  f.reply(() => ({ text: 'Completed.' }));
+  await f.handle.submit('First turn').completion;
+  const nativeRequests = f.requests.length;
+  let release;
+  const beforeTurn = () => new Promise(resolve => { release = resolve; });
+  const pending = f.handle.submit('Waiting for admission', [], { submissionId: 'waiting-turn', beforeTurn });
+  await until(() => Boolean(release));
+  let stopped;
+  try {
+    const waiting = f.handle.snapshot().execution;
+    assert.equal(waiting.waitingForStart, true);
+    assert.ok(waiting.startupWaitSince > 0 && waiting.startupWaitSince <= Date.now());
+    assert.equal(f.handle.uiSnapshot().execution.startupWaitSince, waiting.startupWaitSince);
+    stopped = f.handle.cancel({ userInitiated: true });
+  } finally { release(); }
+  assert.equal((await stopped).cancelledBeforeDispatch, 'waiting-turn');
+  assert.equal((await pending.completion).cancelled, true);
+  assert.notEqual(f.handle.snapshot().execution.waitingForStart, true);
+  assert.equal(f.requests.length, nativeRequests);
+  assert.equal((await f.handle.submit('Fresh turn').completion).ok, true);
+  assert.equal(f.requests.length, nativeRequests + 1);
+});
+
 test('direct Pi completion captures immutable bytes before a queued turn overwrites the same file', { timeout: 20000 }, async t => {
   const f = await fixture(t), captured = [];
   f.reply((_body, count) => count % 2 ? { tool: 'write', args: { path: 'report.md', content: '# Revision ' + count } }

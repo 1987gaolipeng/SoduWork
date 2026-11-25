@@ -64,6 +64,151 @@ function piArchive(texts, ending = '\n') {
   }))].map(row => JSON.stringify(row)).join('\n') + ending;
 }
 
+test('a verified unstarted Runner segment preserves the Pi body; uncertain or admitted segments stay read-only', async t => {
+  const f = fixture(t), segments = require('../main/conversation/runtime-segments');
+  const runnerRef = require('../main/agent-runtime/runner-adapter').runnerRefForDispatch;
+  const dormant = name => ({ adapterId: 'codex', started: false, sessionId: runnerRef(name), nativeDispatchId: name });
+  const middle = dormant('dormant-middle'), tail = dormant('dormant-tail');
+  let cold = false, offline = false, admitted = false, busy = false;
+  t.mock.method(require('../main/runner-runtime'), 'rpc', async (op, p) => {
+    if (op === 'job.session') {
+      if (p.ref === tail.sessionId && busy) return { ok: false, code: 'RUNNER_RPC_BUSY', retryable: true, uncertain: false };
+      if (p.ref === tail.sessionId && offline) throw Error('offline');
+      if (p.ref === tail.sessionId && admitted)
+        return { ok: true, data: { ref: p.ref, seq: 1, items: [{ seq: 1, kind: 'say', text: 'New turn' }] } };
+      return { ok: true, data: { ok: false, ref: p.ref, code: 'NATIVE_HISTORY_MISSING', items: [] } };
+    }
+    assert.equal(op, 'job.has');
+    assert.equal(p.checkPendingWork, true);
+    const persisted = cold && p.ref === tail.sessionId && p.admissionKey === 'dispatch:' + tail.sessionId;
+    return { ok: true, data: { has: persisted, inflight: false, persisted, admissionDurable: true, localWorkPending: false,
+      bootId: 'boot', admissionKey: p.admissionKey || '' } };
+  });
+  f.write(3);
+  await segments.save(f.app, { version: 1, id: f.row.id, owner: f.row.workOwner, cwd: f.row.cwd,
+    originAdapter: 'pi', segments: [{ sessionId: f.row.id, adapterId: 'pi' }, middle], active: tail });
+  await f.history.projectRows([f.row]);
+  const saved = await f.history.backfill(f.row.id);
+  assert.equal(saved.coverage.complete, true);
+  assert.deepEqual(saved.coverage.sources.filter(s => s.dormant).map(s => s.id), [middle.sessionId, tail.sessionId]);
+  assert.equal(saved.snapshot.messages[0].text, 'Message 0');
+  assert.equal((await f.history.exportPortable(f.row.id)).coverage.complete, true);
+
+  cold = true;
+  const view = await f.history.open(f.row.id, { historyPreview: true, allowContinuation: true });
+  assert.equal(view.snapshot().messages[0].text, 'Message 0');
+  assert.equal(view.snapshot().historyRecovery.incomplete, true);
+  assert.match(view.snapshot().historyRecovery.reason, /codex/);
+  assert.equal(view.snapshot().execution.canContinueOnDevice, false);
+  await assert.rejects(f.history.prepareContinuation(f.row.id, { refresh: true }), /不完整/);
+  await assert.rejects(f.history.prepareContinuation(f.row.id), /不完整/);
+  await assert.rejects(f.history.exportPortable(f.row.id), /完整/);
+  assert.equal((await f.store.deviceHistory(f.row.id)).digest, saved.digest);
+
+  cold = false;
+  const local = await require('../main/conversation/task-output-journal').create(f.app, tail.sessionId);
+  local.append(0, { kind: 'message', role: 'assistant', text: 'Controlled task output before dispatch' });
+  local.close();
+  await assert.rejects(f.history.prepareContinuation(f.row.id, { refresh: true }), /不完整/);
+  offline = true;
+  assert.equal((await f.history.open(f.row.id)).snapshot().historyRecovery.incomplete, true);
+  offline = false; admitted = true;
+  const next = await f.history.backfill(f.row.id);
+  assert.equal(next.coverage.sources.at(-1).revision, '1');
+  assert.equal(next.coverage.sources.at(-1).dormant, undefined);
+  const replica = f.store.deviceHistory(f.row.id);
+  const { digest, savedAt, ...body } = replica;
+  const legacy = await f.store.saveDeviceHistory(f.row.id, { ...body,
+    localArtifactHistory: { root: fs.realpathSync(f.row.cwd), items: [{ relative: 'report.txt' }] },
+  }, { expectedRevision: f.store.get(f.row.id).replicaRevision, expectedHistoryDigest: digest });
+  assert.equal(legacy.ok, true);
+  const backup = t.mock.method(require('../main/conversation/device-artifact-archive.cjs'), 'preserve',
+    async (_profile, _id, prior) => prior);
+  busy = true;
+  await assert.rejects(f.history.prepareContinuation(f.row.id, { refresh: true }), { code: 'RUNNER_HISTORY_BUSY' });
+  assert.equal(backup.mock.callCount(), 0);
+  assert.equal(f.store.deviceHistory(f.row.id).digest, legacy.digest);
+  assert.equal(f.store.deviceHistory(f.row.id).coverage.complete, true);
+});
+
+test('a partial native read retains the verified tools and artifact binding at a matching turn', async t => {
+  const f = fixture(t), messages = [{ role: 'user', text: 'Draw' }];
+  const saved = { digest: 'stored', snapshot: { messages, tools: [{ id: 'tool', state: 'done' }] },
+    coverage: { complete: true, sources: [] }, localArtifactHistory: { items: [{ relative: 'drawing.png' }] } };
+  const history = require('../main/conversation/device-history.cjs').create({ app: f.app, session: f.session,
+    store: { deviceHistory: () => saved }, resolve: async () => f.row, guard: () => () => {}, authorize() {} });
+  let prefix = messages;
+  t.mock.method(require('../main/conversation/device-history-native.cjs'), 'read', async () => {
+    throw Object.assign(Error('busy'), { code: 'RUNNER_HISTORY_BUSY', history: {
+      snapshot: { messages: prefix, tools: [] }, coverage: { complete: false, sources: [] } } });
+  });
+  const read = () => history.saved(f.row.id, { refresh: true });
+  const equal = await read();
+  assert.equal(equal.coverage.complete, false);
+  assert.deepEqual(equal.snapshot.tools, saved.snapshot.tools);
+  assert.equal(equal.localArtifactHistory, saved.localArtifactHistory);
+  prefix = [...messages, { role: 'assistant', blocks: [] }];
+  const longer = await read();
+  assert.equal(longer.snapshot.messages.length, 2);
+  assert.equal(longer.digest, saved.digest);
+  assert.equal(longer.localArtifactHistory, saved.localArtifactHistory);
+  prefix = [{ role: 'user', text: 'Different work' }, prefix[1]];
+  assert.equal((await read()).localArtifactHistory, undefined);
+});
+
+test('retired Runner descriptors without a started flag need both dispatch absence and the full frozen prefix', async t => {
+  const f = fixture(t), segments = require('../main/conversation/runtime-segments');
+  const sessionId = require('../main/agent-runtime/runner-adapter').runnerRefForDispatch('legacy-codex');
+  const old = { sessionId, adapterId: 'codex', nativeDispatchId: 'legacy-codex', usedHarnesses: [] };
+  const user = { role: 'user', text: 'Original', sentAt: 1700000000000 };
+  const prefix = { messages: [user], tools: [] };
+  const used = { sessionId: 'used', adapterId: 'qwen' }, active = { sessionId: 'current', adapterId: 'dsh' };
+  let pending = false, receipt = false, permitted = true;
+  const busy = new Map([['job.session', 1], ['keyed', 1], ['live', 1]]);
+  const runtime = { async rpc(op, p) {
+    const key = op === 'job.has' ? p.admissionKey ? 'keyed' : 'live' : op;
+    if (p.ref === sessionId && busy.get(key) > 0) {
+      busy.set(key, busy.get(key) - 1);
+      return { ok: false, code: 'RUNNER_RPC_BUSY', retryable: true, uncertain: false };
+    }
+    if (op === 'job.session') {
+      if (p.ref === sessionId) return { ok: true, data: { ok: false, ref: p.ref, code: 'NATIVE_HISTORY_MISSING', items: [] } };
+      const event = { seq: 1, kind: 'user', text: p.ref === 'used' ? user.text : 'Later', sentAt: user.sentAt };
+      return { ok: true, data: { ref: p.ref, seq: 1, items: [event] } };
+    }
+    assert.equal(op, 'job.has');
+    return { ok: true, data: { has: receipt, persisted: receipt, inflight: false, localWorkPending: pending,
+      admissionDurable: true, bootId: 'boot', admissionKey: p.admissionKey || '' } };
+  } };
+  const manifest = { version: 1, id: 'used', segments: [used, old], active, prefix };
+  const save = overrides => segments.save(f.app, { ...manifest, ...overrides });
+  const read = extra => require('../main/conversation/device-history-native.cjs').read({ app: f.app, row: { id: 'used' },
+    session: f.session, runtime, guard() {}, mayVerifyLegacyRetired: () => permitted, ...extra });
+  const blocked = async () => assert.rejects(read(), { code: 'NATIVE_SEGMENT_UNAVAILABLE' });
+  await save({});
+  const saved = await read();
+  assert.equal(saved.coverage.complete, true);
+  assert.deepEqual([...busy.values()], [0, 0, 0]);
+  assert.equal(saved.coverage.sources[1].dormant, true);
+  assert.deepEqual(saved.snapshot.messages.map(m => m.text), ['Original', 'Later']);
+  busy.set('live', Infinity);
+  await assert.rejects(read(), error => error.code === 'RUNNER_HISTORY_BUSY' &&
+    error.history.coverage.complete === false && /暂忙/.test(error.message));
+  busy.set('live', 1); pending = true; await blocked(); pending = false;
+  busy.set('keyed', 1); receipt = true; await blocked(); receipt = false;
+  permitted = false; await blocked(); permitted = true;
+  await assert.rejects(read({ previousSources: [saved.coverage.sources[0],
+    { id: sessionId, adapterId: 'codex', revision: '2' }] }), { code: 'NATIVE_SEGMENT_UNAVAILABLE' });
+  for (const change of [
+    { prefix: { ...prefix, messages: [user, { ...user, text: 'Lost dispatch' }] } },
+    { prefix: { ...prefix, messages: [{ ...user, sentAt: user.sentAt + 1 }] } },
+    { prefix: { ...prefix, tools: [{ id: sessionId + ':tool', callId: 'unrecorded' }] } },
+    { deviceShared: true }, { deviceTransferId: 'other-device' },
+    { segments: [used, { ...old, usedHarnesses: ['codex'] }] },
+    { segments: [used, { ...old, started: true }] }, { segments: [used], active: old },
+  ]) { await save(change); await blocked(); }
+});
+
 test('opening a truncated or rewritten Pi archive preserves the full replica and blocks execution and transfer', async t => {
   const original = ['first', 'reply', 'second', 'final'];
   const variants = {
@@ -356,6 +501,81 @@ test('an unpaired native tool call remains readable but blocks recovery and migr
   fs.unlinkSync(f.file);
   assert.equal((await require('../main/conversation/native-history-opening.cjs').resolve({ ...f, history: f.history })).readOnly, true);
   assert.match((await f.history.open('one')).snapshot().historyRecovery.reason, /缺少终结回执/);
+});
+test('a retired unknown Runner result can start a new local turn only after all executions and admissions are idle', async t => {
+  const f = fixture(t), segments = require('../main/conversation/runtime-segments');
+  const retired = { sessionId: 'old-runner', adapterId: 'opencode', started: true };
+  const active = { sessionId: 'latest-runner', adapterId: 'kimi', started: true };
+  const record = { version: 1, id: f.row.id, owner: f.row.workOwner, cwd: f.root, originAdapter: 'pi',
+    segments: [{ sessionId: f.row.id, adapterId: 'pi' }, retired], active };
+  let queued = false, quiescent = true, piBusy = false, busyQueries = 0, pendingRef = '';
+  f.session.historyExecutionsIdle = ids => ids.includes(f.row.id) && !piBusy;
+  t.mock.method(require('../main/runner-runtime'), 'rpc', async (op, p) => {
+    const old = p.ref === retired.sessionId, part = old ? retired : active;
+    if (op === 'job.has' && old && busyQueries > 0) {
+      busyQueries--;
+      return { ok: false, code: 'RUNNER_RPC_BUSY', retryable: true, uncertain: false };
+    }
+    if (op === 'job.has') return { ok: true, data: { bootId: 'runner', inflight: false,
+      localWorkPending: false, admissionDurable: true, localAdmissionsPending: queued && old || p.ref === pendingRef } };
+    if (op !== 'job.session') return { ok: false };
+    const items = old ? [{ seq: 1, kind: 'user', text: 'Old question' },
+      { seq: 2, kind: 'do', tool: 'bash', callId: 'missing-result', text: 'Old command' }] :
+      [{ seq: 1, kind: 'user', text: 'Next question' }, { seq: 2, kind: 'say', text: 'Next answer' }];
+    return { ok: true, data: { ok: true, ref: p.ref, cli: part.adapterId, workDir: f.root,
+      deviceTransfer: { schemaVersion: 1, quiescent }, status: 'done', ended: 10,
+      seq: items.length, items: items.filter(e => e.seq > p.since) } };
+  });
+  f.write(2);
+  await segments.save(f.app, record);
+  await f.history.projectRows([f.row]); await f.history.backfill(f.row.id);
+  const preview = async () => (await f.history.open(f.row.id, { historyPreview: true, allowContinuation: true })).snapshot();
+  assert.equal((await preview()).execution.canContinueOnDevice, true);
+  const options = { refresh: true, allowRetiredTools: true };
+  const recovery = await f.history.prepareContinuation(f.row.id, options);
+  assert.equal(recovery.prefix.tools.find(tool => tool.callId === 'missing-result').state, 'running');
+  const sources = recovery.historyRecovery.retiredRunnerSources;
+  await f.history.verifyRetiredToolSend(f.row.id, active.sessionId, sources);
+  busyQueries = 1;
+  assert.equal((await preview()).execution.canContinueOnDevice, true);
+  assert.equal(busyQueries, 0);
+  busyQueries = Infinity;
+  const busy = await preview();
+  assert.equal(busy.execution.canContinueOnDevice, false);
+  assert.match(busy.historyRecovery.reason, /暂忙/);
+  assert.ok(busy.messages.length > 0);
+  await assert.rejects(f.history.verifyRetiredToolSend(f.row.id, active.sessionId, sources), { code: 'RUNNER_HISTORY_BUSY' });
+  busyQueries = 0;
+  await assert.rejects(f.history.exportPortable(f.row.id), { code: 'HISTORY_UNRESOLVED_TOOLS' });
+  await assert.rejects(f.history.prepareContinuation(f.row.id), { code: 'HISTORY_UNRESOLVED_TOOLS' });
+  queued = true;
+  await assert.rejects(f.history.verifyRetiredToolSend(f.row.id, active.sessionId, sources), { code: 'HISTORY_UNRESOLVED_TOOLS' });
+  assert.equal((await preview()).execution.canContinueOnDevice, false);
+  queued = false; quiescent = false;
+  await assert.rejects(f.history.prepareContinuation(f.row.id, options), { code: 'HISTORY_UNRESOLVED_TOOLS' });
+  quiescent = true; piBusy = true;
+  assert.equal((await preview()).execution.canContinueOnDevice, false);
+  piBusy = false;
+  const middle = { sessionId: 'recovered-runner', adapterId: 'kimi', started: true };
+  const recovered = { ...record, deviceHistoryComplete: true, prefix: recovery.prefix,
+    segments: [...record.segments, active], active: middle, historyRecovery: recovery.historyRecovery };
+  await segments.save(f.app, recovered);
+  await assert.rejects(f.history.checkpointRetiringRunner(f.row.id, retired.sessionId));
+  const extended = await f.history.checkpointRetiringRunner(f.row.id, middle.sessionId);
+  assert.deepEqual(extended, [...sources, { id: middle.sessionId, adapterId: 'kimi', revision: '2' }]);
+  const replay = await f.store.deviceHistory(f.row.id);
+  const last = { sessionId: 'next-runner', adapterId: 'kimi', started: true };
+  await segments.save(f.app, { ...recovered, segments: [...recovered.segments, middle], active: last,
+    prefix: replay.snapshot, historyRecovery: { ...recovery.historyRecovery, retiredRunnerSources: extended } });
+  await f.restart();
+  assert.equal((await preview()).execution.canContinueOnDevice, true);
+  pendingRef = middle.sessionId;
+  await assert.rejects(f.history.verifyRetiredToolSend(f.row.id, last.sessionId, sources), { code: 'HISTORY_UNRESOLVED_TOOLS' });
+  assert.equal((await preview()).execution.canContinueOnDevice, false);
+  pendingRef = '';
+  f.setIdentity(identity('two'));
+  const other = await f.history.open(f.row.id, { historyPreview: true, allowContinuation: true });
+  assert.notEqual(other?.snapshot().execution.canContinueOnDevice, true);
 });
 test('nonexecuted tool drafts and a recorded cancellation do not block history continuation', async t => {
   const f = fixture(t); f.write(2);

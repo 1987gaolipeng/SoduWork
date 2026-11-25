@@ -111,7 +111,8 @@
     const copy = String(text || '').trim() ? _copyButton(text, user ? 'nmessage-copy' : 'ntext-copy', afterBlock) : '';
     const speech = !user && message.done !== false && String(text || '').trim()
       ? global.SoduWorkReadAloud?.button(text, ctx._ref, messageIndex, ctx.esc) || '' : '';
-    return time || copy || speech ? '<div class="nmessage-footer">' + time + speech + copy + '</div>' : '';
+    const delivery = user && message.deliveryUnconfirmed ? '<span data-delivery-unconfirmed>' + ctx.esc(uiText('发送未确认')) + '</span>' : '';
+    return time || copy || speech || delivery ? '<div class="nmessage-footer">' + delivery + time + speech + copy + '</div>' : '';
   }
 
   // A provider message can end before a tool runs. Only the last substantive
@@ -411,6 +412,13 @@
       '<div class="ntool-body">' + (hydrate ? _toolBody(t) : '') + '</div></div>';
   }
 
+  function pendingUserText(snapshot) {
+    const recovery = snapshot?.historyRecovery;
+    return snapshot?.localReplica === true && snapshot.execution?.canContinueOnDevice === true &&
+      recovery?.reasonCode === 'HISTORY_UNDISPATCHED_USER_TAIL' && typeof recovery.pendingUserText === 'string'
+      ? recovery.pendingUserText : '';
+  }
+
   function _render() {
     const el = ctx._mount();
     if (!el) return;
@@ -595,11 +603,12 @@
     let firstUser = !allMessages.slice(0, messageStart).some(m => m.role === 'user');
     const keyed = (html, key, index) => String(html).replace('<div class="nmsg',
       '<div data-chat-node="' + ctx.esc(key) + '"' + (index === undefined ? '' : ' data-message-owner="' + _messageOwner(index) + '"') + ' class="nmsg');
-    const userHtml = (text, attachments, plugins, key, sentAt, message, index) => {
+    const userHtml = (message, key, index, deliveryUnconfirmed = false) => {
+      const { text, attachments, plugins, sentAt } = message;
       const goal = firstUser && (ctx._sessionOptions.intent === 'goal' || ctx._sessionOptions.mode === 'goal')
         ? ctx._sessionOptions : {};
       firstUser = false;
-      const footer = _messageFooter({ role: 'user', sentAt }, text);
+      const footer = _messageFooter({ role: 'user', sentAt, deliveryUnconfirmed }, text);
       const files = global.ConversationAttachments ? ConversationAttachments.messageHtml(attachments) : '';
       const badges = pluginBadges?.html(plugins) || (plugins || []).map(item => '<span class="nmessage-plugin"><span class="nmessage-plugin-label">' + ctx.esc(item.name || item.key || 'Plugin') + '</span></span>').join('');
       const tail = (badges ? '<div class="nmessage-plugins">' + badges + '</div>' : '') + files + footer + _workflowSlot(message);
@@ -653,6 +662,10 @@
       rows.push(tool); toolsByMessage.set(after, rows);
     });
     const latestUser = allMessages.findLastIndex(message => message.role === 'user');
+    const atHistoryEnd = !(history.messageEnd < history.totalMessages);
+    const pendingHistoryText = atHistoryEnd ? pendingUserText(ctx._snap) : '';
+    const unconfirmedTailInMessages = atHistoryEnd && ctx._snap.localReplica === true &&
+      ctx._snap.historyRecovery?.reasonCode === 'HISTORY_UNCONFIRMED_USER_TAIL';
     const turnMetrics = () => ctx._turnMetricsHtml?.(busy) || '';
     /* A freshly sent goal can be acknowledged by a tool event before the
        native snapshot persists its user message.  Render the optimistic
@@ -660,13 +673,13 @@
     let pendingRendered = false;
     const appendPending = () => {
       if (!ctx._pending || pendingRendered) return;
-      parts.push(userHtml(ctx._pending, ctx._pendingAttachmentNames, ctx._pendingPlugins,
-        'message:pending', ctx._pendingSentAt));
+      parts.push(userHtml({ text: ctx._pending, attachments: ctx._pendingAttachmentNames,
+        plugins: ctx._pendingPlugins, sentAt: ctx._pendingSentAt }, 'message:pending'));
       parts.push(turnMetrics());
       pendingRendered = true;
     };
     if (!allMessages.length) appendWorkCards(0);
-    if (ctx._pending && allMessages.length === 0 && !approvalCards.length) appendPending();
+    if (ctx._pending && allMessages.length === 0 && !approvalCards.length && !pendingHistoryText) appendPending();
     // One identity stack per user turn, including tool-only participants.
     const crewOf = global.ChatCrew || null;
     const turnCrews = crewOf?.turnsOf(allMessages, allTools, st === 'streaming');
@@ -719,7 +732,8 @@
       if (m.role === 'user') {
         agents?.breakRun?.();   // turn boundary: next turn's same-run messages repaint the crew head; tool-group dedup resets too
         agents?.before(parts, null, 'message:' + mi);
-        parts.push(userHtml(m.text, m.attachments, m.plugins, 'message:' + mi, m.sentAt, m, mi));
+        parts.push(userHtml(m, 'message:' + mi, mi,
+          unconfirmedTailInMessages && mi === allMessages.length - 1));
         appendSummary(mi);
         if (!ctx._pending && mi === latestUser && !summaryTurns.has(mi)) parts.push(turnMetrics());
       } else {
@@ -783,6 +797,11 @@
           '<button type="button" data-chat-workflow-retry="' + ctx.esc(entry.taskId) + '">重试本步骤</button>' +
           '<button type="button" data-task-receipt="' + ctx.esc(entry.taskId) + '">查看详情</button></div></section>' : '') + '</div>');
     });
+    // An unsent historical tail belongs in the transcript UI only. The native
+    // snapshot remains authoritative for summaries, tools and the next send.
+    if (pendingHistoryText && pendingHistoryText !== ctx._pending) {
+      parts.push(userHtml({ text: pendingHistoryText }, 'history-unconfirmed-user', undefined, true));
+    }
     const runtimeNotices = (Array.isArray(ctx._snap.notices) ? ctx._snap.notices : [])
       .filter((item) => item && String(item.message || '').trim());
     const latestNotice = runtimeNotices[runtimeNotices.length - 1];
@@ -867,7 +886,8 @@
     /* Structural stream updates retain preceding final cards. Token-only
        updates still use _patchLiveStream above; current files are decorated
        only after the whole turn has settled. */
-    const deliverySnapshot = { ...ctx._snap, deliveryPending: Boolean(ctx._pending || ctx._snap?.deliveryPending) };
+    const deliverySnapshot = { ...ctx._snap, deliveryPending: Boolean(ctx._pending || ctx._snap?.deliveryPending),
+      historyImagesLoading: ctx._snap.localReplica === true && ctx._outAt === '' && typeof ctx._api?.()?.outputs === 'function' };
     const settledNow = !global.ChatDeliveries || global.ChatDeliveries.isSettled(deliverySnapshot);
     const restoreReading = _preserveReadingPosition(scroll, list);
     const finishThinkingFold = global.ChatThinkingCollapse?.capture(list, scroll, String(ctx._ref || '') + '|' + nextOutputScope);
@@ -942,7 +962,7 @@
     else _updateScrollButton(scrollState);
 
     ChatTools.paintSendButton(el, busy, ctx._messageAttachments, ctx._stopState,
-      ['streaming', 'queued'].includes(st) || execution.running === true || qualityBusy, ctx._sendState);
+      ['streaming', 'queued'].includes(st) || execution.running === true || execution.waitingForStart === true || qualityBusy, ctx._sendState);
 
     if (ctx._snap.modelSelection) ctx._model = ctx._snap.modelSelection.activeModel;
     if (ctx._composerControls) ctx._composerControls.render();

@@ -50,6 +50,39 @@ function harness(options = {}) {
 const plugin = (pluginId, inputValues) => ({ pluginId, name: pluginId, ...(inputValues ? { inputValues } : {}) });
 const failed = () => ({ text: 'failed request', plugins: [plugin('a', { roomId: 'original' })], files: [] });
 
+test('a refused first turn can restore its complete live selection or a known text-only history draft', () => {
+  const row = { intentId: 'i', attemptId: 'one', sessionId: 'a', status: 'failed', canAttachFailed: true, text: 'original' };
+  const h = harness();
+  assert.equal(h.api.firstSendEditState(row, true), 'reselect');
+  const full = { ...failed(), firstSendRetry: { intentId: 'i', attemptId: 'one' } };
+  h.api._retainFailedConversationDraft('a', full, 'validation failed');
+  assert.equal(h.api.restoreFirstSendForEdit(row, false), true);
+  assert.deepEqual(h.ctx._failedConversationDrafts.get('a').draft.plugins, full.plugins);
+  h.api._restoreFailedDraft(full);
+  h.pick([]); h.switchTo('b'); h.switchTo('a');
+  h.api._restoreRetainedConversationFailure();
+  assert.deepEqual(h.picks(), [], 'reopening must preserve a plugin removed in the editor');
+  h.api._flushConversationDrafts();
+  const restarted = harness(); restarted.storage.set('drafts', h.storage.get('drafts')); restarted.ctx._draftStorageLoaded = false;
+  assert.equal(restarted.api.restoreFirstSendForEdit(row, true), false, 'plugin parameters do not survive restart');
+  const plain = { ...row, sessionId: 'text-only', canRestoreText: true };
+  assert.equal(restarted.api.restoreFirstSendForEdit(plain, false), false);
+  assert.equal(restarted.api.restoreFirstSendForEdit(plain, true), true);
+  assert.deepEqual(copy(restarted.ctx._conversationDrafts.get('text-only').firstSendRetry), full.firstSendRetry);
+  assert.equal(restarted.api._conversationDraftText('text-only'), 'original');
+  assert.equal(restarted.api.restoreFirstSendForEdit({ ...plain, status: 'uncertain' }, true), false);
+});
+test('a newer native draft keeps its text and selection even when the refused request used the same words', () => {
+  const h = harness(), row = { intentId: 'i', attemptId: 'one', sessionId: 'a', status: 'failed', canAttachFailed: true, canRestoreText: true };
+  h.input.value = 'failed request'; h.pick([plugin('new')]); h.switchTo('b');
+  h.api._retainFailedConversationDraft('a', { ...failed(), firstSendRetry: { intentId: 'i', attemptId: 'one' } }, 'refused');
+  assert.equal(h.api.firstSendEditState(row, true), 'occupied');
+  assert.equal(h.api.restoreFirstSendForEdit(row, true), false);
+  assert.equal(h.ctx._conversationDrafts.get('a').firstSendRetry, undefined);
+  assert.equal(h.ctx._failedConversationDrafts.has('a'), false);
+  h.switchTo('a'); assert.equal(h.input.value, 'failed request'); assert.deepEqual(h.picks(), [plugin('new')]);
+});
+
 test('unsent plugins and parameters survive A to B to A without borrowing active session plugins', () => {
   const h = harness(), draft = plugin('draft-a', { roomId: 'room-1', seats: 4, online: true });
   h.pick([draft]); h.input.value = 'unsent A'; h.files([{ name: 'A.txt' }]);

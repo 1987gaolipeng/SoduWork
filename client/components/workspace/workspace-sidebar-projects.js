@@ -300,6 +300,10 @@
         node?.scrollIntoView({ block: 'nearest' }); node?.querySelector('.ws-project-toggle')?.focus();
       },
       pins: () => new Set(state().view(getItems()).pinned.map(row => row.id)),
+      recoverFirstSend(row) {
+        return state().fileChat(row.sessionId, row.sidebarProjectId,
+          { id: row.sessionId, title: row.title, at: row.at }, { ifUnassigned: true });
+      },
       projectForChat(id) {
         const wanted = String(id || '');
         if (!wanted) return null;

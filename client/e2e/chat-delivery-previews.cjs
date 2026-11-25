@@ -182,6 +182,31 @@ if (typeof electron === 'string') {
     assert.equal(await js('(()=>{const node=messages.querySelector("[data-native-file-icon=zip]"),svg=node?.querySelector(".library-file-fallback svg");return !!svg&&svg.checkVisibility()&&node.textContent===""&&svg.getBoundingClientRect().width<=18})()'), true,
       'a delivery becoming a ZIP must retain a bounded SVG when native lookup fails');
     report.cases.push('Late ZIP package metadata retains the shared SVG fallback without extension text');
+    await js(`window.qwenMedia = '<div class="nmd"><pre><code class="language-soduwork-media">{"type":"image","items":[{"url":"pentagon.png"}]}</code></pre></div>';
+      window.qwenHtml = [0,1,2,3].map(i => i % 2 === 0 ? '<article class="nmsg user">User</article>' :
+        '<article data-chat-node="message:'+i+'" data-output-task="" data-delivery-final="true" class="nmsg ai">'+qwenMedia+'</article>').join('');
+      window.qwenSnapshot = {localReplica:true,messages:[{role:'user'},{role:'assistant'},{role:'user'},{role:'assistant'}]};
+      window.qwenPreview = {name:'pentagon.jpg',relative:'.soduwork/evidence/shot.jpg',artifactId:'version:preview',versionId:'preview',
+        originalArtifactId:'jpeg',turnId:'second',userMessageIndex:2,previewOf:'pentagon.png',at:9,primary:false,processEvidence:true};
+      render(qwenHtml,[qwenPreview],qwenSnapshot);void 0`);
+    assert.equal(await js('messages.querySelector("[data-chat-node=\\"message:1\\"] [data-output-image]")'), null);
+    assert.equal(await js('messages.querySelector("[data-chat-node=\\"message:3\\"] [data-output-image]").dataset.outputImage'), 'version:preview');
+    assert.match(await js('messages.textContent'), /执行时预览/);
+    await js(`render(qwenHtml,[qwenPreview,{...qwenPreview,previewOf:undefined,relative:'pentagon.png',
+      name:'pentagon.png',versionId:'original',artifactId:'version:original',originalArtifactId:'png'}],qwenSnapshot);void 0`);
+    assert.equal(await js('messages.querySelector("[data-chat-node=\\"message:3\\"] [data-output-image]").dataset.outputImage'), 'version:original');
+    assert.doesNotMatch(await js('messages.textContent'), /执行时预览/);
+    report.cases.push('Qwen native JPEG previews stay on the declared turn and yield to an archived original');
+    await js(`window.priorPage = '<article data-chat-node="message:0" data-output-task="" data-delivery-final="true" class="nmsg ai">'+qwenMedia+'</article>';
+      window.paged = {localReplica:true,messages:[{role:'assistant',done:true}],history:{messageStart:3,messageIndices:[3],totalMessages:4}};
+      window.earlierShot = {...qwenPreview,turnId:'first',userMessageIndex:0,artifactId:'version:first',versionId:'first'};
+      render(priorPage,[earlierShot,qwenPreview],paged);void 0`);
+    assert.equal(await js('messages.querySelector("[data-output-image]")'), null);
+    await js('render(priorPage,[earlierShot,qwenPreview],{...paged,history:{...paged.history,leadingUserMessageIndex:2}});void 0');
+    assert.equal(await js('messages.querySelector("[data-output-image]").dataset.outputImage'), 'version:preview');
+    await js('render(priorPage,[earlierShot,qwenPreview],{...paged,history:{...paged.history,leadingUserMessageIndex:0}});void 0');
+    assert.equal(await js('messages.querySelector("[data-output-image]").dataset.outputImage'), 'version:first');
+    report.cases.push('An assistant-only page shows only the screenshot of its indexed user turn');
     report.ok = true; fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report)); win.destroy(); app.quit();
   }).catch(error => { report.error = error.stack; fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2)); console.error(error); app.exit(1); });

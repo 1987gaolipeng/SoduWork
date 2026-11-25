@@ -2,10 +2,12 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../components/workspace/workspace-chat-list.js'), 'utf8');
+const firstSends = fs.readFileSync(path.join(__dirname, '../components/workspace/workspace-first-sends.js'), 'utf8');
 const brand = require('../components/panels/agent-brand.js');
 
 function fixture(withBrand = true) {
   const window = { AgentBrand: withBrand ? brand : undefined };
+  vm.runInNewContext(firstSends, { window });
   vm.runInNewContext(source, { window });
   const nodes = new Map();
   function node(selector) {
@@ -18,6 +20,45 @@ function fixture(withBrand = true) {
     _chatUiKey: c => c.id || c.localId, wsT: (_key, fallback) => fallback, CHAT_STATE: { completed: '已完成', starting: '启动中' } };
   return { api: window.WorkspaceChatList.create(ctx), ctx, row, node };
 }
+
+test('only a durable first send or a formal session can open its sidebar row', () => {
+  const f = fixture(), button = f.node('.ws-chat');
+  f.api._paintChatRow(f.row, { localId: 'legacy-draft', pending: true }, false);
+  assert.equal(button.disabled, true);
+  f.api._paintChatRow(f.row, { localId: 'first-a', firstSend: { intentId: 'first-a', status: 'sending' } }, false);
+  assert.equal(button.disabled, false); assert.equal(button.dataset.firstSend, 'first-a');
+  f.api._paintChatRow(f.row, { id: 'actual-id' }, false);
+  assert.equal(button.disabled, false); assert.equal(button.dataset.firstSend, '');
+  assert.equal(button.dataset.chatId, 'actual-id');
+});
+
+test('the first-send link opens the real session with its current sidebar project', () => {
+  let open, known, payload, active;
+  const window = { WorkspaceFirstSends: { create(options) { open = options.openChat; known = options.hasHistory; } },
+    WorkspaceHost: { open(_view, options) { payload = options; } } };
+  vm.runInNewContext(source, { window });
+  const ctx = { chatItems: [], setActiveChat(id) { active = id; } };
+  window.WorkspaceChatList.create(ctx);
+  const row = { sessionId: 'native-1', title: 'first request' };
+  assert.equal(known(row.sessionId), false);
+  ctx.chatItems = [{ id: row.sessionId, pending: true }, { id: 'other', title: row.title }];
+  assert.equal(known(row.sessionId), false);
+  ctx.chatItems = [{ id: 'canonical', historyAliasIds: [row.sessionId] }];
+  assert.equal(known(row.sessionId), true);
+  ctx.chatItems[0].deleted = true;
+  assert.equal(known(row.sessionId), false);
+  open(row);
+  assert.equal(payload.chatId, row.sessionId);
+  assert.equal(Object.hasOwn(payload, 'sidebarProjectId'), false);
+  ctx.sidebarProjects = { projectForChat(id) {
+    assert.equal(id, row.sessionId);
+    return { id: 'moved', name: 'Current project', businessProjectId: 'project-2' };
+  } };
+  open(row);
+  assert.equal(active, row.sessionId);
+  assert.deepEqual({ ...payload }, { tab: 'chat', chatId: row.sessionId, chatTitle: row.title,
+    sidebarProjectId: 'moved', sidebarProjectName: 'Current project', projectId: 'project-2' });
+});
 
 test('sidebar shows one icon per actual harness across the whole conversation, with exact accessible identities', () => {
   const f = fixture();

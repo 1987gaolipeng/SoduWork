@@ -676,6 +676,7 @@ function create() {
     uiSnapshot: (options) => snapshot(state, {
       messageLimit: options && options.messageLimit || 80,
       toolLimit: options && options.toolLimit || 160,
+      messageEnd: options?.messageEnd,
     }),
     status: () => deriveStatus(state),
     abort: () => { preparation.clear(state); state.aborted = true; },
@@ -770,4 +771,5 @@ function create() {
   };
 }
 
-module.exports = { SCOPES, create, apply, snapshot, deriveStatus, statusText, reportedContextUsage, _blank };
+module.exports = { SCOPES, create, apply, snapshot, deriveStatus, statusText, reportedContextUsage,
+  visibleUser: content => !_user(content).hidden, _blank };

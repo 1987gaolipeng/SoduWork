@@ -120,6 +120,18 @@ test('latest cloud summary uses remote completion receipts without changing earl
   assert.equal(summary.project(snap, new Set([3]))[0].elapsedMs, null);
 });
 
+test('a historical cloud page ends with its own turn duration even when the latest remote receipt is available', () => {
+  const snap = { messages: [user(), reply('Earlier page')],
+    history: { messageStart: 2, messageEnd: 4, totalMessages: 12, messageIndices: [2, 3] },
+    execution: { cloud: true, running: false, completedAt: 95000, elapsedMs: 85000 } };
+  const elapsed = () => summary.project(snap, new Set([1]))[0].elapsedMs;
+  assert.equal(elapsed(), 4000, 'The archived timestamps belong to this page');
+  snap.messages[1].completedAt = 0;
+  assert.equal(elapsed(), null, 'Missing timing cannot borrow the latest remote turn');
+  snap.turnMetrics = [{ fromMessage: 2, toMessage: 3, elapsedMs: 5100 }];
+  assert.equal(elapsed(), 5100, 'The earlier turn uses its own saved receipt when present');
+});
+
 test('legacy native turns retain their own actual usage without a turn-metrics receipt', () => {
   const first = reply('First'); first.usage = { output: 17 };
   const second = reply('Second'); second.usage = { input_tokens: 90, output_tokens: 31 };

@@ -281,6 +281,10 @@ test('explicit continuation reuses the same idle runtime only after verifying it
     close: () => assert.fail('An exact live selection must retain its native context') };
   const history = { resolve: async () => row, async prepareContinuation(id, options) {
     assert.equal(id, row.id); assert.equal(options.refresh, true); checks++;
+    assert.equal(options.allowUndispatchedTail, true);
+    if (options.expectedPendingUserDigest === 'older-preview')
+      throw Object.assign(Error('Reopen history'), { code: 'HISTORY_PENDING_USER_TAIL_CHANGED' });
+    assert.equal(options.expectedPendingUserDigest, null);
     if (unresolved) throw Object.assign(Error('missing receipt'), { code: 'HISTORY_UNRESOLVED_TOOLS' });
     return { row };
   } };
@@ -292,7 +296,18 @@ test('explicit continuation reuses the same idle runtime only after verifying it
   unresolved = true;
   const denied = await f.open(options);
   assert.equal(denied.ok, false); assert.match(denied.reason, /missing receipt/);
-  assert.equal(checks, 2); assert.equal(f.calls.length, 0);
+  const stale = await f.open({ ...options, expectedPendingUserDigest: 'older-preview' });
+  assert.equal(stale.ok, false); assert.equal(stale.code, 'HISTORY_PENDING_USER_TAIL_CHANGED');
+  assert.equal(stale.reason, 'Reopen history');
+  const changedSelection = await f.open({ ...options, modelName: 'different', expectedPendingUserDigest: 'older-preview' });
+  assert.equal(changedSelection.code, 'HISTORY_PENDING_USER_TAIL_CHANGED');
+  assert.equal(checks, 4); assert.equal(f.calls.length, 0);
+  let retired = 0;
+  const outdated = { ...live, verifyRecoverySend() {}, close: async () => { retired++; return true; } };
+  const recovered = fixture({ identity: a, live: outdated, sharedHistory: { resolve: async () => row,
+    prepareContinuation: async () => ({ row, prefix: { messages: [], tools: [] } }) } });
+  await recovered.open(options);
+  assert.equal(retired, 1, 'a newly settled history must retire the old first-send check');
   const matches = require('../main/conversation/device-local-continuation.cjs').matchesLiveSelection;
   for (const changed of [{ modelName: '' }, { adapterId: 'pi' }, { accessMode: 'standard' }, { reasoningEffort: 'high' }])
     assert.equal(matches(live, { ...options, ...changed }, a, owner), false);

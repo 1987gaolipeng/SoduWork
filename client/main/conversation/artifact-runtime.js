@@ -327,6 +327,7 @@ function publicArtifact(ref, item) {
     preview: Boolean(item && item.preview),
     primary: item ? item.primary !== false : true,
     ...(archiveReaders.has(item) ? { archivedReadOnly: true } : {}),
+    ...(archiveReaders.has(item) && item.versionId && item.previewOf ? { previewOf: item.previewOf } : {}),
     ...(item?.versionId && item.turnId && archiveReaders.has(item) ?
       { versionId: item.versionId, turnId: item.turnId, userMessageIndex: item.userMessageIndex, originalArtifactId: item.originalArtifactId } : {}),
     processEvidence: Boolean(item && item.processEvidence),

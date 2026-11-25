@@ -33,6 +33,9 @@ function assertSettled(data) {
   if (data?.coverage?.unresolvedTools?.length || native.unresolvedTools(data?.snapshot).length)
     throw Object.assign(Error('历史中有工具缺少终结回执，结果尚未确认，暂时只能查看，不能恢复执行或迁移'), { code: 'HISTORY_UNRESOLVED_TOOLS' });
 }
+function pendingTailChanged() {
+  return Object.assign(Error('最后一条消息的发送状态已变化，请重新打开会话后确认。'), { code: 'HISTORY_PENDING_USER_TAIL_CHANGED' });
+}
 function create({ app, session, store, resolve, guard, authorize, authorizeContinuation = authorize,
   requiresNativeEvidence = () => false, usesDeviceDialogue = () => false, allowsArtifacts = () => false, workRoot, identityOf, register, runtime }) {
   const pending = new Map(), writers = new Map();
@@ -50,16 +53,28 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     combined.evidence = () => evidence;
     return combined;
   }
-  async function restoreArchiveReceipts(row, data, check) {
-    if (!data?.localArtifactHistory?.archive || data.historyProtection || check.evidence().historyProtection) return data;
+  async function recoverImages(row, data, history, check, created) {
+    if (!data || row.deviceTransferId || data.imported || data.historyProtection || check.evidence().historyProtection ||
+        !data.coverage?.sources || !allowsArtifacts(check.evidence())) return history;
+    for (const [adapter, reader] of [['kimi', './kimi-history-images.cjs'], ['qwen', './qwen-history-overviews.cjs']]) {
+      if (!data.coverage.sources.some(source => source.adapterId === adapter)) continue;
+      try { history = await require(reader).recover(app, row, data, history, check, created); }
+      catch (error) { check(); if (error.historyAccessFailure) throw error; }
+    }
+    return history;
+  }
+  async function restoreArchiveReceipts(row, data, check, upgradeImages = true) {
+    const images = upgradeImages && data?.coverage?.sources?.some(source => ['kimi', 'qwen'].includes(source.adapterId));
+    if ((!data?.localArtifactHistory?.archive && !images) || data?.historyProtection || check.evidence().historyProtection) return data;
     const received = locallyReceivedArtifacts(row, data);
     if (!received && (data.imported || !allowsArtifacts(check.evidence()))) return data;
     function current() {
       check();
       if (received) authorize(check.evidence());
     }
-    let localArtifactHistory = await archive.rebind(app.getPath('userData'), row.id, data.localArtifactHistory, current);
-    if (localArtifactHistory.archive?.pendingFiles?.length) {
+    let localArtifactHistory = data.localArtifactHistory;
+    if (localArtifactHistory?.archive) localArtifactHistory = await archive.rebind(app.getPath('userData'), row.id, localArtifactHistory, current);
+    if (localArtifactHistory?.archive?.pendingFiles?.length) {
       try {
         localArtifactHistory = await archive.preserve(app.getPath('userData'), row.id, localArtifactHistory,
           localArtifactHistory, current, { readWorkspace: false });
@@ -68,14 +83,20 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
         if (error.historyAccessFailure) throw error;
       }
     }
+    const createdOriginals = [];
+    if (images) localArtifactHistory = await recoverImages(row, data, localArtifactHistory, check, createdOriginals);
     current();
     if (localArtifactHistory === data.localArtifactHistory) return data;
     const { digest: oldDigest, savedAt, ...body } = data;
     const updated = { ...body, localArtifactHistory };
-    const result = await store.saveDeviceHistory(row.id, updated, { expectedRevision: row.replicaRevision,
-      expectedTransferId: row.deviceTransferId || '', expectedHistoryDigest: oldDigest });
-    await archive.retire(app.getPath('userData'), row.id, data.localArtifactHistory.archive, localArtifactHistory.archive,
-      result.ok).catch(() => {});
+    let result;
+    try {
+      result = await store.saveDeviceHistory(row.id, updated, { expectedRevision: row.replicaRevision,
+        expectedTransferId: row.deviceTransferId || '', expectedHistoryDigest: oldDigest });
+    } finally {
+      await archive.retire(app.getPath('userData'), row.id, data.localArtifactHistory?.archive, localArtifactHistory.archive,
+        !!result?.ok, createdOriginals).catch(() => {});
+    }
     current();
     if (result.ok) return { ...updated, digest: result.digest, savedAt };
     const concurrent = await store.deviceHistory(row.id);
@@ -184,8 +205,16 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       let data;
       try {
         data = await native.read({ app, session, row, guard: check, runtime, previousToolReceipts,
+          mayVerifyLegacyRetired: () => !previous?.imported && usesDeviceDialogue(check.evidence()),
           previousSources: previous?.coverage?.complete ? previous.coverage.sources : [], previousSnapshot: previous?.snapshot });
       } catch (error) {
+        if (error.history && ['NATIVE_SEGMENT_UNAVAILABLE', 'RUNNER_HISTORY_BUSY'].includes(error.code)) {
+          const latest = await resolve(id); check();
+          if (!latest || latest.deleted || latest.replicaRevision !== row.replicaRevision ||
+              latest.deviceTransferId !== row.deviceTransferId)
+            throw Object.assign(Error('历史记录已变化，请重新读取'), { code: 'HISTORY_CONCURRENT_UPDATE' });
+          if (check.evidence().historyProtection === 'account') error.history.historyProtection = 'account';
+        }
         if (error.code !== 'NATIVE_HISTORY_DIVERGED' || !previous) throw error;
         check();
         // Keep the complete body and its original proof across restart. A
@@ -198,7 +227,7 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
         throw error;
       }
       check();
-      previous = await restoreArchiveReceipts(row, previous, check);
+      previous = await restoreArchiveReceipts(row, previous, check, false);
       expected.expectedHistoryDigest = previous?.digest ?? null;
       const workspace = data.localWorkspace;
       delete data.localWorkspace;
@@ -244,9 +273,42 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       const current = await resolve(id); check();
       if (!current || current.deleted || current.replicaRevision !== row.replicaRevision ||
           current.deviceTransferId !== row.deviceTransferId) throw Error('历史记录已变化，请重新读取');
-      const saved = await store.saveDeviceHistory(row.id, data, expected); check();
-      await archive.retire(app.getPath('userData'), row.id, previous?.localArtifactHistory?.archive,
-        data.localArtifactHistory?.archive, saved.ok).catch(() => {});
+      const marker = manifest?.historyRecovery?.transcriptTail;
+      const source = data.coverage.sources.at(-1);
+      if (marker && manifest.deviceHistoryComplete && !manifest.deviceTransferId && !manifest.deviceShared &&
+          !current.deviceTransferId && !requiresNativeEvidence(current) && usesDeviceDialogue(current) &&
+          data.coverage.complete && !data.coverage.unresolvedTools?.length && source && !source.dormant &&
+          source.id === manifest.active.sessionId && source.adapterId === manifest.active.adapterId &&
+          data.snapshot.messages.length > manifest.prefix.messages.length &&
+          await store.conversationTranscriptDigest(row.id) === marker.digest) {
+        check();
+        authorize(current);
+        const visible = require('./conversation-transcript.cjs').conversationTranscriptMessages;
+        if (visible(manifest.prefix.messages).length === marker.prefixLength &&
+            visible(data.snapshot.messages.slice(manifest.prefix.messages.length))[0]?.role === 'user') {
+          if (await native.retiredTailAbsent(app, runtime, manifest.segments, marker.sourceId, check)) {
+            expected.transcriptTail = marker;
+            expected.expectedCatalogRevision = current.revision;
+          } else {
+            data.nativeConflict = { code: 'HISTORY_UNCONFIRMED_USER_TAIL', reason: '无法确认上一执行段的末条消息状态，已保留两份记录。' };
+          }
+          check();
+          if (require('./runtime-segments').read(app, row.id) !== manifest)
+            throw Object.assign(Error('历史记录已变化，请重新读取'), { code: 'HISTORY_CONCURRENT_UPDATE' });
+        }
+      }
+      const createdOriginals = [];
+      const images = await recoverImages(row, data, data.localArtifactHistory, check, createdOriginals);
+      if (images) data.localArtifactHistory = images;
+      let saved;
+      try {
+        check();
+        saved = await store.saveDeviceHistory(row.id, data, expected);
+      } finally {
+        await archive.retire(app.getPath('userData'), row.id, previous?.localArtifactHistory?.archive,
+          data.localArtifactHistory?.archive, !!saved?.ok, createdOriginals).catch(() => {});
+      }
+      check();
       if (!saved.ok) throw Object.assign(Error('历史记录已变化，请重新读取'), { code: 'HISTORY_CONCURRENT_UPDATE' });
       await register([{ ...current, deviceHistory: true, historyContentState: 'available',
         ...replayedUsage(data.snapshot, current),
@@ -266,7 +328,7 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     try { return require('./delivery-workspace.cjs').resolve(cwd, row.deliveryWorkspaceKey).draftRoot === receipt.root; }
     catch (_) { return false; }
   }
-  async function saved(id, { refresh: update = false, verify, preferRecorded = false, onlyUpgrade = false } = {}) {
+  async function saved(id, { refresh: update = false, verify, preferRecorded = false, onlyUpgrade = false, allowUndispatchedTail = false } = {}) {
     const row = await resolve(id);
     if (!row || row.deleted || row.cached) return null;
     const check = readGuard(row, verify); check();
@@ -295,11 +357,48 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     if (preferRecorded && !shared && !verify) await readDialogue();
     // An owner's passive desktop view can paint its committed dialogue without
     // waiting for a model or a Runner RPC. Execution and peer access revalidate.
-    const localDisplay = preferRecorded && !shared && !verify && dialogue.length > 0;
-    if (!onlyUpgrade && !localDisplay && (update || !data || !data.coverage?.complete || transcriptError)) {
-      try { data = await refresh(row.id, { verify }); }
+    const manifest = allowUndispatchedTail && (!preferRecorded || dialogue.at(-1)?.role === 'user') &&
+      !shared && !verify && usesDeviceDialogue(check.evidence()) &&
+      !row.deviceTransferId && !data?.imported && !data?.historyProtection && require('./runtime-segments').read(app, row.id);
+    const checkTail = manifest && !manifest.deviceShared && !manifest.deviceTransferId &&
+      (manifest.active?.started === false || manifest.historyRecovery?.transcriptTail);
+    const recorded = preferRecorded && dialogue.length && checkTail ? withTranscript(data, dialogue) : null;
+    const verifyTail = recorded?.unconfirmedUserTail || checkTail && !data?.snapshot && dialogue.at(-1)?.role === 'user' ||
+      manifest?.historyRecovery?.transcriptTail && recorded && recorded !== data;
+    const localDisplay = preferRecorded && !shared && !verify && dialogue.length > 0 &&
+      !verifyTail;
+    // A dormant source certifies absence only at the time of its probe. It
+    // cannot stand in for an independently archived turn on a later resume.
+    const hadDormantSegment = data?.coverage?.sources?.some(source => source.dormant);
+    let refreshed = false;
+    if (!onlyUpgrade && !localDisplay && (update || !data || !data.coverage?.complete || hadDormantSegment || transcriptError)) {
+      try {
+        // Recheck the dormant segment on this open, even if a background read was already in flight.
+        data = await refresh(row.id, { verify: checkTail ? check : verify });
+        refreshed = true;
+        if (checkTail) inspected = false;
+      }
       catch (error) {
         if (error.historyAccessFailure || error.code === 'HISTORY_CONCURRENT_UPDATE') throw error;
+        if (error.history && ['NATIVE_SEGMENT_UNAVAILABLE', 'RUNNER_HISTORY_BUSY'].includes(error.code)) {
+          // Render the longest verified prefix without saving it over a complete
+          // independent replica. Every execution path still checks coverage.
+          const prefix = error.history;
+          if (!data?.snapshot) data = prefix;
+          else if (data.snapshot.messages.length > prefix.snapshot.messages.length ||
+              (data.snapshot.messages.length === prefix.snapshot.messages.length && data.snapshot.tools.length >= prefix.snapshot.tools.length))
+            data = { ...data, coverage: { ...data.coverage, complete: false } };
+          else {
+            // Retain the stored artifact generation only when its message positions still
+            // identify the same turns. Authorization checks its stored digest at use time.
+            const sameTurns = data.digest && data.coverage?.complete && data.localArtifactHistory &&
+              data.snapshot.messages.every((message, index) =>
+                JSON.stringify(message) === JSON.stringify(prefix.snapshot.messages[index]));
+            data = { ...prefix, ...(sameTurns ? { digest: data.digest, localArtifactHistory: data.localArtifactHistory,
+              imported: data.imported } : {}), ...(data.historyProtection ? { historyProtection: data.historyProtection } : {}) };
+          }
+          if (prefix.historyProtection) data = { ...data, historyProtection: prefix.historyProtection };
+        }
         if (!data) await readDialogue();
         if (!data && transcriptError && error.code === 'NATIVE_HISTORY_MISSING') throw transcriptError;
         if (!data && !dialogue.length && error.code === 'NATIVE_HISTORY_MISSING') {
@@ -319,7 +418,7 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     }
     // Legacy replicas can outlive the native CLI journal. Upgrade only their
     // already-verified file identities while the original workspace exists.
-    if (archive.needsBackup(data?.localArtifactHistory) && !data.imported && !data.historyProtection &&
+    if (data?.coverage?.complete && archive.needsBackup(data.localArtifactHistory) && !data.imported && !data.historyProtection &&
         allowsArtifacts(check.evidence()) && await canBackfill(row, data.localArtifactHistory)) {
       const { digest: oldDigest, savedAt, nativeReadError, ...stored } = data;
       const prior = data.localArtifactHistory;
@@ -348,7 +447,27 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       data = { ...data, snapshot: require('./native-agent-source.cjs').restoreRunnerSources(data.snapshot, data.coverage.sources) };
     if (data && transcriptError) return { ...data, coverage: { ...data.coverage, complete: false },
       nativeReadError: { code: transcriptError.code, reason: '设备对话记录校验失败，已显示可读取的执行记录' } };
-    return dialogue.length && usesDeviceDialogue(check.evidence()) ? withTranscript(data, dialogue) : data;
+    if (!dialogue.length || !usesDeviceDialogue(check.evidence())) return data;
+    const combined = withTranscript(data, dialogue);
+    if (!combined?.unconfirmedUserTail || !refreshed || !checkTail || !data?.coverage?.complete ||
+        data.nativeReadError || data.historyProtection || data.imported || data.coverage.unresolvedTools?.length ||
+        native.unresolvedTools(data.snapshot).length || manifest.active?.started !== false ||
+        require('./runtime-segments').read(app, row.id) !== manifest) return combined;
+    const last = data.coverage.sources?.at(-1);
+    if (!last?.dormant || last.id !== manifest.active.sessionId || last.adapterId !== manifest.active.adapterId) return combined;
+    try { authorize(check.evidence()); } catch { return combined; }
+    const marker = require('./conversation-transcript.cjs').recoveryTail(dialogue, data.snapshot.messages);
+    if (!marker) return combined;
+    const prior = manifest.historyRecovery?.transcriptTail;
+    if (manifest.deviceHistoryComplete && prior && (prior.digest === marker.digest || prior.prefixDigest === marker.prefixDigest)) {
+      if (prior.digest !== marker.digest || prior.prefixDigest !== marker.prefixDigest ||
+          !await native.retiredTailAbsent(app, runtime, manifest.segments, prior.sourceId, check))
+        return combined;
+      if (require('./runtime-segments').read(app, row.id) !== manifest) return combined;
+      marker.sourceId = prior.sourceId;
+    } else marker.sourceId = last.id;
+    return { ...data, coverage: { ...data.coverage, complete: false },
+      pendingUserTail: { text: dialogue.at(-1).text, marker } };
   }
   async function attachments(snapshot) {
     const values = [];
@@ -507,15 +626,76 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     if (!result.ok) throw Error('目标历史状态已变化');
     return { ok: true, id: row.id, revision: row.revision };
   }
-  async function prepareContinuation(id, { refresh = false } = {}) {
+  async function retiredRunnerSources(row, data) {
+    if (!data?.coverage?.complete || !data.coverage.unresolvedTools?.length || data.nativeReadError ||
+        data.historyProtection || data.imported || row.deviceTransferId || row.cached || row.deleted ||
+        requiresNativeEvidence(row) || !usesDeviceDialogue(row)) return null;
+    const check = guard(row), record = require('./runtime-segments').read(app, row.id);
+    if (!record || record.deviceShared || record.deviceTransferId || !record.cwd || !row.cwd ||
+        path.relative(record.cwd, row.cwd)) return null;
+    try {
+      authorize(row);
+      require('./runtime-segments').assertOwner(app, record, identityOf());
+    } catch { check(); return null; }
+    const retired = require('./retired-tool-continuation.cjs');
+    const sources = retired.sourcesFor(record, data);
+    return await retired.idle(app, runtime, session, record, sources, check) ? sources : null;
+  }
+  async function verifyRetiredToolSend(id, nativeId, sources) {
+    const row = await resolve(id), record = require('./runtime-segments').read(app, id);
+    if (Array.isArray(sources) && sources.length && row && !row.cached && !row.deleted && !row.deviceTransferId && !row.historyProtection &&
+        usesDeviceDialogue(row) && !requiresNativeEvidence(row) && record && !record.deviceShared &&
+        !record.deviceTransferId && record.active.sessionId === nativeId && row.cwd && record.cwd &&
+        !path.relative(record.cwd, row.cwd)) {
+      authorize(row);
+      require('./runtime-segments').assertOwner(app, record, identityOf());
+      // The initial send guard can predate another runtime switch. Keep
+      // every source it verified and include any segments retired since.
+      const known = new Set(sources.map(source => source.id));
+      const retired = [...sources, ...(record.historyRecovery?.retiredRunnerSources || []).filter(source => !known.has(source.id))];
+      if (await require('./retired-tool-continuation.cjs').idle(app, runtime, session, record, retired, guard(row))) return;
+    }
+    throw Object.assign(Error('无法确认原执行段已空闲，请重新打开历史后再发送。'), { code: 'HISTORY_UNRESOLVED_TOOLS' });
+  }
+  async function checkpointRetiringRunner(id, nativeId) {
+    const manifests = require('./runtime-segments');
+    const record = manifests.read(app, id);
+    const changed = () => Error('无法核验当前执行段的原始记录，请稍后再切换 Agent');
+    if (!record?.deviceHistoryComplete || record.deviceShared || record.deviceTransferId ||
+        !record.historyRecovery?.retiredRunnerSources?.length || record.active.sessionId !== nativeId ||
+        record.active.adapterId === 'pi') throw changed();
+    const data = await refresh(id, { verify(row) {
+      if (row.cached || row.deleted || row.deviceTransferId || !usesDeviceDialogue(row) ||
+          requiresNativeEvidence(row) || !row.cwd || !record.cwd || path.relative(record.cwd, row.cwd)) throw changed();
+      authorize(row);
+    } });
+    if (manifests.read(app, id) !== record || !data?.coverage?.complete || data.nativeConflict ||
+        data.imported || data.historyProtection || data.coverage.sources.length !== 1 ||
+        data.coverage.sources[0].id !== nativeId) throw changed();
+    manifests.assertOwner(app, record, identityOf());
+    // A restored manifest freezes its prefix. The next read can replay only
+    // the new active segment, so carry this authenticated cursor into the switch.
+    const sources = require('./retired-tool-continuation.cjs').sourcesFor(record, data);
+    if (!sources) throw changed();
+    return sources;
+  }
+  async function prepareContinuation(id, { refresh = false, allowUndispatchedTail = false, allowRetiredTools = false, expectedPendingUserDigest } = {}) {
     const row = await resolve(id);
     if (!row || row.deleted || row.cached) throw Error('这条历史不能继续执行');
     authorizeContinuation(row);
-    const check = guard(row), data = await saved(row.id, { refresh }); check();
-    if (!data?.coverage?.complete) throw Object.assign(Error('本机历史不完整，不能恢复执行'), { code: 'HISTORY_INCOMPLETE' });
+    const check = guard(row), data = await saved(row.id, { refresh, allowUndispatchedTail: refresh && allowUndispatchedTail }); check();
+    // Desktop sends bind to the state shown when the user chose to continue.
+    // An admission that arrived since preview must not trigger a second dispatch.
+    if (expectedPendingUserDigest !== undefined && expectedPendingUserDigest !== (data?.pendingUserTail?.marker.digest ?? null))
+      throw pendingTailChanged();
+    if (data?.nativeReadError?.code === 'RUNNER_HISTORY_BUSY')
+      throw Object.assign(Error(data.nativeReadError.reason), { code: data.nativeReadError.code });
+    if (!data?.coverage?.complete && !(refresh && allowUndispatchedTail && data?.pendingUserTail))
+      throw Object.assign(Error('本机历史不完整，不能恢复执行'), { code: 'HISTORY_INCOMPLETE' });
     if (data.nativeReadError && data.nativeReadError.code !== 'NATIVE_HISTORY_MISSING')
       throw Object.assign(Error(data.nativeReadError.reason), { code: data.nativeReadError.code });
-    assertSettled(data);
+    const retired = refresh && allowRetiredTools && await retiredRunnerSources(row, data);
+    if (!retired) assertSettled(data);
     const verified = mergeNativeEvidence(row, data.historyProtection ? { historyProtection: data.historyProtection } : undefined);
     const references = await attachments(data.snapshot);
     check();
@@ -525,7 +705,24 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     return { row: verified, prefix: native.publicSnapshot(data.snapshot),
       ...(data.localArtifactHistory && !data.historyProtection && (locallyReceivedArtifacts(row, data) || !data.imported && allowsArtifacts(verified))
         ? { artifactHistory: data.localArtifactHistory } : {}), historyRecovery: { mode: 'device-history',
+      ...(data.pendingUserTail ? { transcriptTail: data.pendingUserTail.marker } : {}),
+      ...(retired ? { retiredRunnerSources: retired } : {}),
       nativeArchiveMissing, savedAt: data.savedAt || Date.now(), attachments: references } };
+  }
+  async function verifyRecoverySend(id, nativeId, marker) {
+    const row = await resolve(id);
+    if (!row || row.deleted || row.cached || row.deviceTransferId || !usesDeviceDialogue(row)) throw pendingTailChanged();
+    authorize(row);
+    const check = guard(row), read = () => require('./runtime-segments').read(app, id);
+    const manifest = read();
+    if (!manifest?.deviceHistoryComplete || manifest.deviceShared || manifest.deviceTransferId ||
+        manifest.historyRecovery?.transcriptTail?.digest !== marker.digest ||
+        manifest.active.sessionId !== nativeId || manifest.active.started !== false) throw pendingTailChanged();
+    const parts = manifest.active.adapterId === 'pi' ? manifest.segments : [...manifest.segments, manifest.active];
+    if (!await native.retiredTailAbsent(app, runtime, parts, marker.sourceId, check)) throw pendingTailChanged();
+    check();
+    if (await store.conversationTranscriptDigest(id) !== marker.digest || read() !== manifest) throw pendingTailChanged();
+    check();
   }
   function schedule(rows, { includeSaved = false } = {}) {
     for (const row of rows) {
@@ -538,7 +735,8 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       });
     }
   }
-  return { captureTurn, refresh, saved, schedule, transferSources, exportPortable, importPortable, prepareContinuation,
+  return { captureTurn, refresh, saved, schedule, transferSources, exportPortable, importPortable, prepareContinuation, verifyRecoverySend,
+    retiredRunnerSources, verifyRetiredToolSend, checkpointRetiringRunner,
     attachments: message => attachments({ messages: [message] }),
     async close() { await background; await Promise.allSettled([...pending.values(), ...writers.values()]); } };
 }

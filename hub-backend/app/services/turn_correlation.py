@@ -9,6 +9,14 @@ def key(value):
     return value if isinstance(value, str) and _KEY.fullmatch(value) else ""
 
 
+def desktop_submission(cfg, context):
+    submission = context.get("conversationSubmissionId")
+    if (cfg.get("_eventDestination") == "local" and isinstance(submission, str)
+            and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", submission)):
+        return {"submissionId": submission}
+    return {}
+
+
 def stamp(run, event):
     event["round"] = max(1, int(run.get("round") or 1))
     admission = key(run.get("admissionKey"))

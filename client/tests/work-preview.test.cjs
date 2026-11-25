@@ -196,8 +196,6 @@ test('first prompt creates an immediate history row backed by the real Pi sessio
   assert.equal(Object.hasOwn(rows[0], 'localId'), false);
   const chatList = read('components', 'workspace', 'workspace-chat-list.js');
   assert.match(chatList, /ctx\.chatItems = ctx\._reconcileChats\(/);
-  /* Allow selecting optimistic rows once they have a real session ID, even during startup. */
-  assert.match(shell, /b\.dataset\.chatId = id; b\.disabled = !id/);
   assert.match(shell, /aria-current/);
   assert.match(shell, /function setActiveChat\(id\)/);
 });

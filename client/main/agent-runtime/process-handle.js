@@ -37,7 +37,11 @@ function createProcessHandle({ ref, invoke, setProperty, release, onClose, confi
   }
   Object.assign(local, {
     snapshot,
-    uiSnapshot: options => windowed.limitSnapshot(snapshot(), options),
+    uiSnapshot: options => windowed.limitSnapshot(snapshot(), options, { windowTurnMetrics: true }),
+    readHistoryPage(options) {
+      return state.data?.state?.archiveWindow && windowed.requestedEnd(options) !== null
+        ? call('readHistoryPage', [options]) : local.uiSnapshot(options);
+    },
     status: () => lost ? snapshot().status || 'idle' : state.data?.status || 'idle',
     inFlight: () => !closed && !lost && Boolean(state.data?.inFlight),
     executionStopped: () => Boolean(confirmStopped?.()),

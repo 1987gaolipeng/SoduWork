@@ -33,18 +33,32 @@ function outputTokens(usage) {
   return Number.isFinite(nested) && nested > 0 ? Math.round(nested) : null;
 }
 
+function userTurn(message, index) {
+  return { fromMessage: index, sentAt: epoch(message.sentAt), endedAt: 0, outcome: message.turnOutcome,
+    tokens: 0, count: 0, complete: true, known: true };
+}
+function addAssistant(turn, message, complete) {
+  turn.count++;
+  turn.complete = turn.complete && complete;
+  turn.endedAt = epoch(message.completedAt);
+  const tokens = outputTokens(message.usage);
+  turn.known = turn.known && tokens !== null;
+  turn.tokens += tokens || 0;
+}
+
 // Reuse the raw snapshot traversal so a first bounded snapshot does not scan
 // unrelated history. Only a turn cut by the window needs its earlier receipts.
-function collector(state, cache, start) {
+function collector(state, cache, start, end = state.messages.length) {
   const messages = state.messages, tail = messages[messages.length - 1];
   const previous = cache.turnMetrics;
   const unchanged = previous && previous.messages === messages && previous.count === messages.length &&
-    previous.start === start && previous.revision === state.usageRevision &&
+    previous.start === start && previous.end === end && previous.revision === state.usageRevision &&
     previous.tail === tail && previous.tailDone === tail?.done && previous.tailAt === tail?.completedAt &&
     previous.pending.every(message => message.done !== true);
   if (unchanged) return { visit() {}, finish: () => previous.rows };
   const rows = [], pending = [];
-  let turn = state.leadingTurn?.turnOutcome ? { fromMessage: 0, sentAt: 0, endedAt: 0,
+  let turn = state.leadingTurn?.metrics ? { ...state.leadingTurn.metrics, outcome: state.leadingTurn.turnOutcome } :
+    state.leadingTurn?.turnOutcome ? { fromMessage: 0, sentAt: 0, endedAt: 0,
     outcome: state.leadingTurn.turnOutcome, tokens: 0, count: 0, complete: true, known: false } : null;
   function finishTurn(toMessage) {
     if (!turn || toMessage < start) return;
@@ -59,18 +73,11 @@ function collector(state, cache, start) {
   function visit(message, index) {
     if (message?.role === 'user') {
       finishTurn(index - 1);
-      turn = { fromMessage: index, sentAt: epoch(message.sentAt), endedAt: 0,
-        outcome: message.turnOutcome,
-        tokens: 0, count: 0, complete: true, known: true };
+      turn = userTurn(message, index);
     } else if (turn && message?.role === 'assistant') {
-      turn.count++;
       const complete = message.done === true;
       if (!complete) pending.push(message);
-      turn.complete = turn.complete && complete;
-      turn.endedAt = epoch(message.completedAt);
-      const tokens = outputTokens(message.usage);
-      turn.known = turn.known && tokens !== null;
-      turn.tokens += tokens || 0;
+      addAssistant(turn, message, complete);
     }
   }
   if (start > 0 && messages[start]?.role !== 'user') {
@@ -83,12 +90,21 @@ function collector(state, cache, start) {
     for (let index = prefix.length - 1; index >= 0; index--) visit(...prefix[index]);
   }
   function finish() {
-    finishTurn(messages.length - 1);
-    cache.turnMetrics = { messages, count: messages.length, start, revision: state.usageRevision,
+    // A page can end midway through a tool-heavy turn. Only finish the
+    // intersecting turn, using its actual final receipt even if it is off-page.
+    let next = end;
+    if (end > start && turn) {
+      while (next < messages.length && messages[next]?.role !== 'user') {
+        visit(messages[next], next);
+        next++;
+      }
+      finishTurn(next - 1);
+    }
+    cache.turnMetrics = { messages, count: messages.length, start, end, revision: state.usageRevision,
       tail, tailDone: tail?.done, tailAt: tail?.completedAt, pending, rows };
     return rows;
   }
   return { visit, finish };
 }
 
-module.exports = { collector };
+module.exports = { collector, userTurn, addAssistant };

@@ -135,7 +135,8 @@
         const text = String(row && row.text || '');
         const updatedAt = Number(row && row.updatedAt || 0);
         const skills = _skillDraftNames(row && row.skills);
-        if (key && (text.trim() || skills.length)) ctx._conversationDrafts.set(key, { text, skills, updatedAt: updatedAt || Date.now() });
+        if (key && (text.trim() || skills.length)) ctx._conversationDrafts.set(key, { text, skills, updatedAt: updatedAt || Date.now(),
+          ...(row.firstSendRetry ? { firstSendRetry: row.firstSendRetry } : {}) });
       });
     } catch (_) { /* a corrupt browser draft must never block the chat */ }
   }
@@ -150,7 +151,8 @@
       const rows = [...ctx._conversationDrafts.entries()]
         .sort((a, b) => a[1].updatedAt - b[1].updatedAt)
         .slice(-30)
-        .map(([key, row]) => ({ key, text: String(row.text || ''), skills: _skillDraftNames(row.skills), updatedAt: row.updatedAt }));
+        .map(([key, row]) => ({ key, text: String(row.text || ''), skills: _skillDraftNames(row.skills), updatedAt: row.updatedAt,
+          ...(row.firstSendRetry ? { firstSendRetry: row.firstSendRetry } : {}) }));
       if (rows.length) storage.setItem(ctx._draftStorageKey, JSON.stringify(rows));
       else storage.removeItem(ctx._draftStorageKey);
     } catch (_) { /* memory storage remains the source of truth if quota is full */ }
@@ -165,7 +167,9 @@
     const resolvedKey = draftKey(key || _draftKeyForCurrentSession());
     const text = String(value || '');
     const skills = _skillDraftNames(selections === undefined ? ctx._conversationDrafts.get(resolvedKey)?.skills : selections);
-    if (text.trim() || skills.length) ctx._conversationDrafts.set(resolvedKey, { text, skills, updatedAt: Date.now() });
+    const firstSendRetry = ctx._conversationDrafts.get(resolvedKey)?.firstSendRetry;
+    if (text.trim() || skills.length || firstSendRetry && attachmentDrafts.get(resolvedKey)?.length)
+      ctx._conversationDrafts.set(resolvedKey, { text, skills, updatedAt: Date.now(), ...(firstSendRetry ? { firstSendRetry } : {}) });
     else ctx._conversationDrafts.delete(resolvedKey);
     while (ctx._conversationDrafts.size > 30) {
       const oldest = [...ctx._conversationDrafts.entries()]
@@ -224,6 +228,18 @@
       ctx._failedConversationDrafts.delete(resolvedKey);
     _scheduleDraftStorage();
   }
+  function _moveConversationDraft(from, to) {
+    if (!from || !to || from === to) return;
+    _loadConversationDrafts();
+    const stores = [ctx._conversationDrafts, attachmentDrafts, pluginDrafts, actionDrafts];
+    // A draft already edited under the native conversation ID takes precedence.
+    const occupied = stores.some(store => store.has(to));
+    for (const store of stores) {
+      if (!occupied && store.has(from)) store.set(to, store.get(from));
+      store.delete(from);
+    }
+    _scheduleDraftStorage();
+  }
   function _restoreConversationDraft(key, composer) {
     _loadConversationDrafts();
     const controls = composer || _draftComposer(), input = controls.input;
@@ -248,15 +264,50 @@
   function _retainFailedConversationDraft(key, draft, reason) {
     if (!key || !draft) return;
     // A requirement is a scoped queue submission, never a plain composer draft.
-    if (!draft.requirement && !_conversationDraftText(key).trim() && !_conversationDraftSkills(key).length && !attachmentDrafts.get(key)?.length && !pluginDrafts.get(key)?.length && !actionDrafts.has(key) &&
-        !(key === _draftKeyForCurrentSession() && (_hasNewInputDraft(draft) || _hasNewPluginDraft(draft) || _hasNewSkillDraft(draft)))) _rememberConversationText(key, draft.text, draft.skills || []);
+    const vacant = !_conversationDraftText(key).trim() && !_conversationDraftSkills(key).length && !attachmentDrafts.get(key)?.length && !pluginDrafts.get(key)?.length && !actionDrafts.has(key) &&
+      !(key === _draftKeyForCurrentSession() && (_hasNewInputDraft(draft) || _hasNewPluginDraft(draft) || _hasNewSkillDraft(draft)));
+    if (!draft.requirement && vacant) {
+      _rememberConversationText(key, draft.text, draft.skills || []);
+      const stored = ctx._conversationDrafts.get(key);
+      if (draft.firstSendRetry && stored) stored.firstSendRetry = draft.firstSendRetry;
+    } else if (draft.firstSendRetry && !sameAttempt(ctx._conversationDrafts.get(key)?.firstSendRetry, draft.firstSendRetry)) {
+      return; // A later draft already occupies the native conversation.
+    }
     ctx._failedConversationDrafts.delete(key);
     ctx._failedConversationDrafts.set(key, { draft, reason });
     while (ctx._failedConversationDrafts.size > 30) ctx._failedConversationDrafts.delete(ctx._failedConversationDrafts.keys().next().value);
   }
+  function sameAttempt(marker, row) {
+    return Boolean(marker && marker.intentId === row.intentId && marker.attemptId === row.attemptId);
+  }
+  function firstSendEditState(row, hasHistory) {
+    if (row?.status !== 'failed' || !row.canAttachFailed || !row.sessionId || !row.attemptId || !row.intentId) return '';
+    _loadConversationDrafts();
+    const key = row.sessionId, stored = ctx._conversationDrafts.get(key);
+    const retained = ctx._failedConversationDrafts.get(key)?.draft;
+    const occupied = stored || attachmentDrafts.has(key) || pluginDrafts.has(key) || actionDrafts.has(key);
+    if (occupied && !sameAttempt(stored?.firstSendRetry, row) ||
+        retained && !sameAttempt(retained.firstSendRetry, row)) return 'occupied';
+    if (sameAttempt(retained?.firstSendRetry, row) || row.canRestoreText && hasHistory) return 'editable';
+    return 'reselect';
+  }
+  function restoreFirstSendForEdit(row, hasHistory) {
+    if (firstSendEditState(row, hasHistory) !== 'editable') return false;
+    const key = row.sessionId;
+    if (!ctx._conversationDrafts.has(key)) {
+      const retained = ctx._failedConversationDrafts.get(key);
+      if (retained) { retained.restored = false; return true; }
+      _rememberConversationText(key, row.text, []);
+      ctx._conversationDrafts.get(key).firstSendRetry = { intentId: row.intentId, attemptId: row.attemptId };
+    }
+    return true;
+  }
   function _restoreRetainedConversationFailure() {
-    const saved = ctx._failedConversationDrafts.get(_draftKeyForCurrentSession());
+    const key = _draftKeyForCurrentSession(), saved = ctx._failedConversationDrafts.get(key);
     if (!saved) return;
+    // Once hydrated, the ordinary composer owns subsequent edits and removals.
+    if (saved.draft.firstSendRetry && (saved.restored ||
+        ctx._conversationDrafts.has(key) && !sameAttempt(ctx._conversationDrafts.get(key).firstSendRetry, saved.draft.firstSendRetry))) return;
     if (saved.draft.requirement && saved.draft.requirement.ownerScope !== _draftOwnerScope()) return;
     // A lost IPC receipt is not proof that the native session stopped. Restore
     // the input without replacing a currently executing session's status.
@@ -336,6 +387,14 @@
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
     _rememberConversationDraft();
+    if (draft.firstSendRetry) {
+      const key = _draftKeyForCurrentSession();
+      const retained = ctx._failedConversationDrafts.get(key);
+      if (sameAttempt(retained?.draft.firstSendRetry, draft.firstSendRetry)) retained.restored = true;
+      const row = ctx._conversationDrafts.get(key) || { text: input.value, skills: draft.skills || [], updatedAt: Date.now() };
+      ctx._conversationDrafts.set(key, { ...row, firstSendRetry: draft.firstSendRetry });
+      _scheduleDraftStorage();
+    }
   }
   async function _recoverRequirementDraft(draft) {
     if (recoveringRequirements.has(draft)) return false;
@@ -426,7 +485,7 @@
       say(String(error?.message || error)); return false;
     } finally { recoveringRequirements.delete(draft); }
   }
-  return { _withConversationDraftRestore, _draftKeyForCurrentSession, _draftOwnerScope, _clearConversationDraftScope, _flushConversationDrafts, _rememberConversationText, _rememberConversationDraft, _conversationDraftText, _conversationDraftSkills, _clearConversationDraft, _restoreConversationDraft, _retainFailedConversationDraft, _restoreRetainedConversationFailure, _restoreRetryDraft, _openPluginAuthRecovery, _restoreFailedDraft };
+  return { firstSendEditState, restoreFirstSendForEdit, _withConversationDraftRestore, _draftKeyForCurrentSession, _draftOwnerScope, _clearConversationDraftScope, _flushConversationDrafts, _rememberConversationText, _rememberConversationDraft, _conversationDraftText, _conversationDraftSkills, _clearConversationDraft, _moveConversationDraft, _restoreConversationDraft, _retainFailedConversationDraft, _restoreRetainedConversationFailure, _restoreRetryDraft, _openPluginAuthRecovery, _restoreFailedDraft };
   }
   global.ChatDraftRecovery = { create };
 })(window);

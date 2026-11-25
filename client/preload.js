@@ -69,6 +69,21 @@ const conversationSession = {
   recentPluginDraft: () => ipcRenderer.invoke('pi-session-recent-plugin-draft'),
   pluginDraft: (ref, target) => ipcRenderer.invoke('pi-session-plugin-draft', ref, target),
   open: (opts) => ipcRenderer.invoke('pi-session-open', opts || {}),
+  startFirstSend: input => ipcRenderer.invoke('pi-first-send-start', input),
+  waitFirstSend: id => ipcRenderer.invoke('pi-first-send-wait', id),
+  attachFirstSend: (id, attemptId) => ipcRenderer.invoke('pi-first-send-attach', id, attemptId),
+  firstSends: () => ipcRenderer.invoke('pi-first-send-list'),
+  firstSendAssociations: () => ipcRenderer.invoke('pi-first-send-associations'),
+  ackFirstSendAssociations: (id, sessionId) => ipcRenderer.invoke('pi-first-send-ack-associations', id, sessionId),
+  retryFirstSend: (id, attemptId) => ipcRenderer.invoke('pi-first-send-retry', id, attemptId),
+  retryFirstSendInPlace: (id, attemptId, ref, text, files, options) =>
+    ipcRenderer.invoke('pi-first-send-retry-in-place', id, attemptId, ref, text, files, options),
+  dismissFirstSend: (id, attemptId, status) => ipcRenderer.invoke('pi-first-send-dismiss', id, attemptId, status),
+  onFirstSendsChanged(fn) {
+    const listener = () => fn();
+    ipcRenderer.on('pi-first-send-changed', listener);
+    return () => ipcRenderer.removeListener('pi-first-send-changed', listener);
+  },
   // Automation openings retain the current main-process identity so a local
   // personal-plugin lock is verified before the first ordinary-chat turn.
   openAutomation: (opts) => ipcRenderer.invoke('pi-session-automation-open', opts || {}),

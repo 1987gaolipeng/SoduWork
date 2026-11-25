@@ -1,4 +1,5 @@
 'use strict';
+const { requestedEnd } = require('./snapshot-window');
 
 // A renderer's history window is only a bounded projection of the existing
 // runtime. Live publications and refreshes must use the same projection.
@@ -8,6 +9,7 @@ function create() {
     ? Math.min(max, Math.max(fallback, Math.floor(Number(value)))) : fallback;
   function request(handle, win, options) {
     if (!handle || !win || handle.detached || handle.attachedWindow !== win || win.isDestroyed()) return false;
+    if (requestedEnd(options) !== null) return false;
     const previous = windows.get(handle);
     const old = previous?.win === win ? previous : {};
     const messageLimit = Math.max(old.messageLimit || 80, bounded(options?.messageLimit, 80, 2000));
