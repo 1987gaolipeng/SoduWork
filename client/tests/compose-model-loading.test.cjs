@@ -489,8 +489,8 @@ test('Codex slider defaults to medium, preserves supported choices and never bor
     { id: 'empty', label: 'Empty', reasoningLevels: [], defaultReasoning: 'high' },
   ];
   f.requests[0].resolve({ ok: true, models }); await f.picker.ready();
-  assert.equal(f.picker.value().modelName, '', 'unselected accounts let the native runtime resolve its own model');
-  assert.equal(f.picker.value().reasoningEffort, '', 'the native default does not force reasoning settings');
+  assert.equal(f.picker.value().modelName, 'full', 'new drafts use the first visible account model');
+  assert.equal(f.picker.value().reasoningEffort, 'medium', 'the initial effort belongs to the selected model');
   f.choose('full', true);
   assert.equal(f.picker.value().reasoningEffort, 'medium', 'explicit medium overrides model low default');
   f.effort(2); assert.equal(f.picker.value().reasoningEffort, 'high');
@@ -519,15 +519,15 @@ test('Codex refresh reconciles changed capabilities but a failed refresh preserv
   assert.equal(f.picker.value().reasoningEffort, '', 'account changes discard previous effort');
 });
 
-test('Codex defers its default to the native runtime and requires an explicit replacement for a missing choice', async () => {
+test('Codex selects the first account model and requires an explicit replacement for a missing choice', async () => {
   const f = fixture(); f.agent('codex'); f.start();
   const models = [
     {id:'first',label:'First',reasoningLevels:['medium','high']},
     {id:'preferred',label:'Preferred',reasoningLevels:['medium','high']},
   ];
   f.requests[0].resolve({ok:true,models,defaultModel:'preferred'}); await f.picker.ready();
-  assert.equal(f.picker.value().modelName,'');
-  assert.equal(f.picker.value().reasoningEffort,'');
+  assert.equal(f.picker.value().modelName,'first');
+  assert.equal(f.picker.value().reasoningEffort,'medium');
   f.choose('first',true); f.effort(1);
   const refreshed=f.picker.refresh(true);
   f.requests[1].resolve({ok:true,models,defaultModel:'preferred'}); await refreshed;
@@ -537,10 +537,10 @@ test('Codex defers its default to the native runtime and requires an explicit re
   f.requests[2].resolve({ok:true,models:[models[1]],defaultModel:'missing'}); await removed;
   assert.equal(f.picker.value().modelName,'first');
   assert.equal(await f.picker.ready(),false, 'a missing manual choice cannot silently use another model');
-  f.choose('',true);
+  f.choose('preferred',true);
   assert.equal(await f.picker.ready(),true);
-  assert.equal(f.picker.value().modelName,'');
-  assert.equal(f.picker.value().reasoningEffort,'');
+  assert.equal(f.picker.value().modelName,'preferred');
+  assert.equal(f.picker.value().reasoningEffort,'medium');
 });
 
 test('managed model picker translates built-in provider and quota labels', async () => {
@@ -598,14 +598,14 @@ test('a stale directory model restore cannot overwrite a new account or explicit
   assert.equal(f.picker.value().modelName, 'new-account');
 });
 
-test('a saved Codex account default stays usable before and after its native catalog becomes available', async () => {
+test('a legacy empty Codex preference resolves when its first account model becomes available', async () => {
   const f = fixture(); f.agent('codex'); f.start();
   f.requests[0].resolve({ ok: true, models: [] });
-  assert.equal(await f.picker.ready(), true);
+  assert.equal(await f.picker.ready(), false);
   assert.equal(await f.picker.restoreSelection({ adapterId: 'codex', modelName: '' }), true);
   const refresh = f.picker.refresh(true); f.reply(1, 'native-model'); await refresh;
   assert.equal(await f.picker.ready(), true);
-  assert.equal(f.picker.value().modelName, '');
+  assert.equal(f.picker.value().modelName, 'native-model');
   assert.ok(f.requests.every(row => row.kind === 'native'));
 });
 
@@ -678,7 +678,7 @@ test('a missing native catalog preserves an explicit directory preference and it
   assert.equal(f.picker.value().reasoningEffort, '');
 });
 
-test('a cold Codex picker retries on entering the model list and preserves the native default', async () => {
+test('a cold Codex picker retries on entering the model list and selects the first discovered model', async () => {
   const f = fixture(); f.agent('codex'); f.start();
   f.requests[0].resolve({ ok: true, catalogAvailable: false, retryable: true, models: [] });
   await f.picker.ready();
@@ -687,10 +687,10 @@ test('a cold Codex picker retries on entering the model list and preserves the n
   f.nodes.cpModelPop.click({ stopPropagation() {}, target: { closest: selector => selector === '[data-native-list]' } });
   assert.equal(f.requests.length, 2);
   f.requests[1].resolve({ ok: false, models: [] }); await f.picker.ready();
-  assert.match(f.nodes.cpModelPop.innerHTML, /data-native-model=""/);
+  assert.doesNotMatch(f.nodes.cpModelPop.innerHTML, /data-native-model=/);
   f.changed();
   f.reply(2, 'discovered-model'); await f.picker.ready();
   assert.match(f.nodes.cpModelPop.innerHTML, /data-native-model="discovered-model"/);
   assert.doesNotMatch(f.nodes.cpModelPop.innerHTML, /data-native-refresh/);
-  assert.equal(f.picker.value().modelName, '');
+  assert.equal(f.picker.value().modelName, 'discovered-model');
 });

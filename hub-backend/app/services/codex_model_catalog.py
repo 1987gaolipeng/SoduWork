@@ -21,6 +21,14 @@ _MAX_OUTPUT = 24 * 1024 * 1024
 _MAX_CACHE_BYTES = 16 * 1024 * 1024
 
 
+class UpgradeRequired(Exception):
+    """The selected CLI cannot provide the account catalog used by the picker."""
+
+
+class _CommandRejected(ValueError):
+    pass
+
+
 def _cache(home: str) -> tuple[dict, tuple]:
     target = Path(home) / "models_cache.json"
     info = target.lstat()
@@ -30,10 +38,14 @@ def _cache(home: str) -> tuple[dict, tuple]:
         raise ValueError("Unusable Codex catalog")
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     with os.fdopen(os.open(target, flags), "rb") as stream:
-        if stamp(os.fstat(stream.fileno())) != stamp(info):
+        opened = os.fstat(stream.fileno())
+        # Windows fstat and lstat can disagree about ctime after an in-place
+        # write. Compare file identity across views and changes within each view.
+        if not os.path.samestat(opened, info) or (opened.st_size, opened.st_mtime_ns) != (info.st_size, info.st_mtime_ns):
             raise ValueError("Codex catalog replaced")
         content = stream.read(info.st_size + 1)
-        if len(content) != info.st_size or target.resolve(strict=True) != target or stamp(target.lstat()) != stamp(info):
+        if (len(content) != info.st_size or stamp(os.fstat(stream.fileno())) != stamp(opened)
+                or target.resolve(strict=True) != target or stamp(target.lstat()) != stamp(info)):
             raise ValueError("Codex catalog changed")
     try:
         value = json.loads(content)
@@ -78,7 +90,7 @@ def _run(executable: str, args: list[str], env: dict, deadline: float, limit: in
             raise ValueError("Codex catalog probe exceeded its bounds")
         code = proc.wait(timeout=max(0, deadline - time.monotonic()))
         if code:
-            raise ValueError("Codex catalog command failed")
+            raise _CommandRejected(code)
         return output[0]
     finally:
         close_process(proc, [reader], ownership)
@@ -106,9 +118,30 @@ def _matches_version(cached: dict, reported: str) -> bool:
     return version == actual or bool(core and version == core[1])
 
 
-def _rows(executable: str, env: dict, deadline: float, *, bundled: bool) -> list:
+def _catalog_command_missing(executable: str, env: dict, deadline: float, bundled: bool) -> bool:
+    if bundled:
+        help_text = _run(executable, ["debug", "models", "--help"], env, deadline, 65536)
+        return b"Usage:" in help_text and b"--bundled" not in help_text
+    command = b"models"
+    try:
+        help_text = _run(executable, ["debug", "--help"], env, deadline, 65536)
+    except _CommandRejected as exc:
+        if exc.args != (2,):
+            raise
+        command = b"debug"
+        help_text = _run(executable, ["--help"], env, deadline, 65536)
+    return b"Commands:" in help_text and not re.search(rb"(?m)^\s+" + command + rb"(?:\s|$)", help_text)
+
+
+def _rows(executable: str, env: dict, deadline: float, reported: str, *, bundled: bool) -> list:
     args = ["debug", "models"] + (["--bundled"] if bundled else [])
-    data = json.loads(_run(executable, args, env, deadline, _MAX_OUTPUT))
+    try:
+        data = json.loads(_run(executable, args, env, deadline, _MAX_OUTPUT))
+    except _CommandRejected as exc:
+        # Confirm the unsupported syntax before updating an installation on a read failure.
+        if exc.args == (2,) and _catalog_command_missing(executable, env, deadline, bundled):
+            raise UpgradeRequired(reported) from exc
+        raise
     if not isinstance(data, dict) or not isinstance(data.get("models"), list):
         raise ValueError("Unexpected Codex catalog")
     return data["models"]
@@ -152,7 +185,7 @@ def discover(executable: str, home: str) -> tuple[list | None, str]:
             env = _environment(scratch, home)
             deadline = time.monotonic() + _TIMEOUT
             reported = _run(executable, ["--version"], env, deadline, 1024).decode().strip()
-            effective = _index(_rows(executable, env, deadline, bundled=False))
+            effective = _index(_rows(executable, env, deadline, reported, bundled=False))
             observed, after_stamp = _cache(home)
             if not _matches_version(observed, reported) or not isinstance(observed.get("models"), list):
                 return None, ""
@@ -165,7 +198,7 @@ def discover(executable: str, home: str) -> tuple[list | None, str]:
             if not refreshed:
                 # Compare against the same CLI's credential-free default menu.
                 isolated = _environment(scratch)
-                bundled = _index(_rows(executable, isolated, deadline, bundled=True))
+                bundled = _index(_rows(executable, isolated, deadline, reported, bundled=True))
                 if not _used_cache(account, effective, bundled):
                     return None, ""
             if stamp((Path(home) / "models_cache.json").lstat()) != after_stamp:

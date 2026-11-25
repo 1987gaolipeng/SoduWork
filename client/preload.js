@@ -42,7 +42,7 @@ const conversationSession = {
     ipcRenderer.on('models-changed', handler);
     return () => ipcRenderer.removeListener('models-changed', handler);
   },
-  runtimeModels: (adapterId, ref) => ipcRenderer.invoke('pi-session-runtime-models', String(adapterId || ''), ref),
+  runtimeModels: (adapterId, ref, ensureCompatible = false) => ipcRenderer.invoke('pi-session-runtime-models', String(adapterId || ''), ref, ensureCompatible === true),
   capabilities: (options) => timedPageInvoke('conversation-capabilities', options || {}),
   localRequirementParse: params => ipcRenderer.invoke('pi-session-local-requirement-parse', params || {}),
   localUsage: days => ipcRenderer.invoke('pi-session-local-usage', days),

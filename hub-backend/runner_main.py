@@ -773,7 +773,8 @@ class Runner:
         if op == "runtime.models" and message.get("key") == "codex":
             from app.services import codex_account_models, local_base
             data = await runner_local_rpc.to_thread(codex_account_models.list_models,
-                                                    local_base._data_root(), message.get("ref", ""))
+                                                    local_base._data_root(), message.get("ref", ""),
+                                                    ensure_compatible=message.get("ensureCompatible") is True)
             return {"ok": True, "data": data}
         if op == "runtime.history.imageReceipts":
             from app.services import codex_image_history, local_base

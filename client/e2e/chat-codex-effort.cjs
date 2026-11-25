@@ -58,7 +58,7 @@ if (typeof electron === 'string') {
       window.efforts=[];window.savedNative={name:'account-model',level:'medium'};
       window.nativeThinking=()=>{const m=nativeModels.find(m=>m.id===savedNative.name);return{supported:true,enabled:true,level:savedNative.level,levels:m.reasoningLevels,defaultLevel:m.defaultReasoning}};
       window.selection=()=>({name:savedNative.name,model:{id:savedNative.name,label:nativeModels.find(m=>m.id===savedNative.name).label}});
-      soduWorkAPI.conversationSession.conversationRuntimes=async()=>({ok:true,runtimes:fixtureRuntimes});
+      soduWorkAPI.conversationSession.conversationRuntimes=async()=>({ok:true,runtimes:fixtureRuntimes,availableRuntimes:fixtureRuntimes});
       soduWorkAPI.conversationSession.selectAgent=async(ref,id)=>({ok:true,snapshot:{adapterId:id,selection:id==='codex'?selection():{name:models[0].name,model:models[0]},thinking:id==='codex'?nativeThinking():{supported:true,canDisable:true,enabled:false}}});
       soduWorkAPI.conversationSession.runtimeModels=async()=>({ok:true,models:nativeModels});
       soduWorkAPI.conversationSession.selectModel=async(ref,name)=>{savedNative.name=name;const m=nativeModels.find(m=>m.id===name);if(!m.reasoningLevels.includes(savedNative.level))savedNative.level=m.defaultReasoning;return{ok:true,selection:selection(),thinking:nativeThinking()}};

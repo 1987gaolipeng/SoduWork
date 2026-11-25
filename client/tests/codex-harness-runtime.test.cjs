@@ -775,6 +775,7 @@ for (const runtimeSpec of runtimeCatalog.runnerRuntimes()) {
     const runtime = {
       async rpc(op, payload) {
         calls.push({ op, payload });
+        if (op === 'runtime.models') return { ok: true, data: { ok: true, catalogAvailable: true, models: [{ id: 'account-model' }] } };
         if (op === 'job.dispatch') return { ok: true, data: { ref: expectedRef } };
         if (op === 'job.session') return { ok: true, data: {
           ok: true, status: 'done', round: 1,

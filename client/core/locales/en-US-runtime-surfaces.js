@@ -1,5 +1,12 @@
 (function (global) {
   const messages = {
+    "Codex CLI 版本过低，请到 Agent 管理更新。": "This Codex CLI is too old. Update it in Agent management.",
+    "Codex CLI 版本过低，正在自动更新。更新完成后将重新加载模型。": "Updating the outdated Codex CLI. The model list will reload automatically.",
+    "Codex CLI 更新后仍无法读取模型目录，请到 Agent 管理检查并重试。": "The Codex catalog is still unavailable after the update attempt. Check Agent management and retry.",
+    "本机 Codex 模型目录暂时无法读取，请刷新重试。": "The local Codex model list is temporarily unavailable. Refresh to try again.",
+    "请选择可用的 Codex 模型后再发送。": "Select an available Codex model before sending.",
+    "当前 Codex 账号无法使用所选模型。请在此会话中选择其他可用模型，再发送消息。": "This Codex account cannot use the selected model. Choose another available model before sending.",
+    "当前 Codex 账号目录中没有所选模型，请选择其他可用模型": "The selected model is missing from this Codex account. Select another available model.",
     "记录数": "Record count",
     "上一页": "Previous page",
     "下一页": "Next page",

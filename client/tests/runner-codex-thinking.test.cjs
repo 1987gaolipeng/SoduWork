@@ -144,24 +144,24 @@ for (const legacy of [false, true]) test('a rejected Codex model is not replayed
   assert.equal((await turn.completion).ok, false);
   const blocked = f.session.send({ text: 'Do not resend the rejected model' });
   assert.equal(blocked.accepted, false);
-  assert.match(blocked.result.reason, /Codex 默认/);
+  assert.match(blocked.result.reason, /选择其他可用模型/);
   assert.equal(f.requests().length, 1, 'the rejection cannot replay the previous request or submit a new one');
   assert.equal((await f.handle.accountCatalog()).models.some(row => row.id === 'balanced'), false);
   await f.session.dispose();
 
   const reopened = await f.open(true);
-  assert.equal(reopened.session.snapshot().modelSelection.name, '');
+  assert.equal(reopened.session.snapshot().modelSelection.name, 'limited');
   assert.equal((await reopened.handle.selectModel('balanced')).ok, false);
   assert.equal(f.requests().length, 1, 'opening a failed archive cannot run another turn');
   assert.equal((await reopened.handle.selectModel('')).ok, true);
   await wait(() => reopened.session.snapshot().status === 'unreachable');
   f.reject(null);
-  const continued = reopened.session.send({ text: 'Continue on the native default' });
+  const continued = reopened.session.send({ text: 'Continue on the first available account model' });
   assert.equal((await continued.completion).ok, true);
-  assert.deepEqual(f.requests().at(-1).input.executionSelection, { agentId: 'codex', modelName: '', reasoningEffort: '' });
+  assert.deepEqual(f.requests().at(-1).input.executionSelection, { agentId: 'codex', modelName: 'limited', reasoningEffort: 'high' });
 });
 
-test('missing catalog evidence preserves a saved model while a verified removal restores the native default', async t => {
+test('missing catalog evidence preserves a saved model and a verified empty catalog blocks dispatch without hiding history', async t => {
   const f = await fixture(t);
   await f.session.dispose();
   let available = false;
@@ -175,5 +175,6 @@ test('missing catalog evidence preserves a saved model while a verified removal 
   const removed = await f.open(true);
   assert.equal(removed.session.snapshot().modelSelection.name, '');
   assert.equal(preference(f.app, f.ref).read(), '');
+  assert.equal(removed.session.send({ text: 'No models available' }).accepted, false);
   assert.equal(f.requests().length, 0);
 });

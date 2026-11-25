@@ -153,6 +153,49 @@ class CodexModelCatalogTests(unittest.TestCase):
                 self.assertEqual(catalog.discover("cli.exe", str(home)), (None, ""))
             self.assertEqual(commands, [["--version"], ["debug", "models"]])
 
+    def test_upgrade_requires_a_confirmed_missing_catalog_command(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = str(Path(temp).resolve())
+            for debug, help_text, upgrade in (
+                (True, b"Commands:\n  test     test driver", True),
+                (True, b"Commands:\n  models   list models", False),
+                (False, b"Commands:\n  exec     run", True),
+            ):
+                def run(executable, args, *unused):
+                    if args == ["--version"]:
+                        return b"codex-cli 0.90.0"
+                    if args == ["debug", "models"] or args == ["debug", "--help"] and not debug:
+                        raise catalog._CommandRejected(2)
+                    return help_text
+                with self.subTest(debug=debug, upgrade=upgrade), patch.object(catalog, "_run", side_effect=run):
+                    if upgrade:
+                        with self.assertRaisesRegex(catalog.UpgradeRequired, "0.90.0"):
+                            catalog.discover("codex.exe", home)
+                    else:
+                        self.assertEqual(catalog.discover("codex.exe", home), (None, ""))
+
+    def test_explicit_upgrade_is_shared_by_readers_and_reloads_the_new_catalog(self):
+        with patch.object(codex_account_models, "_last_upgrade", None), \
+                patch.object(codex_account_models.codex_account_home, "model_catalog_home", return_value="home"), \
+                patch.object(agent_setup, "_bin_of", return_value="codex.exe"), \
+                patch.object(agent_setup, "start_install", return_value="job") as install, \
+                patch.object(agent_setup, "job", return_value={"state": "running"}) as job, \
+                patch.object(catalog, "discover", side_effect=catalog.UpgradeRequired("codex-cli 0.90.0")) as discover:
+            read = codex_account_models.list_models
+            self.assertEqual(read("root")["upgradeState"], "update-required")
+            install.assert_not_called()
+            self.assertEqual(read("root", ensure_compatible=True)["upgradeState"], "updating")
+            self.assertEqual(read("root", ensure_compatible=True)["cliVersion"], "0.90.0")
+            job.return_value = {"state": "done", "ok": False}
+            self.assertEqual(read("root", ensure_compatible=True)["upgradeState"], "update-failed")
+            install.assert_called_once_with("codex", "update")
+            discover.side_effect = None
+            discover.return_value = ([{"slug": "available"}], "codex-native")
+            self.assertEqual(read("root")["models"][0]["id"], "available")
+            discover.return_value = (None, "")
+            self.assertNotIn("upgradeState", read("root", ensure_compatible=True))
+            install.assert_called_once()
+
     def test_windows_rejects_shell_wrappers_before_launch(self):
         with patch.object(catalog.os, "name", "nt"), patch.object(catalog, "_run") as run:
             for path in ("codex.cmd", "codex.ps1", "codex.bat", "codex"):

@@ -251,8 +251,9 @@ def _codex_bin() -> str | None:
             if not isinstance(manifest, dict) or manifest.get("name") != "@openai/codex":
                 continue
             native = os.path.join("@openai", f"codex-{system}-{arch}")
-            cands.extend(os.path.join(base, "vendor", triple, "bin", exe) for base in (
-                os.path.join(package, "node_modules", native), os.path.join(root, native), package))
+            for base in (os.path.join(package, "node_modules", native), os.path.join(root, native), package):
+                # Older official npm packages put the executable in codex/ instead of bin/.
+                cands.extend(os.path.join(base, "vendor", triple, directory, exe) for directory in ("bin", "codex"))
     return _real_bin(cands, [exe, "codex"], exclude=lambda path:
                      _WIN and "\\windowsapps\\openai.codex_" in os.path.normpath(path).replace("/", "\\").lower())
 

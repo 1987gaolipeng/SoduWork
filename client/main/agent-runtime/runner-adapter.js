@@ -135,7 +135,7 @@ function _fatalHarnessText(value) {
     ? clean : '';
 }
 
-const ACCOUNT_MODEL_UNAVAILABLE = '当前 Codex 账号无法使用所选模型。请在此会话中切换到 Codex 默认模型或其他可用模型，再发送消息。';
+const ACCOUNT_MODEL_UNAVAILABLE = '当前 Codex 账号无法使用所选模型。请在此会话中选择其他可用模型，再发送消息。';
 
 function rejectedAccountModel(adapterId, data) {
   if (adapterId !== 'codex' || data?.status !== 'failed') return null;
@@ -506,20 +506,18 @@ async function createRunnerHandle(request, defaults, initialSession) {
   }
   let nativeModels = [];
   const rejectedModels = new Set();
-  async function accountCatalog() {
-    const catalog = await require('./native-model-catalog').list(adapterId, runtime, runnerRef);
+  async function accountCatalog(ensureCompatible = false) {
+    const catalog = await require('./native-model-catalog').list(adapterId, runtime, runnerRef, ensureCompatible);
     if (!Array.isArray(catalog.models) || catalog.ok === false) return catalog;
     nativeModels = catalog.models.filter(row => !rejectedModels.has(row.id));
     return { ...catalog, models: nativeModels };
   }
-  const initialCatalog = adapterId === 'codex' && modelName ? await accountCatalog() : null;
   const previousRejection = initialSession?.ok && initialSession.data?.ok !== false && rejectedAccountModel(adapterId, initialSession.data);
   if (previousRejection) rejectedModels.add(previousRejection);
-  const absentAccountModel = rejectedModels.has(modelName) || initialCatalog?.catalogAvailable === true && !nativeModels.some(row => row.id === modelName);
+  const initialCatalog = adapterId === 'codex' ? await accountCatalog(true) : null;
+  if (!modelName && nativeModels.length) modelName = nativeModels[0].id;
+  const absentAccountModel = modelName && (rejectedModels.has(modelName) || initialCatalog?.catalogAvailable === true && !nativeModels.some(row => row.id === modelName));
   const accountThinking = (name, effort) => require('./codex-thinking').profile(name, effort, nativeModels);
-  const initialThinking = adapterId === 'codex' ? accountThinking(modelName,
-    resumedRef && typeof savedSelection.reasoningEffort === 'string' ? savedSelection.reasoningEffort
-      : opts.reasoningEffort || savedSelection.reasoningEffort || '') : null;
   if (opts.taskRef) {
     const bound = taskBindings.bind(opts.taskRef, opts.taskTitle);
     if (!bound.ok) throw new Error(bound.reason);
@@ -537,7 +535,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
   const allowHistoricalModel = !opts.startDeviceSegment && Boolean(resumedRef || opts.resumedConversation);
   let prepared = accountModel
     ? { ok: !absentAccountModel, model: { id: modelName, name: modelName || displayName, baseUrl: '', key: '' },
-      ...(absentAccountModel ? { reason: '当前 Codex 账号目录中没有所选模型，请选择 Codex 默认或其他可用模型' } : {}) }
+      ...(absentAccountModel ? { reason: '当前 Codex 账号目录中没有所选模型，请选择其他可用模型' } : {}) }
     : await models.fetchModel(identity, modelName, undefined, undefined, false, adapterId,
       { app, allowLocal: true, allowHistorical: allowHistoricalModel });
   // A Runner archive can outlive the model catalog just like a native Pi archive.
@@ -555,7 +553,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
   let resetSavedModel = false;
   if (canRecoverStaleModel && (!prepared?.ok || returnedDifferentModel)) {
     const fallback = accountModel
-      ? { ok: true, model: { id: '', name: displayName, baseUrl: '', key: '' } }
+      ? { ok: true, model: { id: nativeModels[0]?.id || '', name: nativeModels[0]?.label || displayName, baseUrl: '', key: '' } }
       : await models.fetchModel(identity, '', undefined, undefined, false, adapterId,
         { app, allowLocal: true, ignoreAgentPreference: true,
           allowHistorical: allowHistoricalModel });
@@ -572,6 +570,9 @@ async function createRunnerHandle(request, defaults, initialSession) {
   // A default is resolved once for this conversation. Future chats still use their own default.
   if (prepared.model.localOnly) modelName = require('../pi-session/local-model-runtime-privacy.cjs').reference(prepared.model);
   else if (!modelName) modelName = prepared.model.id;
+  const initialThinking = adapterId === 'codex' ? accountThinking(modelName,
+    resumedRef && typeof savedSelection.reasoningEffort === 'string' ? savedSelection.reasoningEffort
+      : opts.reasoningEffort || savedSelection.reasoningEffort || '') : null;
   if (explicitModel || resetSavedModel || modelName && savedSelection.name !== modelName) {
     const keepSavedEffort = modelName && savedSelection.name === modelName &&
       (initialCatalog?.ok === false || initialCatalog?.catalogAvailable === false);
@@ -643,10 +644,9 @@ async function createRunnerHandle(request, defaults, initialSession) {
       if (!accountModel) return models.fetchModel(identity, name, undefined, undefined, false, adapterId,
         { app, allowLocal: true });
       if (adapterId !== 'codex') return { ok: false };
-      if (!name) return { ok: true, model: { id: '', label: 'Codex 默认' } };
-      const catalog = await accountCatalog();
-      const row = catalog.models?.find(model => model.id === name);
-      return row ? { ok: true, model: { id: name, label: row.label || name } } : { ok: false };
+      const catalog = await accountCatalog(true);
+      const row = name ? catalog.models?.find(model => model.id === name) : catalog.models?.[0];
+      return row ? { ok: true, model: { id: row.id, label: row.label || row.id } } : { ok: false };
     },
     persist: name => {
       if (state.disposed) throw Error('会话已关闭');
@@ -2062,6 +2062,8 @@ async function createRunnerHandle(request, defaults, initialSession) {
       {
         const taskModelOverride = options?.taskId && !options.controlled && typeof options.modelName === 'string';
         const modelName = taskModelOverride ? options.modelName : state.modelSelection.capture();
+        if (adapterId === 'codex' && !modelName && !options?.controlled) return { accepted: false, result: { ok: false,
+          reason: initialCatalog?.reason || '请选择可用的 Codex 模型后再发送。' } };
         if (rejectedModels.has(modelName)) return { accepted: false, result: { ok: false, reason: ACCOUNT_MODEL_UNAVAILABLE } };
         const item = turnQueue.add({ text: value, attachments, options: { ...options, modelName,
           ...(adapterId === 'codex' ? { reasoningEffort: taskModelOverride && typeof options.reasoningEffort === 'string'

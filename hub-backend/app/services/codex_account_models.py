@@ -1,10 +1,44 @@
 """Project the model catalog observed by the executing account Codex CLI."""
 from pathlib import Path
+import re
+import threading
+from typing import NamedTuple
 
 from . import agent_execution_options as options, codex_account_home, codex_model_catalog
 
 
-def list_models(data_root: str, ref: str = "") -> dict:
+class _Upgrade(NamedTuple):
+    root: str
+    executable: str
+    version: str
+    job_id: str
+
+
+_upgrade_lock = threading.Lock()
+_last_upgrade: _Upgrade | None = None
+
+
+def _upgrade_status(root, executable, reported, requested):
+    from . import agent_setup
+    global _last_upgrade
+    match = re.fullmatch(r"(?:codex-cli )?(\d+\.\d+\.\d+(?:[-+][\w.+-]+)?)", reported)
+    if not match:
+        return {}
+    version = match[1]
+    with _upgrade_lock:
+        if (_last_upgrade and _last_upgrade.root == root and _last_upgrade.executable == executable
+                and _last_upgrade.version == version):
+            job = agent_setup.job(_last_upgrade.job_id)
+            status = "updating" if job and job["state"] == "running" else "update-failed"
+        elif requested:
+            _last_upgrade = _Upgrade(root, executable, version, agent_setup.start_install("codex", "update"))
+            status = "updating"
+        else:
+            status = "update-required"
+    return {"cliVersion": version, "upgradeState": status}
+
+
+def list_models(data_root: str, ref: str = "", *, ensure_compatible: bool = False) -> dict:
     from . import agent_setup
     result = {"ok": True, "adapterId": "codex", "source": "", "catalogAvailable": False, "retryable": True, "models": []}
     if not isinstance(ref, str) or len(ref) > 160:
@@ -14,8 +48,20 @@ def list_models(data_root: str, ref: str = "") -> dict:
         home = codex_account_home.model_catalog_home(root, ref)
         if not home:
             return result
+        # npm can temporarily replace the executable during an update.
+        with _upgrade_lock:
+            if _last_upgrade and _last_upgrade.root == root:
+                job = agent_setup.job(_last_upgrade.job_id)
+                if job and job["state"] == "running":
+                    return {**result, "cliVersion": _last_upgrade.version, "upgradeState": "updating"}
         executable = agent_setup._bin_of("codex")
-        rows, source = codex_model_catalog.discover(executable, home)
+        try:
+            rows, source = codex_model_catalog.discover(executable, home)
+        except codex_model_catalog.UpgradeRequired as exc:
+            if (codex_account_home.model_catalog_home(root, ref) == home
+                    and agent_setup._bin_of("codex") == executable):
+                result.update(_upgrade_status(root, executable, str(exc), ensure_compatible))
+            return result
         if (rows is None or codex_account_home.model_catalog_home(root, ref) != home
                 or agent_setup._bin_of("codex") != executable):
             return result

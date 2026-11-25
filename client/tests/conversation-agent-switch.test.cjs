@@ -81,6 +81,7 @@ function fixture(t, { nativeHistory = false, nativeOutputs = false, modelConfig 
   };
   const runtime = { async rpc(op, input) {
     requests.push({ op, input });
+    if (op === 'runtime.models') return { ok: true, data: { ok: true, catalogAvailable: true, models: [{ id: 'native-model' }] } };
     if (op === 'runtime.detect') { if (gate) await gate;
       return { ok: true, data: { installed: input.key !== unavailable, state: input.key === unavailable ? 'missing' : 'ready',
         accessControl: { ...catalog.runtime(input.key).accessControl, canChangeDuringSession: true } } }; }
@@ -252,13 +253,13 @@ for (const selection of [undefined, { modelName: '' }, { modelName: 'limited' }]
     await send(handle, 'Existing managed conversation');
     assert.equal((await handle.selectAgent('codex', selection)).ok, true);
     const explicit = selection?.modelName === 'limited';
-    assert.equal(handle.snapshot().modelSelection.name, explicit ? 'limited' : '');
-    assert.equal(handle.snapshot().thinking.supported, explicit);
-    assert.equal((await handle.setThinkingLevel(explicit ? 'low' : 'high')).ok, explicit);
+    assert.equal(handle.snapshot().modelSelection.name, explicit ? 'limited' : 'balanced');
+    assert.equal(handle.snapshot().thinking.supported, true);
+    assert.equal((await handle.setThinkingLevel(explicit ? 'low' : 'high')).ok, true);
     await send(handle, 'Apply selected Codex settings');
     const dispatch = f.requests.find(row => row.op === 'job.dispatch').input;
-    assert.equal(dispatch.cfg.codex_model, explicit ? 'limited' : '');
-    assert.equal(dispatch.cfg.codex_reasoning_effort, explicit ? 'low' : '');
+    assert.equal(dispatch.cfg.codex_model, explicit ? 'limited' : 'balanced');
+    assert.equal(dispatch.cfg.codex_reasoning_effort, explicit ? 'low' : 'high');
   });
 }
 

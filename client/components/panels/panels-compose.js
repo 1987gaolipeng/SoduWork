@@ -548,7 +548,7 @@
     const libraryItemIds = _attachments ? _attachments.libraryItems() : [];
     await global.ComposeRuntime?.ready?.();
     if (await global.ComposeModelPicker?.ready?.() === false) {
-      if (typeof petSay === 'function') petSay('默认模型暂不可用，请选择其他模型');
+      if (typeof petSay === 'function') petSay(global.ComposeModelPicker?.unavailableReason?.() || '默认模型暂不可用，请选择其他模型');
       return false;
     }
     if (!current()) return false;
@@ -622,7 +622,7 @@
       if (!ready()) return;
       const modelReady = await global.ComposeModelPicker?.ready?.();
       if (!ready()) return;
-      if (modelReady === false) { global.petSay?.('默认模型暂不可用，请选择其他模型'); return; }
+      if (modelReady === false) { global.petSay?.(global.ComposeModelPicker?.unavailableReason?.() || '默认模型暂不可用，请选择其他模型'); return; }
       if (_accessConsent && !await _accessConsent.ready()) return;
       if (!ready()) return;
       _closeSetupPops(); _rememberComposeDraft();
@@ -719,7 +719,7 @@
         if (!currentWorkEntry()) return false;
         const ready = await global.ComposeModelPicker?.ready?.();
         if (!currentWorkEntry()) return false;
-        if (ready === false) { global.petSay?.('默认模型暂不可用，请选择其他模型'); return false; }
+        if (ready === false) { global.petSay?.(global.ComposeModelPicker?.unavailableReason?.() || '默认模型暂不可用，请选择其他模型'); return false; }
         const selection = global.ComposeModelPicker?.value?.() || { modelName: _pickedModel };
         return { adapterId: submitAdapter, modelName: selection.modelName || '',
           modelLabel: global.ComposeModelPicker?.label?.() || selection.modelName || '',
