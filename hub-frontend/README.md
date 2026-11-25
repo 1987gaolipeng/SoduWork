@@ -12,6 +12,18 @@ The model catalog starts with a compact service/model and live-load summary. Exp
 
 Service cards adapt from one to four columns according to the available content width. View opens model details in a dialog without resizing or rearranging the service grid. Add, discover and configure actions remain visible; enable/disable and deletion are in the More popover, with the existing deletion confirmation retained.
 
+## Upload client installers
+
+In **Client releases**, choose one original installer and a release channel, or
+keep the current environment's default. Hub reads its version/platform, signs and
+registers it automatically; no manifest or private key is supplied by the publisher.
+Each upload finishes independently and new records stay disabled until enabled.
+A failed upload keeps the selected file for retry. An identical upload returns the
+existing record and preserves its enabled state. Beta selects a channel; it does
+not turn a plain package version into a `-beta.N` build. Such packages require manual
+installation. Environment administrators configure signing once as described in
+the [backend guide](../hub-backend/README.md#register-client-installers).
+
 ## Automation template dates
 
 Templates default to **No date limits**. Clear this option to set a start date, an end date, or both. Dates are inclusive and use the template's time zone (Asia/Shanghai by default); the existing hourly, daily or weekly rhythm determines execution times within that range. Invalid dates and reversed ranges are rejected before saving.

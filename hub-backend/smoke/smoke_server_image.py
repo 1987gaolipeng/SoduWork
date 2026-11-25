@@ -86,6 +86,7 @@ if RUNTIME_MARKER in source:
         "apt-get install -y --no-install-recommends git openssh-client",
         "chromium fonts-noto-cjk",
         "postgresql-client-16",
+        "7zip aapt",
         "COPY --from=node-runtime /usr/local/lib/node_modules",
         "COPY hub-backend/requirements.txt ./requirements.txt",
         "python -m pip install -r requirements.txt",
@@ -99,6 +100,10 @@ if RUNTIME_MARKER in source:
            f"runtime stage rebuilds dependency layer ({forbidden}); it belongs in the deps stage")
     ok(deps_stage.count("python -m pip install -r requirements.txt") == 1,
        "dependency base must install its Python requirements exactly once")
+    ok("command -v 7zz || command -v 7z" in runtime_stage
+       and "command -v aapt" in runtime_stage
+       and "rebuild the deps image or use HUB_BASE_IMAGE=deps" in runtime_stage,
+       "release image must reject dependency bases missing installer inspection tools")
     requirements_copy = "COPY hub-backend/requirements.txt ./requirements.txt"
     ok(requirements_copy in runtime_stage,
        "release image keeps stale requirements from the published dependency base")
