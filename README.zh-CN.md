@@ -14,6 +14,8 @@
 
 **多底座 · 多 Agent · 私有化部署**
 
+<img src="docs/assets/soduwork-demo.gif" alt="SoduWork 产品演示" width="100%" />
+
 支持 Pi · OpenCode · DeepSeek Harness · Qwen Code · Kimi Code · Codex Harness · Codex
 
 **从源码运行**
