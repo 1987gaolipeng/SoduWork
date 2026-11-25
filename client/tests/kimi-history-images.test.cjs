@@ -13,7 +13,7 @@ const segments = require('../main/conversation/runtime-segments');
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 
 async function fixture(t) {
-  const profile = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-history-')));
+  const profile = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-history-')));
   t.after(() => fs.rmSync(profile, { recursive: true, force: true }));
   const taskId = 'chat-abcdef-1234', cwd = path.join(profile, 'workspaces', 'temp', taskId);
   const dispatch = 'chat:' + taskId + ':kimi', id = require('../main/agent-runtime/runner-adapter').runnerRefForDispatch(dispatch);

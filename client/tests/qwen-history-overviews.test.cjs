@@ -8,7 +8,7 @@ const runtime = require('../main/conversation/artifact-runtime');
 const segments = require('../main/conversation/runtime-segments');
 
 async function fixture(t) {
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-turn-preview-'));
+  const profile = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-turn-preview-')));
   t.after(() => fs.rmSync(profile, { recursive: true, force: true }));
   const name = 'chat-abcdef-1234', cwd = path.join(profile, 'temp', name), dispatch = 'chat:' + name + ':qwen';
   const id = require('../main/agent-runtime/runner-adapter').runnerRefForDispatch(dispatch);
