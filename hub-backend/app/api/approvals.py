@@ -1,7 +1,7 @@
 """Unified client approval inbox for requirements, outputs, UAT, and release decisions."""
 from __future__ import annotations
-import uuid
 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
@@ -13,11 +13,21 @@ from ..config import get_settings
 from ..db import get_session
 from ..deps import current_client
 from ..models import Attachment, Client, Role, Task, User
-from ..schemas import attachment_to_api
 from ..permissions import ALL_KEYS
 from ..realtime import hub
-from ..services import (approval_routing, approval_summaries, code_delivery, deployments, release_control,
-                        resource_access, storage, task_access, task_rework, task_trace)
+from ..schemas import attachment_to_api
+from ..services import (
+    approval_routing,
+    approval_summaries,
+    code_delivery,
+    deployments,
+    release_control,
+    resource_access,
+    storage,
+    task_access,
+    task_rework,
+    task_trace,
+)
 from ..services.task_requirements import public_content
 
 router = APIRouter(prefix="/api/v1/approvals", tags=["approvals"])

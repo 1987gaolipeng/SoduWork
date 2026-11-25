@@ -10,7 +10,6 @@ from .. import automation_models as am
 from ..models import Task
 from . import mcp_servers, plugin_compat, plugin_service
 
-
 _ACTIVE_RUNS = {"queued", "dispatching", "running", "waiting_human",
                 "waiting_external", "rework"}
 _FAILED_RUNS = {"failed"}
