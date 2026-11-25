@@ -71,14 +71,29 @@ async function execute(app,binding,method,input,assertCurrent=()=>{},options={})
       row.hash.update(bytes);row.written+=bytes.length;row.expiry.refresh();current();return {ok:true,offset:row.written};
     }
     if(row.written!==row.size)throw Error('文件尚未传输完整');
-    await row.handle.sync();await row.handle.close();current();
-    const file={id:uuid('file_'),projectId:row.projectId,name:row.name,type:row.type,size:row.size,sha256:row.hash.digest('hex'),createdAt:new Date().toISOString()};
-    const dir=await directory(app,scope,['projects',projectKey(row.projectId),'files'],true);current();
-    await fsp.rename(row.temp,path.join(dir,file.id+'.'+extension(file.type)));
-    const meta=await fsp.open(path.join(dir,file.id+'.json'),'wx',0o600);
-    try{await meta.writeFile(JSON.stringify(file));await meta.sync();}finally{await meta.close();}
-    clearTimeout(row.expiry);uploads.delete(key);const result={...file,url:url(binding,file)};completed.set(key,result);
-    if(completed.size>128)completed.delete(completed.keys().next().value);current();return {ok:true,file:result};
+    const published=[];let committed=false;
+    try {
+      await row.handle.sync();await row.handle.close();current();
+      const file={id:uuid('file_'),projectId:row.projectId,name:row.name,type:row.type,size:row.size,sha256:row.hash.digest('hex'),createdAt:new Date().toISOString()};
+      const dir=await directory(app,scope,['projects',projectKey(row.projectId),'files'],true);current();
+      const binary=path.join(dir,file.id+'.'+extension(file.type)),metadataPath=path.join(dir,file.id+'.json');
+      await fsp.rename(row.temp,binary);
+      published.push(binary);
+      const meta=await fsp.open(metadataPath,'wx',0o600);
+      published.push(metadataPath);
+      try{await meta.writeFile(JSON.stringify(file));await meta.sync();}finally{await meta.close();}
+      clearTimeout(row.expiry);uploads.delete(key);const result={...file,url:url(binding,file)};completed.set(key,result);
+      if(completed.size>128)completed.delete(completed.keys().next().value);committed=true;
+      // A lost reply after commit must retain its file and replayable receipt.
+      current();return {ok:true,file:result};
+    } catch(error) {
+      if(!committed){
+        clearTimeout(row.expiry);uploads.delete(key);
+        try{await row.handle.close();}catch(_){}
+        await Promise.allSettled([row.temp,...published].map(file=>fsp.rm(file,{force:true})));
+      }
+      throw error;
+    }
   } finally {row.busy=false;}
 }
 async function handle({item},request,deps) {

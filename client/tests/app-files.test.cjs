@@ -121,3 +121,66 @@ test('native picker preview and copy use opaque authorized references without re
  const contract=require('../main/soduwork-app-bridge-contract.cjs');assert.equal(contract.METHOD_CAPABILITY['files.copyLocal'],'data.write');assert.throws(()=>contract.normalizeRequest({id:'x',method:'files.copyLocal',params:{projectId:'p',sourceId:item.sourceId,path:source}}));
  await assert.rejects(()=>f.call('files.copyLocal',{projectId:'p',sourceId:'source_'+'0'.repeat(32)}));fs.appendFileSync(source,'changed');await assert.rejects(()=>f.call('files.copyLocal',{projectId:'native',sourceId:item.sourceId}),/变化/);f.switchAccount();assert.equal((await f.request({url:item.url,method:'GET'})).status,403);
 });
+
+test('failed SDK file finalization leaves no staging or partial publication and permits a fresh save',async t=>{
+  for(const phase of ['metadata-open','metadata-write','metadata-sync'])await t.test(phase,async t=>{
+    const f=fixture(t);await f.open();
+    const original=await upload(f,'preserved');
+    const directory=path.join(f.root,'jiyong-files');
+    const records=()=>fs.readdirSync(directory,{recursive:true})
+      .filter(name=>/\.(part|png|json)$/.test(String(name))).sort();
+    const before=records(),open=fs.promises.open.bind(fs.promises);
+    const error=Object.assign(Error('Synthetic metadata write failed'),{code:'ENOSPC'});
+    let armed=true;
+    t.mock.method(fs.promises,'open',async(file,...args)=>{
+      if(!armed||!String(file).includes(path.sep+'jiyong-files'+path.sep)||!String(file).endsWith('.json'))return open(file,...args);
+      armed=false;
+      if(phase==='metadata-open')throw error;
+      const handle=await open(file,...args);
+      if(phase==='metadata-write'){
+        const write=handle.writeFile.bind(handle);
+        t.mock.method(handle,'writeFile',async()=>{await write('{"partial":');throw error;});
+      }else t.mock.method(handle,'sync',async()=>{throw error;});
+      return handle;
+    });
+    const {sdk,calls}=nativeFileSdk(f);
+    await assert.rejects(()=>sdk.files.importFile(new Blob(['uncommitted bytes'],{type:'image/png'}),
+      {projectId:'failed-save'}),/Synthetic metadata write failed/);
+    assert.equal(armed,false,'the injected error reached the real metadata publication');
+    const start=calls.find(row=>row.method==='files.begin').result;
+    await assert.rejects(()=>f.call('files.finish',{id:start.id}),/不存在|取消/);
+    assert.deepEqual(records(),before,'a failed save retains no orphan bytes or incomplete metadata');
+    const retained=await f.request({url:original.file.url,method:'GET'});
+    assert.deepEqual(Buffer.from(await retained.arrayBuffer()),original.bytes,'earlier committed files remain readable');
+    const retry=await sdk.files.importFile(new Blob(['retry bytes'],{type:'image/png'}),{projectId:'failed-save'});
+    assert.equal(retry.ok,true);
+    const response=await f.request({url:retry.file.url,method:'GET'});
+    assert.equal(await response.text(),'retry bytes');
+  });
+});
+
+test('an unfinished file can continue uploading after a premature finish request',async t=>{
+  const f=fixture(t);await f.open();
+  const start=await f.call('files.begin',{projectId:'continued',name:'complete.png',type:'image/png',size:3});
+  await f.call('files.append',{id:start.id,offset:0,data:Buffer.from('a')});
+  await assert.rejects(()=>f.call('files.finish',{id:start.id}),/完整/);
+  await f.call('files.append',{id:start.id,offset:1,data:Buffer.from('bc')});
+  const result=await f.call('files.finish',{id:start.id});
+  assert.equal(await (await f.request({url:result.file.url,method:'GET'})).text(),'abc');
+});
+
+test('a lost receipt after publication retains the committed file for an idempotent finish retry',async t=>{
+  const f=fixture(t);await f.open();
+  const start=await f.call('files.begin',{projectId:'uncertain',name:'committed.png',type:'image/png',size:3});
+  await f.call('files.append',{id:start.id,offset:0,data:Buffer.from('abc')});
+  const records=()=>fs.readdirSync(path.join(f.root,'jiyong-files'),{recursive:true})
+    .filter(name=>String(name).endsWith('.json'));
+  await assert.rejects(()=>files.execute(f.app,f.binding,'files.finish',{id:start.id},()=>{
+    if(records().length)throw Error('Synthetic receipt delivery failed');
+  }),/Synthetic receipt delivery failed/);
+  assert.equal(records().length,1);
+  const retry=await f.call('files.finish',{id:start.id});
+  const again=await f.call('files.finish',{id:start.id});
+  assert.deepEqual(again,retry);
+  assert.equal(await (await f.request({url:retry.file.url,method:'GET'})).text(),'abc');
+});
