@@ -125,6 +125,7 @@ async function actualRunner(t, spec, mode = 'complete') {
   const ref = _uuidV5('9af442c8-cd1d-4b91-a668-22da2b2635bf', 'chat:' + alias + ':' + spec.id);
   let round = 0;
   const runtime = { async rpc(op) {
+    if (op === 'runtime.models') return { ok: true, data: { ok: true, catalogAvailable: true, models: [{ id: 'account-model' }] } };
     if (op === 'runtime.detect') return { ok: true, data: { installed: true, state: 'ready' } };
     if (op === 'job.dispatch') { round++; return { ok: true, data: { ref } }; }
     if (op === 'job.comment') { round++; return { ok: true, data: { ok: true } }; }

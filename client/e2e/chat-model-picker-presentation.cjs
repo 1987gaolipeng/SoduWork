@@ -112,10 +112,10 @@ if (typeof electron === 'string') {
     await until('document.querySelector(".nmodel-pop").hidden');
     assert.ok(await js('document.querySelector(".nmodel-pop").hidden'));
     report.checks.push('Provider search, selection, focus restoration and thinking switch preserve existing next-message semantics; fixed/unsupported thinking cannot be toggled');
-    await js(`state.adapterId='codex';state.selection={name:'',model:{id:''}};window.nativeCalls=0;
+    await js(`state.adapterId='codex';state.model=null;state.selection={name:'',model:{id:''}};window.nativeCalls=0;
       soduWorkAPI.conversationSession.runtimeModels=async()=>++nativeCalls===1 ? new Promise(resolve=>window.finishCold=resolve)
         : nativeCalls===2 ? {ok:false,catalogAvailable:false,models:[]}
-        : {ok:true,catalogAvailable:true,models:[{id:'account-model',label:'Account model'}]};
+        : {ok:true,catalogAvailable:true,models:[{id:'account-model',label:'Account model'},{id:'second-model',label:'Second model'}]};
       SoduWorkAPI.myModels=async()=>{throw Error('Account models cannot use managed quota')};controls.render()`);
     await click('.nmodel-button'); await until('typeof finishCold==="function"');
     assert.match(await js('document.querySelector(".nmodel-options").textContent'), /正在加载/);
@@ -125,17 +125,30 @@ if (typeof electron === 'string') {
     assert.ok(await js('document.querySelector("[data-effort-reset]") && document.querySelector("[data-effort-slider]").disabled'));
     assert.equal(await js('document.querySelector("[data-native-refresh], [data-native-catalog-note]")'), null);
     await click('[data-native-list]'); await until('nativeCalls===2');
-    assert.deepEqual(await js('Array.from(document.querySelectorAll("[data-model-name]"),e=>e.dataset.modelName)'), ['']);
+    assert.deepEqual(await js('Array.from(document.querySelectorAll("[data-model-name]"),e=>e.dataset.modelName)'), []);
     assert.match(await js('document.querySelector(".nmodel-button").title'), /暂时无法读取/);
     await click('[data-native-back]'); await click('[data-native-list]');
     await until(`document.querySelector('[data-model-name="account-model"]')`);
-    assert.deepEqual(await js('Array.from(document.querySelectorAll("[data-model-name]"),e=>e.dataset.modelName)'), ['', 'account-model']);
-    assert.equal(await js('state.selection.name'), '');
+    assert.deepEqual(await js('Array.from(document.querySelectorAll("[data-model-name]"),e=>e.dataset.modelName)'), ['account-model', 'second-model']);
+    assert.equal(await js('state.selection.name'), 'account-model');
     assert.doesNotMatch(await js('document.querySelector(".nmodel-options").textContent'), /自己的额度/);
-    await click('[data-model-name="account-model"]');
-    assert.equal(await js('selected.at(-1).name'), 'account-model');
+    await click('[data-model-name="second-model"]');
+    assert.equal(await js('selected.at(-1).name'), 'second-model');
     await key('Escape');
-    report.checks.push('A cold native list keeps Codex default, refreshes the open menu and switches only after explicit selection');
+    report.checks.push('A cold account catalog has no placeholder and selects its first model on recovery. A second model can be selected explicitly.');
+    await js(`state.ref='old-cli-chat';state.selection={};state.model=null;
+      window.upgradeReads=0;
+      soduWorkAPI.conversationSession.runtimeModels=async(adapter,ref,ensureCompatible)=>{
+        if (adapter!=='codex'||ref!=='old-cli-chat'||!ensureCompatible) throw Error('Expected a bound Codex update request');
+        return ++upgradeReads===1 ? {ok:true,catalogAvailable:false,models:[],upgradeState:'updating',reason:'Updating Codex CLI'}
+          : {ok:true,catalogAvailable:true,models:[{id:'account-model',label:'Account model'}]};
+      };controls.render()`);
+    await until('notices.includes("Updating Codex CLI")');
+    await until('state.selection.name==="account-model"');
+    assert.equal(await js('upgradeReads'), 2);
+    assert.equal(await js('document.querySelector(".nmodel-button span").textContent'), 'Account model');
+    await js('notices.splice(notices.indexOf("Updating Codex CLI"),1);soduWorkAPI.conversationSession.runtimeModels=async()=>({ok:true,catalogAvailable:true,models:[{id:"account-model",label:"Account model"}]});void 0');
+    report.checks.push('An incompatible CLI triggers a visible update notice and the first model becomes selected after the automatic refresh');
     await js(`state.adapterId='pi';SoduWorkAPI.myModels=async()=>({usable:models,mediaUsable:{image:[{name:'paint',label:'Picture model',providerId:'image-provider',providerName:'Image provider',keyFrom:'mine'}]}});controls.render()`);
     await open(); await search('Image provider');
     assert.equal(await js('document.querySelector("[data-model-name]").dataset.modelName'), 'image::image-provider::paint');
@@ -178,7 +191,8 @@ if (typeof electron === 'string') {
     await js(`preview._viewEpoch++; preview._ref='local-history-preview-other-account';
       preview._sessionOptions={adapterId:'codex',modelName:''}; preview._snap.modelSelection={};
       coldRuntimes=previewAgents.slice(0,1); draft.runtimes(true).then(()=>{controls.render()})`);
-    assert.deepEqual(await badges(), ['Codex', 'Codex 默认']);
+    await until(`document.querySelector('.nmodel-button span').textContent === 'Account model'`);
+    assert.deepEqual(await badges(), ['Codex', 'Account model']);
     await js('coldRuntimes=previewAgents; draft.runtimes(true).then(()=>{controls.render()})');
     await click('#nchatRuntime'); await until('document.querySelector("[data-runtime=pi]")');
     await click('[data-runtime=pi]');

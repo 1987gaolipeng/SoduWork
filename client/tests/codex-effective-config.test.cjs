@@ -238,13 +238,13 @@ for (const transport of ['native', 'acp']) test('Codex ' + transport + ' launche
   assert.equal(restored.model, 'native-b'); assert.equal(restored.effort, 'high');
   if (transport === 'acp') assert.equal(restored.config.disable_response_storage, true);
   assert.equal((await f.selectModel('')).ok, true);
-  assert.equal((await f.session.send({ text: 'USE_ACCOUNT_DEFAULT' }).completion).ok, true);
-  const accountDefault = f.launches().at(-1);
-  assert.equal(accountDefault.model, '');
-  assert.equal(accountDefault.effort, '');
+  assert.equal((await f.session.send({ text: 'USE_FIRST_ACCOUNT_MODEL' }).completion).ok, true);
+  const firstAccountModel = f.launches().at(-1);
+  assert.equal(firstAccountModel.model, 'native-a');
+  assert.equal(firstAccountModel.effort, 'high');
   if (transport === 'acp') {
-    assert.equal(Object.hasOwn(accountDefault.config, 'model'), false);
-    assert.equal(Object.hasOwn(accountDefault.config, 'model_reasoning_effort'), false);
+    assert.equal(firstAccountModel.config.model, 'native-a');
+    assert.equal(firstAccountModel.config.model_reasoning_effort, 'high');
   }
 });
 

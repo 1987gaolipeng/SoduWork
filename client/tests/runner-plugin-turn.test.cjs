@@ -41,6 +41,7 @@ function harness(t, opts={}) {
       return {ok:true,data:{ok:true,status:'done',items:events.filter(e=>e.seq>payload.since)}};
     }
     if(op==='job.stop')return {ok:true,data:{ok:true}};
+    if (op === 'runtime.models') return { ok: true, data: { ok: true, catalogAvailable: true, models: [{ id: 'account-model' }] } };
     if(op==='runtime.detect')return {ok:true,data:{accessControl:{schema:'soduwork.access-policy/v1',supported:true,modes:['standard','readonly','full']}}};
     throw Error(op);
   }};

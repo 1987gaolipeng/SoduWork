@@ -56,6 +56,10 @@ class AgentPlatformInstallationTests(unittest.TestCase):
                         patch.object(local_base, "_npm_root", return_value=""), \
                         patch.object(npm, "private_bin", side_effect=AssertionError("Native account cannot launch .cmd")):
                     self.assertEqual(local_base._codex_bin(), str(binary))
+                    legacy = self.root / f"@openai/codex/vendor/{triple}-pc-windows-msvc/codex/codex.exe"
+                    legacy.parent.mkdir(parents=True)
+                    binary.rename(legacy)
+                    self.assertEqual(local_base._codex_bin(), str(legacy))
 
     def test_native_packages_follow_node_architecture_under_rosetta(self):
         from app.services import agent_setup_runtime

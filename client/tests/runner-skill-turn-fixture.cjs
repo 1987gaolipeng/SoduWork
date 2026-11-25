@@ -40,6 +40,7 @@ async function fixture(t, spec, overrides = {}) {
   const heldReady = new Promise(resolve => { entered = resolve; });
   const runtime = { async rpc(op, payload) {
     calls.push({ op, payload });
+    if (op === 'runtime.models') return { ok: true, data: { ok: true, catalogAvailable: true, models: [{ id: 'account-model' }] } };
     if (op === 'runtime.detect') return { ok: true, data: { accessControl: {
       schema: 'soduwork.access-policy/v1', supported: true, modes: ['standard', 'full', 'readonly'], canChangeDuringSession: true,
     } } };

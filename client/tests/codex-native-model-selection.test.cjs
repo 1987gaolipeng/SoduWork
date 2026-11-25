@@ -71,7 +71,7 @@ test('native options and picker retain viewport placement and reasoning controls
   const desk = source('client/desk.html');
   const backend = source('hub-backend/app/services/local_base.py');
 
-  assert.match(preload, /runtimeModels:\s*\(adapterId, ref\).*pi-session-runtime-models/s);
+  assert.match(preload, /runtimeModels:\s*\(adapterId, ref, ensureCompatible = false\).*pi-session-runtime-models/s);
   assert.match(ipc, /pi-session-runtime-models[\s\S]*native-model-catalog'\)\.list/);
   assert.match(compose, /ComposeModelPicker\.value\(\)[\s\S]*reasoningEffort:\s*modelSelection\.reasoningEffort/);
   assert.match(picker, /row\.id === 'codex'[\s\S]*runtimeModels/);

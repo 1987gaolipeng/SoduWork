@@ -26,6 +26,7 @@ async function fixture(t, settings = {}) {
   let observed = settings.observed || { status: 'done', taskGoal: receipt('completed') };
   const runtime = { async rpc(op, input) {
     calls.push({ op, input });
+    if (op === 'runtime.models') return { ok: true, data: { ok: true, catalogAvailable: true, models: [{ id: 'account-model' }] } };
     if (op === 'runtime.detect') return { ok: true, data: { accessControl: {
       schema: 'soduwork.access-policy/v1', supported: true, modes: ['standard', 'readonly', 'full'],
     } } };

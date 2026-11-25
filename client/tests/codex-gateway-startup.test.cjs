@@ -46,18 +46,14 @@ test('native startup and adapter restarts receive the same provider without cred
   }
 });
 
-test('bundled Codex receives gateway configuration from versioned and renamed Node runtimes', () => {
+test('bundled Codex receives gateway configuration from versioned and renamed Node runtimes', async () => {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-codex-node-')));
   const extension = process.platform === 'win32' ? '.exe' : '';
-  let executable = path.join(directory, 'node-22' + extension);
   try {
-    // A symlink resolves back to the original name in process.execPath.
-    // Copy the binary so this exercises the adapter's real renamed runtime.
-    fs.copyFileSync(process.execPath, executable);
     for (const name of ['node-22', 'node20', 'node22', 'custom-node-runtime']) {
-      const next = path.join(directory, name + extension);
-      if (next !== executable) fs.renameSync(executable, next);
-      executable = next;
+      // A copy preserves the test name in process.execPath and can stay in place until teardown.
+      const executable = path.join(directory, name + extension);
+      fs.copyFileSync(process.execPath, executable, fs.constants.COPYFILE_FICLONE);
       const result = probe({}, `
         const args = ['/isolated/codex.js', 'app-server', '-c', 'model_provider="custom-gateway"'];
         const env = {NODE_OPTIONS:'adapter-only', DEFAULT_AUTH_REQUEST:'private', CODEX_CONFIG:'private', CODEX_HOME:'isolated'};
@@ -85,7 +81,7 @@ test('bundled Codex receives gateway configuration from versioned and renamed No
       assert.deepEqual(calls[2], [executable, ['/isolated/tool.js', 'app-server'], {env:{keep:'tool'}}]);
     }
   } finally {
-    fs.rmSync(directory, {recursive:true, force:true});
+    await fs.promises.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 

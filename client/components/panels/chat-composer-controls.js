@@ -143,7 +143,7 @@
       const selectedName = selection.name || selection.model?.id || state.model?.id || '';
       const updated = catalogScope === modelScope() && rows.find(row => row.name === selectedName || row.historyAlias === selectedName);
       const selectedModel = selection.model || (!selection.name || selection.name === state.model?.id ? state.model : null);
-      let label = nativeMode(state) && !selectedName && !state.restoringHistory ? 'Codex 默认' :
+      let label = nativeMode(state) && !selectedName && !state.restoringHistory ? '选择模型' :
         (selectedModel?.unavailable ? selectedModel.label : updated?.label) || selectedModel?.label ||
         selectedName || (state.restoringHistory ? '正在加载…' : '选择模型');
       if (savedChoice(state) && selectedModel?.unavailable && !localChoice(state))
@@ -167,7 +167,7 @@
         if (!localChoice(state) && historyReadScope !== scope) {
           historyReadScope = scope; void loadModels();
         }
-      } else if ((!selectedName || selectedModel?.unavailable) && !['codex'].includes(state.adapterId) &&
+      } else if ((!selectedName || selectedModel?.unavailable) && (state.adapterId !== 'codex' || nativeMode(state) && !state.restoringHistory && !state.runtimeSwitching && identity) &&
           !catalogLoads && catalogScope !== scope) void loadModels();
     }
     function nativeSelection(state) {
@@ -188,7 +188,7 @@
         list();
       } else {
         const selected = nativeSelection(state), model = nativeModels.find(row => row.id === selected.modelName);
-        pop.innerHTML = effortView().html(selected, model);
+        pop.innerHTML = (nativeReason ? '<p class="cp-native-note is-warning" role="status">' + esc(nativeReason) + '</p>' : '') + effortView().html(selected, model);
         paintNativeEffort(state);
       }
       positionModels();
@@ -280,7 +280,7 @@
       const read = promise => bounded(Promise.race([promise, flight.superseded]), flight.deadline,
         () => modelError('MODEL_CATALOG_TIMEOUT', '读取模型列表超时，请检查连接后重试；输入已保留。'),
         () => { flight.invalidated = true; });
-      const previousNativeModels = nativeModels;
+      const previousNativeModels = nativeModels, previousReason = nativeReason;
       let managedChoiceBlocked = false;
       try {
         const adapter = current.adapterId || 'pi';
@@ -289,7 +289,7 @@
         const runtime = catalog?.ok && catalog.runtimes?.find(item => item.id === adapter);
         if (!runtime) throw new Error('Agent catalog unavailable');
         const native = runtime.modelMode === 'account';
-        const response = native ? (current.cloudHandoff ? { models: [] } : await read(global.soduWorkAPI.conversationSession.runtimeModels(adapter, current.devicePreview ? undefined : current.ref))) :
+        const response = native ? (current.cloudHandoff ? { models: [] } : await read(global.soduWorkAPI.conversationSession.runtimeModels(adapter, current.devicePreview ? undefined : current.ref, adapter === 'codex'))) :
           await read(global.SoduWorkAPI.myModels(historyChoice && !historyLocal ? { localDefaults: false, refreshManaged: true } :
             { localDefaults: !current.cloudHandoff, ...(historyLocal ? { historyChoice: selectedAtStart } : {}) }));
         if (!valid()) return stale();
@@ -299,9 +299,12 @@
           nativeModels = failed ? [] : response.models;
           nativeRetryable = localCodex && (failed || response.catalogAvailable === false || response.retryable === true);
           nativeReason = localCodex && !nativeModels.length ? response?.reason || (nativeRetryable
-            ? '本机 Codex 模型目录暂时无法读取，可继续使用默认模型' : '该 Agent 暂未提供可切换的模型。') : '';
+            ? '本机 Codex 模型目录暂时无法读取，请刷新重试。' : '该 Agent 暂未提供可切换的模型。') : '';
           rows = nativeModels.map(row => ({ name: row.id, label: row.label || row.id }));
-          if (adapter === 'codex' && !current.cloudHandoff) rows.unshift({ name: '', label: 'Codex 默认' });
+          if (localCodex && response?.upgradeState) {
+            if (previousReason !== nativeReason) options.say(nativeReason);
+            if (response.upgradeState === 'updating') global.setTimeout?.(() => { if (valid()) void loadModels(true); }, 2500);
+          }
         }
         else {
           if (response?.ok === false || !Array.isArray(response?.usable)) throw new Error('Model catalog unavailable');
@@ -316,6 +319,8 @@
           if (adapter === 'pi' && global.SoduWorkModelChoice) rows.push(...(response.mediaUsable?.image || []).filter(allowed).map(row => ({
             name: SoduWorkModelChoice.imageKey(row), label: '生成图片 · ' + (row.label || row.name), subtitle: subtitle(row),
           })));
+        }
+        if (!native || adapter === 'codex' && !current.cloudHandoff && !selectedAtStart && rows.length) {
           const latest = options.state(), selection = latest.selection || {}, selected = selection.name || selection.model?.id || latest.model?.id || '';
           const localReference = selected.startsWith('local:') ? selected : global.SoduWorkModelChoice?.imageChoice(selected)?.name;
           const availableRow = rows.find(row => row.name === selected || (historyLocal ? row.name === response.historyChoiceName :
@@ -380,7 +385,7 @@
           const selected = nativeSelection(options.state()).modelName;
           const before = previousNativeModels.find(model => model.id === selected);
           const after = nativeModels.find(model => model.id === selected);
-          if (pop.querySelector('.cp-effort-card') && JSON.stringify(before) === JSON.stringify(after)) {
+          if (previousReason === nativeReason && pop.querySelector('.cp-effort-card') && JSON.stringify(before) === JSON.stringify(after)) {
             paintNativeEffort();
           }
           else { renderNativeEffort(); pop.querySelector('[data-native-list]')?.focus({ preventScroll: true }); }
@@ -388,7 +393,7 @@
         }
         if (!rows.length) {
           pop.querySelector('.nmodel-options').innerHTML = '<p class="nmodel-message">' +
-            (native ? (current.cloudHandoff ? '云端 Agent 暂未提供模型列表。' : '该 Agent 暂未提供可切换的模型。') : '暂无可用模型，请检查模型服务授权。') + '</p>'; return native;
+            (native ? (current.cloudHandoff ? '云端 Agent 暂未提供模型列表。' : esc(nativeReason || '该 Agent 暂未提供可切换的模型。')) : '暂无可用模型，请检查模型服务授权。') + '</p>'; return native;
         }
         const listNode = pop.querySelector('.nmodel-options'), scroll = listNode?.scrollTop || 0;
         const focusedName = pop.contains(document.activeElement) ? document.activeElement?.dataset?.modelName : '';
@@ -400,9 +405,9 @@
       } catch (error) {
         if (!lifecycle.signal.aborted && scope === modelScope() && flight.version === catalogVersion &&
             flight.stage === 'read' && nativeMode(options.state())) {
-          nativeReason = '本机 Codex 模型目录暂时无法读取，可继续使用默认模型';
+          nativeReason = '本机 Codex 模型目录暂时无法读取，请刷新重试。';
           nativeRetryable = true;
-          nativeModels = []; rows = [{ name: '', label: 'Codex 默认' }];
+          nativeModels = []; rows = []; catalogScope = scope;
           render();
           if (!pop.hidden) renderNativeEffort();
           return true;
@@ -613,7 +618,7 @@
         if (failed) throw failed;
         return false;
       }
-      if (['codex'].includes(options.state().adapterId)) return true;
+      if (options.state().adapterId === 'codex' && (options.state().cloudHandoff || nativeSelection(options.state()).modelName)) return true;
       // A confirmed Agent switch may change the adapter while preserving the conversation.
       const scope = modelScope();
       // Recheck at send time and share an in-flight read. A model-change push
@@ -629,7 +634,11 @@
           flight = catalogFlight; promise = flight.promise; continue;
         }
         if (flight.error) throw flight.error;
-        if (result && !flight.invalidated) return true;
+        if (result && !flight.invalidated) {
+          if (nativeMode(options.state()) && !nativeSelection(options.state()).modelName)
+            throw modelError('MODEL_UNAVAILABLE', nativeReason || '请选择可用的 Codex 模型后再发送。');
+          return true;
+        }
         if (!flight.stale && !flight.invalidated) throw catalogError();
         if (!await waitChoice(modelRequest)) throw modelError('MODEL_SELECTION_FAILED', '模型切换未能确认，请重新选择模型后重试；输入已保留。');
         promise = loadModels(true); flight = catalogFlight;

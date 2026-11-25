@@ -14,13 +14,14 @@ function install({ app, ipcMain, session, identityOf, memories, cloud, publish }
     require('../conversation/requirement-context').identityMatches(handle, identity);
     return handle;
   }
-  ipcMain.handle('pi-session-runtime-models', async (event, adapterId, ref) => {
+  ipcMain.handle('pi-session-runtime-models', async (event, adapterId, ref, ensureCompatible) => {
     try {
-      if (!ref || adapterId !== 'codex') return await require('../agent-runtime/native-model-catalog').list(adapterId);
+      const upgrade = ensureCompatible === true && trusted(event);
+      if (!ref || adapterId !== 'codex') return await require('../agent-runtime/native-model-catalog').list(adapterId, undefined, undefined, upgrade);
       const handle = await current(event, ref);
       if (handle.adapterId !== adapterId || !handle.accountCatalog || cloud.guard(handle))
         return { ok: false, models: [] };
-      const catalog = await handle.accountCatalog();
+      const catalog = await handle.accountCatalog(upgrade);
       if (await current(event, ref) !== handle || handle.adapterId !== adapterId || cloud.guard(handle))
         return { ok: false, models: [] };
       return catalog;

@@ -434,7 +434,7 @@ test('an open Codex chat distinguishes a cold Runner from an empty list and reco
   const click = key => f.pop.handlers.get('click')({ stopPropagation() {}, target: { closest: selector => selector === key } });
   await click('[data-native-list]'); await tick();
   assert.match(f.button.title, /暂未提供可切换的模型/);
-  assert.match(f.field.innerHTML, /Codex 默认/);
+  assert.doesNotMatch(f.field.innerHTML, /data-model-name=/);
   assert.equal(f.state.selection.name, 'saved');
   f.changed(); await tick();
   assert.match(f.field.innerHTML, /Found model/);
