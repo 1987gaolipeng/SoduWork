@@ -150,6 +150,29 @@ test('repair preserves a resource replaced by a directory across later edits', t
   assert.equal(fs.readFileSync(path.join(savedDirectory, 'notes.txt'), 'utf8'), 'user notes');
 });
 
+test('a long private cache path preserves edited resources and reports a relative backup path', t => {
+  const profile = fixture(t), cwd = fixture(t);
+  const userData = path.join(profile, 'application-profile-'.repeat(4), 'desktop-data-'.repeat(4));
+  const app = { getPath: () => userData };
+  const item = { path: 'templates/报告.md', kind: 'template', encoding: 'utf8', content: 'bundled' };
+  const resolve = () => resources.forTurn([item], app, { cwd, ref: 'session', owner: 'account' }, 'template-demo');
+  const { directory } = resolve();
+  assert.ok(directory.length > 260);
+  const file = path.join(directory, item.path);
+  fs.writeFileSync(file, 'local edit');
+
+  const repaired = resolve();
+  assert.equal(repaired.directory, directory);
+  assert.deepEqual(repaired.rescued, [item.path]);
+  assert.equal(repaired.backups.length, 1);
+  const backup = repaired.backups[0];
+  assert.equal(backup.path, item.path);
+  assert.match(backup.backup, /^\.local-[^/]+\/templates\/报告\.md$/);
+  assert.equal(fs.readFileSync(path.join(directory, backup.backup), 'utf8'), 'local edit');
+  assert.equal(fs.readFileSync(file, 'utf8'), 'bundled');
+  assert.deepEqual(resolve().backups, []);
+});
+
 test('resource cache refuses a junction escape and keeps unrelated files unchanged', t => {
   const root=fixture(t), other=fixture(t);fs.symlinkSync(other,path.join(root,'template-demo'),'junction');
   assert.throws(()=>resources.materialize(draft().resources,root,'template-demo'),/链接|联接/);

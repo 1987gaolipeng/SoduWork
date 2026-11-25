@@ -136,8 +136,9 @@ function materialize(raw, cacheRoot, key, options) {
   const rescue = (file, label) => {
     let backup = '';
     try {
-      const backupDirectory = fs.mkdtempSync(path.join(directory, '.local-'));
-      backup = path.join(backupDirectory, ...label.split('/'));
+      // mkdtemp passes its prefix directly to Win32, even when the cache exceeds MAX_PATH.
+      const temporary = fs.mkdtempSync(path.toNamespacedPath(path.join(directory, '.local-')));
+      backup = path.join(directory, path.basename(temporary), ...label.split('/'));
       fs.mkdirSync(path.dirname(backup), { recursive: true });
       assertNoLinks(root, backup);
       try { fs.renameSync(file, backup); }
