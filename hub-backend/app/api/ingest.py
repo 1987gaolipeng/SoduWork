@@ -57,6 +57,8 @@ async def webhook(
     """
     token = request.headers.get("X-Ingest-Token") or request.headers.get("X-Gitlab-Token")
     integ = await _integration_by_token(session, token)
+    if integration_id != integ.id:
+        raise HTTPException(status_code=404, detail="集成不存在")
     raw = await request.body()
     conn = get_connector(integ.type)
     if conn is not None and hasattr(conn, "parse_webhook"):
