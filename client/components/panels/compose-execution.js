@@ -6,6 +6,7 @@
   function bind(panel, onChange) {
     if (!panel || panelRoot === panel) return;
     panelRoot = panel;
+    global.FirstChatReadiness?.bind(panel);
     refresh = onChange;
     const eventRoot = panel;
     if (typeof eventRoot.addEventListener !== 'function') { paint(); return; }
@@ -41,6 +42,7 @@
   function paint() {
     if (!panelRoot) return;
     const cloud = location === 'cloud';
+    global.FirstChatReadiness?.paint();
     const mid = panelRoot.querySelector('.cp-mid');
     mid?.classList.toggle('is-cloud-compose', cloud);
     const composer = panelRoot.querySelector('.cp-box');

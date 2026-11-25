@@ -146,6 +146,15 @@ test('plan edits require a preview of the current draft before saving', async ()
   page.unmount()
 })
 
+test('a transient preview failure allows a revision-checked plan save', async () => {
+  const { page, saves } = await planHarness({}, () => ({ error: 'offline' }))
+  assert.equal(footerButtons(page)[1].props.disabled, false)
+  page.act(() => footerButtons(page)[1].props.onClick())
+  await page.flush()
+  assert.equal(saves[0].revision, config.revision)
+  page.unmount()
+})
+
 test('preview ignores superseded results, retries failures and skips invalid drafts', async () => {
   const requests = []
   const props = { config, draft: trial, onConflict() {} }
@@ -222,7 +231,7 @@ test('quota inputs are removed from user editing and login policy saves cannot c
   assert.doesNotMatch(users, /tokenQuota|quotaMode|quotaLimit/)
   const calls = []
   const page = await createComponentHarness(new URL('../src/screens/ClientAccessPolicy.jsx', import.meta.url), { dependencies: {
-    '../api.js': { api: { clientAuthPolicy: async () => ({ allowSelfRegistration: true, defaultOrgId: '', defaultRoleId: '', tokenLimitEnabled: true, monthlyTokenLimit: 500 }), orgs: async () => [], roles: async () => [], saveClientAuthPolicy: async value => { calls.push(value); return value } } },
+    '../api.js': { api: { clientAuthPolicy: async () => ({ allowSelfRegistration: true, defaultOrgId: '', defaultRoleId: '', tokenLimitEnabled: true, monthlyTokenLimit: 500 }), orgs: async () => [], roleOptions: async () => [], saveClientAuthPolicy: async value => { calls.push(value); return value } } },
     '../ui.jsx': { Icon: 'Icon', SelectMenu: 'SelectMenu', toast() {} }, './client-access-policy.css': {},
   } })
   page.render(); await page.flush()
@@ -235,10 +244,11 @@ test('member search debounces requests, ignores stale responses and does not upd
   const pending = []
   const page = await createComponentHarness(new URL('../src/screens/QuotaMembers.jsx', import.meta.url), { props: { config, revision: 0 }, dependencies: {
     '../api.js': { api: { quotaMembers: args => new Promise(resolve => pending.push({ args, resolve })) } },
+    '../FilterControls.jsx': { FilterSelect: 'FilterSelect' },
     '../ui.jsx': { Icon: 'Icon' }, './QuotaEditors.jsx': { MemberEditor: 'MemberEditor' }, './quota-model.js': model,
   } })
   page.render(); await new Promise(resolve => setTimeout(resolve, 20)); await page.flush()
-  assert.equal(pending.length, 1); assert.equal(pending[0].args.limit, 50)
+  assert.equal(pending.length, 1); assert.equal(pending[0].args.limit, 50); assert.equal(pending[0].args.isActive, true)
   const input = () => page.nodes(node => node.type === 'input')[0]
   page.act(() => input().props.onChange({ target: { value: 'al' } }))
   page.act(() => input().props.onChange({ target: { value: 'alice' } }))
@@ -275,6 +285,49 @@ test('the member editor rejects invalid caps, saves a zero pause and retains unl
   page.unmount()
 })
 
+test('only super administrators can edit platform quotas while scoped managers can view and assign', async t => {
+  const scoped = { me: { isSuper: false, permissions: ['quota.manage'] } }
+  const superAdmin = { me: { isSuper: true } }
+  const page = await createComponentHarness(new URL('../src/screens/QuotaManagement.jsx', import.meta.url), {
+    props: scoped,
+    dependencies: {
+      '../api.js': { api: { quotaPlans: async () => config } },
+      '../ui.jsx': { Icon: 'Icon', Loading: 'Loading' },
+      './QuotaMembers.jsx': { __esModule: true, default: 'QuotaMembers' },
+      './QuotaEditors.jsx': { DefaultEditor: 'DefaultEditor', PlanEditor: 'PlanEditor' },
+      './quota-management.css': {},
+    },
+  })
+  t.after(() => page.unmount())
+  const nodes = type => page.nodes(node => node.type === type)
+  const button = label => nodes('button').find(node =>
+    (node.props['aria-label'] || [node.props.children].flat().at(-1)) === label)
+  const openTab = label => page.act(button(label).props.onClick)
+  page.render()
+  await page.flush()
+
+  assert.ok(nodes('h3').some(node => node.props.children === standard.name))
+  assert.equal(button('新建套餐'), undefined)
+  assert.equal(button('编辑套餐：Standard'), undefined)
+  assert.equal(nodes('small').some(node => node.props.children.includes('编辑套餐')), false)
+  openTab('成员额度')
+  assert.equal(nodes('QuotaMembers')[0].props.config, config)
+  openTab('原有账号默认规则')
+  assert.equal(nodes('strong')[0].props.children, '不限额')
+  assert.equal(button('调整默认额度'), undefined)
+
+  page.render(superAdmin)
+  page.act(button('调整默认额度').props.onClick)
+  assert.equal(nodes('DefaultEditor').length, 1)
+  page.act(nodes('DefaultEditor')[0].props.onClose)
+  openTab('套餐设置')
+  assert.ok(button('新建套餐'))
+  page.act(button('编辑套餐：Standard').props.onClick)
+  assert.equal(nodes('PlanEditor')[0].props.plan, standard)
+  page.render(scoped)
+  assert.equal(nodes('PlanEditor').length, 0)
+})
+
 test('page refresh reloads member quotas without changing the catalog revision, search or open editor', async () => {
   const calls = []
   let member = { id: 'alice', username: 'alice', displayName: 'Alice', isActive: true,
@@ -294,7 +347,7 @@ test('page refresh reloads member quotas without changing the catalog revision, 
   page.act(() => page.nodes(node => node.props.id === 'qm-tab-members')[0].props.onClick())
   const memberProps = () => page.nodes(node => node.type === 'QuotaMembers')[0].props
   const members = await createComponentHarness(new URL('../src/screens/QuotaMembers.jsx', import.meta.url), { props: memberProps(), dependencies: {
-    '../api.js': { api }, '../ui.jsx': { Icon: 'Icon' },
+    '../api.js': { api }, '../ui.jsx': { Icon: 'Icon' }, '../FilterControls.jsx': { FilterSelect: 'FilterSelect' },
     './QuotaEditors.jsx': { MemberEditor: 'MemberEditor' }, './quota-model.js': model,
   } })
   const settleMembers = async () => { await new Promise(resolve => setTimeout(resolve, 280)); await members.flush() }

@@ -56,18 +56,21 @@
       '<label data-auth-confirm hidden><span>确认密码</span><input id="acConfirmPassword" type="password" autocomplete="new-password" maxlength="128" placeholder="再次输入密码"></label>' +
       '<div class="ac-consent" data-auth-consent hidden><label><input id="acConsent" type="checkbox"><span>我已阅读并同意</span></label>' +
       '<button type="button" class="ac-link" data-legal="terms">《用户协议》</button><span data-consent-and>和</span><button type="button" class="ac-link" data-legal="privacy">《隐私政策》</button></div>' +
+      (hooks.preferencesHtml || '') +
       '<div class="soduwork-auth-status" role="status" aria-live="polite"></div>' +
       '<div class="ac-status" data-mail-availability hidden><span data-mail-message></span> ' +
       '<button type="button" class="ac-link" data-recheck-policy>重新检查</button></div>' +
       '<div class="soduwork-auth-recovery" hidden><button type="button" class="soduwork-auth-retry" hidden>重试连接</button></div>' +
       '<button class="soduwork-auth-submit ac-primary" type="submit"><span>登录</span></button></form>' +
-      '<nav class="ac-auth-links"><button type="button" class="ac-link" data-auth-mode="register">创建账号</button><button type="button" class="ac-link" data-auth-mode="resetPassword">忘记密码</button></nav>' +
+      '<nav class="ac-auth-links"><button type="button" class="ac-link" data-auth-mode="register">创建账号</button><button type="button" class="ac-link" data-auth-mode="resetPassword">忘记密码</button><button type="button" class="ac-link" data-copy-device-pairing>复制设备配对码</button></nav>' +
       '<button type="button" class="ac-link ac-auth-back" data-auth-mode="password" hidden>返回登录</button>' +
-      '<footer class="ac-auth-footer"><div class="ac-auth-connection-note"><span class="soduwork-auth-secure"><i></i>密码和验证码不会保存在本机</span><span class="soduwork-auth-hub">连接 <b></b></span></div><div class="ac-auth-legal-links"><button type="button" class="ac-link" data-legal="terms">用户协议</button><i aria-hidden="true">·</i><button type="button" class="ac-link" data-legal="privacy">隐私政策</button></div>' +
+      '<footer class="ac-auth-footer"><div class="ac-auth-connection-note"><span class="soduwork-auth-secure"><i></i>密码和验证码不会保存在本机</span><span><span class="soduwork-auth-hub">连接 <b></b></span> <button type="button" class="ac-link" data-edit-hub aria-haspopup="dialog" hidden>更改地址</button></span></div><div class="ac-auth-legal-links"><button type="button" class="ac-link" data-legal="terms">用户协议</button><i aria-hidden="true">·</i><button type="button" class="ac-link" data-legal="privacy">隐私政策</button></div>' +
       '<label class="ac-auth-language" hidden><span>界面语言</span><select data-auth-language translate="no"></select></label></footer></main>';
     const form = gate.querySelector('form'), account = gate.querySelector('#soduWorkAuthAccount');
     const password = gate.querySelector('#soduWorkAuthPassword'), confirm = gate.querySelector('#acConfirmPassword');
     const code = gate.querySelector('#acEmailCode'), consent = gate.querySelector('#acConsent');
+    const preferences = gate.querySelector('.soduwork-auth-preferences');
+    const rememberAccount = gate.querySelector('#soduWorkRememberAccount'), autoLogin = gate.querySelector('#soduWorkAutoLogin');
     const status = gate.querySelector('.soduwork-auth-status'), submit = gate.querySelector('[type="submit"]');
     const send = gate.querySelector('[data-send-code]');
     const language = gate.querySelector('[data-auth-language]');
@@ -139,6 +142,9 @@
       text('[data-send-code]', '获取验证码');
       text('.ac-password-label', mode === 'password' ? '密码' : '设置密码');
       text('[data-auth-confirm] > span', '确认密码');
+      text('#soduWorkRememberAccount + span', '记住账号');
+      text('#soduWorkAutoLogin + span', '在此设备上自动登录');
+      text('#soduWorkAutoLoginHint', '自动登录使用系统加密保存的设备凭据。');
       const toggle = gate.querySelector('[data-password-toggle]');
       if (toggle) {
         const shown = password.type === 'text';
@@ -161,7 +167,13 @@
       text('.soduwork-auth-retry', '重试连接');
       text('[data-auth-mode="register"]', '创建账号');
       text('[data-auth-mode="resetPassword"]', '忘记密码');
+      text('[data-copy-device-pairing]', '复制设备配对码');
       text('.ac-auth-back', '返回登录');
+      text('[data-edit-hub]', '更改地址');
+      text('#acHubTitle', '服务连接');
+      text('.ac-hub-dialog label', 'SoduWork 服务地址');
+      text('.ac-hub-dialog .soduwork-auth-connect', '保存并连接');
+      text('.ac-hub-cancel', '取消');
       text('.ac-auth-language > span', '界面语言');
       language.setAttribute('aria-label', tx('界面语言'));
       language.value = global.SoduWorkI18n?.getLocale?.() || '';
@@ -250,6 +262,7 @@
       if (busy) stopDelivery();
       if (!busy && pendingPasswordMode) { pendingPasswordMode = false; changeMode('password'); return; }
       form.querySelectorAll('input,button').forEach(el => { el.disabled = busy; });
+      gate.querySelectorAll('[data-edit-hub], .ac-hub-dialog input, .ac-hub-dialog button').forEach(el => { el.disabled = busy; });
       gate.querySelectorAll('[data-auth-mode]').forEach(el => { el.disabled = busy || (el.dataset.authMode === 'register' && policy?.allowSelfRegistration === false); });
       submit.querySelector('span').textContent = tx(label || (busy ? '正在处理…' : actionLabel()));
       submit.classList.toggle('is-busy', busy); refreshCooldown();
@@ -284,6 +297,7 @@
       gate.querySelector('[data-auth-password]').hidden = mode === 'emailCode';
       gate.querySelector('[data-auth-confirm]').hidden = !['register', 'resetPassword'].includes(mode);
       gate.querySelector('[data-auth-consent]').hidden = mode !== 'register';
+      if (preferences) preferences.hidden = mode === 'resetPassword';
       gate.querySelector('.ac-password-label').textContent = tx(mode === 'password' ? '密码' : '设置密码');
       const passwordLogin = mode === 'password';
       gate.querySelector('.ac-account-label').textContent = tx(passwordLogin ? '账号' : '邮箱');
@@ -391,6 +405,9 @@
       const state = stamp(), action = mode;
       const payload = { email: value, password: password.value, newPassword: password.value,
         challengeId: challenge?.id || '', code: code.value, consents: policy?.requiredConsentVersions || {} };
+      const choices = action === 'resetPassword' || !preferences ? {} : {
+        rememberAccount: rememberAccount.checked === true, autoLogin: autoLogin.checked === true,
+      };
       if (action === 'register') payload.consentLocales = Object.fromEntries(['terms', 'privacy'].map(kind => {
         const selected = ui.legalSelection?.(policy?.legalDocuments, kind, global.SoduWorkI18n?.getLocale?.() || 'zh-CN', policy?.requiredConsentVersions?.[kind]).document;
         const read = legalLocales[kind];
@@ -401,7 +418,8 @@
       setBusy(true); setStatus('');
       try {
         const result = ui.check(await (action === 'password' && (!ui.email(value) || (policy && !supportsEmail()))
-          ? api().clientLogin({ account: value, password: password.value }) : api().clientAccountAction(action, payload)));
+          ? api().clientLogin({ account: value, password: password.value, ...choices })
+          : api().clientAccountAction(action, { ...payload, ...choices })));
         // The API fences concurrent auth changes; first login can also establish the real device ID.
         if (submission !== state || !current(state, true)) return;
         password.value = ''; confirm.value = ''; code.value = ''; password.type = 'password';

@@ -113,6 +113,12 @@ For business completion notifications, the application's own service records `re
 
 An ordinary external browser without the native shell returns disconnected. No custom URL protocol is required.
 
+## Managed local file imports
+
+For a packaged application with local storage and `data.write`, `files.importFile(file, {projectId, signal, onProgress})` saves a managed file and returns its native resource URL. Cancellation observed before finalization stops the import and requests cleanup of its temporary upload, including empty files, cancellation during a read and cancellation after the last progress update. Progress describes staged bytes; the final receipt confirms that the file was saved. Cancellation after finalization has started does not undo a committed file.
+
+Application authors adopt the updated copied SDK in a new package version; updating the host preserves existing immutable application resources.
+
 ## Application-defined settings (SDK 1.1)
 
 Applications choose their parameter names, types, and business meaning. Settings do not require business login or MCP. New applications do not need or benefit from introducing a `ukey` merely to use the bridge; existing credentials remain compatible, and the application's actual service determines authentication. Local, standalone, and account-free applications may install, open, and use declared conversation capabilities directly. Do not request settings permissions if persistence is unnecessary.

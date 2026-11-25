@@ -2,6 +2,7 @@
 (function (global) {
   'use strict';
   const esc = value => String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const tx = value => global.SoduWorkI18n?.translateText?.(value) || value;
   function create(el, options) {
     const lifecycle = new AbortController();
     const on = (target, type, handler, capture = false) => target.addEventListener(type, handler, { capture, signal: lifecycle.signal });
@@ -14,11 +15,12 @@
     const effortView = () => global.ComposeModelPicker?.nativeEffort;
     const nativeMode = state => state.adapterId === 'codex' && !state.cloudHandoff && Boolean(effortView());
     let catalogScope = '', lastScope = '', catalogLoads = 0, catalogFlight = null, catalogVersion = 0;
+    let catalogState = { scope: '', status: 'idle', reason: '' };
     const MODEL_WAIT_MS = 12000;
     const modelErrors = new WeakSet();
     const automaticSelections = new WeakMap();
     const modelError = (code, message) => {
-      const error = Object.assign(new Error(message), { code });
+      const error = Object.assign(new Error(tx(message)), { code });
       modelErrors.add(error); return error;
     };
     const catalogError = () => modelError('MODEL_CATALOG_UNAVAILABLE', '模型列表暂时无法读取，请检查连接或模型配置后重试；输入已保留。');
@@ -40,6 +42,32 @@
       return JSON.stringify([global.SoduWorkAPI?.taskStorageKey?.('ops') || '',
         state.ref || 'draft:' + state.draftId, state.adapterId || 'pi', state.cloudHandoff?.phase || '']);
     };
+    function modelCatalogState() {
+      const state = options.state(), selected = state.selection?.model || state.model;
+      const name = state.selection?.name || selected?.id || '';
+      const current = catalogState.scope === modelScope() ? catalogState : { status: 'idle', reason: '' };
+      return { status: current.status, reason: current.reason,
+        blocked: state.adapterId !== 'codex' && (!name || selected?.unavailable === true) &&
+          ['loading', 'empty', 'error'].includes(current.status) };
+    }
+    function paintCatalogStatus() {
+      if (catalogState.scope !== modelScope() || catalogState.status === 'ready') return false;
+      const listNode = !pop.hidden && pop.querySelector('.nmodel-options');
+      if (!listNode) return false;
+      const loading = catalogState.status === 'loading';
+      listNode.setAttribute('aria-busy', String(loading));
+      listNode.innerHTML = '<p class="nmodel-message" role="status">' + esc(catalogState.reason) + '</p>' +
+        (['empty', 'error'].includes(catalogState.status)
+          ? '<button type="button" data-model-retry>' + esc(tx('重新加载')) + '</button>' : '');
+      positionModels();
+      return true;
+    }
+    function catalogChanged(flight, status, reason = '') {
+      if (lifecycle.signal.aborted || flight.scope !== modelScope() || flight.version !== catalogVersion) return;
+      catalogState = { scope: flight.scope, status, reason: status === 'ready' ? '' : tx(reason) };
+      options.catalogChanged?.(modelCatalogState());
+      paintCatalogStatus();
+    }
     const meta = el.querySelector('#nchatMeta');
     let contextPinned = false;
     const sessionControls = global.ChatSessionControls?.create(el, options);
@@ -127,6 +155,7 @@
       if (lastScope !== scope || lastIdentity !== identity || lastAdapter !== state.adapterId || state.runtimeSwitching) {
         close(false); rows = []; nativeModels = []; nativeView = 'effort'; effortEpoch++; pendingEffort = null; effortPreview = null; effortRequest = null; modelRequest = null; selecting = false;
         pop.removeAttribute('aria-busy');
+        catalogState = { scope, status: 'idle', reason: '' }; options.catalogChanged?.(modelCatalogState());
       }
       lastScope = scope;
       lastIdentity = identity;
@@ -152,7 +181,8 @@
         else renderThinking(state);
       }
       if ((!selectedName || selectedModel?.unavailable) && !['codex'].includes(state.adapterId) &&
-          !catalogLoads && catalogScope !== scope) void loadModels();
+          !catalogLoads && catalogScope !== scope && catalogState.status === 'idle') void loadModels();
+      options.catalogChanged?.(modelCatalogState());
     }
     function nativeSelection(state) {
       return { modelName: state.selection?.name || state.selection?.model?.id || state.model?.id || '',
@@ -206,16 +236,19 @@
       effortRequest = request;
     }
     function list(filter = '') {
+      if (paintCatalogStatus()) return;
       const state = options.state(), selection = state.selection || {};
       const selected = selection.name || selection.model?.id || state.model?.id || '';
       const visible = rows.filter(row => (row.label + ' ' + row.name + ' ' + (row.subtitle || '')).toLowerCase().includes(filter.trim().toLowerCase()));
-      pop.querySelector('.nmodel-options').innerHTML = visible.length ? visible.map(row =>
+      const listNode = pop.querySelector('.nmodel-options');
+      listNode.setAttribute('aria-busy', 'false');
+      listNode.innerHTML = visible.length ? visible.map(row =>
         '<button type="button" role="option" aria-selected="' + (row.name === selected) +
         '" data-model-name="' + esc(row.name) + '"><span class="nmodel-symbol" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m10 3 2 5 5 2-5 2-2 5-2-5-5-2 5-2Z"/></svg></span>' +
         '<span class="nmodel-row-copy"><b data-user-content>' + esc(row.label) + '</b>' +
         (row.subtitle ? '<small class="nmodel-row-subtitle" data-user-content>' + esc(row.subtitle) + '</small>' : '') + '</span>' +
         '<i class="nmodel-tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i></button>').join('') :
-        '<p class="nmodel-message">没有匹配的可用模型</p>';
+        '<p class="nmodel-message">' + esc(tx('没有匹配的可用模型')) + '</p>';
     }
     function thinkingMarkup() {
       return '<section class="nmodel-thinking" aria-label="思考模式">' +
@@ -241,13 +274,16 @@
     function loadModels(force = false) {
       if (lifecycle.signal.aborted) return Promise.resolve(false);
       const scope = modelScope();
-      if (!force && catalogFlight?.scope === scope && !catalogFlight.done && !catalogFlight.invalidated)
+      if (!force && catalogFlight?.scope === scope && !catalogFlight.done && !catalogFlight.invalidated) {
+        if (!paintCatalogStatus() && !pop.hidden && pop.querySelector('.nmodel-options')) list();
         return catalogFlight.promise;
+      }
       supersedeCatalog();
       const flight = { scope, version: ++catalogVersion, deadline: Date.now() + MODEL_WAIT_MS,
         stage: 'read', invalidated: false, done: false, stale: false, error: null };
       flight.superseded = new Promise(resolve => { flight.wake = resolve; });
       catalogFlight = flight;
+      catalogChanged(flight, 'loading', '正在加载…');
       flight.promise = readModels(flight).finally(() => { flight.done = true; });
       return flight.promise;
     }
@@ -258,18 +294,30 @@
       const valid = () => !lifecycle.signal.aborted && !flight.invalidated && flight.version === catalogVersion && scope === modelScope();
       const stale = () => { flight.stale = true; return false; };
       const read = promise => bounded(Promise.race([promise, flight.superseded]), flight.deadline,
-        () => modelError('MODEL_CATALOG_TIMEOUT', '读取模型列表超时，请检查连接后重试；输入已保留。'),
-        () => { flight.invalidated = true; });
+        () => modelError('MODEL_CATALOG_TIMEOUT', '读取模型列表超时，请检查连接后重试；输入已保留。'));
       let managedChoiceBlocked = false;
       try {
         const adapter = current.adapterId || 'pi';
-        const catalog = await read(global.soduWorkAPI.conversationSession.runtimes());
-        if (!valid()) return stale();
-        const runtime = catalog?.ok && catalog.runtimes?.find(item => item.id === adapter);
-        if (!runtime) throw new Error('Agent catalog unavailable');
-        const native = runtime.modelMode === 'account';
-        const response = native ? (current.cloudHandoff ? { models: [] } : await read(global.soduWorkAPI.conversationSession.runtimeModels(adapter))) :
-          await read(global.SoduWorkAPI.myModels({ localDefaults: !current.cloudHandoff }));
+        let native, response;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            // Only model ownership metadata is needed here, not every Agent's health probe.
+            const catalog = await read(global.soduWorkAPI.conversationSession.runtimes({ catalogOnly: true }));
+            if (!valid()) return stale();
+            const runtime = catalog?.ok && catalog.runtimes?.find(item => item.id === adapter);
+            if (!runtime) throw new Error('Agent catalog unavailable');
+            native = runtime.modelMode === 'account';
+            response = native ? (current.cloudHandoff ? { models: [] } : await read(global.soduWorkAPI.conversationSession.runtimeModels(adapter))) :
+              await read(global.SoduWorkAPI.myModels({ localDefaults: !current.cloudHandoff }));
+            break;
+          } catch (error) {
+            // Retry only our bounded read timeout. Storage/auth failures and model mutations
+            // must never be replayed or interpreted as an empty directory.
+            if (attempt || !valid() || !modelErrors.has(error) || error.code !== 'MODEL_CATALOG_TIMEOUT') throw error;
+            flight.deadline = Date.now() + MODEL_WAIT_MS;
+            catalogChanged(flight, 'loading', '正在重试读取模型列表…');
+          }
+        }
         if (!valid()) return stale();
         if (native) {
           nativeModels = response.models || [];
@@ -292,7 +340,10 @@
           const localReference = selected.startsWith('local:') ? selected : global.SoduWorkModelChoice?.imageChoice(selected)?.name;
           const availableRow = rows.find(row => row.name === selected || !selected.startsWith('local:') &&
             localReference?.startsWith('local:') && global.SoduWorkModelChoice?.imageChoice(row.name)?.name === localReference);
-          if (selected !== selectedAtStart || selecting) { render(); return stale(); }
+          if (selected !== selectedAtStart || selecting) {
+            catalogChanged(flight, rows.length ? 'ready' : 'empty', rows.length ? '' : '暂无可用模型，请检查模型服务授权。');
+            render(); if (!pop.hidden) list(pop.querySelector('input')?.value || ''); return stale();
+          }
           if (!availableRow && response.managedCatalogUnavailable === true && selected && !localReference?.startsWith('local:')) {
             // A partial local directory cannot establish that a Hub choice was deleted.
             managedChoiceBlocked = true; flight.error = catalogError();
@@ -303,12 +354,17 @@
                 label: '暂无可用模型，请检查模型配置',
               } });
               flight.error = modelError('MODEL_UNAVAILABLE', '暂无可用模型，请检查模型配置后重试；输入已保留。');
-              catalogScope = scope; render(); return false;
+              catalogScope = scope;
+              catalogChanged(flight, 'empty', flight.error.message);
+              render(); return false;
             }
             // A successful directory read proves the old choice is absent.
             // Switch through the normal IPC so runtime state and persistence
             // match the displayed replacement; never infer deletion on errors.
             const target = availableRow || rows[0];
+            // The directory is already known while a separate selection acknowledgement waits.
+            catalogChanged(flight, 'ready');
+            if (!pop.hidden) list(pop.querySelector('input')?.value || '');
             const request = (async () => {
               const result = latest.draftOnly
                 ? await options.draft.selectModel(target.name, target.label)
@@ -326,6 +382,7 @@
             automaticSelections.set(request, flight);
             try { if (!await request) {
               flight.error = modelError('MODEL_SELECTION_FAILED', '模型切换未能确认，请重新选择模型后重试；输入已保留。');
+              catalogChanged(flight, 'error', flight.error.message);
               return false;
             } }
             finally { if (modelRequest === request) { modelRequest = null; selecting = false; } }
@@ -333,6 +390,10 @@
           }
         }
         catalogScope = scope;
+        catalogChanged(flight, rows.length ? 'ready' : managedChoiceBlocked ? 'error' : 'empty',
+          managedChoiceBlocked ? flight.error.message : native
+            ? (current.cloudHandoff ? '云端 Agent 暂未提供模型列表。' : '该 Agent 暂未提供可切换的模型。')
+            : '暂无可用模型，请检查模型服务授权。');
         render();
         if (pop.hidden) return !managedChoiceBlocked;
         if (nativeMode(options.state()) && nativeView === 'effort') {
@@ -341,8 +402,7 @@
           return true;
         }
         if (!rows.length) {
-          pop.querySelector('.nmodel-options').innerHTML = '<p class="nmodel-message">' +
-            (native ? (current.cloudHandoff ? '云端 Agent 暂未提供模型列表。' : '该 Agent 暂未提供可切换的模型。') : '暂无可用模型，请检查模型服务授权。') + '</p>'; return native;
+          paintCatalogStatus(); return native;
         }
         const listNode = pop.querySelector('.nmodel-options'), scroll = listNode?.scrollTop || 0;
         const focusedName = pop.contains(document.activeElement) ? document.activeElement?.dataset?.modelName : '';
@@ -354,8 +414,7 @@
       } catch (error) {
         flight.error = modelErrors.has(error) ? error : flight.stage === 'selection'
           ? modelError('MODEL_SELECTION_FAILED', '模型切换未能确认，请重新选择模型后重试；输入已保留。') : catalogError();
-        if (scope === modelScope() && flight.version === catalogVersion && !pop.hidden && pop.querySelector('.nmodel-options'))
-          pop.querySelector('.nmodel-options').innerHTML = '<p class="nmodel-message">' + esc(flight.error.message) + '</p>';
+        catalogChanged(flight, 'error', flight.error.message);
         return false;
       } finally { catalogLoads--; }
     }
@@ -376,6 +435,7 @@
     on(pop, 'click', async event => {
       event.stopPropagation();
       if (event.target.closest('[data-model-close]')) { close(true); return; }
+      if (event.target.closest('[data-model-retry]')) { await loadModels(); return; }
       if (event.target.closest('[data-native-list]')) { nativeView = 'models'; renderNativeEffort(); pop.querySelector('input')?.focus(); return; }
       if (event.target.closest('[data-native-back]')) { nativeView = 'effort'; renderNativeEffort(); pop.querySelector('[data-native-list]')?.focus(); return; }
       if (event.target.closest('[data-effort-reset]')) {
@@ -562,7 +622,7 @@
         const result = await bounded(Promise.race([promise, flight.superseded]), deadline, () => {
           if (modelRequest || flight.stage === 'selection') return selectionTimeout();
           return modelError('MODEL_CATALOG_TIMEOUT', '读取模型列表超时，请检查连接后重试；输入已保留。');
-        }, () => { if (flight.stage === 'read') flight.invalidated = true; });
+        });
         if (scope !== modelScope() || lifecycle.signal.aborted) return false;
         if (flight !== catalogFlight) {
           flight = catalogFlight; promise = flight.promise; continue;
@@ -575,7 +635,7 @@
       }
       return false;
     }
-    return { render, positionContext, waitForAccess, destroy() { offModels?.(); global.clearInterval?.(modelTimer); effortEpoch++; pendingEffort = null; options.draft?.destroy(); runtimePicker?.destroy(); sessionControls?.destroy(); close(); closeContext(); lifecycle.abort(); supersedeCatalog(); drag = null; }, isDragging: () => Boolean(drag), reset() { runtimePicker?.reset(); sessionControls?.reset(); close(); closeContext(); drag = null; render(); } };
+    return { render, positionContext, waitForAccess, modelCatalogState, destroy() { offModels?.(); global.clearInterval?.(modelTimer); effortEpoch++; pendingEffort = null; options.draft?.destroy(); runtimePicker?.destroy(); sessionControls?.destroy(); close(); closeContext(); lifecycle.abort(); supersedeCatalog(); drag = null; }, isDragging: () => Boolean(drag), reset() { runtimePicker?.reset(); sessionControls?.reset(); close(); closeContext(); drag = null; render(); } };
   }
   global.ChatComposerControls = { create };
 })(window);

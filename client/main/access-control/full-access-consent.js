@@ -144,6 +144,8 @@ function create({ BrowserWindow, ipcMain, screen, timeoutMs = 180000, themeSourc
         on(wc, 'did-fail-load', cancel);
         on(wc, 'render-process-gone', cancel);
         on(wc, 'destroyed', cancel);
+        on(window, 'hide', cancel);
+        on(window, 'unresponsive', cancel);
         on(window, 'closed', cancel);
         on(parent, 'closed', cancel);
         const reposition = () => { try { window.setBounds(item.position(item.naturalHeight)); } catch (_) { cancel(); } };
@@ -156,7 +158,8 @@ function create({ BrowserWindow, ipcMain, screen, timeoutMs = 180000, themeSourc
         on(ownerContents, 'did-start-navigation', (_event, _url, _inPlace, isMainFrame) => { if (isMainFrame) cancel(); });
         on(wc, 'before-input-event', (event, input) => { if (input.key === 'Escape') { event.preventDefault(); cancel(); } });
         on(window, 'ready-to-show', () => { if (!done && item.ownerValid()) { window.show(); window.focus(); } else cancel(); });
-        timer = setTimeout(cancel, timeoutMs);
+        const remaining = Number.isFinite(options.expiresAt) ? options.expiresAt - Date.now() : timeoutMs;
+        timer = setTimeout(cancel, Math.max(0, Math.min(timeoutMs, remaining)));
         Promise.resolve(window.loadFile(PAGE)).catch(cancel);
       } catch (_) { cancel(); }
     });

@@ -14,22 +14,10 @@ const componentDir = path.resolve(__dirname, '..', 'components', 'client-auth');
 const css = fs.readFileSync(path.join(componentDir, 'client-auth.css'), 'utf8');
 const js = fs.readFileSync(path.join(componentDir, 'client-auth.js'), 'utf8');
 
-test('login gate drags as a whole while interactive controls stay no-drag', () => {
-  /*
-   * The authentication gate must provide its own drag region because login hides the
-   * ordinary window-menu region.
-   */
+test('authentication reserves native window dragging for a fixed caption above the scrolling surface', () => {
   assert.match(css, /html\.soduwork-auth-pending body > :not\(#soduWorkClientAuthGate\)/);
-  assert.match(
-    css,
-    /\.soduwork-auth-gate\s*\{[^}]*-webkit-app-region:\s*drag/,
-    '登录遮罩缺少整层 -webkit-app-region: drag',
-  );
-  assert.match(
-    css,
-    /\.soduwork-auth-gate input,\s*\.soduwork-auth-gate button,\s*\.soduwork-auth-gate summary\s*\{[^}]*-webkit-app-region:\s*no-drag/,
-    '输入框/按钮/summary 必须豁免 no-drag，否则无法交互',
-  );
+  assert.doesNotMatch(css, /\.soduwork-auth-gate\s*\{[^}]*-webkit-app-region:\s*drag/);
+  assert.match(css, /\.soduwork-auth-gate::before\s*\{[^}]*position:\s*fixed;[^}]*-webkit-app-region:\s*drag/);
 });
 
 test('password field has a reveal toggle that flips the input type and resets after clearing', () => {

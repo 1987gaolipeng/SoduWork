@@ -102,6 +102,7 @@ async function handle(req, res) {
     }
     if (url.pathname === '/api/v1/admin/quotas') {
       if (req.method === 'GET') return respond(res, 200, catalog)
+      if (!user.isSuper) return respond(res, 403, { detail: 'Platform quota changes require a super administrator' })
       const body = await readBody(req)
       if (body.revision !== catalog.revision) return respond(res, 409, { detail: 'Fixture revision conflict' })
       assert.equal('models' in body, false, 'read-only choices must never be persisted')
@@ -167,12 +168,43 @@ app.whenReady().then(async () => {
   await shot('plans-zh')
   checks.push('Dedicated permission-gated module renders trial, Standard and Pro from one catalog request')
 
+  assert.equal(await js('document.querySelectorAll(".qm-section-heading button, .qm-plan-card footer button").length'), 0)
+  await click('原有账号默认规则')
+  assert.ok(await js('document.querySelector(".qm-default-card").textContent.includes("1,000,000")'))
+  assert.equal(await js('document.querySelectorAll(".qm-default-card button").length'), 0)
+  await click('成员额度')
+  await waitFor('[...document.querySelectorAll("button")].some(button => button.textContent.trim() === "分配额度")', 'scoped member assignment')
+  checks.push('Scoped administrators can view platform quotas and assign member quotas, while platform editors are available to super administrators')
+
+  user.isSuper = true
+  await win.loadURL(origin)
+  await waitFor('document.querySelectorAll(".qm-plan-card").length===3', 'super administrator plans')
   await point('document.querySelector(' + JSON.stringify('button[aria-label="编辑套餐：Trial"]') + ')')
   await waitFor('!!document.querySelector(".qm-editor")', 'trial editor')
   await input(findField('试用有效天数'), '10')
-  await input('document.querySelector(".qm-total-fields input")', '120000')
-  await click('添加模型额度'); await select('[aria-label="模型 1"]', 'Model A · Primary')
-  await input('document.querySelector(".qm-model-row input[type=number]")', '70000')
+  const totalField = 'document.querySelector(".qm-total-fields input")'
+  const modelField = 'document.querySelector(".qm-model-row input[type=number]")'
+  const fieldHint = field => '(' + field + ').closest("label").querySelector("[role=status]").textContent'
+  for (const value of ['0', '-1', '1.5', '10000000000001']) {
+    await input(totalField, value)
+    assert.equal(await js(fieldHint(totalField)), '请输入 1 到 10,000,000,000,000 的整数')
+  }
+  await input(totalField, '120000')
+  assert.equal(await js(fieldHint(totalField)), '')
+  await click('添加模型额度')
+  const modelSearch = `document.querySelector('[aria-label="模型 1"]')`
+  await input(modelSearch, 'absent-fixture-model')
+  await waitFor("document.querySelector('.select-menu-empty')?.textContent === '没有匹配的模型'", 'model search empty feedback')
+  await input(modelSearch, 'Model A')
+  await select('[aria-label="模型 1"]', 'Model A · Primary')
+  for (const value of ['-1', '3.5', '10000000000001']) {
+    await input(modelField, value)
+    assert.equal(await js(fieldHint(modelField)), '请输入 0 到 10,000,000,000,000 的整数')
+    assert.equal(await js(fieldHint(totalField)), '')
+  }
+  await input(modelField, '0')
+  assert.equal(await js(fieldHint(modelField)), '')
+  await input(modelField, '70000')
   await click('添加模型额度'); await select('[aria-label="模型 2"]', 'Model B · Secondary')
   await input('document.querySelectorAll(".qm-model-row input[type=number]")[1]', '50000')
   await point('document.querySelector(".qm-checkbox input")')
@@ -220,7 +252,8 @@ app.whenReady().then(async () => {
   await waitFor('document.querySelector(".qm-impact dl")?.textContent.includes("13,160,932")', 'refreshed selected plan preview')
   assert.equal(member.assignment.planId, 'standard')
   assert.ok(await js('document.querySelector(".qm-impact").textContent.includes("调整后剩余合计（Tokens）123")'))
-  await click('取消'); await waitFor('!document.querySelector(".qm-editor")', 'cancelled assignment after concurrent catalog change')
+  await click('取消'); await click('放弃改动')
+  await waitFor('!document.querySelector(".qm-editor")', 'cancelled assignment after concurrent catalog change')
   await click('分配额度')
   await select('[aria-label="额度规则"]', '个人自定义')
   const beforeMemberSave = saves.length
@@ -229,7 +262,8 @@ app.whenReady().then(async () => {
   const preview = () => js('[...document.querySelectorAll(".qm-impact dl dd")].map(e => e.textContent)')
   assert.deepEqual(await preview(), ['1', '1,000,000 → 13,160,810', '13,160,809', '1', '0'])
   assert.equal(saves.length, beforeMemberSave)
-  await click('取消'); await waitFor('!document.querySelector(".qm-editor")', 'cancelled personal draft')
+  await click('取消'); await click('放弃改动')
+  await waitFor('!document.querySelector(".qm-editor")', 'cancelled personal draft')
   assert.equal(member.assignment.mode, 'plan')
   await click('分配额度'); await select('[aria-label="额度规则"]', '个人自定义')
   await input('document.querySelector(".qm-total-fields input")', '0')
@@ -258,6 +292,7 @@ app.whenReady().then(async () => {
   await shot('plans-narrow')
   checks.push('English, Japanese and Korean copy plus narrow-layout bounds verified in Chromium')
   const quotaRequestsBeforeDenial = requests.filter(row => row.path.startsWith('/api/v1/admin/quotas')).length
+  user.isSuper = false
   user.permissions = []
   await win.loadURL(origin + '/?locale=en-US')
   await waitFor('!!document.querySelector(".app .landing")', 'account without management permissions')

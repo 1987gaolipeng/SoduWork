@@ -221,20 +221,20 @@ def _stored_checksum(path: str) -> str:
     return digest.hexdigest()
 
 
-def store(parsed: dict) -> str:
+def store(parsed: dict, *, version_id: str = "") -> str:
     key = parsed["manifest"]["key"]
     checksum = parsed["checksum"]
     content_checksum = hashlib.sha256(parsed["bytes"]).hexdigest()
     folder = os.path.join(package_root(), key)
     os.makedirs(folder, exist_ok=True)
-    # Preserve existing content-addressed paths; new packages use the current brand.
-    for suffix in (".soduwork-plugin", ".soduwork-plugin", ".soduwork-plugin"):
-        existing = os.path.join(folder, checksum + suffix)
-        if os.path.isfile(existing):
-            if _stored_checksum(existing) != content_checksum:
-                raise RuntimeError("Stored plugin package checksum does not match its identity")
-            return existing
-    path = os.path.join(folder, checksum + ".soduwork-plugin")
+    # Imported versions own their archive. Direct callers without a database
+    # version keep the historical content-addressed storage contract.
+    filename = (version_id or checksum) + ".soduwork-plugin"
+    path = os.path.join(folder, filename)
+    if os.path.isfile(path):
+        if _stored_checksum(path) != content_checksum:
+            raise RuntimeError("Stored plugin package checksum does not match its identity")
+        return path
 
     # Publish a fully written file atomically. A hard link never replaces a
     # concurrent winner; filesystems without link support use replace and then
@@ -256,6 +256,8 @@ def store(parsed: dict) -> str:
                 if _stored_checksum(path) != content_checksum:
                     raise
         if _stored_checksum(path) != content_checksum:
+            if version_id:
+                os.unlink(path)
             raise RuntimeError("Stored plugin package checksum does not match its identity")
     finally:
         if os.path.exists(tmp):

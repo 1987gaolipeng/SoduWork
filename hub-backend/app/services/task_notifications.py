@@ -120,7 +120,8 @@ async def deliver(job, sessions=SessionLocal):
             if (task is not None and request is not None and request.task_id == tid
                     and request.action == "review" and request.status == "pending"
                     and not task.archived_at and not task.reviewed_at):
-                await code_delivery.notify_reviewer(session, task, "交付成果", publish=publish_reliably)
+                await code_delivery.notify_reviewer(session, task, request.artifact_version_id,
+                                                    "交付成果", publish=publish_reliably)
     if metadata.get("notification_id"):
         from . import task_assignment_notifications
         async with sessions() as session:

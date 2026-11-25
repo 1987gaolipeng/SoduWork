@@ -37,6 +37,16 @@ async def find_plugin(session: AsyncSession, org_id: str | None,
     return (await session.execute(statement.limit(1))).scalar_one_or_none()
 
 
+async def _begin_identity_write(session: AsyncSession) -> None:
+    # SQLite's legacy transaction mode can release a SAVEPOINT as a commit
+    # before the import has published its archive or audience.
+    if session.bind.dialect.name == "sqlite":
+        connection = await session.connection()
+        raw = await connection.get_raw_connection()
+        if not raw.driver_connection.in_transaction:
+            await connection.exec_driver_sql("BEGIN IMMEDIATE")
+
+
 async def get_or_create_plugin(
     session: AsyncSession, *, org_id: str | None, key: str, name: str,
     description: str, source_kind: str, created_by: str,
@@ -48,6 +58,7 @@ async def get_or_create_plugin(
     candidate = am.Plugin(
         org_id=org_id, key=key, name=name, description=description,
         source_kind=source_kind, enabled=False, created_by=created_by)
+    await _begin_identity_write(session)
     try:
         async with session.begin_nested():
             session.add(candidate)
@@ -90,6 +101,7 @@ async def insert_version_once(
     if state == "conflict":
         raise PluginVersionConflict(
             "\u540c\u4e00\u7248\u672c\u53f7\u7684\u63d2\u4ef6\u5185\u5bb9\u5df2\u7ecf\u53d8\u5316\uff0c\u8bf7\u63d0\u5347\u7248\u672c\u53f7\u540e\u518d\u5bfc\u5165")
+    await _begin_identity_write(session)
     try:
         async with session.begin_nested():
             session.add(candidate)

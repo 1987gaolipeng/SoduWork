@@ -547,3 +547,45 @@ async def decisions(chk, actor, approved):
     retried_decision.state = "cancelled"
     decision_run.state = "cancelled"
     await session.commit()
+
+
+    # Persist an older workflow whose condition did not repeat its source in dependsOn.
+    conditional_version = am.PluginVersion(
+        plugin_id=plugin.id, version="condition-test", checksum="condition-test",
+        trust_state="approved", enabled=True, workflow={"nodes": [
+            {"key": "chosen", "type": "ai", "config": {"when": {"node": "source", "equals": True}}},
+            {"key": "other", "type": "ai", "config": {"when": {"node": "source", "equals": False}}},
+            {"key": "source", "type": "ai"},
+        ]})
+    session.add(conditional_version)
+    await session.flush()
+    conditional_run = am.WorkflowRun(
+        task_id=receipt_task.id, plugin_id=plugin.id, plugin_version_id=conditional_version.id,
+        binding_id=binding.id, state="running")
+    session.add(conditional_run)
+    await session.commit()
+    await workflow_engine._schedule(session, conditional_run)
+    rows = await workflow_engine._latest_nodes(session, conditional_run.id)
+    chk("Conditional nodes wait for the source even when listed first", set(rows) == {"source"})
+    rows["source"].state, rows["source"].output = "succeeded", {"value": True}
+    await session.commit()
+    await workflow_engine._schedule(session, conditional_run)
+    rows = await workflow_engine._latest_nodes(session, conditional_run.id)
+    chk("The stored outcome selects one branch and skips the other",
+        rows["chosen"].state == "queued" and rows["other"].state == "skipped")
+    invalid_version = am.PluginVersion(
+        plugin_id=plugin.id, version="old-condition-cycle", checksum="old-condition-cycle",
+        trust_state="approved", enabled=True, workflow={"nodes": [
+            {"key": "a", "type": "ai", "config": {"when": {"node": "b", "equals": True}}},
+            {"key": "b", "type": "ai", "dependsOn": ["a"]},
+        ]})
+    session.add(invalid_version)
+    await session.flush()
+    invalid_run = am.WorkflowRun(task_id=receipt_task.id, plugin_id=plugin.id,
+                                 plugin_version_id=invalid_version.id, binding_id=binding.id,
+                                 state="running")
+    session.add(invalid_run)
+    await session.commit()
+    await workflow_engine._schedule(session, invalid_run)
+    chk("An already running invalid legacy graph fails with a configuration explanation",
+        invalid_run.state == "failed" and bool(invalid_run.error))

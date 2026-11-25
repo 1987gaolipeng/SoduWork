@@ -24,6 +24,25 @@ function fixture(t) {
       fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(value)); return file;
     } };
 }
+test('an owned live draft can be renamed before it has a history row', async t => {
+  const f = fixture(t), handlers = new Map(), events = [];
+  const live = { ref: 'chat-draft', sessionId: 'alice', historyRow: () => null };
+  require('../main/pi-session/history-ipc').install({ app: f.app,
+    ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
+    BrowserWindow: { getAllWindows: () => [{ isDestroyed: () => false,
+      webContents: { send: (_channel, event) => events.push(event) } }] },
+    session: { findBySessionId: id => id === live.sessionId ? live : null, archivedConversation: async () => null } });
+  const rename = title => handlers.get('pi-session-history-rename')({}, live.sessionId, title);
+  const saved = await rename('My draft');
+  assert.equal(saved.ok, true, saved.reason);
+  assert.equal(require('../main/conversation/titles').read(f.app, live.sessionId).title, 'My draft');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].presence, null);
+  assert.equal(events[0].draftTitle.customTitle, 'My draft');
+  f.switch(identity('two'));
+  assert.equal((await rename('Other account')).ok, false);
+  assert.equal(events.length, 1);
+});
 test('local history follows the current account and rejects conflicting ownership', t => {
   const f = fixture(t), id = 'pre-rename';
   const previous = crypto.createHash('sha256').update('soduwork-account\0one').digest('hex').slice(0, 32);

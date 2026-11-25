@@ -102,10 +102,11 @@ class IncompleteTurnDeliveryTests(_Base):
             await self._dispose(engine, session)
 
 
-    async def test_completed_delivery_without_creator_remains_unassigned(self):
+    async def test_completed_delivery_without_independent_reviewer_remains_unassigned(self):
         engine, session, task = await self._prepared()
         try:
             task.created_by = None
+            task.requester_user_id = task.owner_user_id
             await session.commit()
             await conversation_turns.deliver_artifacts(
                 session, task, conversation_id="conv-9", turn_id="turn-9",
@@ -135,10 +136,10 @@ class FailCancelsAutoReviewTests(_Base):
         try:
             session.add(models.Client(id="review-device", user_ref="u-requester"))
             await session.commit()
-            async def deliver(name, turn="turn-9"):
+            async def deliver(name, turn="turn-9", data=b"Original report", replaces=None):
                 return await conversation_turns.deliver_artifacts(session, task,
                     conversation_id="conv-9", turn_id=turn, outcome="completed",
-                    files=[(name, b"Complete revised report", "text/markdown")])
+                    files=[(name, data, "text/markdown")], replacements=replaces)
             with patch.object(hub, "publish", new=AsyncMock()):
                 await deliver("report.md")
                 request = (await self._requests(session))[0]
@@ -162,9 +163,10 @@ class FailCancelsAutoReviewTests(_Base):
                         {"action": action, "turnId": "turn-10", "conversationId": "conv-9"})
                 await session.commit()
                 self.assertNotIn("reworkPending", task.work_routing)
-                result = await deliver("revised.md", "turn-10")
+                revision = ("revised.md", "turn-10", b"Complete revised report", {"revised.md": ["report.md"]})
+                result = await deliver(*revision)
                 self.assertNotIn("deferred", result)
-                await deliver("revised.md", "turn-10")
+                await deliver(*revision)
                 self.assertEqual(sorted(r.status for r in await self._requests(session)), ["pending", "rejected"])
                 api = await tasks.task_to_api_live(session, task)
                 self.assertEqual(api["requirementStage"], "reviewing")

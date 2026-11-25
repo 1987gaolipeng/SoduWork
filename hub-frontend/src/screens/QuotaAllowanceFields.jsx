@@ -1,7 +1,15 @@
 import React, { useId } from 'react'
 import { translateText as tx, useLocale } from '../i18n.js'
 import { Icon, SelectMenu } from '../ui.jsx'
-import { MAX_TOKENS, modelKey } from './quota-model.js'
+import { MAX_TOKENS, modelKey, tokenNumber } from './quota-model.js'
+
+function TokenLimitHint({ value, trial = false }) {
+  const amount = tokenNumber(value)
+  const invalid = amount === null || (trial && amount === 0)
+  return <small className="qm-token-hint" role="status">{invalid && (trial
+    ? tx('请输入 1 到 10,000,000,000,000 的整数')
+    : tx('请输入 0 到 10,000,000,000,000 的整数'))}</small>
+}
 
 export function TotalLimitField({ value, onChange, trial = false }) {
   useLocale()
@@ -15,6 +23,7 @@ export function TotalLimitField({ value, onChange, trial = false }) {
       </SelectMenu>
     </label>
     {value !== null && <label className="qm-field" htmlFor={id + '-limit'}><span>{tx('Token 数量')}</span>
+      <TokenLimitHint value={value} trial={trial} />
       <input id={id + '-limit'} className="f-in" aria-label={tx('Token 数量')} type="number" min={trial ? 1 : 0} max={MAX_TOKENS} step="1"
         value={value} onChange={event => onChange(event.target.value)} />
     </label>}
@@ -48,7 +57,8 @@ export default function QuotaAllowanceFields({ value, onChange, choices, trial =
             </option>)}
           </SelectMenu>
         </label>
-        <label className="qm-field" htmlFor={id + '-cap-' + index}><span>{tx('模型 Token 上限')}</span>
+        <label className="qm-field" htmlFor={id + '-cap-' + index} aria-label={tx('模型 Token 上限')}><span>{tx('模型 Token 上限')}</span>
+          <TokenLimitHint value={row.limit} />
           <input className="f-in" id={id + '-cap-' + index} type="number" min="0" max={MAX_TOKENS} step="1"
             value={row.limit} onChange={event => updateModel(index, { limit: event.target.value })} />
         </label>

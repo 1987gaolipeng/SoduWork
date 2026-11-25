@@ -72,23 +72,24 @@ class ModelDiscoveryEndpointTests(unittest.IsolatedAsyncioTestCase):
         from app.services import model_discovery
         calls = []
 
-        async def fake_discover(base, key, kind="openai-compat"):
-            calls.append((base, key, kind))
-            return {"ok": True, "models": ["known-model", "fresh-a", "fresh-b"],
-                    "path": "/models", "detail": ""}
+        def upstream_response(request):
+            calls.append((request.method, str(request.url), request.headers["Authorization"]))
+            return httpx.Response(200, json={"data": [
+                {"id": "known-model", "output": "text"}, {"id": "fresh-a"},
+                {"id": "fresh-b", "output": "decision"}]})
 
-        original = model_discovery.discover
-        model_discovery.discover = fake_discover
-        try:
+        upstream = httpx.AsyncClient(transport=httpx.MockTransport(upstream_response))
+        with patch.object(model_discovery.httpx, "AsyncClient", return_value=upstream):
             resp = await self.request("POST", "/model-providers/good/discover")
-        finally:
-            model_discovery.discover = original
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
         self.assertTrue(body["ok"])
         self.assertEqual(body["models"], ["fresh-a", "fresh-b"])
         self.assertEqual(body["known"], ["known-model"])
-        self.assertEqual(calls, [("https://gw.example/v1", "k", "openai-compat")])
+        self.assertEqual(body["candidates"], [{"id": "fresh-a", "purposes": [], "status": "unknown"},
+                                             {"id": "fresh-b", "purposes": [], "status": "unsupported"}])
+        self.assertEqual(body["counts"], {"total": 3, "chat": 1, "unknown": 1})
+        self.assertEqual(calls, [("GET", "https://gw.example/v1/models", "Bearer k")])
 
     async def test_discovery_never_writes_model_rows(self):
         from app.services import model_discovery
@@ -103,7 +104,9 @@ class ModelDiscoveryEndpointTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unsaved_connection_uses_draft_values_without_writing(self):
         from app.services import model_discovery
-        result = {"ok": True, "models": ["fixture-model"], "path": "/v1/models", "detail": ""}
+        result = {"ok": True, "models": ["fixture-model"], "path": "/v1/models", "detail": "",
+                  "candidates": [{"id": "fixture-model", "purposes": [], "status": "unknown"}],
+                  "counts": {"total": 1, "chat": 0, "unknown": 1}}
         draft = {"kind": "anthropic", "baseUrl": "https://draft.example", "apiKey": "draft-key"}
         with patch.object(model_discovery, "discover", AsyncMock(return_value=result)) as discover:
             response = await self.request("POST", "/model-providers/test-connection", json=draft)

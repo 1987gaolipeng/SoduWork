@@ -42,6 +42,7 @@ if (typeof electron === 'string') {
     const previewUrl = 'http://127.0.0.1:' + server.address().port + '/preview';
     ipcMain.handle('pi-session-history', require('./fixtures/history-ipc.cjs').create(() => ({ ok: true, chats: [] })));
     ipcMain.handle('open-external', (_e, url) => { external.push(url); return { ok: true }; });
+    ipcMain.handle('recent-workspace-get', () => ({ ok: true, dir: '' }));
     const testApp = { getAppPath: () => tmp, getVersion: () => require('../package.json').version,
       isPackaged: false, getPath: key => key === 'userData' ? path.join(tmp, 'profile') : tmp };
     const hubEndpoint = require('../main/hub-endpoint.cjs');
@@ -74,11 +75,14 @@ if (typeof electron === 'string') {
     assert.equal(await js(`document.querySelector('.window-menu nav').hidden`), false);
     assert.equal(await js(`document.querySelectorAll('.wm-title-brand').length`), 0);
     report.cases.push('Production titlebar options expose native Windows captions and draggable empty space without duplicating the sidebar brand; menu buttons remain non-draggable.');
-    await js(`document.documentElement.style.setProperty('--bg-0','#17191f');document.documentElement.style.setProperty('--ink-3','#dadde4');void 0;`);
+    for (let i = 0; i < 100 && !titlebarThemes.length; i++) await delay(20);
+    assert.ok(titlebarThemes.length, 'Native caption received the initial palette');
+    const initialCaptionColor = titlebarThemes.at(-1).color;
+    await js(`document.documentElement.style.setProperty('--accent','#17191f');void 0;`);
     for (let i = 0; i < 100 && titlebarThemes.at(-1)?.color !== '#17191f'; i++) await delay(20);
-    assert.deepEqual(titlebarThemes.at(-1), { color: '#17191f', symbolColor: '#dadde4', height: 34 });
+    assert.deepEqual(titlebarThemes.at(-1), { color: '#17191f', symbolColor: '#ffffff', height: 34 });
     await shot('titlebar-dark');
-    await js(`document.documentElement.style.removeProperty('--ws-side');document.documentElement.style.removeProperty('--ink-3');void 0;`);
+    await js(`document.documentElement.style.removeProperty('--accent');void 0;`);
     for (let i = 0; i < 100 && titlebarThemes.at(-1)?.color !== initialCaptionColor; i++) await delay(20);
     assert.equal(titlebarThemes.at(-1).color, initialCaptionColor);
     report.cases.push('Changing and restoring skin colors reaches the real native caption controls without changing their fixed height.');
@@ -89,7 +93,8 @@ if (typeof electron === 'string') {
     await js(`document.querySelector('#wsSideScroll').scrollTop=120;window.savedDraft=document.querySelector('#draft');window.savedList=document.querySelector('#wsChats');void 0;`);
     const original = await geometry(); assert.equal(original.bar.bottom, 34); assert.equal(original.content.top, original.bar.bottom + 2);
     assert.equal(await js(`getComputedStyle(document.querySelector('#workspaceShell'), '::before').backgroundColor`), 'rgb(253, 253, 253)');
-    assert.equal(await js('innerHeight') - original.content.bottom, 15);
+    assert.equal(await js('innerHeight') - original.content.bottom,
+      await js("parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ws-frame-bottom'))"));
     await click('[data-window-sidebar]'); const hidden = await geometry();
     assert.equal(hidden.side.visible, false); assert.equal(hidden.resizer.visible, false); assert.equal(hidden.rail.visible, true);
     assert.equal(hidden.content.left, 52); assert.equal(hidden.draft, original.draft); assert.ok(hidden.content.right > hidden.content.left);

@@ -2,14 +2,18 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased, load_only
 
 from .. import automation_models as am
 from ..config import get_settings
 from ..log_safety import redact_log_text
-from . import runner_registry, runtime_telemetry
+from ..models import Task
+from . import workflow_diagnostics
+from . import operations_approvals, runner_registry, runtime_telemetry
 
 
 async def _group_counts(session: AsyncSession, column) -> dict[str, int]:
@@ -33,7 +37,37 @@ def _stamp(value) -> int | None:
     return int(value.timestamp() * 1000)
 
 
-async def overview(session: AsyncSession) -> dict:
+async def _recent_failures(session: AsyncSession, visible_client_ids: set[str] | None,
+                           can_view_failures: bool) -> list:
+    run, node = am.WorkflowRun, am.NodeRun
+    newer = aliased(node)
+    # A failed attempt that was later retried is historical evidence.
+    current_failure = select(node.id).where(
+        node.run_id == run.id, node.state.in_(("failed", "rework")),
+        ~select(newer.id).where(newer.run_id == node.run_id, newer.node_key == node.node_key,
+                                newer.attempt > node.attempt).exists()
+    ).order_by(node.created_at.desc(), node.attempt.desc(), node.id).limit(1).correlate(run)
+    query = (select(run, Task.title, node)
+             .outerjoin(Task, Task.id == run.task_id)
+             .outerjoin(node, node.id == current_failure.scalar_subquery())
+             .options(load_only(run.id, run.task_id, run.error, run.state, run.updated_at),
+                      load_only(node.state, node.node_type, node.error, node.output))
+             .where(run.state == "failed").order_by(run.updated_at.desc(), run.id).limit(8))
+    if visible_client_ids is not None:
+        query = query.where(Task.owner_client_id.in_(visible_client_ids))
+    items = []
+    for row, title, failed_node in (await session.execute(query)).all():
+        diagnosis = workflow_diagnostics.diagnose(
+            failed_node or SimpleNamespace(state=row.state, error=row.error), False)
+        items.append({"id": row.id, "taskId": row.task_id if can_view_failures else "",
+                      "taskTitle": title if can_view_failures else "", "taskAvailable": title is not None,
+                      "diagnosis": diagnosis["title"], "error": redact_log_text(row.error or "")[:300]
+                      if can_view_failures else "",
+                      "updatedAt": _stamp(row.updated_at)})
+    return items
+
+
+async def overview(session: AsyncSession, visible_client_ids=None, *, can_view_failures=True) -> dict:
     from ..db import engine
     from . import database_telemetry
     settings = get_settings()
@@ -44,11 +78,7 @@ async def overview(session: AsyncSession) -> dict:
     workflow = await _group_counts(session, am.WorkflowRun.state)
     executions = await _group_counts(session, am.ExecutionSession.state)
     deployments = await _group_counts(session, am.DeploymentRun.state)
-    pending_approvals = int(await session.scalar(select(func.count(am.ApprovalRequest.id)).where(
-        am.ApprovalRequest.status == "pending")) or 0)
-    failed = list((await session.execute(select(am.WorkflowRun).where(
-        am.WorkflowRun.state == "failed").order_by(am.WorkflowRun.updated_at.desc()).limit(8)
-    )).scalars().all())
+    pending_approvals, overdue_approvals = await operations_approvals.counts(session, visible_client_ids)
     blockers: list[dict] = []
     if not db_ok:
         blockers.append({"level": "critical", "title": "数据库不可用", "detail": db_message})
@@ -85,10 +115,8 @@ async def overview(session: AsyncSession) -> dict:
                     "accepting": len(accepting), "busy": sum(int(x.get("busy") or 0) for x in online),
                     "items": safe_runners},
         "work": {"workflow": workflow, "executions": executions,
-                 "deployments": deployments, "pendingApprovals": pending_approvals},
-        "recentFailures": [{"id": row.id, "taskId": row.task_id,
-                            # The zh-CN fallback label moved to the admin UI (operations copy catalog); send data only.
-                            "error": redact_log_text(row.error or "")[:300],
-                            "updatedAt": _stamp(row.updated_at)} for row in failed],
+                 "deployments": deployments, "pendingApprovals": pending_approvals,
+                 "overdueApprovals": overdue_approvals},
+        "recentFailures": await _recent_failures(session, visible_client_ids, can_view_failures),
         "blockers": blockers,
     }

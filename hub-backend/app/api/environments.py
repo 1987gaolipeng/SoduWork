@@ -3,25 +3,49 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import automation_models as am, models
+from .. import automation_models as am
+from .. import models
 from ..db import get_session
 from ..deps import require_perm
 from ..models import User
-from ..services import (approval_policies as policy_svc, audit, deployments,
-                        environment_service as svc, project_setup, rbac,
-                        release_control, runner_hub)
+from ..services import approval_policies as policy_svc
+from ..services import (
+    audit,
+    catalog_names,
+    deployments,
+    project_setup,
+    rbac,
+    release_control,
+    runner_hub,
+)
+from ..services import environment_service as svc
+from ..services.environment_contracts import InvalidHealthCheck
 from .input_validation import parse_integer
 
 router = APIRouter(prefix="/api/v1/admin", tags=["environments"])
 
 
 def _bad(error: ValueError) -> HTTPException:
+    if isinstance(error, svc.InvalidPromotionDependencies):
+        return HTTPException(400, detail=str(error), headers={"X-Error-Code": "hub.input.promotion_requires"})
+    if isinstance(error, (InvalidHealthCheck, svc.InvalidSecretReferenceOrg)):
+        return HTTPException(status_code=400, detail=str(error))
     if isinstance(error, svc.InvalidRunnerSelector):
         return HTTPException(status_code=422, detail=str(error))
     if isinstance(error, svc.InvalidEnvironmentTier):
         return HTTPException(status_code=400, detail=str(error), headers={"X-Error-Code": "hub.input.tier"})
-    return HTTPException(status_code=400 if isinstance(error, policy_svc.InvalidPolicyInput) else 409,
-                         detail=str(error))
+    if isinstance(error, (catalog_names.DuplicateName, svc.BusinessConflict)):
+        return HTTPException(status_code=409, detail=str(error))
+    if isinstance(error, policy_svc.InvalidPolicyInput):
+        return HTTPException(status_code=400, detail=str(error), headers={"X-Error-Code": "hub.input.tier"})
+    # Approval policy business errors (unsupported/empty actions, missing approvers) are 409.
+    msg = str(error)
+    if msg in (
+        "至少选择一个适用场景", "审批职责必须是数组", "至少选择一种审批职责",
+    ) or msg.startswith(("不支持的审批场景", "不支持的审批职责")):
+        return HTTPException(status_code=409, detail=msg)
+    # Generic value errors (e.g., invalid key format, bad selector) are 422.
+    return HTTPException(status_code=422, detail=str(error))
 
 
 def _approval_policy_input(body: dict) -> dict:
@@ -84,7 +108,8 @@ async def automation_overview(
     probes.
     """
     scope = await _scope(session, user)
-    project_q = select(models.Project)
+    from ..services.business_records import business_visible
+    project_q = select(models.Project).where(business_visible(models.Project))
     if scope is not None:
         project_q = project_q.where(
             models.Project.org_id.in_(scope or {"__none__"}) |
@@ -93,7 +118,7 @@ async def automation_overview(
         project_q.order_by(models.Project.created_at.desc()))).scalars().all())
     project_ids = {x.id for x in projects}
     repos = list((await session.execute(select(models.Repo).where(
-        models.Repo.project_id.in_(project_ids or {"__none__"})
+        business_visible(models.Repo), models.Repo.project_id.in_(project_ids or {"__none__"})
     ))).scalars().all())
     repo_ids = {x.id for x in repos}
     targets = list((await session.execute(select(am.DeploymentTarget).where(

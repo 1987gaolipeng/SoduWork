@@ -1,7 +1,7 @@
 import { pluginRequirementOptions } from './requirement-governance.js'
 import { getLocale, translateText as tx, localeMap, useLocale } from '../i18n.js'
 import React, { useEffect, useState } from 'react'
-import { api } from '../api.js'
+import { api, can } from '../api.js'
 import { Icon, Modal, toast, SelectMenu } from '../ui.jsx'
 import { LoadIssue } from './PluginOverviewParts.jsx'
 import { Field, NoticeList } from './PluginDialogParts.jsx'
@@ -101,8 +101,10 @@ export function PluginRunForm({ plugin, onClose, onStarted }) {
     setBusy(false)
   }
 
-  return <Modal scope="plugin-page" wide title={tx("让「{0}」处理需求", [plugin.name])} icon="send" onClose={onClose}
-    foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+  const dirty = bindingId !== (bindings[0]?.id || '') || Boolean(taskId && taskId !== availableTasks[0]?.id)
+    || defs.some(def => inputs[def.key] != null && String(inputs[def.key]) !== String(def.default ?? (def.type === 'boolean' ? false : '')))
+  return <Modal dirty={dirty} scope="plugin-page" wide title={tx("让「{0}」处理需求", [plugin.name])} icon="send" onClose={onClose}
+    foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
       <button className="btn btn-primary" disabled={busy || !!taskError || !selectedTask || !!selectedTask.blockedReason || !bindingId}
         onClick={start}>{busy ? tx("正在启动…") : tx("启动工作流")}</button></>}>
     {taskError && <LoadIssue message={taskError} onRetry={loadTasks} />}
@@ -173,7 +175,7 @@ function InputField({ def, value, onChange }) {
   </Field>
 }
 
-export function RunDrawer({ run: initial, onClose }) {
+export function RunDrawer({ run: initial, onClose, onChanged, evidenceOpen = false }) {
   const uiLocale = useLocale();
   const [run, setRun] = useState(initial)
   const [busyNode, setBusyNode] = useState('')
@@ -197,17 +199,21 @@ export function RunDrawer({ run: initial, onClose }) {
     return () => clearInterval(timer)
   }, [run && run.id, run && run.state])
 
-  async function retry(node) {
+  async function retry(node, model) {
     setBusyNode(node.id)
     try {
       const resumeRework = String((node.diagnosis || {}).actionKey || '') === 'resume-rework'
-      const out = await api.retryRunGate(run.id, node.key, { resumeRework })
+      const out = await api.retryRunGate(run.id, node.key, {
+        sourceNodeId: node.id, resumeRework, ...(model && { execution: { model } }),
+      })
       setRun(out.run)
+      onChanged?.()
       toast(resumeRework
         ? tx("已按审查意见回到实施环节，修复后会重新审查")
         : tx("已从「") + (node.name || node.key) + tx("」继续，历史失败证据仍保留"))
     } catch (error) {
       toast(tx("暂时不能重试：") + error.message)
+      if (error.status === 409) await refreshRun(true)
     }
     setBusyNode('')
   }
@@ -220,13 +226,18 @@ export function RunDrawer({ run: initial, onClose }) {
   }
 
   const nodes = run.nodes || []
-  const failedNode = nodes.find((node) => node.state === 'failed')
-  const activeNode = nodes.find((node) =>
+  const latest = new Map()
+  for (const node of nodes) {
+    if (!latest.has(node.key) || node.attempt > latest.get(node.key).attempt) latest.set(node.key, node)
+  }
+  const current = [...latest.values()]
+  const failedNode = run.state === 'failed' && current.find((node) => ['failed', 'rework'].includes(node.state))
+  const activeNode = current.find((node) =>
     ['dispatching', 'queued', 'running', 'waiting_human', 'waiting_external', 'rework'].includes(node.state))
   const focusNode = failedNode || activeNode
-  const completed = nodes.filter((node) => ['succeeded', 'skipped'].includes(node.state)).length
+  const completed = current.filter((node) => ['succeeded', 'skipped'].includes(node.state)).length
   const stateCopy = failedNode
-    ? tx("停在「{0}」，按下方建议处理后可从本关重试。", [failedNode.name || failedNode.key])
+    ? tx("停在「{0}」", [failedNode.name || failedNode.key])
     : activeNode ? tx("正在处理「{0}」，完成后会自动进入下一关。", [activeNode.name || activeNode.key])
       : run.state === 'succeeded' ? tx("所有节点均已完成，运行结果和证据已经归档。")
         : RUN[run.state] || tx("正在读取最新状态。")
@@ -237,21 +248,22 @@ export function RunDrawer({ run: initial, onClose }) {
         <section className={'run-summary state-' + run.state}>
           <span className={'run-pulse state-' + run.state} /><div><small>{tx("当前结果")}</small>
             <b>{RUN[run.state] || run.state}</b><p>{stateCopy}</p></div>
-          <dl><div><dt>{tx("已完成")}</dt><dd>{completed}/{nodes.length || 0}</dd></div>
+          <dl><div><dt>{tx("已完成")}</dt><dd>{completed}/{current.length}</dd></div>
             <div><dt>{tx("当前环节")}</dt><dd>{focusNode ? (focusNode.name || focusNode.key) : '—'}</dd></div></dl>
         </section>
         <section className="run-progress-section">
           <header><div><span className="eyebrow">{tx("执行进度")}</span><h4>{tx("每一关发生了什么")}</h4></div>
             <small>{tx("失败节点会自动展开恢复建议")}</small></header>
           <div className="node-run-list">{nodes.map((node) =>
-            <NodeRunRow node={node} key={node.id} busy={busyNode === node.id} onRetry={retry} />)}
+            <NodeRunRow node={node} key={node.id} busy={!!busyNode} onRetry={retry} />)}
           </div>
         </section>
-        <details className="run-technical-evidence">
+        <details className="run-technical-evidence" open={evidenceOpen || undefined}>
           <summary><span><Icon name="shield" /><span><b>{tx("审计与技术信息")}</b><small>{tx("运行编号、路由和原始事件，排障时再查看")}</small></span></span><em>{(run.events || []).length}{tx(" 条事件")}</em></summary>
           <div className="run-id-row"><span><small>{tx("运行编号")}</small><code>{run.id}</code></span>
             <button type="button" onClick={copyRunId}>{tx("复制")}</button></div>
           <section className="evidence-section"><h4>{tx("运行时间线")}</h4>
+            {run.error && <pre className="ops-run-error">{run.error}</pre>}
             {(run.events || []).map((event) => <div className="event-line" key={event.id}>
               <span /><div><b>{EVENT[event.kind] || event.kind}</b><small>{fmt(event.at)}</small></div>
             </div>)}
@@ -262,6 +274,7 @@ export function RunDrawer({ run: initial, onClose }) {
 
 function NodeRunRow({ node, busy, onRetry }) {
   const uiLocale = useLocale();
+  const [model, setModel] = useState('')
   const output = node.output || {}
   const checks = output.checks || []
   const executor = node.executor || {}
@@ -286,18 +299,24 @@ function NodeRunRow({ node, busy, onRetry }) {
     ['running', 'waiting_human', 'waiting_external', 'rework'].includes(node.state)
   const hasAudit = routeVisible || (snapshot.dependencyKeys || []).length > 0 ||
     capabilityItems.length > 0 || output.log || node.error
-  return <details className={'node-run-card state-' + node.state} defaultOpen={expanded}>
+  return <details className={'node-run-card state-' + node.state} open={expanded || undefined}>
     <summary className={'node-run state-' + node.state}><span>{node.attempt}</span><div>
       <b>{node.name || node.key}<em>{NODE[node.type] || node.type}</em></b>
-      <small>{node.state === 'failed' ? (diagnosis.title || tx("本关未通过")) : RUN[node.state] || node.state}</small>
+      <small>{node.state === 'failed' ? (diagnosis.title ? tx(diagnosis.title) : tx("本关未通过")) : RUN[node.state] || node.state}</small>
     </div><i>{node.state === 'succeeded' ? '✓' : node.state === 'failed' ? '!' : '…'}</i></summary>
     <div className="node-run-detail">
       {diagnosis.kind && <div className={'node-failure diagnosis-' + diagnosis.kind}>
-        <span className="node-failure-mark">!</span><div><b>{diagnosis.title}</b><p>{diagnosis.action}</p>
+        <span className="node-failure-mark">!</span><div><b>{tx(diagnosis.title)}</b><p>{tx(diagnosis.action)}</p>
           {diagnosis.detail && <details><summary>{tx("查看技术详情")}</summary><pre>{diagnosis.detail}</pre></details>}
-        </div>{diagnosis.retryable && <button disabled={busy} onClick={() => onRetry(node)}>
-          {busy ? tx("正在重试…") : diagnosis.requiresFix ? tx("已修复，重试本关") : tx("重试本关")}
-        </button>}
+        </div>{diagnosis.retryable && can('plugin.run') && <div>
+          {!!node.retryModels?.length && <label>{tx('重试模型')}
+            <select className="f-in" value={model} disabled={busy} onChange={event => setModel(event.target.value)}>
+              <option value="">{tx('沿用原模型')}</option>
+              {node.retryModels.map(name => <option key={name} value={name}>{name}</option>)}
+            </select></label>}
+          <button type="button" disabled={busy} onClick={() => onRetry(node, model)}>
+            {busy ? tx("正在重试…") : model ? tx("换模型重试") : diagnosis.requiresFix ? tx("已修复，重试本关") : tx("重试本关")}
+          </button></div>}
       </div>}
       {checks.length > 0 && <div className="node-run-checks">{checks.map((check, index) =>
         <span className={check.ok ? 'ok' : 'bad'} key={index}><i>{check.ok ? '✓' : '!'}</i>

@@ -29,10 +29,32 @@ from app.schema_migrations import (
 
 OLD_MERGE = "0067_merge_release_account_ownership"
 CANONICAL_MERGE = "0067_merge_account_ownership"
-CURRENT_HEAD = "0092_task_text_storage"
+CURRENT_HEAD = "0096_usage_chat_source"
 
 
 class IntegratedMigrationHistoryTests(unittest.TestCase):
+    def test_chat_source_migration_preserves_original_receipts_and_counters(self):
+        from importlib import import_module
+        migration = import_module("migrations.versions.0096_usage_chat_source")
+        engine = create_engine("sqlite://")
+        self.addCleanup(engine.dispose)
+        with engine.begin() as conn:
+            conn.execute(text("""CREATE TABLE ai_usage_event (idempotency_key TEXT, source_type TEXT,
+                source_id TEXT, conversation_id TEXT, total_tokens INTEGER)"""))
+            conn.execute(text("""INSERT INTO ai_usage_event VALUES
+                ('client:old', 'chat', 'session', 'session', 3),
+                ('client-account:new', 'chat', 'one', 'two', 5),
+                ('client-account:key', 'chat', 'key', '', 7),
+                ('execution:run', 'task', 'task', '', 9)"""))
+            original = conn.execute(text("SELECT * FROM ai_usage_event ORDER BY idempotency_key")).all()
+            with Operations.context(MigrationContext.configure(connection=conn)):
+                migration.upgrade()
+                claims = dict(conn.execute(text("SELECT idempotency_key, reported_chat_session_id FROM ai_usage_event")).all())
+                self.assertEqual(claims, {"client:old": "session", "client-account:new": "",
+                                          "client-account:key": "", "execution:run": None})
+                migration.downgrade()
+            self.assertEqual(conn.execute(text("SELECT * FROM ai_usage_event ORDER BY idempotency_key")).all(), original)
+
     def test_downgrade_cannot_orphan_an_endpoint_only_schedule_input(self):
         import importlib
         migration = importlib.import_module("migrations.versions.0082_endpoint_conversation_content")
@@ -108,6 +130,10 @@ class IntegratedMigrationHistoryTests(unittest.TestCase):
         script = ScriptDirectory.from_config(_config())
         self.assertEqual(script.get_heads(), [CURRENT_HEAD])
         expected = {
+            "0095_business_record_source": "0094_review_recipient",
+            "0096_usage_chat_source": "0095_business_record_source",
+            "0094_review_recipient": "0093_user_test_account",
+            "0093_user_test_account": "0092_task_text_storage",
             "0092_task_text_storage": "0091_domain_sort_validation",
             "0091_domain_sort_validation": "0090_requirement_creator",
             "0090_requirement_creator": "0089_schedule_model_source",
@@ -321,7 +347,8 @@ class IntegratedMigrationHistoryTests(unittest.TestCase):
                                 self.assertEqual(json.loads(row.pop("source_requirement")),
                                                  expected_source if row["id"] == "schedule-enabled" else {})
                             self.assertEqual(actual, old_schedules)
-                            self.assertEqual([dict(row) for row in connection.execute("SELECT * FROM task")], old_tasks)
+                            self.assertEqual([dict(row) for row in connection.execute("SELECT * FROM task")],
+                                             [{**row, "review_recipient_user_id": None} for row in old_tasks])
 
                     command.upgrade(_config(), "head")
                     assert_preserved({})

@@ -6,6 +6,8 @@ Command examples use `sh start.sh` on macOS/Linux. On Windows, use `.\start.cmd`
 
 Hub provides identity, authorization, execution governance, plugins, shared materials, and desktop connectivity. It uses FastAPI and asynchronous SQLAlchemy with PostgreSQL; local development can use SQLite.
 
+The first-chat checklist combines the available model catalog with the signed-in administrator’s latest desktop report. The device sends two readiness flags for its runtime and model selection. After five minutes without a fresh report, the Hub shows those steps as awaiting the desktop.
+
 ## Start locally
 
 For a first session, use `sh start.sh` from the repository root; it creates an isolated database, environment, and administrator.
@@ -34,6 +36,51 @@ macOS / Linux:
 Direct development uses local configuration and data; keep it separate from real deployments. Configure bootstrap identity with `ADMIN_USER` / `ADMIN_PASS` in a private environment; no shared default password is supplied. The root launcher handles this interactively instead.
 
 API documentation: **http://127.0.0.1:9080/docs**. Health check: `GET /healthz`.
+
+### Upgrading local attachment storage
+
+Stop every Hub process that can write to the uploads volume. Back up the database and the entire volume at the same point in time. On NTFS, use a backup that preserves named streams if the deployment predates #336. Start one upgraded Hub with this pair before starting any other writers.
+
+Before serving requests, Hub checks local attachment and conversation handoff references against the older flat and hashed layouts. Each uniquely owned file moves to `uploads/objects-v2/<SHA-256 of the logical key in UTF-8>`. Database keys and display names stay the same. Repeated references to one key are valid. Distinct keys that lead to the same physical file, conflicting sources, or missing active objects require inspection; the preflight leaves the original files in place. An interrupted move can resume on the next startup. Once the volume has its completion marker, reads and deletes use v2 exclusively. Include the marker when moving the volume.
+
+Older Hubs could keep a handoff receipt after deleting its task and archive. An absent archive for such a receipt allows startup when no active reference needs it. If the file still exists, migration preserves it. Attachments used for messages can have no task and still require their bytes.
+
+For a missing active object, use the reported key to locate its database record and a trusted backup from the same deployment. Early Windows installations may have stored bytes in an NTFS named stream. Check ownership and verify the recovered ordinary file against the recorded length and SHA-256 where available. With Hub stopped, place that verified copy at the v2 path for the exact key in the restore copy, preserving the original backup. If ownership or content cannot be established, keep the originals for review. A successful startup and a download matching the original bytes verify recovery. To roll back, stop Hub and restore the old database and uploads volume together before restarting the old version.
+
+### Read-only automation
+
+Use the configured Hub address. The local development example below uses port 9080. The health check is public. To list the projects visible to an account, obtain its bearer token through `POST /api/v1/admin/login` and provide it in `HUB_TOKEN` through your environment or CI secret store. The account needs the `task.view` permission.
+
+```sh
+HUB_URL=http://127.0.0.1:9080
+curl --fail --silent --show-error "$HUB_URL/healthz"
+curl --fail --silent --show-error -H "Authorization: Bearer $HUB_TOKEN" "$HUB_URL/api/v1/admin/projects"
+```
+
+The projects response is a JSON array. An empty array means the account can see no projects. HTTP 401 means the token is missing, invalid or expired. HTTP 403 means the signed-in account lacks the required permission.
+
+## Diagnosing queued dispatches
+
+When the Runner first accepts a dispatch, its log records the execution reference and queue position.
+While it is queued, `GET /api/v1/tasks/{tid}/ai-status` can return `runner.waitReason`.
+`resource_pressure` means the Runner's resource budget is blocking new starts.
+`execution_slot` means all slots available to this work are occupied.
+The Runner pauses new starts when memory use reaches 92% or reported available memory falls below 768 MiB.
+With enough reported memory, CPU readings at or above 95% spanning at least one second allow one task at a time.
+A reading below 95% resets that interval. Memory pressure takes precedence even while CPU use stays high.
+The field is optional. Poll the same task to see the current reason or its transition to running.
+
+For a direct dispatch, the Hub checks the original Runner's durable queue receipt using the
+execution reference and admission key. A matching receipt or per-task heartbeat renews the
+90-second lease, including while memory pressure keeps the task queued. If the Hub loses
+confirmation, the next lease check reports `queueLeaseStatus=unconfirmed` and
+`queueLeaseReason=no_runner_ack`. Device ai-status puts these fields under `runner`; admin
+ai-status returns them at the top level. Reconnecting the Runner triggers a check of its
+persisted queue. Keep the original dispatch while confirmation is pending to avoid duplicate work.
+
+While resource pressure blocks queued work, the Runner periodically logs CPU use, available
+memory and queue depth. A second process opening the same queue exits and reports the last
+registered owner's PID and Runner boot ID.
 
 ## Desktop-local Runner event recovery
 
@@ -64,6 +111,8 @@ Recognized npm JavaScript Agents use the same validated Node and package entry f
 DeepSeek native packages follow the selected Node's platform, architecture and Linux libc, including Rosetta and mixed-runtime installations. Unknown Node identities fail closed. Launch and version-probe child processes inherit the selected Node directory without modifying the Runner's global PATH; quoted Windows PATH entries retain their priority.
 
 Model capability report v3 tests streaming continuation after a synthetic tool result, with tools retained and no extra user message. Existing v2 tool successes require rechecking; independent evidence remains available. Deploy the matching desktop update. Model refusals include an opaque `soduwork-trace` marker shared by JSON and SSE errors and the transport log; validated upstream request IDs remain correlation metadata, never error-classification input. Generic 403 guidance does not infer credential permissions from the status alone.
+
+Reading older model configurations preserves valid manual capability declarations when another field is incompatible, without rewriting the database. Saving still validates configuration fields and rejects arrays, strings and other non-object values; explicit `config: null` retains its existing reset behavior. Unknown capabilities are not promoted to supported during reads or upgrades, and an inconclusive capability check does not replace manual declarations.
 
 Model transport refusal logs distinguish recognized rate limits, billing failures and unclassified 429 responses without recording provider bodies. Numeric and HTTP-date `Retry-After` values pass through the existing JSON/SSE error contract; waits above one day are bounded to one day, already beyond the desktop retry budget. Billing errors omit retry hints. The Hub does not add a retry loop; the matching desktop update honors the provider wait only within its existing per-turn budget.
 
@@ -340,7 +389,16 @@ The check verifies the packaged native verifier, real TLS with a disposable trus
 
 ## API and trust boundaries
 
-- Devices enroll with `POST /api/v1/clients/enroll`, then use a short-lived device session. Device long-term keys remain in the Electron main process; Hub stores only their digest.
+The AI proxy's image and video generation routes accept options for the selected media type, such as image size or video duration. A value in the model's configured `defaults` takes precedence over a request option. To set a provider-specific parameter, add it to the model's `defaults` in the catalog. The proxy ignores unrecognized request fields.
+
+When posting usage to `POST /api/v1/usage/events`, omit `occurredAt` to use the time the Hub receives the event. Supply an ISO 8601 timestamp to report an earlier instant. The Hub interprets a timestamp without an offset as UTC. If an event has an invalid timestamp, the Hub returns HTTP 422 before recording any event in the batch. For example, 16:30 without an offset is 00:30 the next day in Beijing. Include `+08:00` to report 16:30 Beijing time.
+
+Omitting `sourceType` selects `chat`. Supported categories are `chat`, `task`, `workflow`, `automation` and `system`. Use the lowercase names as shown. Task and workflow reports require a task the device owns or its account is assigned. Invalid categories return HTTP 422. Each event receipt includes the cumulative stored counters and a `status` of `created`, `updated` (a counter increased), or `duplicate` (no counter increased).
+
+For chat usage, supply the local session ID in `sourceId` or `conversationId`. If both are present, they must match. A receipt keeps its original session on retries. Conflicting references return HTTP 422 for the batch. A report containing only an idempotency key can still count toward usage. Receipts and usage details expose the session ID with `sourceVerification: "verified"` when the Hub conversation directory matches the account, device and session. Until then they return empty IDs and `"unverified"`. Usage reported before conversation sync becomes attributable on the next read.
+
+- A new installation can connect before sign-in. The Hub saves its device ID and key digest after the employee signs in or an administrator pairs the device. Trusted devices renew their short-lived sessions with `POST /api/v1/clients/enroll`. Existing pre-v1 clients can use compatibility mode with an established credential. A fresh pre-v1 installation needs the current desktop client.
+- To pair a device, the employee copies a pairing code from the sign-in screen or Account Security and gives it directly to the administrator. In the device fleet, choose **Pair device**, select the employee and paste the code within ten minutes. The employee can then select **Retry connection** on the desktop. The Hub also requires a fresh code when activating a pending device or changing its owner. Reset a revoked device before requesting a new code.
 - Business requests use `Authorization: Device <session>`. WebSocket connectivity uses the same short-lived session at `/api/v1/ws`.
 - Tasks use `/api/v1/tasks`, task-specific operations, batch updates, completed-task clearing, and agent run/retry/takeover routes. Device preferences use `GET /api/v1/config?withRevision=true`. Send edited fields and the returned `_configRevision` to `PUT /api/v1/config`. The versioned response lists writable fields in `_configKeys`. Unknown fields and invalid values return 422, a stale revision returns 409, and replacing a previously saved value without a revision returns 428.
 - Administrators sign in at `/api/v1/admin/login` and use bearer tokens for administrator APIs, including clients, tasks, and dispatch. After 10 failed sign-ins for one account or 30 from one IP address within a five-minute window, the Hub returns HTTP 429 with the remaining wait in the `Retry-After` header (seconds). The database stores the counters across Hub workers. Failed attempts appear in the audit log as `admin.login.failed`.
@@ -355,6 +413,8 @@ See [OAuth deployment and validation](CONNECTOR_OAUTH.en.md) for connector crede
 ### Listing records
 
 Under `/api/v1`, `admin/users`, `admin/orgs`, `admin/roles`, `admin/domains`, `tasks` and `schedules` return their existing arrays when called without pagination. Supply `limit` (1–200) or `offset` (zero-based) to receive `{items, total}`. With only an offset, the page size defaults to 50. The total counts visible records before pagination. An offset past the end returns an empty page.
+
+`GET /api/v1/admin/ai-schedules/{sid}/runs` returns up to 20 recent runs by default. Pass an integer `limit` from 1 to 200. Values outside this range return HTTP 422.
 
 Use `GET /api/v1/admin/client-inventory` for an object containing `items`, `total`, `counts`, `page`, `pageSize` and `offset` on every call. Choose `page` and `pageSize` (1–100, default 25), or `offset` and `limit`. Existing callers of `admin/clients` can still request the legacy array or use `paged=1` for an object.
 
@@ -438,3 +498,7 @@ python3 e2e_dsh_private_probe.py \
 ```
 
 This explicit check uses the production private-probe job and ACP bridge, the installed adapter and host, and a synthetic loopback model. It first reproduces the old incorrect installation path, then requires a real model request and the expected Agent response with the corrected path. It uses disposable home, state and temporary directories, blocks non-loopback Node connections and cleans up its subprocesses. It does not install or update dependencies, use real credentials, or verify desktop UI, production Hub or provider behavior. Run it separately from the offline quality gate because it requires an existing native installation.
+
+## Model provider deletion
+
+With `integration.manage`, request `GET /api/v1/admin/model-providers/{id}/deletion-impact`. The result includes the provider and impact revisions, child models, and visible saved model selections. Member names require `user.manage` and issue titles require `task.view`; department visibility still applies. Submit the revisions as `expectedRevision` and `expectedImpact` plus the exact ID as `confirmId` to the existing `DELETE /api/v1/admin/model-providers/{id}`. Older delete requests without the preview return HTTP 428. On HTTP 409, retrieve a fresh preview and confirm again. Built-in services cannot be deleted.

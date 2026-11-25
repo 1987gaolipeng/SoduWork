@@ -7,12 +7,17 @@ const MARK = '\n…';
 // Compute collapsed added/removed line counts from full text with jsdiff.
 // Skip exact diff for oversized replacements and report edit counts to bound processing cost.
 const DIFF_BUDGET = 256 * 1024;
+const DIFF_TIME_MS = 50;
 let DIFF = null;
 try { DIFF = require('../../vendor/markdown/diff.min.js'); } catch (_) { DIFF = null; }
-function diffLineStat(oldText, newText) {
+function diffLineStat(oldText, newText, deadline) {
   if (!DIFF || typeof DIFF.diffLines !== 'function') return null;
+  const timeout = deadline - Date.now();
+  if (timeout <= 0) return null;
+  const changes = DIFF.diffLines(String(oldText || ''), String(newText || ''), { timeout });
+  if (!changes) return null;
   let added = 0, removed = 0;
-  DIFF.diffLines(String(oldText || ''), String(newText || '')).forEach((part) => {
+  changes.forEach((part) => {
     const lines = part.value.split('\n');
     if (lines.length && lines[lines.length - 1] === '') lines.pop();
     const count = part.count != null ? part.count : lines.length;
@@ -35,9 +40,12 @@ function editDiffSummary(args) {
   }
   const summary = { editCount: edits ? edits.length : 1 };
   if (budget > DIFF_BUDGET || !DIFF) return summary;
+  // Short lines can make an exact diff expensive below the text-size limit.
+  // Share one deadline across every edit instead of renewing it per part.
+  const deadline = Date.now() + DIFF_TIME_MS;
   let added = 0, removed = 0, ok = true;
   for (const part of parts) {
-    const stat = diffLineStat(part ? (part.oldText ?? part.old_string ?? '') : '', part ? (part.newText ?? part.new_string ?? '') : '');
+    const stat = diffLineStat(part ? (part.oldText ?? part.old_string ?? '') : '', part ? (part.newText ?? part.new_string ?? '') : '', deadline);
     if (!stat) { ok = false; break; }
     added += stat.added; removed += stat.removed;
   }
