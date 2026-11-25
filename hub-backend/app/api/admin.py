@@ -4,7 +4,6 @@ unassigned devices. Client.user_ref determines device ownership.
 """
 from datetime import date as calendar_date, datetime, timedelta, timezone
 import logging
-import uuid
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import case, func, or_, select, update
@@ -44,7 +43,7 @@ from ..services import inbox as inbox_svc
 from ..services import poller
 from ..services import rbac
 from ..services import client_access
-from ..services import storage
+from ..services import task_attachment_uploads
 from ..services import tasks as svc
 from ..services import work_catalog
 from ..services import device_auth
@@ -883,25 +882,10 @@ async def upload_task_attachment(
     vis = await _visible_client_ids(session, user)
     if vis is not None and t.owner_client_id not in vis:
         raise HTTPException(status_code=403, detail="超出作用域")
-    data = await file.read()
-    max_bytes = settings.attach_max_mb * 1024 * 1024
-    if len(data) > max_bytes:
-        raise HTTPException(status_code=413, detail=f"文件超过 {settings.attach_max_mb}MB 上限")
-    if not data:
-        raise HTTPException(status_code=400, detail="空文件")
-    fn = (file.filename or "file").replace("/", "_").replace("\\", "_").strip()[:200] or "file"
-    ct = file.content_type or "application/octet-stream"
-    # The column default is applied at flush; the storage key needs the id now.
-    a = Attachment(id=str(uuid.uuid4()), task_id=tid, filename=fn, content_type=ct, size=len(data),
-                   uploaded_by="admin:" + user.id)
-    a.storage_key = f"att/{tid}/{a.id}/{fn}"
-    a.backend = storage.put(a.storage_key, data, ct)
-    session.add(a)
-    await session.commit()
-    await session.refresh(a)
-    await audit.log(session, user, "task.attachment.upload", "attachment", a.id, fn,
-                    {"taskId": tid, "size": len(data),
-                     "contentType": ct[:120]})
+    a = await task_attachment_uploads.save(session, tid, file, settings=settings,
+                                          account_id=user.id, uploader="admin:" + user.id)
+    await audit.log(session, user, "task.attachment.upload", "attachment", a.id, a.filename,
+                    {"taskId": tid, "size": a.size, "contentType": a.content_type[:120]})
     return attachment_to_api(a)
 
 

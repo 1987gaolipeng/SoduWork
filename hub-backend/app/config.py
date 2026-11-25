@@ -150,6 +150,8 @@ class Settings(BaseSettings):
     minio_bucket: str = "file-storage"
     minio_secure: bool = True         # https
     attach_max_mb: int = 20           # Maximum size per file in MB.
+    attach_owner_quota_bytes: int | None = Field(default=None, ge=0)
+    attach_org_quota_bytes: int | None = Field(default=None, ge=0)
     # Independent document-library storage.
     # local is the default; remote selects the first fully configured protocol; auto falls back to local when none is configured.
     # Existing files retain their recorded backend; all backends isolate object keys by user hash.

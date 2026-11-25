@@ -1,13 +1,13 @@
 """Host isolation with real scoped discovery/API and stubbed execution transport.
 
-Imports the existing migrated temporary-DB fixture before app modules. No live
+Uses a private migrated database for each test. No live
 service, business database, vendor process or model credential is used.
 """
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-import test_handoff_target_diagnostics as fixture
+from handoff_test_support import HandoffFixture
 from fastapi import HTTPException
 from app import db, models
 from app.api import cloud_environments as environments_api
@@ -19,19 +19,7 @@ from app.services import (ai_exec, ai_local, ai_remote, cloud_conversations,
                           runner_hub)
 
 
-class HostPolicyTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        # Tests start with explicit compatibility settings, never the deployment
-        # .env. Per-case restrictions stack on this patch; cleanup restores the
-        # original process settings even if fixture setup or an assertion fails.
-        self.restrict(local=True)
-        await fixture.TargetDiagnosticsTests.asyncSetUp(self)
-
-    asyncTearDown = fixture.TargetDiagnosticsTests.asyncTearDown
-    live = fixture.TargetDiagnosticsTests.live
-    catalog = fixture.TargetDiagnosticsTests.catalog
-    enroll_personal = fixture.TargetDiagnosticsTests.enroll_personal
-
+class HostPolicyTests(HandoffFixture, unittest.IsolatedAsyncioTestCase):
     def restrict(self, *runner_ids, local=False):
         gate = patch.multiple(get_settings(), cloud_execution_runner_ids=','.join(runner_ids),
                               hub_local_execution_enabled=local)

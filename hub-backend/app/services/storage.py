@@ -184,7 +184,7 @@ def iter_stream(handle, chunk_size: int = 1024 * 1024):
                 release()
 
 
-def delete(key: str, backend: str) -> None:
+def delete(key: str, backend: str) -> bool:
     try:
         if backend == "minio":
             s = get_settings()
@@ -193,5 +193,6 @@ def delete(key: str, backend: str) -> None:
             p = _local_path(key)
             if os.path.exists(p):
                 os.remove(p)
+        return True
     except Exception:
-        pass  # Storage deletion failure must not block metadata removal.
+        return False  # Metadata deletion still succeeds; journaled cleanups can retry.

@@ -321,7 +321,13 @@ async def destination(session, client, options, source=None):
         llm = (ctx.get("localCfg") or ctx.get("cfg") or {}).get("llm") or {}
         if not all(llm.get(key) for key in ("base", "key", "model")):
             raise HTTPException(409, "请先为所选底座配置可用模型")
+        picked = {**picked, "managedModelSelection": ctx["_managedModelSelection"]}
     return picked
+
+
+def check_prepared_model(options, resolved):
+    if options.get("managedModelSelection") != resolved:
+        raise ValueError("交接确认后的执行模型或配置版本已变化，请重新准备并确认交接")
 
 
 async def committed_destination(session, client, options, source=None):
@@ -547,6 +553,8 @@ async def prepare(session, client, transfer_id, data, raw_options):
         # destination separately in options so every retry/commit uses one host.
         options["assigneeId"] = available[0]["id"]
     picked = await destination(session, client, options, source)
+    if "managedModelSelection" in picked:
+        options["managedModelSelection"] = picked["managedModelSelection"]
     options["targetSnapshot"] = {key: str(picked.get(key) or "") for key in
                                  ("name", "runnerName", "agentId", "modelMode", "runnerId", "host")}
     tid = str(uuid.uuid5(_NS, row_id + ":task"))
@@ -702,6 +710,10 @@ async def commit(session, client, transfer_id, sha256):
             return public(row)
     # Configuration/readiness failure is unambiguously before any dispatch.
     picked = await destination(session, client, row.options, row.source)
+    try:
+        check_prepared_model(row.options, picked.get("managedModelSelection"))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     now = datetime.now(timezone.utc)
     conditions = [Handoff.phase == "prepared"]
     if row.phase == "committing":

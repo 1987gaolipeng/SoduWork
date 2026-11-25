@@ -29,10 +29,14 @@ async def prepare(session, client, ctx: dict, assignee: dict,
                 raise ValueError("模型「%s」当前不可用，请重新选择可用模型" % wanted)
             # An empty resolution must not preserve disabled legacy credentials.
             raise ValueError("当前没有可用的执行模型，请检查模型服务、密钥和启用状态")
-        return ai_exec.with_llm(ctx, llm), native
+        out = ai_exec.with_llm(ctx, llm)
+        out["_managedModelSelection"] = {key: str(llm.get(key) or "") for key in
+                                         ("provider", "model", "configRevision", "runtimeRevision")}
+        return out, native
 
     # Native-account Agents must not inherit or report the shared model service model.
     out = dict(ctx or {})
+    out.pop("_managedModelSelection", None)
     for key in ("cfg", "localCfg"):
         if isinstance(out.get(key), dict):
             config = dict(out[key])

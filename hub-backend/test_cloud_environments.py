@@ -10,7 +10,7 @@ import zipfile
 from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
-from test_handoff_target_diagnostics import TargetDiagnosticsTests as _Base, WORK
+from handoff_test_support import HandoffFixture
 from app import db, models
 from app.api import cloud_environments as api
 from app.automation_models import ExecutionSession, RunnerNode
@@ -19,11 +19,11 @@ from app.services import ai_exec, ai_remote, conversation_handoffs, runner_hub, 
 from sqlalchemy import select
 
 
-class CloudEnvironmentsTests(_Base):
+class CloudEnvironmentsTests(HandoffFixture, unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.app.include_router(api.router)
-        storage._LOCAL_DIR = str(WORK / "isolated-uploads")
+        self.enterContext(patch.object(storage, "_LOCAL_DIR", str(self.work / "isolated-uploads")))
 
     async def manager(self):
         async with db.SessionLocal() as session:

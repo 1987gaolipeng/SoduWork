@@ -165,14 +165,6 @@ async def get_task(
     return r
 
 
-@router.post("/tasks/{tid}/prepare-execution")
-async def prepare_requirement_execution(
-    tid: str, client: Client = Depends(current_client), session: AsyncSession = Depends(get_session)
-):
-    from ..services import task_execution_claim
-    return await task_execution_claim.prepare(session, client, tid)
-
-
 @router.get("/tasks/{tid}/delivery-state")
 async def get_delivery_state(
     tid: str, client: Client = Depends(current_client), session: AsyncSession = Depends(get_session)
@@ -549,7 +541,11 @@ async def ai_dispatch_preview(
     if t is None or not _task_access.is_owner(t, client):
         raise HTTPException(status_code=404, detail="需求不存在")
     ctx = await ai_exec.load(session)
-    names = await ai_exec.list_task_file_names(session, tid)
+    try:
+        manifest, omitted = await ai_exec.preview_task_files(session, tid)
+    except ai_exec.TaskAttachmentError as error:
+        raise HTTPException(409, str(error)) from error
+    names = [entry["name"] for entry in manifest]
     extra = await ai_exec.collect_task_context(session, tid)
     extra["brief"] = str(body.get("brief") or "")[:2000]
     extra["files"] = names
@@ -560,13 +556,16 @@ async def ai_dispatch_preview(
     await _attach_skills(session, extra, extra["repo"], client)   # Include selected skills in the preview as they appear in execution.
     extra["extProjectId"] = await _ext_project_id(session, t)
     p = ai_exec.preview(t, ctx, extra)
+    if omitted:
+        p["description"] += "\n\n以下附件超过派发大小或数量限制，本次不发送：" + "、".join(omitted)
     prog = [x for x in (getattr(t, "progress", None) or [])
             if isinstance(x, dict) and (x.get("text") or "").strip()]
     return {"title": p["title"], "description": p["description"],
             "provider": ai_exec.provider_name(ctx),
             "carried": {"note": bool((t.note or "").strip()), "tags": len(getattr(t, "tags", None) or []),
                         "progress": len(prog), "comments": len(extra.get("comments") or []),
-                        "files": names, "brief": bool(extra["brief"].strip())}}
+                        "files": names, "inputManifest": manifest, "omittedFiles": omitted,
+                        "brief": bool(extra["brief"].strip())}}
 
 
 @router.post("/tasks/{tid}/conversation-turn")
@@ -836,21 +835,25 @@ async def batch_dispatch(
     from ..models import Milestone
     from ..services import ai_exec
     from ..services import task_events as ev
-    from ..services import tasks as tsvc
+    from ..services import batch_dispatch as batches
+    from ..services import task_requirements, task_status
 
-    ids = [str(x) for x in (body.get("taskIds") or []) if str(x).strip()][:20]
+    ids = list(dict.fromkeys(str(x).strip() for x in (body.get("taskIds") or []) if str(x).strip()))[:20]
     if len(ids) < 2:
         raise HTTPException(status_code=400, detail="至少选两条才谈得上合并")
-    locked = {}
-    for tid in sorted(set(ids)):
-        await task_access.reserve_task_write(session, tid, client.id)
-        t = await session.get(Task, tid, with_for_update=True, populate_existing=True)
-        if t is None or not task_access.is_owner(t, client):
-            raise HTTPException(status_code=404, detail="Task is not owned by this account: " + tid)
+    rows = await batches.lock_members(session, ids, client)
+    request_key = batches.request_key(client, ids, body, _repo_ctx(body))
+    existing = await batches.receipt(session, client, rows, request_key)
+    if existing is not None:
+        await session.commit()
+        return existing
+    for t in rows:
         if t.status in ("done", "cancel"):
             raise HTTPException(status_code=400, detail=f"Task {t.title!r} is already closed")
-        locked[tid] = t
-    rows = [locked[tid] for tid in ids]
+        try:
+            task_requirements.ensure_executable(t)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
     # Merge only within one project because execution and parallel work are scoped to a repository.
     # Combining separate repositories would force one agent to switch between unrelated workspaces.
     pids = {getattr(t, "project_id", None) for t in rows}
@@ -929,37 +932,43 @@ async def batch_dispatch(
     except ValueError as error:
         raise HTTPException(409, str(error)) from error
     # Source-task milestones already define the batch plan; do not generate a second decomposition.
-    r = await _aio.to_thread(ai_exec.dispatch_sync, ctx, batch, None, picked, extra)
-    if not r.get("ok"):
-        raise HTTPException(status_code=502, detail="批量安排执行失败：" + str(r.get("error"))[:120])
-    ev.record(session, batch.id, ai_exec.EV_DISPATCHED,
-               {"ref": r.get("issueId", ""), "issueId": r.get("issueId", ""),
-                "identifier": r.get("identifier", ""), "url": r.get("url", ""), "by": who,
-                "provider": r.get("provider", ""), "batch": len(rows),
-                "runnerId": r.get("runnerId", ""), "host": r.get("host", ""),
-                "assigneeId": r.get("assigneeId", "") or aid,
-                "assigneeType": r.get("assigneeType", "agent"),
-               "assigneeName": r.get("assigneeName", ""), "assigneeCli": r.get("assigneeCli", "")},
-              actor=who)
-    from ..services import execution_sessions as _es
-    await _es.record_dispatch(session, batch, r)
     ev.record(session, batch.id, "ai.plan_set",
               {"count": len(rows), "skipped": 0, "titles": [t.title for t in rows][:12],
                "batch": True}, actor=who)
+    attempt_id = await batches.reserve(session, batch, ids, request_key, who, aid, atype,
+                                       str(body.get("model") or ""), picked)
+    extra["dispatchId"] = attempt_id
+    try:
+        r = await _aio.to_thread(ai_exec.dispatch_sync, ctx, batch, None, picked, extra)
+    except Exception as error:
+        r = {"ok": False, "uncertain": True, "error": type(error).__name__}
+    await task_access.reserve_task_write(session, batch.id, client.id)
+    batch = await session.get(Task, batch.id, with_for_update=True, populate_existing=True)
+    pending = await batches.settle(session, batch, len(rows), who, aid, picked, r)
     # Record the batch association on each source task for traceability.
-    for t in rows:
+    for tid in sorted(ids):
+        await task_access.reserve_task_write(session, tid, client.id)
+        t = await session.get(Task, tid, with_for_update=True, populate_existing=True)
+        if t is None or not task_access.is_owner(t, client):
+            continue
         ev.record(session, t.id, "ai.batched",
                   {"batchId": batch.id, "batchTitle": title, "n": len(rows)}, actor=who)
+        try:
+            task_requirements.ensure_executable(t)
+        except ValueError:
+            continue
         if t.status == "todo":
-            from ..services import task_status
             await task_status.mark(session, t, "doing", why="并入合并批次")
     await session.commit()
     # Push both the server-created batch task and changed source tasks to clients.
     # Clients must observe authoritative changes rather than retaining stale task status.
     await _push_task(session, batch, created=True)
-    for t in rows:
-        await _push_task(session, t, created=False)
-    return {"ok": True, "batchId": batch.id, "count": len(rows),
+    for tid in ids:
+        t = await session.get(Task, tid)
+        if t is not None and task_access.is_owner(t, client):
+            await _push_task(session, t, created=False)
+    return {"ok": True, "batchId": batch.id, "count": len(rows), "attemptId": attempt_id,
+            "pending": pending, "state": "confirming" if pending else "running",
             "identifier": r.get("identifier", "")}
 
 

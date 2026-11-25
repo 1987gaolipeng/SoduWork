@@ -94,7 +94,10 @@ async def candidates(session: AsyncSession, *, now: datetime | None = None,
     ))
     rows = list((await session.execute(
         select(event).join(models.Task, models.Task.id == event.task_id).where(
-            event.kind == ai_exec.EV_DISPATCH_UNCERTAIN,
+            or_(event.kind == ai_exec.EV_DISPATCH_UNCERTAIN, and_(
+                event.kind == ai_exec.EV_DISPATCH_STARTED,
+                event.detail["recoverReceipt"].as_boolean().is_(True),
+                event.at <= now - timedelta(minutes=10))),
             event.at <= now - timedelta(seconds=PROBE_AFTER_SECONDS),
             models.Task.status.in_(("todo", "doing")),
             ~newer_state,
@@ -168,9 +171,12 @@ async def _latest_state(session: AsyncSession, task_id: str):
 
 
 def _same_attempt(event, candidate: Candidate) -> bool:
-    if event is None or event.kind != ai_exec.EV_DISPATCH_UNCERTAIN:
+    if event is None:
         return False
     detail = dict(event.detail or {})
+    if event.kind != ai_exec.EV_DISPATCH_UNCERTAIN and not (
+            event.kind == ai_exec.EV_DISPATCH_STARTED and detail.get("recoverReceipt")):
+        return False
     return (str(detail.get("attemptId") or "") == candidate.attempt_id
             and str(detail.get("expectedRef") or "") == candidate.expected_ref)
 

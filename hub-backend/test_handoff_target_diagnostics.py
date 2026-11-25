@@ -3,98 +3,17 @@
 Only live Runner presence is simulated. No vendor process, service, credentials
 or business database is used; these tests cover visibility and explanations.
 """
-import os
-from pathlib import Path
-import tempfile
 import unittest
-import uuid
 from unittest.mock import patch, PropertyMock
 
-WORK = Path(tempfile.mkdtemp(prefix="soduwork-handoff-targets-"))
-os.environ.update(
-    DATABASE_URL="sqlite+aiosqlite:///" + (WORK / "test.db").as_posix(),
-    AUTH_SECRET="handoff-target-test-secret-not-a-real-credential",
-    REDIS_URL="", CLUSTER_REDIS_URL="", HUB_CLUSTER_MODE="single",
-    MINIO_ENDPOINT="", DEVICE_AUTH_COMPAT="false", DB_MIGRATION_MODE="auto",
-    CLOUD_EXECUTION_RUNNER_IDS="", HUB_LOCAL_EXECUTION_ENABLED="true",
-    SODUWORK_DATA_ROOT=str(WORK / "data"),
-)
-
-import httpx
-from fastapi import FastAPI
-from sqlalchemy import delete, select
+from handoff_test_support import HandoffFixture
+from sqlalchemy import select
 from app import db, models
 from app.automation_models import RunnerNode
-from app.api import conversation_handoffs as api
-from app.services import device_auth, runner_hub
 from app.services.cluster_bus import bus
 
 
-class TargetDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        await db.init_db()
-        self.prefix = uuid.uuid4().hex[:12]
-        self.org = self.prefix + "-org"
-        self.foreign_org = self.prefix + "-foreign"
-        self.user_id = self.prefix + "-owner"
-        self.client_id = self.prefix + "-desktop"
-        self.other_id = self.prefix + "-other-own-device"
-        self.colleague_id = self.prefix + "-colleague-device"
-        self.foreign_client_id = self.prefix + "-foreign-device"
-        async with db.SessionLocal() as session:
-            user = models.User(id=self.user_id, username=self.user_id, org_id=self.org, is_active=True)
-            client = models.Client(id=self.client_id, user_ref=user.id, auth_state="active")
-            session.add_all([
-                models.OrgUnit(id=self.org, name="Target test team"),
-                models.OrgUnit(id=self.foreign_org, name="Other test organization"), user, client,
-                models.User(id=self.prefix + "-colleague", username=self.prefix + "-colleague",
-                            org_id=self.org, is_active=True),
-                models.User(id=self.prefix + "-foreign-owner", username=self.prefix + "-foreign-owner",
-                            org_id=self.foreign_org, is_active=True),
-                models.Client(id=self.other_id, user_ref=user.id, auth_state="active"),
-                models.Client(id=self.colleague_id, user_ref=self.prefix + "-colleague", auth_state="active"),
-                models.Client(id=self.foreign_client_id, user_ref=self.prefix + "-foreign-owner", auth_state="active"),
-            ])
-            await session.commit()
-        token = device_auth.issue_session(client)[0]
-        self.app = FastAPI()
-        self.app.include_router(api.router)
-        self.http = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://isolated",
-                                     headers={"Authorization": "Device " + token})
-        runner_hub._RUNNERS.clear()
-
-    async def asyncTearDown(self):
-        runner_hub._RUNNERS.clear()
-        await self.http.aclose()
-        async with db.SessionLocal() as session:
-            await session.execute(delete(RunnerNode).where(RunnerNode.id.startswith(self.prefix)))
-            await session.commit()
-        await db.engine.dispose()
-
-    def live(self, name, *, client_id="", org_id=None):
-        rid = self.prefix + "-" + name
-        node = runner_hub._Runner(None, {
-            "runnerId": rid, "host": name, "workRoot": str(WORK / "remote-work"),
-            "agents": [{"key": "codex", "auth": "authed"}], "caps": ["handoff1"],
-            "capabilities": {"available": ["files", "terminal"]},
-        })
-        node.client_id, node.org_id = client_id, self.org if org_id is None else org_id
-        node.ready, node.inventory_ready, node.dispatch_mode = True, True, "accepting"
-        node.alive = lambda: True
-        runner_hub._RUNNERS[rid] = node
-        return node
-
-    async def catalog(self):
-        reply = await self.http.get("/api/v1/conversation-handoffs/targets")
-        self.assertEqual(reply.status_code, 200, reply.text)
-        return reply.json()
-
-    async def enroll_personal(self, node):
-        node.owner_user_id = self.user_id
-        async with db.SessionLocal() as session:
-            session.add(RunnerNode(id=node.id, org_id=self.org, owner_user_id=self.user_id))
-            await session.commit()
-
+class TargetDiagnosticsTests(HandoffFixture, unittest.IsolatedAsyncioTestCase):
     async def test_current_device_offline_scope_and_get_is_read_only(self):
         local = self.live("current", client_id=self.client_id)
         self.live("private-colleague", client_id=self.colleague_id)

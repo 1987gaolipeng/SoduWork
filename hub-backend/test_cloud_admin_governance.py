@@ -6,29 +6,21 @@ read actual credentials or connect to the user's running services.
 import unittest
 from unittest.mock import patch
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
-from test_handoff_target_diagnostics import TargetDiagnosticsTests as Base
+from handoff_test_support import HandoffFixture
 from app import auth, db, models
 from app.api import cloud_environments, runner_ws
 from app.automation_models import ExecutionSession, RunnerNode
 from app.services import runner_enroll, runner_hub, runner_registry
 
 
-class CloudAdminGovernanceTests(Base):
+class CloudAdminGovernanceTests(HandoffFixture, unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.app.include_router(runner_ws.router)
         self.app.include_router(cloud_environments.router)
         self.admin_headers = {"Authorization": "Bearer " + auth.sign_token(self.user_id)}
-
-    async def asyncTearDown(self):
-        # Enrollment generates its own ids, so the base's prefix cleanup alone
-        # cannot remove these isolated nodes between inherited super-user tests.
-        async with db.SessionLocal() as session:
-            await session.execute(delete(RunnerNode).where(RunnerNode.org_id == self.org))
-            await session.commit()
-        await super().asyncTearDown()
 
     async def grant_manager(self):
         async with db.SessionLocal() as session:

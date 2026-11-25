@@ -908,56 +908,75 @@ def preview(t, ctx: dict, extra: dict | None = None) -> dict:
 
 # Provider-independent SoduWork orchestration.
 
-async def collect_task_files(session, task_id: str, limit: int = 5,
-                             max_mb: int = 10) -> list[tuple[str, bytes, str]]:
-    """Collect human-uploaded task attachments as name, bytes, and content type. Exclude
-    agent-prefixed uploaders to avoid feeding previous AI outputs back as inputs.
-    """
-    from sqlalchemy import select as _sel
+class TaskAttachmentError(ValueError):
+    """A selected task input could not be delivered intact."""
 
-    from .. import models
+
+async def select_task_files(session, task_id: str, limit: int = 5, max_mb: int = 10):
+    from ..models import Attachment
+
+    rows = await session.scalars(select(Attachment).where(Attachment.task_id == task_id)
+                                 .order_by(Attachment.created_at, Attachment.id))
+    selected, omitted = [], []
+    for row in rows:
+        if str(row.uploaded_by or "").startswith("agent:"):
+            continue
+        if row.size > max_mb * 1024 * 1024 or len(selected) >= limit:
+            omitted.append(row.filename)
+        else:
+            selected.append(row)
+    return selected, omitted
+
+
+def _read_task_file(row):
+    import hashlib
+    from contextlib import closing
     from . import storage
-    rows = (await session.execute(
-        _sel(models.Attachment).where(models.Attachment.task_id == task_id)
-        .order_by(models.Attachment.created_at)
-    )).scalars().all()
-    out: list[tuple[str, bytes, str]] = []
-    for a in rows:
-        if str(a.uploaded_by or "").startswith("agent:"):
-            continue
-        if a.size and a.size > max_mb * 1024 * 1024:
-            continue
-        try:
-            data = storage.get(a.storage_key, a.backend)
-        except Exception:  # noqa: BLE001 - Skip unavailable attachments without failing dispatch.
-            continue
-        out.append((a.filename, data, a.content_type or "application/octet-stream"))
-        if len(out) >= limit:
-            break
-    return out
+
+    data = bytearray()
+    try:
+        with closing(storage.iter_stream(storage.open_stream(row.storage_key, row.backend))) as chunks:
+            for chunk in chunks:
+                if len(data) + len(chunk) > row.size:
+                    raise TaskAttachmentError(f"需求附件「{row.filename}」大小与上传记录不一致")
+                data.extend(chunk)
+    except TaskAttachmentError:
+        raise
+    except Exception as exc:
+        raise TaskAttachmentError(f"无法读取需求附件「{row.filename}」，请恢复或重新上传") from exc
+    digest = hashlib.sha256(data).hexdigest()
+    expected = (row.evidence_meta or {}).get("sha256")
+    if len(data) != row.size or (expected and digest != expected):
+        raise TaskAttachmentError(f"需求附件「{row.filename}」内容与上传记录不一致")
+    return ((row.filename, bytes(data), row.content_type or "application/octet-stream"),
+            {"id": row.id, "name": row.filename, "size": len(data), "sha256": digest})
 
 
-async def list_task_file_names(session, task_id: str, limit: int = 5, max_mb: int = 10) -> list[str]:
-    """Collect preview file names without reading contents, using the same filtering rules as
-    collect_task_files.
-    """
-    from sqlalchemy import select as _sel
+async def preview_task_files(session, task_id: str):
+    import asyncio
+    selected, omitted = await select_task_files(session, task_id)
+    manifest = []
+    for row in selected:
+        digest = (row.evidence_meta or {}).get("sha256")
+        if digest:
+            entry = {"id": row.id, "name": row.filename, "size": row.size, "sha256": digest}
+        else:
+            # Earlier uploads have no recorded checksum. Bind the preview to their actual bytes.
+            _, entry = await asyncio.to_thread(_read_task_file, row)
+        manifest.append(entry)
+    return manifest, omitted
 
-    from .. import models
-    rows = (await session.execute(
-        _sel(models.Attachment).where(models.Attachment.task_id == task_id)
-        .order_by(models.Attachment.created_at)
-    )).scalars().all()
-    out = []
-    for a in rows:
-        if str(a.uploaded_by or "").startswith("agent:"):
-            continue
-        if a.size and a.size > max_mb * 1024 * 1024:
-            continue
-        out.append(a.filename)
-        if len(out) >= limit:
-            break
-    return out
+
+async def collect_task_files(session, task_id: str, limit: int = 5,
+                             max_mb: int = 10):
+    import asyncio
+    selected, _ = await select_task_files(session, task_id, limit, max_mb)
+    files, manifest = [], []
+    for row in selected:
+        payload, entry = await asyncio.to_thread(_read_task_file, row)
+        files.append(payload)
+        manifest.append(entry)
+    return files, manifest
 
 
 async def collect_task_context(session, task_id: str, limit: int = 5) -> dict:

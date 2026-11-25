@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am, models
 from ..db import SessionLocal
-from . import (agent_route_selection, ai_exec, ai_remote, environment_service,
+from . import (agent_route_selection, ai_exec, ai_remote, artifact_bytes, environment_service,
                plugin_runtime, workflow_inputs)
 
 
@@ -377,11 +377,15 @@ async def refresh(session: AsyncSession, row: am.PluginEvaluationRun) -> am.Plug
     elif not status.get("ok"):
         unavailable = str(status.get("error") or "无法取得执行状态")
     elif status.get("done"):
-        result = await _collect_result(session, row, status, provider, ctx, route)
-        if result is None:
-            unavailable = "暂时无法取回执行产物"
+        try:
+            result = await _collect_result(session, row, status, provider, ctx, route)
+        except artifact_bytes.ArtifactTooLarge as exc:
+            changes.update(state="failed", error=str(exc))
         else:
-            changes.update(state="completed", error="", result=result)
+            if result is None:
+                unavailable = "暂时无法取回执行产物"
+            else:
+                changes.update(state="completed", error="", result=result)
     if unavailable:
         since = stamp
         if previous.get("ok") is False:

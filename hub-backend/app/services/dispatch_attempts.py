@@ -64,7 +64,7 @@ def _agent_detail(requested_id: str, picked: dict | None = None) -> dict:
 
 async def start(session: AsyncSession, task_id: str, actor: str,
                 requested_id: str = "", requested_type: str = "",
-                model: str = "", *, stable_id: str = "") -> str:
+                model: str = "", *, stable_id: str = "", recovery_route: dict | None = None) -> str:
     """Persist the intent before touching a Runner and return its correlation id."""
     attempt_id = dispatch_identity.clean_dispatch_id(stable_id) or uuid.uuid4().hex
     detail = {
@@ -78,6 +78,12 @@ async def start(session: AsyncSession, task_id: str, actor: str,
         "model": str(model or "")[:180],
         "retryable": True,
     }
+    if recovery_route is not None:
+        detail.update(_agent_detail(requested_id, recovery_route))
+        detail["recoverReceipt"] = True
+        # Before the transport has returned, a negative existence probe cannot
+        # prove that the request is no longer in flight.
+        detail["runnerBootId"] = ""
     task_events.record(session, task_id, ai_exec.EV_DISPATCH_STARTED, detail, actor=actor)
     await session.commit()
     return attempt_id
@@ -140,7 +146,7 @@ def _existing_receipt(event, task_status: str, execution_state, now: datetime) -
         at = at.replace(tzinfo=timezone.utc)
     age = now - at if isinstance(at, datetime) else None
     if (event.kind == ai_exec.EV_DISPATCH_STARTED and age is not None
-            and age > timedelta(minutes=10)):
+            and age > timedelta(minutes=10) and not detail.get("recoverReceipt")):
         return None
     if (event.kind in ai_exec.KINDS_DISPATCHED and task_status == "todo"
             and age is not None and age > timedelta(minutes=10)):
@@ -212,6 +218,14 @@ async def failed(session: AsyncSession, task_id: str, actor: str, attempt_id: st
                  picked: dict | None = None, retryable: bool = True) -> dict:
     """Rollback partial DB mutations, then durably record the failed attempt."""
     await session.rollback()
+    detail = record_failure(session, task_id, actor, attempt_id, phase, error, requested_id, picked, retryable)
+    await session.commit()
+    return detail
+
+
+def record_failure(session, task_id, actor, attempt_id, phase, error, requested_id="", picked=None,
+                   retryable=True) -> dict:
+    """Record a definite rejection in the caller's outcome transaction."""
     key = phase if phase in PHASE_NAMES else "unknown"
     message = public_error(error)
     detail = {
@@ -224,7 +238,6 @@ async def failed(session: AsyncSession, task_id: str, actor: str, attempt_id: st
         **_agent_detail(requested_id, picked),
     }
     task_events.record(session, task_id, ai_exec.EV_DISPATCH_FAILED, detail, actor=actor)
-    await session.commit()
     return detail
 
 

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
 from . import ai_exec as _exec
-from . import file_io
+from . import artifact_bytes, artifact_staging, file_io
 
 log = _exec.log
 KINDS_ARTIFACTS = _exec.KINDS_ARTIFACTS
@@ -35,7 +35,7 @@ def _read_local_artifact(wd: str, name: str) -> bytes | None:
         if os.path.commonpath([root, candidate]) != root or not os.path.isfile(candidate):
             return None
         with open(candidate, "rb") as stream:
-            return stream.read()
+            return artifact_bytes.read(stream)
     except (OSError, ValueError):
         return None
 
@@ -52,15 +52,12 @@ async def pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, re
     Remote callers must enter without unrelated database write locks: this
     service never commits an enclosing business intent before slow retrieval.
     """
-    try:
-        return await _pull_artifacts(session, tid, ctx, s, ref, settle)
-    except BaseException:
-        await session.rollback()
-        raise
+    async with artifact_staging.operation(session, tid) as objects:
+        return await _pull_artifacts(session, tid, ctx, s, ref, settle, objects)
 
 
-async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, ref: str = "",
-                          settle: bool = True) -> dict:
+async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, ref: str,
+                          settle: bool, objects: artifact_staging.ObjectList) -> dict:
     """Idempotently import AI files and URLs into the task, record ai.artifacts, and notify the
     creator for review. Adapters only provide artifact bytes.
     """
@@ -138,6 +135,7 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
     received, valid, deliverables, evidence, ignored, invalid, known_urls = await receipts_now()
     got: list[str] = []
     staged = []
+    oversized = {}
     # For local execution, prefer reading the original workspace file.
     # Process-specific transparent encryption can make another uploader read encrypted bytes.
     # The authorized backend process may read the plaintext from the same path.
@@ -163,18 +161,21 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
         fn = delivery_manifest.normalize_name(a.get("filename") or "")
         if not fn or fn in received:
             continue                                  # Deduplicate within one execution only; rework outputs with the same name create a new version.
-        data = None
-        if wd:
-            data = await file_io.run(_read_local_artifact, wd, fn)
-        if data is None:
-            _fp = _ref_provider or _p(ctx)
-            # Use execution-scoped artifact retrieval whenever a ref is available.
-            # Relative paths such as index.html can repeat across concurrent tasks.
-            if ref and hasattr(_fp, "fetch_attachment_for_sync"):
-                data = await _aio.to_thread(
-                    _fp.fetch_attachment_for_sync, _cfg_of(ctx, _fp), ref, a["id"])
-            else:
-                data = await _aio.to_thread(_fp.fetch_attachment_sync, _cfg_of(ctx, _fp), a["id"])
+        try:
+            data = await file_io.run(_read_local_artifact, wd, fn) if wd else None
+            if data is None:
+                _fp = _ref_provider or _p(ctx)
+                # Relative paths can repeat across executions. Prefer a scoped lookup.
+                if ref and hasattr(_fp, "fetch_attachment_for_sync"):
+                    data = await _aio.to_thread(
+                        _fp.fetch_attachment_for_sync, _cfg_of(ctx, _fp), ref, a["id"])
+                else:
+                    data = await _aio.to_thread(_fp.fetch_attachment_sync, _cfg_of(ctx, _fp), a["id"])
+            if data is not None and len(data) > artifact_bytes.MAX_BYTES:
+                raise artifact_bytes.ArtifactTooLarge(artifact_bytes.MAX_BYTES)
+        except artifact_bytes.ArtifactTooLarge as error:
+            oversized[fn] = str(error)
+            continue
         if data is None:
             continue
         import mimetypes
@@ -200,8 +201,8 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
             role = "process"
             ignored.add(fn)
             valid.add(fn)  # Explicit file contracts may accept types that generic evidence classification does not.
-        key = f"ai/{tid}/{_uuid.uuid4().hex[:8]}-{fn}"
-        backend = await _aio.to_thread(storage.put, key, data, ctype)
+        key = f"ai/{tid}/{_uuid.uuid4().hex}-{fn}"
+        backend = await file_io.run(objects.store, storage.put, key, data, ctype)
         # The existing receipt is the primary idempotency record. A stable
         # primary key also fences an insert racing a stale transaction snapshot.
         identity = ({"id": str(_uuid.uuid5(_uuid.NAMESPACE_URL, "soduwork:artifact:" + json.dumps(
@@ -222,14 +223,14 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
         received.add(fn)
     # Downloads and object uploads finish before the first ingestion write.
     # Re-read committed facts, then let the primary key arbitrate any final race.
+    await objects.before_insert(session)
     received, valid, deliverables, evidence, ignored, invalid, known_urls = await receipts_now()
-    got, inserted, discarded = [], [], []
+    got, inserted = [], []
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from sqlalchemy.dialects.sqlite import insert as sqlite_insert
     factory = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
     for values in staged:
         if values["filename"] in received:
-            discarded.append((values["storage_key"], values["backend"]))
             continue
         statement = factory(Attachment).values(**values).on_conflict_do_nothing(index_elements=["id"])
         result = await session.execute(statement)
@@ -243,7 +244,6 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
                     or int(old_meta.get("round") or 0) != round_no
                     or old_meta.get("sha256") != values["evidence_meta"]["sha256"]):
                 raise ValueError("Conflicting artifact identity or bytes for the same execution turn")
-            discarded.append((values["storage_key"], values["backend"]))
     # A conflicting inserter committed its attachment and receipt together.
     received, valid, deliverables, evidence, ignored, invalid, known_urls = await receipts_now()
     for values in inserted:
@@ -270,13 +270,16 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
                       if a.get("filename")} - received)
     _dropped = int(s.get("artifactsDropped") or 0) + max(0, len(_atts) - _ATT_CAP)
 
-    async def cleanup_discarded():
-        for key, backend in discarded:
-            try:
-                await _aio.to_thread(storage.delete, key, backend)
-            except Exception:
-                log.warning("Unreferenced duplicate output cleanup deferred for task %s", tid)
-        discarded.clear()
+    if oversized:
+        # A rejected file may be replaced and collected on a later retry. It is
+        # never marked as received and must not poison the next valid receipt.
+        latest = await session.scalar(select(TaskEvent).where(
+            TaskEvent.task_id == tid, TaskEvent.kind == "artifact.delivery_rejected"
+        ).order_by(TaskEvent.at.desc(), TaskEvent.id.desc()).limit(1))
+        rejected = {"ref": ref, "round": round_no, "files": sorted(oversized),
+                    "reason": next(iter(oversized.values()))}
+        if latest is None or latest.detail != rejected:
+            task_events.record(session, tid, "artifact.delivery_rejected", rejected, actor=who)
 
     if got or new_url or new_url_receipt:
         # Record excluded artifact counts in the timeline so incomplete delivery remains visible.
@@ -293,10 +296,9 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
                                                "（都在执行机的工作目录里）" % (len(got), _dropped)}
                                if _dropped else {})}, actor=who)
         await session.commit()
-        await cleanup_discarded()
         # Plugin nodes retain their own review gates; only a settled ordinary
         # execution may enter the shared submission path.
-        if not settle:
+        if not settle and not oversized:
             return {"files": len(got), "url": url, "received": sorted(received),
                     "valid": sorted(valid), "deliverables": sorted(deliverables),
                     "evidence": sorted(evidence), "ignored": sorted(ignored),
@@ -308,7 +310,11 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
     mode = normalize_submission_mode((t.work_routing or {}).get("executionSubmissionMode"),
                                      fallback=default_submission_mode(t))
     submission_error = ""
-    if (settle and s.get("done") and (received or url) and not _source_run
+    if oversized:
+        invalid.extend({"name": name, "reason": reason} for name, reason in oversized.items())
+        submission_error = rejected["reason"]
+        await session.commit()
+    elif (settle and s.get("done") and (received or url) and not _source_run
             and t.status not in {"done", "cancel"} and mode == "auto"):
         from . import delivery_validation
         repaired = await delivery_validation.recheck_components(session, tid, source_ref=ref, round_no=round_no)
@@ -367,7 +373,6 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
     elif staged:
         # Release a successful no-op conflict transaction before any library RPC.
         await session.commit()
-    await cleanup_discarded()
     return {"files": len(got), "url": url, "received": sorted(received),
             "valid": sorted(valid), "deliverables": sorted(deliverables),
             "evidence": sorted(evidence), "ignored": sorted(ignored),

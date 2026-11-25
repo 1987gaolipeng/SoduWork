@@ -11,6 +11,20 @@ from app import models, automation_models as am
 from test_unified_requirements import UnifiedRequirementTests
 
 
+class ExecutionClaimRouteTests(unittest.TestCase):
+    def test_prepare_execution_has_one_route_and_retains_its_openapi_operation(self):
+        from fastapi import FastAPI
+        from app.api.tasks import router
+
+        path = "/api/v1/tasks/{tid}/prepare-execution"
+        matches = [route for route in router.routes if getattr(route, "path", None) == path and "POST" in route.methods]
+        self.assertEqual([route.endpoint.__name__ for route in matches], ["prepare_task_execution"])
+        app = FastAPI()
+        app.include_router(router)
+        operation = app.openapi()["paths"][path]["post"]
+        self.assertEqual(operation["operationId"], "prepare_task_execution_api_v1_tasks__tid__prepare_execution_post")
+
+
 class RequirementExecutionClaimTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = UnifiedRequirementTests.asyncSetUp
     asyncTearDown = UnifiedRequirementTests.asyncTearDown

@@ -53,6 +53,18 @@ class AdminTaskAttachmentTests(unittest.IsolatedAsyncioTestCase):
     async def test_equal_size_uploads_do_not_silently_change_the_first_file(self):
         await self.assert_independent_uploads(b"version A", b"version B")
 
+    async def test_administrator_and_device_uploads_share_the_account_limit(self):
+        with patch.object(admin.settings, "attach_owner_quota_bytes", 4):
+            saved = await self.upload(b"abcd")
+            async with self.sessions() as session:
+                row = await session.get(models.Attachment, saved["id"])
+                self.assertEqual(row.uploaded_by, "admin:owner")
+                self.assertNotIn("ownerUserId", row.evidence_meta)
+            denied = await unified.UnifiedRequirementTests.call(
+                self, "POST", "tasks/shared/attachments", files={"file": ("x.txt", b"x", "text/plain")})
+            self.assertEqual(denied.status_code, 413, denied.text)
+            self.assertEqual(denied.json()["detail"], "attachment_owner_quota_exceeded")
+
     async def test_desktop_upload_keeps_long_filename_and_content(self):
         task_id = "attachment-verification-332"
         async with self.sessions() as session:

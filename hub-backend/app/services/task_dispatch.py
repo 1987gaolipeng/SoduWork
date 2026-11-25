@@ -287,14 +287,20 @@ async def dispatch(tid, body, client, session, *, actor=None):
         ctx, agent_execution = await task_execution_model.prepare(
             session, client, ctx, picked, str(body.get("model") or ""),
             str(body.get("reasoningEffort") or ""))
+        if handoff:
+            conversation_handoffs.check_prepared_model(handoff.options, ctx.get("_managedModelSelection"))
     except ValueError as error:
         await _fail("configuration", str(error), 409, False)
     except Exception as error:  # noqa: BLE001 - never launch with an unrelated model
         await _fail("configuration", "读取执行模型配置失败：" + type(error).__name__, 502)
     try:
-        files = await ai_exec.collect_task_files(session, tid)   # Include requirement documents and screenshots in the AI context.
-
+        # Handoffs load their own verified archive or cloud input manifest below.
+        files, input_manifest = ([], []) if handoff else await ai_exec.collect_task_files(session, tid)
+        if not handoff and "inputManifest" in body and body["inputManifest"] != input_manifest:
+            raise ai_exec.TaskAttachmentError("需求附件自预览后已变化，请重新预览后再派发")
         extra = await ai_exec.collect_task_context(session, tid)
+    except ai_exec.TaskAttachmentError as error:
+        await _fail("context", str(error), 409, False)
     except Exception as error:  # noqa: BLE001
         await _fail("context", "整理需求说明和附件失败：" + str(error), 502)
     extra["brief"] = conversation_brief
@@ -371,6 +377,7 @@ async def dispatch(tid, body, client, session, *, actor=None):
                            "tags": len(getattr(t, "tags", None) or []),
                            "progress": len(_prog), "comments": len(extra.get("comments") or []),
                            "files": [f[0] for f in files][:r.get("files", 0)],
+                           **({"inputManifest": input_manifest} if input_manifest else {}),
                            "brief": "" if handoff and handoff.options.get("contentRef") else extra["brief"].strip()[:300]}}, actor=who)
     from ..services import execution_sessions as _es
     await _es.record_dispatch(session, t, r)   # Persist the execution at dispatch so routing does not depend on event details alone.
