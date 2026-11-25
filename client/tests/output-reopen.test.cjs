@@ -136,17 +136,18 @@ test('Runner keeps the project cwd but only freezes files staged for this conver
   const workspaces = require('../main/conversation/delivery-workspace.cjs');
   const deliveryWorkspace = workspaces.allocate(cwd);
   const other = workspaces.allocate(cwd);
-  const start = Date.now();
-  let handle;
+  let handle, start;
   const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime('opencode'),
     modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'fixture', key: 'fixture' } }) },
     runnerRuntime: { async rpc(op, params) {
       if (op === 'job.dispatch') {
         assert.equal(params.ctx.workDir, cwd);
         assert.ok(params.task.note.includes(deliveryWorkspace.key));
+        start = Date.now();
         fs.writeFileSync(path.join(cwd, 'source.md'), 'requested edit');
+        // Give both outputs the dispatch timestamp so only the conversation directory distinguishes them.
         for (const [assignment, content] of [[other, 'foreign'], [deliveryWorkspace, 'own']]) {
-          fs.writeFileSync(path.join(workspaces.ensure(cwd, assignment), 'index.html'), content);
+          put(workspaces.ensure(cwd, assignment), 'index.html', content, start);
         }
         return { ok: true, data: { ref: handle.sessionId } };
       }
