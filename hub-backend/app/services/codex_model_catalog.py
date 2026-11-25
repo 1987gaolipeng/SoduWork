@@ -12,6 +12,7 @@ import threading
 import time
 
 from .acp_process import OwnedProcessGroup, close_process
+from . import cli_account_auth
 from .native_history_archive import stamp
 
 _TIMEOUT = 5.0
@@ -67,12 +68,12 @@ def _environment(scratch: str, home: str = "") -> dict[str, str]:
     return env
 
 
-def _run(executable: str, args: list[str], env: dict, deadline: float, limit: int) -> bytes:
+def _run(executable: str, args: list[str], env: dict, deadline: float, limit: int, *, status_output=False) -> bytes:
     if time.monotonic() >= deadline:
         raise TimeoutError
     flags = ({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True})
     proc = subprocess.Popen([executable, *args], cwd=env["TMPDIR"], env=env, stdin=subprocess.DEVNULL,
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **flags)
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT if status_output else subprocess.DEVNULL, **flags)
     ownership = OwnedProcessGroup(proc.pid) if os.name != "nt" else None
     output = []
 
@@ -171,7 +172,18 @@ def _used_cache(account: dict, effective: dict, bundled: dict) -> bool:
     return applied or bool(bundled.keys() - effective.keys() - account.keys())
 
 
-def discover(executable: str, home: str) -> tuple[list | None, str]:
+def _default_route(executable: str, env: dict, deadline: float, check_default: bool) -> tuple[None, str]:
+    # Native login status is local, may use stderr, and shares the catalog's total time budget.
+    if check_default:
+        def run(command, args):
+            output = _run(command, args, env, deadline, 4096, status_output=True)
+            return 0, output.decode("utf-8", "replace")
+        if cli_account_auth.probe("codex", executable, runner=run)[0] == "authed":
+            return None, "codex-native-default"
+    return None, ""
+
+
+def discover(executable: str, home: str, *, check_default: bool = False) -> tuple[list | None, str]:
     """Only expose service-reported entries accepted by the executing native CLI."""
     if (not executable or (os.name == "nt" and not executable.lower().endswith(".exe"))
             or not os.path.isdir(home) or os.path.normcase(os.path.realpath(home)) != os.path.normcase(home)):
@@ -185,12 +197,22 @@ def discover(executable: str, home: str) -> tuple[list | None, str]:
             env = _environment(scratch, home)
             deadline = time.monotonic() + _TIMEOUT
             reported = _run(executable, ["--version"], env, deadline, 1024).decode().strip()
-            effective = _index(_rows(executable, env, deadline, reported, bundled=False))
-            observed, after_stamp = _cache(home)
-            if not _matches_version(observed, reported) or not isinstance(observed.get("models"), list):
-                return None, ""
+            try:
+                effective = _index(_rows(executable, env, deadline, reported, bundled=False))
+            except _CommandRejected as exc:
+                if exc.args != (1,):
+                    raise
+                return _default_route(executable, env, deadline, check_default)
+            try:
+                observed, after_stamp = _cache(home)
+            except FileNotFoundError:
+                if before_stamp is not None:
+                    return None, ""
+                return _default_route(executable, env, deadline, check_default)
             if before.get("identity") and before["identity"] != observed.get("identity"):
                 return None, ""
+            if not _matches_version(observed, reported) or not isinstance(observed.get("models"), list):
+                return _default_route(executable, env, deadline, check_default)
             account = _index(observed["models"])
             fetched_at = observed.get("fetched_at")
             refreshed = (before_stamp != after_stamp and isinstance(fetched_at, str) and bool(fetched_at)
@@ -200,7 +222,7 @@ def discover(executable: str, home: str) -> tuple[list | None, str]:
                 isolated = _environment(scratch)
                 bundled = _index(_rows(executable, isolated, deadline, reported, bundled=True))
                 if not _used_cache(account, effective, bundled):
-                    return None, ""
+                    return _default_route(executable, env, deadline, check_default)
             if stamp((Path(home) / "models_cache.json").lstat()) != after_stamp:
                 return None, ""
             # Preserve account visibility even if the native menu also contains

@@ -13,7 +13,12 @@
   // A local reference includes a 48-character provider and up to 160 model
   // characters, each of which may occupy nine percent-encoded ASCII bytes.
   function nameLimit(value) { return typeof value === 'string' && value.trim().startsWith('local:') ? 1500 : 300; }
-  const api = { imageKey, imageChoice, nameLimit };
+  // Only the account-bound Runner can confirm an implicit native selection.
+  function codexDefaultAvailable(catalog) {
+    return catalog?.ok === true && catalog.catalogAvailable === false &&
+      catalog.nativeDefaultAvailable === true && !catalog.upgradeState && Array.isArray(catalog.models) && !catalog.models.length;
+  }
+  const api = { imageKey, imageChoice, nameLimit, codexDefaultAvailable };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else global.SoduWorkModelChoice = api;
 })(typeof window !== 'undefined' ? window : globalThis);

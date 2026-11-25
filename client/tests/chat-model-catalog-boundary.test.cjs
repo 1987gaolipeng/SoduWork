@@ -441,3 +441,24 @@ test('an open Codex chat distinguishes a cold Runner from an empty list and reco
   assert.deepEqual(refs, ['chat', 'chat', 'chat']);
   assert.deepEqual(f.selections, []);
 });
+
+test('an open Codex chat admits an empty selection only with current account default evidence', async () => {
+  const verified = { ok: true, models: [], catalogAvailable: false, nativeDefaultAvailable: true };
+  let response = verified;
+  const f = fixture({ nativeEffort: true, runtimeModels: () => response });
+  f.state.adapterId = 'codex'; f.state.model = { id: '' };
+  f.controls.render(); await tick();
+  assert.equal(await f.controls.waitForAccess(), true);
+  assert.equal(f.label.textContent, 'Codex 默认');
+  assert.deepEqual(f.selections, []);
+  for (const status of [{ catalogAvailable: true }, { ok: false }, { upgradeState: 'updating' }, { nativeDefaultAvailable: false }]) {
+    response = { ...verified, ...status };
+    await assert.rejects(f.controls.waitForAccess(), { code: 'MODEL_UNAVAILABLE' });
+    assert.equal(f.label.textContent, '选择模型');
+  }
+  response = verified;
+  f.state.selection = { name: 'denied', model: { id: 'denied', unavailable: true } };
+  await assert.rejects(f.controls.waitForAccess(), { code: 'MODEL_UNAVAILABLE' });
+  assert.equal(f.state.selection.name, 'denied');
+  f.controls.destroy();
+});
