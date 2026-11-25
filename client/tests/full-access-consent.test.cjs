@@ -25,6 +25,7 @@ function fixture(options = {}) {
       windows.push(this);
     }
     getBounds() { return { x: 200, y: 100, width: 1000, height: 700 }; }
+    getContentSize() { return [options.area?.width || 1000, options.area?.height || 700]; }
     setBounds(bounds) { this.bounds = bounds; }
     isDestroyed() { return this.destroyed; }
     destroy() {
@@ -38,19 +39,49 @@ function fixture(options = {}) {
       if (options.loadFailure) throw Error('fixture load failure');
       this.webContents.url = this.webContents.mainFrame.url = pathToFileURL(file).href;
       this.webContents.emit('did-start-navigation', {}, this.webContents.url, false, true);
-      this.emit('ready-to-show');
+      if (!options.skipFirstPaint) this.emit('ready-to-show');
     }
   }
   const parent = new Window();
   const confirm = create({ BrowserWindow: Window, ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
     screen: { getDisplayMatching: () => ({ workArea: options.area || { x: 0, y: 0, width: 1920, height: 1080 } }) },
-    timeoutMs: options.timeoutMs || 1000 });
+    platform: options.platform || process.platform, linuxSession: options.linuxSession || 'wayland', timeoutMs: options.timeoutMs || 1000 });
   const event = window => ({ sender: window.webContents, senderFrame: window.webContents.mainFrame });
   return { windows, parent, confirm, event,
     data: (window, input = event(window)) => handlers.get(DATA)(input),
     size: (window, value) => handlers.get('soduwork-full-access-consent:size')(event(window), value),
     answer: (window, value, input = event(window)) => handlers.get(ANSWER)(input, value) };
 }
+
+test('Linux shows default and chat consent even without a first paint or global window coordinates', async () => {
+  for (const scope of ['default', 'session']) {
+    const f = fixture({ platform: 'linux', skipFirstPaint: true });
+    f.parent.getBounds = () => { throw Error('global coordinates unavailable'); };
+    const result = f.confirm(f.parent, { scope, source: scope === 'session' ? f.parent.webContents : undefined });
+    const dialog = f.windows[1];
+    assert.equal(dialog.shown, true);
+    assert.equal(dialog.options.transparent, false);
+    assert.equal(dialog.options.parent, f.parent);
+    assert.equal(dialog.options.modal, true);
+    assert.equal(dialog.options.x, undefined);
+    const data = f.data(dialog);
+    assert.equal(data.title, content(scope).title);
+    f.answer(dialog, { requestId: data.requestId, decision: 'cancel' });
+    assert.equal(await result, false);
+  }
+});
+
+test('Linux X11 keeps the chat confirmation next to its trigger without waiting for first paint', async () => {
+  const f = fixture({ platform: 'linux', linuxSession: 'x11', skipFirstPaint: true });
+  const result = f.confirm(f.parent, { source: f.parent.webContents, anchor: { left: 450, top: 500, width: 80, height: 32 } });
+  const dialog = f.windows[1];
+  assert.equal(dialog.shown, true);
+  assert.equal(dialog.options.x, 498);
+  assert.equal(dialog.options.y, 644);
+  const data = f.data(dialog);
+  f.answer(dialog, { requestId: data.requestId, decision: 'cancel' });
+  assert.equal(await result, false);
+});
 
 test('embedded consent uses native view bounds, stays above its icon through height/size changes, and revokes on source navigation', async () => {
   for (const zoom of [1, 1.25]) {
