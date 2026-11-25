@@ -82,7 +82,7 @@ function ProjectModal({ project, owners, orgs, onClose, onSave }) {
     if (form.orgId) payload.orgId = form.orgId
     setBusy(true); try { await onSave(payload) } catch (e) { toast(tx("项目没有保存：") + e.message) } finally { setBusy(false) }
   }
-  return <Modal scope="project-governance" title={project ? tx("编辑项目信息") : tx("新建项目")} icon="box" wide draft={[form.name || '', form.group || '', form.desc || '', form.repoUrl || '', form.ownerUserId || '', form.dataSource || '']} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : project ? tx("保存项目") : tx("创建项目")}</button></>}>
+  return <Modal scope="project-governance" title={project ? tx("编辑项目信息") : tx("新建项目")} icon="box" wide draft={[form.name || '', form.group || '', form.desc || '', form.repoUrl || '', form.ownerUserId || '', form.dataSource || '']} busy={busy} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : project ? tx("保存项目") : tx("创建项目")}</button></>}>
     <div className="pg-modal-intro"><b>{project ? tx("维护项目资产的基本身份") : tx("先建立项目，再逐步接入仓库、流程与发布环境")}</b><span>{tx("这里登记的是业务项目；前端、后端等代码资产在项目内作为独立仓库管理。")}</span></div>
     <div className="pg-form-grid">
       <Field label={tx("项目名称")}><input autoFocus className="f-in" value={form.name || ''} onChange={set('name')} placeholder={tx("例如：示例社区")} /></Field>
@@ -105,7 +105,7 @@ function AddTaskModal({ pid, tasks, clients, onClose, onDone }) {
     if (!target) return toast(tx("请选择接收需求的 SoduWork"))
     setBusy(true); try { await api.addProjectTask(pid, { title: title.trim(), target, deps, triageStage: 'intake' }); onDone() } catch (e) { toast(tx("需求没有创建：") + e.message) } finally { setBusy(false) }
   }
-  return <Modal scope="project-governance" title={tx("添加项目需求")} icon="ticket" wide draft={[title, target, [...deps].sort()]} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={add}>{tx("创建需求")}</button></>}>
+  return <Modal scope="project-governance" title={tx("添加项目需求")} icon="ticket" wide draft={[title, target, [...deps].sort()]} busy={busy} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={add}>{tx("创建需求")}</button></>}>
     <div className="pg-form-grid"><Field label={tx("需求标题")} wide><input autoFocus className="f-in" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={tx("例如：完成前端交互开发与自测")} /></Field><Field label={tx("接收终端")} wide><SelectMenu className="f-in" value={target} onChange={(e) => setTarget(e.target.value)}><option value="">{tx("选择 SoduWork…")}</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}{c.online ? '' : tx(" · 离线")}</option>)}</SelectMenu></Field></div>
     {tasks.length > 0 && <section className="pg-dependencies"><b>{tx("前置需求")}</b><p>{tx("新需求进入需求池待整理；澄清后设为待交付。选定的前置需求交付后，才能安排执行。")}</p><div>{tasks.map((t) => <button type="button" key={t.id} className={deps.includes(t.id) ? 'on' : ''} onClick={() => toggle(t.id)}><i />{t.title}</button>)}</div></section>}
   </Modal>
@@ -245,8 +245,8 @@ function CatalogRepoModal({ pid, clients, onClose, onDone }) {
   useEffect(() => scheduleCatalogSearch(pages, term, api.repositoryCatalog, setSearchResult), [pages, term])
   const search = catalogSearchView(pages, term, searchResult)
   const shown = search.rows
-  return <Modal scope="project-governance" title={tx("从远程仓库目录添加")} icon="box" wide draft={selected ? [selected.id, form] : null} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy || !selected} onClick={save}>{busy ? tx("正在添加…") : tx("添加到项目")}</button></>}>
-    <div className="pg-catalog-lead"><div><b>{tx("选择真实代码资产，再指定这个项目使用的分支")}</b><span>{tx("同一个远程仓库可以服务多个项目；每个项目独立保存工作分支、合并目标与研发规则。")}</span></div>{canSync && <button className="btn btn-ghost btn-sm" disabled={syncing || !sourceId} onClick={sync}><Icon name="refresh" />{syncing ? tx("同步中…") : tx("同步目录")}</button>}</div>
+  return <Modal scope="project-governance" title={tx("从远程仓库目录添加")} icon="box" wide draft={selected ? [selected.id, form] : null} busy={busy || syncing} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" disabled={busy || syncing} onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy || syncing || !selected} onClick={save}>{busy ? tx("正在添加…") : tx("添加到项目")}</button></>}>
+    <div className="pg-catalog-lead"><div><b>{tx("选择真实代码资产，再指定这个项目使用的分支")}</b><span>{tx("同一个远程仓库可以服务多个项目；每个项目独立保存工作分支、合并目标与研发规则。")}</span></div>{canSync && <button className="btn btn-ghost btn-sm" disabled={busy || syncing || !sourceId} onClick={sync}><Icon name="refresh" />{syncing ? tx("同步中…") : tx("同步目录")}</button>}</div>
     <div className="pg-catalog-source">
       <Field label={tx("代码源")}><SelectMenu className="f-in" value={sourceId} onChange={(e) => changeSource(e.target.value)}><option value="">{tx("选择代码源…")}</option>{integrations.map((item) => <option key={item.id} value={item.id}>{item.name} · {String(item.type).toUpperCase()}</option>)}</SelectMenu></Field>
       <Field label={tx("用于读取的代码账号")}><SelectMenu className="f-in" value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">{tx("选择 SoduWork…")}</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name || client.id}{client.online ? tx(" · 在线") : tx(" · 离线")}</option>)}</SelectMenu></Field>
@@ -285,7 +285,7 @@ function CopyRepoModal({ repo, pid, projects, onClose, onDone }) {
       onDone()
     } catch (e) { toast(tx("仓库映射没有复制：") + e.message) } finally { setBusy(false) }
   }
-  return <Modal scope="project-governance" title={tx("复制仓库映射 · ") + repo.name} icon="copy" draft={form} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy || !targets.length} onClick={save}>{busy ? tx("复制中…") : tx("复制到项目")}</button></>}>
+  return <Modal scope="project-governance" title={tx("复制仓库映射 · ") + repo.name} icon="copy" draft={form} busy={busy} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy || !targets.length} onClick={save}>{busy ? tx("复制中…") : tx("复制到项目")}</button></>}>
     <div className="pg-modal-intro"><b>{tx("复用远程仓库，不复制环境和运行路径")}</b><span>{tx("目标项目可选择自己的工作分支；发布目标、服务端目录和 AI 工作目录需要按目标环境单独配置。")}</span></div>
     {targets.length ? <div className="pg-form-grid">
       <Field label={tx("目标项目")} wide><SelectMenu autoFocus className="f-in" value={form.projectId} onChange={(e) => setForm({ ...form, projectId: e.target.value })}>{targets.map((project) => <option value={project.id} key={project.id}>{project.name}{project.group ? ' · ' + project.group : ''}</option>)}</SelectMenu></Field>

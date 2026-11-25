@@ -237,7 +237,7 @@ export function BindingForm({ plugin, binding, onClose, onSaved }) {
   return <Modal draft={{ versionId, projectId, agentKind, model, fallbackMode, routeMode, runnerTags,
     nodeOverrides: aiNodes.map(node => nodeOverrides[node.key] || {}),
     secretRefs: declaredSecrets.map(name => secretRefs[name] || ''), mcpTools, mcpRiskConfirmed }} scope="plugin-page" wide title={`${binding ? tx("调整") : tx("启用")}「${plugin.name}」`} icon="link"
-    onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
+    busy={busy} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
       <button className="btn btn-primary"
         disabled={busy || !versionId || !!catalogError || !mcpState.ready || mcpState.loading ||
           (routeMode === 'fixed' && !agentKind) || (breakingUpgrade && !confirmBreaking)} onClick={save}>

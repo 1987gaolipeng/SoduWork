@@ -46,7 +46,9 @@ function ReviewDialog({ item, onClose, onReviewed }) {
   const [content, setContent] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const [pendingAction, setPendingAction] = useState('')
+  const busy = Boolean(pendingAction)
+  const reviewing = pendingAction === 'review'
   const [confirmed, setConfirmed] = useState(false)
   const [note, setNote] = useState('')
   const revision = useRef(0)
@@ -67,29 +69,29 @@ function ReviewDialog({ item, onClose, onReviewed }) {
   useEffect(() => { read(path); return () => { revision.current++ } }, [path, item.id])
 
   async function download(file = '') {
-    setBusy(true)
+    setPendingAction('download')
     try { await api.downloadSkillSubmission(item.id, item.checksum, file, item.name) }
     catch (err) { toast(err.message) }
-    finally { setBusy(false) }
+    finally { setPendingAction('') }
   }
   async function review(decision) {
-    setBusy(true)
+    setPendingAction('review')
     try {
       const result = await api.reviewSkillSubmission(item.id, { checksum: item.checksum, decision, note })
       toast(decision === 'reject' ? tx("已退回修改") : result.allowed ?
         tx("已审核并发布，其他客户端刷新后可选择使用") : tx("已审核，请在公司能力库中确认开放状态"))
       onReviewed()
     } catch (err) { setError(err.message) }
-    finally { setBusy(false) }
+    finally { setPendingAction('') }
   }
-  return <div className="skill-review"><Modal dirty={Boolean(note)} scope="skill-review" wide title={tx("审核 Skill · ") + item.name} onClose={onClose}
+  return <div className="skill-review"><Modal dirty={Boolean(note)} scope="skill-review" wide title={tx("审核 Skill · ") + item.name} busy={reviewing} onClose={onClose}
     foot={dismiss => <><button className="btn btn-ghost" disabled={busy || !data.data} onClick={() => download()}>{tx("下载完整包")}</button>
       <span className="ml-auto" />
       {current.status === 'pending' ? <>
         <button className="btn btn-ghost" disabled={busy || !note.trim()} onClick={() => review('reject')}>{tx("退回修改")}</button>
         <button className="btn btn-primary" disabled={busy || !confirmed || !data.data}
-          onClick={() => review('approve')}>{busy ? tx("正在处理…") : tx("审核并发布")}</button>
-      </> : <button className="btn btn-ghost" onClick={dismiss}>{tx("完成")}</button>}</>}>
+          onClick={() => review('approve')}>{reviewing ? tx("正在处理…") : tx("审核并发布")}</button>
+      </> : <button className="btn btn-ghost" disabled={reviewing} onClick={dismiss}>{tx("完成")}</button>}</>}>
     {data.error ? <ErrorState msg={data.error.message} onRetry={data.reload} /> : !data.data ? <Loading /> : <>
       <div className="skill-review-meta"><span>{data.data.fileCount}{tx(" 个文件")}</span>
         <code title={item.checksum}>{tx("版本 ")}{item.checksum.slice(0, 12)}</code>

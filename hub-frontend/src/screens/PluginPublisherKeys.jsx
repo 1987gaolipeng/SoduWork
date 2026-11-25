@@ -16,7 +16,8 @@ export function PluginPublisherKeys({ onClose }) {
   const [error, setError] = useState('')
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState(EMPTY)
-  const [busy, setBusy] = useState('')
+  const [pendingKeys, setPendingKeys] = useState([])
+  const busy = pendingKeys.length > 0
   const [confirmId, setConfirmId] = useState('')
   const [discardEntry, setDiscardEntry] = useState(false)
   const edited = Object.values(form).some(Boolean)
@@ -33,29 +34,29 @@ export function PluginPublisherKeys({ onClose }) {
   useEffect(() => { load() }, [])
 
   async function create() {
-    setBusy('create')
+    setPendingKeys(keys => [...keys, 'create'])
     try {
       await api.createPluginPublisher(form)
       setForm(EMPTY); setAdding(false); toast(tx("可信发布者已登记"))
       await load()
     } catch (e) { toast(tx("登记失败：") + e.message) }
-    setBusy('')
+    setPendingKeys(keys => keys.filter(key => key !== 'create'))
   }
 
   async function revoke(row) {
     if (confirmId !== row.id) { setConfirmId(row.id); return }
-    setBusy(row.id)
+    setPendingKeys(keys => [...keys, row.id])
     try {
       await api.revokePluginPublisher(
         row.id, tx("停止信任该密钥签发的新插件包"))
       setConfirmId(''); toast(tx("密钥已撤销，现有已发布版本未被自动停用"))
       await load()
     } catch (e) { toast(tx("撤销失败：") + e.message) }
-    setBusy('')
+    setPendingKeys(keys => keys.filter(key => key !== row.id))
   }
 
-  return <Modal dirty={edited} scope="plugin-page" wide title={tx("可信发布者")} icon="shield" onClose={onClose}
-    foot={dismiss => <button className="btn btn-ghost" onClick={dismiss}>{tx("关闭")}</button>}>
+  return <Modal dirty={edited} scope="plugin-page" wide title={tx("可信发布者")} icon="shield" busy={busy} onClose={onClose}
+    foot={dismiss => <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("关闭")}</button>}>
     {discardEntry && <Confirm title={tx("放弃未保存的改动")} text={tx("关闭后，此次未保存的改动将丢失。")}
       cancelText={tx("继续编辑")} confirmText={tx("放弃改动")} danger focusCancel
       onClose={() => setDiscardEntry(false)} onConfirm={clearEntry} />}
@@ -81,8 +82,8 @@ export function PluginPublisherKeys({ onClose }) {
           onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
       <div className="publisher-form-actions"><button className="btn btn-ghost"
         onClick={() => edited ? setDiscardEntry(true) : clearEntry()}>{tx("取消")}</button>
-        <button className="btn btn-primary" disabled={busy === 'create'}
-          onClick={create}>{busy === 'create' ? tx("正在校验…") : tx("校验并登记")}</button></div>
+        <button className="btn btn-primary" disabled={pendingKeys.includes('create')}
+          onClick={create}>{pendingKeys.includes('create') ? tx("正在校验…") : tx("校验并登记")}</button></div>
     </section>}
 
     {error && <div className="publisher-error"><Icon name="alert" /><span>{error}</span><button onClick={load}>{tx("重试")}</button></div>}
@@ -98,8 +99,8 @@ export function PluginPublisherKeys({ onClose }) {
         <span className={'publisher-status ' + row.status}>{row.status === 'active' ? tx("有效") : tx("已撤销")}</span>
         <span className="publisher-actions">{row.status === 'active' && <button
           className={confirmId === row.id ? 'confirm' : ''}
-          disabled={busy === row.id} onClick={() => revoke(row)}>
-          {busy === row.id ? tx("处理中…") : confirmId === row.id ? tx("确认撤销") : tx("撤销")}
+          disabled={pendingKeys.includes(row.id)} onClick={() => revoke(row)}>
+          {pendingKeys.includes(row.id) ? tx("处理中…") : confirmId === row.id ? tx("确认撤销") : tx("撤销")}
         </button>}</span>
       </div>)}
     </div>}
@@ -147,7 +148,7 @@ export function PluginPublisherCandidate({ version, pluginName, onClose, onRegis
     setBusy(false)
   }
 
-  return <Modal dirty={initialForm && (form.publisherName !== initialForm.publisherName || form.description !== initialForm.description)} scope="plugin-page" title={tx("核对发布身份")} icon="shield" onClose={onClose}
+  return <Modal dirty={initialForm && (form.publisherName !== initialForm.publisherName || form.description !== initialForm.description)} scope="plugin-page" title={tx("核对发布身份")} icon="shield" busy={busy} onClose={onClose}
     foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
       <button className="btn btn-primary" disabled={busy || !candidate || !form.publisherName.trim()}
         onClick={trust}>{busy ? tx("正在重新验签…") : tx("登记公钥并继续审核")}</button></>}>

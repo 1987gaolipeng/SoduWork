@@ -28,6 +28,7 @@ export function PublicationEvaluationPanel({
 }) {
   const uiLocale = useLocale();
   const [launchCase, setLaunchCase] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
   const cases = ((version.capabilities || {}).evaluationCases || [])
   const items = (data && data.items) || []
   const gate = (data && data.gate) || {}
@@ -112,10 +113,13 @@ export function PublicationEvaluationPanel({
     {launchCase && <EvaluationLaunchModal
       version={version}
       caseItem={launchCase}
-      busy={busy === 'start:' + launchCase.key}
+      busy={submitting || busy === 'start:' + launchCase.key}
       onClose={() => setLaunchCase(null)}
       onStart={async (options) => {
-        if (await onStart(launchCase, options)) setLaunchCase(null)
+        setSubmitting(true)
+        try {
+          if (await onStart(launchCase, options)) setLaunchCase(null)
+        } finally { setSubmitting(false) }
       }}
     />}
   </section>
@@ -338,7 +342,7 @@ function EvaluationLaunchModal({ version, caseItem, busy, onClose, onStart }) {
   return <Modal draft={{ agentKind, runnerId, model, runnerTags, secretRefs, confirmExternal }} scope="plugin-page"
     title={tx("验证设置 · ") + caseItem.name}
     icon="shield"
-    onClose={onClose}
+    busy={busy} onClose={onClose}
     foot={dismiss => <>
       <button className="btn btn-ghost" onClick={dismiss} disabled={busy}>{tx("返回")}</button>
       <button className="btn btn-primary" onClick={submit}

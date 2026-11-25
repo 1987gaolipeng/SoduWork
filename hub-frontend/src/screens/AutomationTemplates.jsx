@@ -82,9 +82,9 @@ function Editor({ value, items = [], onChange, onCancel, onSave, busy, conflict,
   }
   const toggleCap = (key) => set('requiredCapabilities', value.requiredCapabilities.includes(key)
     ? value.requiredCapabilities.filter((x) => x !== key) : [...value.requiredCapabilities, key])
-  return <Modal draft={{ ...value, requiredCapabilities: [...value.requiredCapabilities].sort() }} wide className="at-dialog" icon="activity" title={value.updatedAt ? tx("编辑自动化模板") : tx("新建自动化模板")} onClose={onCancel}
+  return <Modal draft={{ ...value, requiredCapabilities: [...value.requiredCapabilities].sort() }} wide className="at-dialog" icon="activity" title={value.updatedAt ? tx("编辑自动化模板") : tx("新建自动化模板")} busy={busy} onClose={onCancel}
     foot={dismiss => <><label className="at-enabled modal-foot-note"><input type="checkbox" checked={value.enabled} onChange={(e) => set('enabled', e.target.checked)} />{tx("发布给员工使用")}</label>
-      <button type="button" className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button type="submit" form={formId} className="btn btn-primary" disabled={busy || conflict}>{busy ? tx("保存中…") : tx("保存模板")}</button></>}>
+      <button type="button" className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button><button type="submit" form={formId} className="btn btn-primary" disabled={busy || conflict}>{busy ? tx("保存中…") : tx("保存模板")}</button></>}>
     {conflict && <div role="alert"><p>{tx("模板已被其他管理员修改。草稿已保留，请加载最新目录并核对后再保存。")}</p><button type="button" className="btn btn-ghost" onClick={onReload}>{tx("加载最新目录，保留草稿")}</button></div>}
     <form id={formId} className="at-editor" onInvalidCapture={event => {
       const section = event.target.closest?.('details')

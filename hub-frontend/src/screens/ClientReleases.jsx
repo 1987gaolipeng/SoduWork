@@ -408,7 +408,7 @@ function UploadModal({ onClose, onDone }) {
     setBusy(false)
   }
 
-  return <Modal dirty={!busy && Boolean(channel || installerName)} title={tx("上传客户端发布")} icon="send" onClose={busy ? undefined : onClose}
+  return <Modal dirty={!busy && Boolean(channel || installerName)} title={tx("上传客户端发布")} icon="send" busy={busy} onClose={onClose}
     foot={dismiss => <>
       <button className="btn btn-ghost" disabled={busy && progress.sent} onClick={() => busy ? controller.current?.abort() : dismiss()}>
         {busy ? tx("上传中，请勿关闭") : tx("取消")}

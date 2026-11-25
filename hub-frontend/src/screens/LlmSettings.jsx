@@ -7,7 +7,7 @@ import { Loading, ErrorState, Icon, toast } from '../ui.jsx'
  * Retain organization defaults for reports and compatibility execution without maintaining
  * a second model catalog.
  */
-export default function LlmSettings({ embedded = false, onDirtyChange }) {
+export default function LlmSettings({ embedded = false, onDirtyChange, onSavingChange }) {
   const uiLocale = useLocale();
   const [d, setD] = useState(null)
   const [baseUrl, setBaseUrl] = useState('')
@@ -28,7 +28,7 @@ export default function LlmSettings({ embedded = false, onDirtyChange }) {
 
   async function save() {
     if (baseUrl && !/^https?:\/\//.test(baseUrl.trim())) { toast(tx("接口地址要以 http(s):// 开头")); return }
-    setBusy(true)
+    setBusy(true); onSavingChange?.(true)
     try {
       const r = await api.saveLlmConfig({
         expectedRevision: d.revision,
@@ -37,7 +37,7 @@ export default function LlmSettings({ embedded = false, onDirtyChange }) {
       toast(r.keyChanged ? tx("已保存，密钥已更新") : tx("已保存（密钥未改动）"))
       setApiKey(''); load()
     } catch (e) { toast(tx("保存失败：") + (e.message || e)) }
-    setBusy(false)
+    setBusy(false); onSavingChange?.(false)
   }
 
   if (!d && error) return <ErrorState msg={error.message} onRetry={load} />

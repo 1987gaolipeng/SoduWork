@@ -287,9 +287,9 @@ function UserEditor({ user, orgs, roles, onClose, onDone }) {
   }
 
   return (
-    <Modal title={isNew ? tx("新建用户") : tx("编辑用户")} icon="users" draft={[username, displayName, password, orgId, roleId, isActive, accountKind, [...posSel].sort(), [...domSel].sort()]} onClose={onClose}
+    <Modal title={isNew ? tx("新建用户") : tx("编辑用户")} icon="users" draft={[username, displayName, password, orgId, roleId, isActive, accountKind, [...posSel].sort(), [...domSel].sort()]} busy={busy} onClose={onClose}
       foot={dismiss => <>
-        <button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
+        <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
         <button className="btn btn-primary" disabled={busy || (orgId !== user?.orgId && posSel.length > 0 && !positionsReady)} onClick={save}>{busy ? tx("保存中…") : tx("保存")}</button>
       </>}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 2 }}>
@@ -377,28 +377,31 @@ function DomainManager({ domains, onClose, onChanged }) {
   const formId = useId()
   const [list, setList] = useState(domains || [])
   const [name, setName] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [pendingWrites, setPendingWrites] = useState(0)
+  const busy = pendingWrites > 0
   const [pendingDel, setPendingDel] = useState(null)   // Domain awaiting deletion confirmation.
   const refresh = async () => { const d = await api.domains().catch(() => null); if (d) setList(d); onChanged && onChanged() }
   async function add() {
-    const n = name.trim(); if (!n) return
-    setBusy(true)
+    const n = name.trim(); if (!n || busy) return
+    setPendingWrites(count => count + 1)
     try { await api.createDomain({ name: n, sort: (list.length + 1) }); setName(''); await refresh() }
     catch (e) { toast(tx("新建失败：") + e.message) }
-    setBusy(false)
+    finally { setPendingWrites(count => count - 1) }
   }
   async function rename(d) {
     const nn = (d._edit != null ? d._edit : d.name).trim(); if (!nn || nn === d.name) { setList((a) => a.map((x) => x.id === d.id ? { ...x, _edit: undefined } : x)); return }
+    setPendingWrites(count => count + 1)
     try { await api.updateDomain(d.id, { name: nn }); await refresh() }
     catch (e) { toast(tx("改名失败：") + e.message) }
+    finally { setPendingWrites(count => count - 1) }
   }
   async function del(d) {
     try { await api.deleteDomain(d.id); await refresh() }
     catch (e) { toast(tx("删除失败：") + e.message) }
   }
   return (
-    <Modal title={tx("管理领域 / 模块")} icon="grid" dirty={!!name || list.some(row => row._edit != null && row._edit !== row.name)} onClose={onClose}
-      foot={dismiss => <button className="btn btn-primary" onClick={dismiss}>{tx("完成")}</button>}>
+    <Modal title={tx("管理领域 / 模块")} icon="grid" dirty={!!name || list.some(row => row._edit != null && row._edit !== row.name)} busy={busy} onClose={onClose}
+      foot={dismiss => <button className="btn btn-primary" disabled={busy} onClick={dismiss}>{tx("完成")}</button>}>
       <p className="muted" style={{ fontSize: 14.5, marginTop: 0 }}>{tx("领域是负责的业务块（支付、订单、前端等）。给成员标记领域后，分配需求时会优先选择对应负责人。")}</p>
       <label className="f-lbl" htmlFor={`${formId}-new-domain`}>{tx("领域名称")}</label>
       <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>

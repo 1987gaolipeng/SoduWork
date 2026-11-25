@@ -148,9 +148,9 @@ export default function RepositoryIssueSync({ row, onClose, onUpdated }) {
     finally { finish(epoch) }
   }
 
-  return <Modal scope="repository-issue-sync" title={tx('Issue 自动同步：{0}', [row.displayName || row.fullName])} dirty={dirty || memberDirty} onClose={onClose}
+  return <Modal scope="repository-issue-sync" title={tx('Issue 自动同步：{0}', [row.displayName || row.fullName])} dirty={dirty || memberDirty} busy={!!busy} onClose={onClose}
     footer={dismiss => <>
-      <button className="btn btn-ghost" onClick={dismiss}>{tx('关闭')}</button>
+      <button className="btn btn-ghost" disabled={!!busy} onClick={dismiss}>{tx('关闭')}</button>
       <button className="btn btn-primary" disabled={loading || !!busy || !data || !dirty} onClick={save}>{busy === 'save' ? tx('正在保存…') : tx('保存设置')}</button>
     </>}>
     <div className="rc-issue-dialog">

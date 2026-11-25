@@ -156,8 +156,8 @@ function ProviderEditor({ value, orgs, roles, onClose, onDone }) {
     setBusy(false)
   }
 
-  return <Modal draft={form} title={original ? tx("配置企业身份源") : tx("接入企业身份源")} icon="key" wide onClose={onClose}
-    foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" type="submit" form={formId} disabled={busy}>{busy ? tx("正在保存并测试…") : tx("保存并测试")}</button></>}>
+  return <Modal draft={form} title={original ? tx("配置企业身份源") : tx("接入企业身份源")} icon="key" wide busy={busy} onClose={onClose}
+    foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" type="submit" form={formId} disabled={busy}>{busy ? tx("正在保存并测试…") : tx("保存并测试")}</button></>}>
     <form id={formId} className="idp-form" noValidate onSubmit={submit}>
       <div className="idp-form-note"><Icon name="shield" /><p><b>{tx("这里不填写密钥明文。")}</b>{tx("机密客户端只填 Hub 上的环境变量名；SoduWork 测试时会验证变量是否存在。")}</p></div>
       <ol>

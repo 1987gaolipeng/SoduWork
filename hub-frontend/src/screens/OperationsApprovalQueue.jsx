@@ -100,8 +100,8 @@ function ApprovalEditor({ row, action, onClose, onSaved, onConflict }) {
       if ([403, 404, 409].includes(err.status)) onConflict()
     }
   }
-  return <Modal title={actionNames[action]} icon="shield" size="compact" onClose={() => { if (!busy) onClose() }}
-    foot={<><button className="btn btn-ghost" disabled={busy} onClick={onClose}>{tx('取消')}</button>
+  return <Modal title={actionNames[action]} icon="shield" size="compact" busy={busy} onClose={onClose}
+    foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx('取消')}</button>
       <button className={'btn ' + (action === 'withdraw' || action === 'reject' ? 'btn-danger' : 'btn-primary')} disabled={!canSubmit}
         onClick={submit}>{busy ? tx('处理中…') : tx('确认{0}', [actionNames[action]])}</button></>}>
     <div className="ops-approval-editor">

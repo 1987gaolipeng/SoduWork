@@ -103,8 +103,8 @@ export function PluginRunForm({ plugin, onClose, onStarted }) {
 
   const dirty = bindingId !== (bindings[0]?.id || '') || Boolean(taskId && taskId !== availableTasks[0]?.id)
     || defs.some(def => inputs[def.key] != null && String(inputs[def.key]) !== String(def.default ?? (def.type === 'boolean' ? false : '')))
-  return <Modal dirty={dirty} scope="plugin-page" wide title={tx("让「{0}」处理需求", [plugin.name])} icon="send" onClose={onClose}
-    foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
+  return <Modal dirty={dirty} scope="plugin-page" wide title={tx("让「{0}」处理需求", [plugin.name])} icon="send" busy={busy} onClose={onClose}
+    foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
       <button className="btn btn-primary" disabled={busy || !!taskError || !selectedTask || !!selectedTask.blockedReason || !bindingId}
         onClick={start}>{busy ? tx("正在启动…") : tx("启动工作流")}</button></>}>
     {taskError && <LoadIssue message={taskError} onRetry={loadTasks} />}
@@ -242,7 +242,7 @@ export function RunDrawer({ run: initial, onClose, onChanged, evidenceOpen = fal
       : run.state === 'succeeded' ? tx("所有节点均已完成，运行结果和证据已经归档。")
         : RUN[run.state] || tx("正在读取最新状态。")
 
-  return <Modal scope="plugin-page" wide className="run-drawer" title={tx("插件运行详情")} icon="activity" onClose={onClose}>
+  return <Modal scope="plugin-page" wide className="run-drawer" title={tx("插件运行详情")} icon="activity" busy={!!busyNode} onClose={onClose}>
         {pollError && <LoadIssue message={tx("运行状态可能已过期：") + pollError}
           onRetry={() => refreshRun(false)} />}
         <section className={'run-summary state-' + run.state}>

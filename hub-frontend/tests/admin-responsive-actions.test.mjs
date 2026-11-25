@@ -54,7 +54,10 @@ async function mountSharedConfirm(t, page) {
     dependencies: { './api.js': { api: {} }, 'react-dom': { createPortal: (node) => node } },
   })
   t.after(() => dialog.unmount())
-  const buttons = () => descendants(dialog.render().props.foot, (node) => node.type === 'button')
+  const buttons = () => {
+    const { foot, onClose } = dialog.render().props
+    return descendants(foot(onClose), node => node.type === 'button')
+  }
   return {
     props: element.props,
     cancel: () => buttons()[0].props.onClick(),

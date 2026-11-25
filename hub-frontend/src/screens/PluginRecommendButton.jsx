@@ -135,7 +135,7 @@ export default function PluginRecommendButton({ plugin, version, onChanged, onOp
         onClick={() => { void openDialog() }}>
         {hasSaved ? t('plugin.recommend.edit') : actionLabel}</button>
     </div>
-    {open && <Modal draft={{ cover, compose, featured, sidebar }} title={tx('推荐设置')} icon="sparkle" className="rec-modal" onClose={busy ? undefined : () => setOpen(false)}
+    {open && <Modal draft={{ cover, compose, featured, sidebar }} title={tx('推荐设置')} icon="sparkle" className="rec-modal" busy={busy} onClose={() => setOpen(false)}
       foot={dismiss => <>
         {hasSaved && <button className="btn btn-ghost rec-foot-danger" disabled={busy} onClick={cancelAll}>{tx('取消推荐')}</button>}
         <span className="rec-foot-space" />

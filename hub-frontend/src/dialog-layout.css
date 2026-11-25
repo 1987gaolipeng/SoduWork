@@ -87,7 +87,8 @@
   background: var(--surface);
   color: var(--ink-2);
 }
-.modal-head > .mx:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.modal-head > .mx:hover:enabled { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.modal-head > .mx:disabled { opacity: .55; cursor: not-allowed; }
 .modal > .modal-body {
   flex: 1 1 auto;
   min-width: 0;

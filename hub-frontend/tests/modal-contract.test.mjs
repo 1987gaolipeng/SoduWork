@@ -142,6 +142,13 @@ test('all editor dismissal paths compare the draft, keep the safe choice and lea
   ]
   const renderDraft = draft => page.render({ ...props, draft })
   page.render()
+  page.render({ ...props, draft: { ...original, name: 'Saving' }, busy: true })
+  assert.equal(page.nodes(node => node.props.className === 'mx')[0].props.disabled, true)
+  for (const dismiss of actions) {
+    page.act(dismiss)
+    assert.equal(confirm(), undefined, 'a pending save must not prompt to discard its draft')
+    assert.equal(closed, 0)
+  }
   renderDraft({ ...original, name: 'Changed' })
   for (const dismiss of actions) {
     page.act(dismiss)
@@ -165,4 +172,25 @@ test('all editor dismissal paths compare the draft, keep the safe choice and lea
   page.render({ ...props, draft: undefined, dirty: true })
   page.act(actions[1])
   assert.ok(confirm())
+  page.render({ ...props, dirty: true, busy: true })
+  assert.equal(confirm(), undefined, 'starting a save clears an earlier discard prompt')
+  page.render({ ...props, dirty: true })
+  assert.equal(confirm(), undefined, 'finishing the save must not reopen a stale prompt')
+})
+
+test('Confirm keeps its dialog and cancel button busy until the submitted action settles', async t => {
+  const { dependencies } = host(t)
+  let finish
+  const page = await createComponentHarness(uiFile, { exportName: 'Confirm', dependencies,
+    props: { onClose() {}, onConfirm: () => new Promise(resolve => { finish = resolve }) } })
+  t.after(() => page.unmount())
+  const dialog = () => page.nodes(node => node.type?.name === 'Modal')[0]
+  const buttons = () => dialog().props.foot(dialog().props.onClose).props.children
+  page.act(() => buttons()[1].props.onClick())
+  assert.equal(dialog().props.busy, true)
+  assert.equal(buttons()[0].props.disabled, true)
+  finish()
+  await page.flush()
+  assert.equal(dialog().props.busy, false)
+  assert.equal(buttons()[0].props.disabled, false)
 })

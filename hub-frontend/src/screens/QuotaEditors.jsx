@@ -50,7 +50,7 @@ export function PlanEditor({ plan, config, onConfig, onClose, onSaved }) {
     catch (e) { setError(tx(e.message)) }
     finally { setBusy(false) }
   }
-  return <Modal draft={draft} title={plan ? tx('编辑套餐') : tx('新建套餐')} icon="ticket" wide className="qm-editor" onClose={busy ? undefined : onClose}
+  return <Modal draft={draft} title={plan ? tx('编辑套餐') : tx('新建套餐')} icon="ticket" wide className="qm-editor" busy={busy} onClose={onClose}
     foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx('取消')}</button><button className="btn btn-primary" disabled={busy || conflict || !!impact.pending} onClick={save}>{busy ? tx('保存中…') : refreshed ? tx('覆盖此项并保存') : tx('保存套餐')}</button></>}>
     <p className="qm-note">{trial ? tx('注册后自动领取一次。修改只影响之后注册的新用户，已有试用不会延长或重置。') : tx('每个自然月重新计算。修改立即生效，切换套餐或调整额度不会清空已用量。')}</p>
     <label className="qm-field"><span>{tx('套餐名称')}</span><input className="f-in" value={draft.name} maxLength={60} onChange={e => setDraft({ ...draft, name: e.target.value })} /></label>
@@ -90,7 +90,7 @@ export function MemberEditor({ member, config, onConfig, onClose, onSaved }) {
     catch (e) { setError(tx(e.message)) }
     finally { setBusy(false) }
   }
-  return <Modal draft={draft} title={tx('分配成员额度')} icon="users" wide className="qm-editor" onClose={busy ? undefined : onClose}
+  return <Modal draft={draft} title={tx('分配成员额度')} icon="users" wide className="qm-editor" busy={busy} onClose={onClose}
     foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx('取消')}</button><button className="btn btn-primary" disabled={busy || conflict || impact.pending} onClick={save}>{busy ? tx('保存中…') : refreshed ? tx('覆盖此项并保存') : tx('保存分配')}</button></>}>
     <div className="qm-member-identity"><b>{member.displayName || member.username}</b><span>{member.username}</span></div>
     <p className="qm-note">{tx('调整后立即生效，当前周期已用量保留；新注册试用只能领取一次。')}</p>
@@ -130,7 +130,7 @@ export function DefaultEditor({ config, onConfig, onClose, onSaved }) {
     catch (e) { setError(tx(e.message)) }
     finally { setBusy(false) }
   }
-  return <Modal draft={limit == null ? null : String(limit)} title={tx('原有账号默认额度')} icon="settings" className="qm-editor" onClose={busy ? undefined : onClose}
+  return <Modal draft={limit == null ? null : String(limit)} title={tx('原有账号默认额度')} icon="settings" className="qm-editor" busy={busy} onClose={onClose}
     foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx('取消')}</button><button className="btn btn-primary" disabled={busy || conflict} onClick={save}>{busy ? tx('保存中…') : refreshed ? tx('覆盖此项并保存') : tx('保存')}</button></>}>
     <p className="qm-note">{tx('仅适用于未分配套餐、未设个人额度的原有账号。新注册用户使用试用套餐。')}</p>
     <TotalLimitField value={limit} onChange={setLimit} /><p className="qm-help">{tx('按自然月生效；0 暂停 AI，选择不限额则不设总上限。')}</p>

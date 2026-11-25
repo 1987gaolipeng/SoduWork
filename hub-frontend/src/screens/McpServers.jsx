@@ -214,9 +214,9 @@ function McpImportPreview({ value, busy, onClose, onImport }) {
   const summary = value.summary || {}
   const servers = value.servers || []
   return (
-    <Modal wide title={tx("导入连接器配置")} icon="plug" onClose={onClose}
-      foot={<>
-        <button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+    <Modal wide title={tx("导入连接器配置")} icon="plug" busy={busy} onClose={onClose}
+      foot={dismiss => <>
+        <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
         <span className="ml-auto" />
         <button className="btn btn-primary" disabled={busy || !summary.importable} onClick={onImport}>
           {busy ? tx("正在导入…") : tx("导入 ") + (summary.importable || 0) + tx(" 个连接")}
