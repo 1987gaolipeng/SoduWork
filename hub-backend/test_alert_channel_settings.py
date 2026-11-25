@@ -1,4 +1,4 @@
-"""HTTP contract for write-only delivery alert destinations."""
+"""HTTP contracts for alert channels and platform notification settings."""
 import asyncio
 import tempfile
 import unittest
@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import models
 from app.account_models import EmailRateLimit
-from app.api import admin
+from app.api import admin, admin_mail
 from app.auth import sign_token
 from app.db import Base, get_session
 from app.services.notify import ALERT_URL_KEY
@@ -40,11 +40,43 @@ class AlertChannelSettingsTests(unittest.IsolatedAsyncioTestCase):
 
         app = FastAPI()
         app.include_router(admin.router)
+        app.include_router(admin_mail.router)
         app.dependency_overrides[get_session] = isolated_session
         self.http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                       base_url="http://fixture/api/v1/admin/",
                                       headers={"Authorization": "Bearer " + sign_token("fixture-admin")})
         self.addAsyncCleanup(self.http.aclose)
+
+    async def test_department_permissions_allow_reads_but_only_superusers_save_platform_settings(self):
+        async with self.sessions() as session:
+            role = models.Role(id="settings-role", name="Settings operator",
+                               permissions=["integration.manage", "identity.manage"])
+            session.add_all([role, models.OrgUnit(id="root", name="Root"),
+                             models.OrgUnit(id="team", name="Team", parent_id="root")])
+            session.add(models.User(id="settings-operator", username="operator", role_id=role.id, org_id="team"))
+            await session.commit()
+        operator = {"Authorization": "Bearer " + sign_token("settings-operator")}
+        cases = [
+            ("alert-config", {"url": "https://example.invalid/fixture"}, {"url": ""}),
+            ("mail-settings", {"senderName": "Fixture sender", "username": "sender@example.invalid",
+                               "senderAddress": "sender@example.invalid"}, {"senderName": "Other sender"}),
+        ]
+        for path, initial, edit in cases:
+            with self.subTest(path=path):
+                saved = await self.http.put(path, json=initial)
+                self.assertEqual(saved.status_code, 200, saved.text)
+                before = await self.http.get(path, headers=operator)
+                self.assertEqual(before.status_code, 200, before.text)
+                denied = await self.http.put(path, json=edit, headers=operator)
+                self.assertEqual(denied.status_code, 403, denied.text)
+                after = await self.http.get(path)
+                self.assertEqual(after.json(), before.json())
+                if path == "alert-config":
+                    self.assertTrue(after.json()["configured"])
+                    async with self.sessions() as session:
+                        self.assertEqual((await session.get(models.AppSetting, ALERT_URL_KEY)).value, initial["url"])
+                else:
+                    self.assertEqual(after.json()["senderName"], initial["senderName"])
 
     async def test_admins_share_one_test_send_and_rejected_attempts_do_not_extend_cooldown(self):
         async with self.sessions() as session:

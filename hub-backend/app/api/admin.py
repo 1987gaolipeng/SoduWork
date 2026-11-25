@@ -2184,6 +2184,9 @@ async def put_alert_config(
 ):
     from ..services import notify
     from ..services.model_runtime import lock_setting
+
+    if not user.is_super:
+        raise HTTPException(status_code=403, detail="平台级告警配置仅超级管理员可修改")
     url = body.get("url")
     if url is None or url == _HIDDEN_ALERT_URL:
         row = await session.get(models.AppSetting, notify.ALERT_URL_KEY)
