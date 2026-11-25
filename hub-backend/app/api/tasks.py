@@ -63,6 +63,8 @@ from ..services.task_dispatch_context import (
     _stale_runner_hint as _stale_runner_hint,
 )
 from ..timestamps import iso_utc
+from . import conversation_upload
+from .attachments import _upload_size
 
 router = APIRouter(prefix="/api/v1", tags=["tasks"])
 log = logging.getLogger("uvicorn.error")
@@ -635,7 +637,10 @@ async def conversation_task_turn(
     return {"ok": True, "turn": receipt, "task": task_to_api(task)}
 
 
-@router.post("/tasks/{tid}/conversation-delivery")
+delivery_upload_router = APIRouter(route_class=conversation_upload.DeliveryUploadRoute)
+
+
+@delivery_upload_router.post("/tasks/{tid}/conversation-delivery")
 async def conversation_task_delivery(
     tid: str,
     files: list[UploadFile] = File(...),
@@ -664,6 +669,8 @@ async def conversation_task_delivery(
     ).with_for_update())).scalar_one_or_none()
     if task is None:
         raise HTTPException(404, "需求不存在或不属于当前设备")
+    if len(files) > conversation_turns.MAX_DELIVERY_FILES:
+        raise HTTPException(413, "交付文件数量超过上限")
     if len(paths) != len(files):
         raise HTTPException(422, "产出文件名与文件数量不一致")
     if not isinstance(categories, list):
@@ -681,16 +688,18 @@ async def conversation_task_delivery(
     }
     if not (declared | replaced.keys()) <= {delivery_manifest.normalize_name(path) for path in paths}:
         raise HTTPException(422, "交付声明必须引用本轮上传的文件")
+    total_bytes = 0
+    per_file_limit = get_settings().attach_max_mb * 1024 * 1024
     for index, (path, file) in enumerate(zip(paths, files)):
-        data = await file.read()
-        max_bytes = get_settings().attach_max_mb * 1024 * 1024
-        if len(data) > max_bytes:
-            raise HTTPException(413, f"产出 {file.filename} 超过 {get_settings().attach_max_mb}MB 上限")
-        if not data:
+        size = _upload_size(file)
+        total_bytes += size
+        if size > per_file_limit or total_bytes > conversation_upload.MAX_BATCH_BYTES:
+            raise HTTPException(413, "交付文件超过上传大小上限")
+        if not size:
             continue
         relative = str(path or file.filename or "").replace("\\", "/").strip("/")[:600]
         name = relative or delivery_manifest.normalize_name(file.filename)
-        prepared.append((name, data, file.content_type or "application/octet-stream"))
+        prepared.append((name, file, file.content_type or "application/octet-stream"))
         if categories:
             prepared_categories[name] = categories[index]
     try:
@@ -708,6 +717,9 @@ async def conversation_task_delivery(
     except ValueError as error:
         raise HTTPException(409, str(error)) from error
     return result
+
+
+router.include_router(delivery_upload_router)
 
 
 @router.post("/tasks/{tid}/ai-dispatch")

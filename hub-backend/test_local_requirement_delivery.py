@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import delete, event, select
@@ -65,6 +66,33 @@ class LocalRequirementDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 am.ApprovalDecision.request_id == request.id)))
         foreign = await self.call("POST", "tasks/" + tid + "/review", "peer", json={})
         self.assertIn(foreign.status_code, (403, 404), foreign.text)
+
+    async def test_partial_delivery_cleans_uncommitted_files_and_preserves_committed_ones(self):
+        tid = await self.create_running("manual")
+        paths = ["first.md", "second.md"]
+        files = [("files", (name, b"# Report\n", "text/markdown")) for name in paths]
+        data = {"conversationId": "chat", "turnId": "turn", "paths": paths}
+        route = f"tasks/{tid}/conversation-delivery"
+        original = storage.put
+
+        def put(key, content, content_type):
+            if key.endswith("-second.md"):
+                original(key, content[:1], content_type)
+                raise OSError("fixture write failure")
+            return original(key, content, content_type)
+
+        with patch.object(storage, "put", side_effect=put), self.assertRaisesRegex(OSError, "fixture write"):
+            await self.call("POST", route, files=files, data=data)
+        self.assertFalse(any(path.is_file() for path in Path(storage._LOCAL_DIR).rglob("*")))
+        async with self.sessions() as session:
+            self.assertIsNone(await session.scalar(select(models.Attachment.id).where(models.Attachment.task_id == tid)))
+
+        with patch("app.services.task_access.publish_task", side_effect=RuntimeError("fixture notify failure")), \
+                self.assertRaisesRegex(RuntimeError, "fixture notify"):
+            await self.call("POST", route, files=files, data=data)
+        self.assertEqual(sum(path.is_file() for path in Path(storage._LOCAL_DIR).rglob("*")), 2)
+        replay = await self.call("POST", route, files=files, data=data)
+        self.assertTrue(replay.json()["already"], replay.text)
 
     async def test_single_account_auto_delivery_is_identical_for_private_and_managed_models(self):
         for model in ("", "managed-model"):
