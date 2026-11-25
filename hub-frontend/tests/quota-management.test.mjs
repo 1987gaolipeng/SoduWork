@@ -285,6 +285,49 @@ test('the member editor rejects invalid caps, saves a zero pause and retains unl
   page.unmount()
 })
 
+test('only super administrators can edit platform quotas while scoped managers can view and assign', async t => {
+  const scoped = { me: { isSuper: false, permissions: ['quota.manage'] } }
+  const superAdmin = { me: { isSuper: true } }
+  const page = await createComponentHarness(new URL('../src/screens/QuotaManagement.jsx', import.meta.url), {
+    props: scoped,
+    dependencies: {
+      '../api.js': { api: { quotaPlans: async () => config } },
+      '../ui.jsx': { Icon: 'Icon', Loading: 'Loading' },
+      './QuotaMembers.jsx': { __esModule: true, default: 'QuotaMembers' },
+      './QuotaEditors.jsx': { DefaultEditor: 'DefaultEditor', PlanEditor: 'PlanEditor' },
+      './quota-management.css': {},
+    },
+  })
+  t.after(() => page.unmount())
+  const nodes = type => page.nodes(node => node.type === type)
+  const button = label => nodes('button').find(node =>
+    (node.props['aria-label'] || [node.props.children].flat().at(-1)) === label)
+  const openTab = label => page.act(button(label).props.onClick)
+  page.render()
+  await page.flush()
+
+  assert.ok(nodes('h3').some(node => node.props.children === standard.name))
+  assert.equal(button('新建套餐'), undefined)
+  assert.equal(button('编辑套餐：Standard'), undefined)
+  assert.equal(nodes('small').some(node => node.props.children.includes('编辑套餐')), false)
+  openTab('成员额度')
+  assert.equal(nodes('QuotaMembers')[0].props.config, config)
+  openTab('原有账号默认规则')
+  assert.equal(nodes('strong')[0].props.children, '不限额')
+  assert.equal(button('调整默认额度'), undefined)
+
+  page.render(superAdmin)
+  page.act(button('调整默认额度').props.onClick)
+  assert.equal(nodes('DefaultEditor').length, 1)
+  page.act(nodes('DefaultEditor')[0].props.onClose)
+  openTab('套餐设置')
+  assert.ok(button('新建套餐'))
+  page.act(button('编辑套餐：Standard').props.onClick)
+  assert.equal(nodes('PlanEditor')[0].props.plan, standard)
+  page.render(scoped)
+  assert.equal(nodes('PlanEditor').length, 0)
+})
+
 test('page refresh reloads member quotas without changing the catalog revision, search or open editor', async () => {
   const calls = []
   let member = { id: 'alice', username: 'alice', displayName: 'Alice', isActive: true,

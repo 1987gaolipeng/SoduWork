@@ -102,6 +102,7 @@ async function handle(req, res) {
     }
     if (url.pathname === '/api/v1/admin/quotas') {
       if (req.method === 'GET') return respond(res, 200, catalog)
+      if (!user.isSuper) return respond(res, 403, { detail: 'Platform quota changes require a super administrator' })
       const body = await readBody(req)
       if (body.revision !== catalog.revision) return respond(res, 409, { detail: 'Fixture revision conflict' })
       assert.equal('models' in body, false, 'read-only choices must never be persisted')
@@ -167,6 +168,17 @@ app.whenReady().then(async () => {
   await shot('plans-zh')
   checks.push('Dedicated permission-gated module renders trial, Standard and Pro from one catalog request')
 
+  assert.equal(await js('document.querySelectorAll(".qm-section-heading button, .qm-plan-card footer button").length'), 0)
+  await click('原有账号默认规则')
+  assert.ok(await js('document.querySelector(".qm-default-card").textContent.includes("1,000,000")'))
+  assert.equal(await js('document.querySelectorAll(".qm-default-card button").length'), 0)
+  await click('成员额度')
+  await waitFor('[...document.querySelectorAll("button")].some(button => button.textContent.trim() === "分配额度")', 'scoped member assignment')
+  checks.push('Scoped administrators can view platform quotas and assign member quotas, while platform editors are available to super administrators')
+
+  user.isSuper = true
+  await win.loadURL(origin)
+  await waitFor('document.querySelectorAll(".qm-plan-card").length===3', 'super administrator plans')
   await point('document.querySelector(' + JSON.stringify('button[aria-label="编辑套餐：Trial"]') + ')')
   await waitFor('!!document.querySelector(".qm-editor")', 'trial editor')
   await input(findField('试用有效天数'), '10')
@@ -280,6 +292,7 @@ app.whenReady().then(async () => {
   await shot('plans-narrow')
   checks.push('English, Japanese and Korean copy plus narrow-layout bounds verified in Chromium')
   const quotaRequestsBeforeDenial = requests.filter(row => row.path.startsWith('/api/v1/admin/quotas')).length
+  user.isSuper = false
   user.permissions = []
   await win.loadURL(origin + '/?locale=en-US')
   await waitFor('!!document.querySelector(".app .landing")', 'account without management permissions')

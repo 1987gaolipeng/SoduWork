@@ -13,7 +13,7 @@ os.environ.setdefault("ADMIN_PASS", "isolated-quota-test-admin")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -21,7 +21,7 @@ from app import models
 from app.account_conversation_models import AccountConversation
 from app.api import (account_conversations, admin, ai_proxy, attachments, client_auth, clients, cloud_conversations,
                      config, personal_models, plugin_client_catalog, plugin_client_runs,
-                     reports, tasks, usage)
+                     quotas, reports, tasks, usage)
 from app.auth import sign_token
 from app.db import get_session
 from app.services import client_access, device_auth, rbac, usage_ledger
@@ -484,6 +484,45 @@ class TokenQuotaTests(unittest.IsolatedAsyncioTestCase):
         client_access._policy_cache = (time.monotonic() + 10000, dict(client_access.DEFAULT_POLICY))
         loaded = await self.http.get("/api/v1/admin/client-auth-policy", headers=self.admin_headers)
         self.assertTrue(loaded.json()["tokenLimitEnabled"])
+
+    async def test_platform_catalog_write_rejects_department_and_unbound_roles(self):
+        with patch.object(quotas, "lock_setting") as lock_setting:
+            for org_id in ("quota-department", self.user.org_id, None):
+                with self.subTest(org_id=org_id):
+                    operator = models.User(org_id=org_id, is_super=False)
+                    operator._perms = {"quota.manage"}
+                    with self.assertRaises(HTTPException) as denied:
+                        await quotas.save_configuration(body=None, user=operator, session=None)
+                    self.assertEqual(denied.exception.status_code, 403)
+                    self.assertEqual((denied.exception.headers or {}).get("X-Error-Code"),
+                                     "quota.platform_write_forbidden")
+            lock_setting.assert_not_called()
+
+    async def test_client_policy_quota_changes_require_a_super_administrator(self):
+        self.user._perms = {"client.assign", "quota.manage"}
+        with patch.object(client_access, "update_policy") as update_policy:
+            for body in (client_auth.ClientPolicyUpdate(tokenLimitEnabled=False),
+                         client_auth.ClientPolicyUpdate(monthlyTokenLimit=0)):
+                with self.subTest(fields=body.model_fields_set):
+                    with self.assertRaises(HTTPException) as denied:
+                        await client_auth.save_admin_policy(body=body, user=self.user, session=None)
+                    self.assertEqual(denied.exception.status_code, 403)
+                    self.assertEqual((denied.exception.headers or {}).get("X-Error-Code"),
+                                     "quota.platform_write_forbidden")
+            update_policy.assert_not_called()
+
+    async def test_delegated_login_policy_update_preserves_default_quota(self):
+        await self.policy(100)
+        self.user._perms = {"client.assign"}
+        body = client_auth.ClientPolicyUpdate(
+            allowSelfRegistration=False, tokenLimitEnabled=None, monthlyTokenLimit=None,
+        )
+        async with self.sessions() as session:
+            await client_auth.save_admin_policy(body=body, user=self.user, session=session)
+            policy = await client_access.policy(session, fresh=True)
+        self.assertFalse(policy["allowSelfRegistration"])
+        self.assertTrue(policy["tokenLimitEnabled"])
+        self.assertEqual(policy["monthlyTokenLimit"], 100)
 
     async def test_month_boundaries_and_future_month_do_not_move_quota(self):
         zone = timezone(timedelta(hours=8))

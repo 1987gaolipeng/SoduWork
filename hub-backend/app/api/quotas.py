@@ -9,9 +9,10 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
-from ..deps import require_perm
+from ..deps import require_perm, require_platform_quota_admin
 from ..models import AppSetting, AuditLog, ModelDef, ModelProvider, User
-from ..services import client_access, client_domain_events, quota_plans as qp, quota_usage, rbac
+from ..services import client_access, client_domain_events, quota_usage, rbac
+from ..services import quota_plans as qp
 from ..services.model_runtime import lock_setting
 
 router = APIRouter(prefix="/api/v1/admin/quotas", tags=["quotas"])
@@ -80,6 +81,7 @@ async def configuration(user: User = Depends(require_perm("quota.manage")),
 async def save_configuration(body: CatalogUpdate,
                              user: User = Depends(require_perm("quota.manage")),
                              session: AsyncSession = Depends(get_session)):
+    require_platform_quota_admin(user)
     row = await lock_setting(session, qp.CATALOG_KEY)
     old = qp.catalog_from(row.value)
     if old["revision"] != body.revision:
