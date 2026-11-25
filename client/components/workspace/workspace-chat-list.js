@@ -775,7 +775,14 @@ function _newChatRow() {
       finally { archive.dataset.busy = ''; archive.disabled = false; }
     });
     const actions = document.createElement('div'); actions.className = 'ws-chat-actions';
-    actions.append(pin, more);
+    const discard = document.createElement('button');
+    discard.type = 'button'; discard.className = 'ws-chat-more ws-first-send-discard'; discard.hidden = true;
+    discard.textContent = '×';
+    discard.addEventListener('click', e => {
+      e.stopPropagation();
+      void firstSends?.discard(b.dataset.firstSend, discard.dataset.attemptId);
+    });
+    actions.append(pin, more, discard);
     menu.append(rename, move, archive, remove);
     more.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -881,6 +888,13 @@ function _paintChatRow(row, c, isPinned) {
     pin.hidden = Boolean(c.firstSend);
     pin.setAttribute('aria-label', pin.title);
     pin.setAttribute('aria-pressed', String(isPinned));
+    const discard = row.querySelector('.ws-first-send-discard');
+    if (discard) {
+      discard.hidden = !global.WorkspaceFirstSends?.canDiscard?.(c.firstSend);
+      discard.dataset.attemptId = c.firstSend?.attemptId || '';
+      discard.title = ctx.wsT('workspace.firstSend.discard', '丢弃未发送的请求');
+      discard.setAttribute('aria-label', discard.title);
+    }
     if (more) {
       more.hidden = Boolean(c.firstSend);
       more.title = '会话操作';

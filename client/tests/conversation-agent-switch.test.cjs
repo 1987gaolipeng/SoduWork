@@ -48,7 +48,8 @@ test('a restored multi-agent chat pages its frozen prefix and bounded Pi archive
     { role: 'user', text: 'Earlier follow-up' }], tools: [{ id: 'prefix-tool', name: 'read', state: 'done', after: 1 }],
     turnMetrics: [{ fromMessage: 0, toMessage: 1, elapsedMs: 9000 }] };
   const restore = raw => require('../main/agent-runtime/switchable-conversation').create({ raw, options: {},
-    restored: { id: 'original', originAdapter: 'qwen', segments: [{ adapterId: 'qwen' }], prefix } });
+    restored: { id: 'original', originAdapter: 'qwen', segments: [{ adapterId: 'qwen' }], prefix,
+      historyRecovery: { mode: 'device-history' } } });
   const handle = restore(mirror.handle);
   const tail = handle.uiSnapshot({ messageLimit: 80 });
   assert.equal(tail.history.totalMessages, 403);
@@ -70,6 +71,11 @@ test('a restored multi-agent chat pages its frozen prefix and bounded Pi archive
   assert.equal(calls.at(-1), 10, 'The native worker receives its segment-local end cursor');
   assert.deepEqual(crossing.history.messageIndices, [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]);
   assert.equal(crossing.messages[0].text, 'Earlier reply');
+  assert.equal(crossing.historyRecovery.prefixMessageCount, prefix.messages.length);
+  assert.equal(crossing.history.leadingUserMessageIndex, 0);
+  const links = require('../components/panels/chat-output-links');
+  const files = [0, 2].map(i => ({ versionId: 'version-' + i, turnId: 'pi-history:' + i, userMessageIndex: i }));
+  assert.deepEqual(links.deliveryTurns(crossing, files).slice(0, 3), ['pi-history:0', 'pi-history:2', '']);
   assert.equal(crossing.messages.at(-1).blocks[0].text, 'Active 9');
   assert.equal(crossing.tools.find(tool => tool.id === 'prefix-tool').after, 0);
   assert.equal(crossing.history.messageIndices[crossing.tools.find(tool => tool.id === 'active-tool').after], 8);

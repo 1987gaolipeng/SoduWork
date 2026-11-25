@@ -175,7 +175,10 @@ function _seed(acc, piSession, options) {
     if (!m || !m.role) return;
     try {
       if (m.role === 'user') {
+        const position = acc.state.messages.length;
         acc.push({ type: 'message_end', message: m, replay: true });
+        if (opts.onUserMessage && acc.state.messages[position]?.role === 'user')
+          opts.onUserMessage(entry, position, acc.state.messages[position], sequenceIndex);
         n += 1;
         /*
          * For legacy archives without scope checkpoints, display the initial goal request and hide

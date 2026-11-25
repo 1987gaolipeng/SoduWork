@@ -190,3 +190,47 @@ test('an explicit current screenshot can replace an automatic live service and d
   f.wb.render(f.current.root,snapshot,[shot]);
   assert.equal(f.wb.state().open,false,'old references cannot select a screenshot for the next turn');
 });
+
+test('a late delivery receipt opens the confirmed file without requiring the file index to change', async () => {
+  const f = fixture();
+  const file = { artifactId: 'web', name: 'index.html', relative: 'index.html', kind: 'website',
+    primary: true, changedInTurn: false, at: 7, size: 8 };
+  const snapshot = { status: 'idle', messages: [{ role: 'user', text: 'Build the page' },
+    { role: 'assistant', blocks: [{ kind: 'text', text: 'Done.' }] }] };
+  f.wb.render(f.current.root, snapshot, [file]);
+  assert.equal(f.wb.state().open, false);
+  f.wb.render(f.current.root, { ...snapshot, deliverySync: { currentTurn: true,
+    artifactVersions: [{ id: 'web', at: 7, size: 8 }] } }, [file]);
+  await f.flush();
+  assert.equal(f.requests.at(-1)?.artifactId, 'web');
+});
+
+test('only the frozen version for the latest user message can open automatically', async () => {
+  const f = fixture();
+  const file = { originalArtifactId: 'report', name: 'report.html', relative: 'report.html', kind: 'website',
+    primary: true, archivedReadOnly: true, changedInTurn: false };
+  const files = [
+    { ...file, artifactId: 'version:earlier', versionId: 'earlier', turnId: 'old', userMessageIndex: 0 },
+    { ...file, artifactId: 'version:current', versionId: 'current', turnId: 'new', userMessageIndex: 4 },
+  ];
+  const messages = [{ role: 'user', text: 'Build a page' }, { role: 'assistant', done: true }];
+  const snapshot = { messages, history: { messageIndices: [4, 5] } };
+  f.wb.render(f.current.root, snapshot, files);
+  await f.flush();
+  assert.equal(f.requests.at(-1)?.artifactId, 'version:current');
+  f.switch();
+  f.wb.render(f.current.root, { ...snapshot, messages: [...messages, { role: 'user', submissionId: 'third' }] }, files);
+  assert.equal(f.wb.state().open, false);
+});
+
+test('an unresolved restored Markdown link cannot open a same-named file from the new workspace', () => {
+  const f = fixture();
+  f.wb.render(f.current.root, { messages: [] }, [{
+    artifactId: 'new-site', kind: 'website', name: 'index.html', relative: 'index.html', primary: true,
+  }]);
+  const source = { closest: () => ({ dataset: { outputTask: '', deliveryRestored: 'true', deliveryTurn: 'old' } }) };
+  assert.equal(f.wb.openLink('index.html', { source }), false);
+  assert.equal(f.wb.openOutput('new-site', { source }), false, 'an old carried card cannot resolve against the new workspace');
+  assert.equal(f.wb.state().open, false);
+  assert.equal(f.wb.openLink('https://example.test/', { source }), true);
+});

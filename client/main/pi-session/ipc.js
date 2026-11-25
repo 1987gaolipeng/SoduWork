@@ -581,6 +581,12 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       const assertContinuationOwner = (row = local) => continuationGrant
         ? deviceContinuation.assert(continuationGrant, app, identity, opts.chatId)
         : historyAccess.assertOwner(app, opts.chatId, historyActor, row);
+      const savedFullAccess = async cwd => {
+        const policy = !continuationGrant && await deviceContinuation.nativeAccessPolicy(
+          app, local, historyActor, session, opts.adapterId, cwd);
+        if (policy?.mode !== 'full') throw Error('原会话的完全访问权限已变化，请重新打开会话');
+        return policy;
+      };
       const openingConnection = connectionOf(identity);
       const assertHistoryCurrent = async connectionError => {
         const current = await identityOf(app);
@@ -706,6 +712,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           const switching = require('../agent-runtime/switchable-conversation');
           if (switching.busy(live) || switching.goalSwitchBlocked(live.snapshot()))
             return { ok: false, reason: '会话仍在执行或等待处理，请完成后再继续' };
+          if (opts.accessMode === 'full') await savedFullAccess(local.cwd);
           let reusable = deviceContinuation.matchesLiveSelection(live, opts, identity, historyActor.owner);
           if (reusable || opts.expectedPendingUserDigest || live.verifyRecoverySend) {
             const verified = await verifiedDeviceHistory();
@@ -911,7 +918,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       if (!permitted.ok) { await capabilityPromise.catch(() => {}); return permitted; }
       if ((continuationGrant || startDeviceSegment) && deviceHistoryRecovery) {
         const readOnly = opts.mode === 'readonly' || opts.accessMode === 'readonly';
-        opts.accessPolicy = require('../access-control/policy').create(readOnly ? 'readonly' : 'standard', cwd);
+        opts.accessPolicy = !readOnly && startDeviceSegment && opts.accessMode === 'full' ? await savedFullAccess(cwd)
+          : require('../access-control/policy').create(readOnly ? 'readonly' : 'standard', cwd);
       }
       // A per-chat scratch directory is not a reusable engineering workspace.
       const scratchRoot = path.resolve(workDir(app), 'temp');
@@ -971,6 +979,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         if (opts.chatId) {
           assertContinuationOwner(resume);
         }
+        if (startDeviceSegment && opts.accessPolicy?.mode === 'full') await savedFullAccess(cwd);
         accessConsent?.assertValid();
         return session.open({
         app, identity, cwd: spec.cwd, ref, deliveryWorkspace, runtimeConversationId: resume?.runtimeConversationId,

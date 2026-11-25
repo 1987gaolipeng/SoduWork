@@ -72,6 +72,7 @@ const conversationSession = {
   startFirstSend: input => ipcRenderer.invoke('pi-first-send-start', input),
   waitFirstSend: id => ipcRenderer.invoke('pi-first-send-wait', id),
   attachFirstSend: (id, attemptId) => ipcRenderer.invoke('pi-first-send-attach', id, attemptId),
+  discardFirstSend: (id, attemptId) => ipcRenderer.invoke('pi-first-send-discard', id, attemptId),
   firstSends: () => ipcRenderer.invoke('pi-first-send-list'),
   firstSendAssociations: () => ipcRenderer.invoke('pi-first-send-associations'),
   ackFirstSendAssociations: (id, sessionId) => ipcRenderer.invoke('pi-first-send-ack-associations', id, sessionId),

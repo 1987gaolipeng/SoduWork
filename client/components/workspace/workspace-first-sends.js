@@ -3,6 +3,7 @@
   const states = { opening: '正在启动', sending: '正在发送', accepted: '已发送', failed: '发送失败', uncertain: '发送待确认' };
   function label(key, fallback) { return global.SoduWorkI18n?.t('workspace.firstSend.' + key, fallback) || fallback; }
   function status(row) { return label(row.status, states[row.status]); }
+  function canDiscard(row) { return row?.status === 'failed' && !row.sessionId && Boolean(row.attemptId); }
   function deliveryNote(row) {
     if (!row) return label('unavailable', '这条发送记录已不可用');
     if (row.status === 'uncertain' && !row.sessionId) return label('noReceipt', '尚未收到这条消息的发送回执。');
@@ -71,6 +72,25 @@
     function show(id) {
       if (loadedOwner === owner() && rows.has(id)) return openRecord(id);
     }
+    function activeId() {
+      return detail?.pane.isConnected ? detail.id :
+        global.document?.querySelector('#cpChat [data-first-send-draft-id]')?.dataset.firstSendDraftId || '';
+    }
+    async function discard(id, expectedAttempt) {
+      const scope = owner(), row = loadedOwner === scope && rows.get(id);
+      if (!canDiscard(row) || row.attemptId !== expectedAttempt) return;
+      if (!global.confirm(label('discardConfirm', '丢弃这条未发送的请求及其附件副本？'))) return;
+      const navigation = global.WorkspaceNavigation?.generation;
+      try {
+        const result = await api().discardFirstSend(id, expectedAttempt);
+        if (scope !== owner()) return;
+        if (!result?.ok) throw Error(result?.reason || label('discardFailed', '未能丢弃发送记录'));
+        if (navigation === global.WorkspaceNavigation?.generation && activeId() === id)
+          await global.WorkspaceHost?.open('create', { newSession: true });
+        if (scope === owner()) global.NativeChat?.clearDraft?.('first-send-draft:' + id);
+      } catch (error) { if (scope === owner()) global.petSay?.(error.message); }
+      if (scope === owner()) await refresh();
+    }
     function mount(id, host) {
       close();
       const scope = owner(), navigation = global.WorkspaceNavigation?.generation;
@@ -108,6 +128,12 @@
           return openDraft(value);
         }
         if (!value.sessionId) return;
+        if (state === 'reselect' && known) {
+          global.NativeChat.restoreFirstSendForEdit(value, true, { reselect: true });
+          global.petSay?.(label('reselect', '请重新选择这条请求所需的附件或技能，再发送。'));
+          opened = true;
+          return openChat(value);
+        }
         if (value.status === 'accepted' || value.status === 'uncertain' || state === 'occupied' ||
             state === 'editable' && global.NativeChat.restoreFirstSendForEdit(value, known)) {
           opened = true;
@@ -120,10 +146,7 @@
       void refresh();
       return true;
     }
-    return { clear, refresh, recent, show, mount, get activeId() {
-      return detail?.pane.isConnected ? detail.id :
-        global.document?.querySelector('#cpChat [data-first-send-draft-id]')?.dataset.firstSendDraftId || '';
-    } };
+    return { clear, refresh, recent, show, mount, discard, get activeId() { return activeId(); } };
   }
-  global.WorkspaceFirstSends = { create, status };
+  global.WorkspaceFirstSends = { create, status, canDiscard };
 })(window);

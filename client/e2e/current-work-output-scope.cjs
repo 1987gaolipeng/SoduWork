@@ -25,7 +25,7 @@ if (typeof electron === 'string') {
   const report = { ok: false, cases: [], errors: [], boundary: 'Real Electron and production artifact IPC; isolated shared project and synthetic session snapshots, no business data or model.' };
   const handles = new Map(['first', 'second'].map(id => [id, { cwd, sessionId: id,
     outputSnapshot: () => outputs.scan(cwd, 0, 1), snapshot: () => ({ tools: [] }) }]));
-  let win;
+  let win, deviceHistory;
   const js = code => win.webContents.executeJavaScript(code, true);
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   async function click(selector) {
@@ -39,13 +39,18 @@ if (typeof electron === 'string') {
     throw Error('Timed out: ' + label);
   };
   app.whenReady().then(async () => {
-    require('../main/pi-session/artifact-ipc').install({ app, ipcMain, BrowserWindow,
-      session: { get: ref => handles.get(ref) }, workDir: () => cwd });
-    require('../main/work-preview').install({ ipcMain, BrowserWindow, WebContentsView: electron.WebContentsView,
+    const bridge = require('../main/agent-runtime/pi-session-bridge');
+    const nativeGet = bridge.get;
+    bridge.get = ref => handles.get(ref) || nativeGet(ref);
+    const identity = require('../tests/helpers/platform-session-fixture.cjs').identity();
+    const handoff = require('../main/conversation/cloud-handoff').create({ app, identityOf: () => identity });
+    require('../main/pi-session/artifact-ipc').install({ app, ipcMain, BrowserWindow, session: bridge,
+      resolveSession: handle => handoff.artifactSession(handle), workDir: () => cwd });
+    require('../main/work-preview').install({ app, ipcMain, BrowserWindow, WebContentsView: electron.WebContentsView,
       shell: { openExternal: async () => { throw Error('External navigation is outside this fixture'); } } });
     const client = path.resolve(__dirname, '..');
     const url = file => pathToFileURL(path.join(client, file)).href;
-    const scripts = ['chat-dom-patch', 'panels-chat-tools', 'chat-output-links', 'chat-workspace-info',
+    const scripts = ['chat-dom-patch', 'panels-chat-tools', 'chat-output-links', 'chat-deliveries', 'chat-workspace-info',
       'chat-workspace-split', 'chat-workspace-controls', 'panels-chat-workspace', 'panels-chat-chrome'];
     const html = path.join(owned, 'fixture.html');
     fs.writeFileSync(html, '<!doctype html><meta charset="utf-8"><title>本次工作 · 隔离验证</title>' +
@@ -101,9 +106,63 @@ if (typeof electron === 'string') {
     await sleep(180);
     assert.equal(await js('document.querySelectorAll("[data-chat-summary-body] button").length'), 0, 'opening history must not relabel it as current work');
     fs.writeFileSync(path.join(out, 'historical-preview.png'), (await win.webContents.capturePage()).toPNG());
+    const journal = require('../main/conversation/file-change-journal');
+    const workspaces = require('../main/conversation/delivery-workspace.cjs');
+    const workspace = fs.realpathSync.native(cwd), deliveryWorkspace = workspaces.allocate(workspace);
+    const draft = workspaces.ensure(workspace, deliveryWorkspace), before = await journal.snapshot(draft);
+    const row = { cwd: workspace, id: 'website', adapterId: 'pi', count: 2, at: 1 };
+    const session = { historyEntry: async () => ({ ok: false, notFound: true }), archivedConversation: async () => null };
+    deviceHistory = require('../main/conversation/shared-history.cjs').create({ app, session, identityOf: () => identity });
+    const messages = [{ role: 'user', submissionId: 'web-turn', text: 'Create a website' },
+      { role: 'assistant', done: true, text: 'Created index.html' }];
+    const handle = bridge.attachView({ ref: row.id, sessionId: row.id, cwd: workspace, deliveryWorkspace,
+      historyRow: () => row, snapshot: () => ({ messages, tools: [] }),
+      outputSnapshot: () => outputs.scan(draft, 0, 1), close: async () => true });
+    deviceHistory.observe(handle, identity);
+    fs.writeFileSync(path.join(draft, 'index.html'), '<title>Turn result</title><link rel="stylesheet" href="site.css"><h1>Frozen website</h1>');
+    fs.writeFileSync(path.join(draft, 'site.css'), 'h1{color:rgb(111,22,33)}');
+    const change = journal.compare(before, await journal.snapshot(draft), { turnId: 'web-turn' });
+    await handle.captureArtifactTurn(change);
+    fs.writeFileSync(path.join(draft, 'index.html'), '<h1>Later working copy</h1>');
+    await js(`(async () => {
+      ChatWorkbench.reset(); ChatChrome.reset(); fixtureContext.ref = 'website';
+      ChatChrome.bind(fixtureRoot, contextValue); ChatWorkbench.bind(fixtureRoot, contextValue);
+      window.webFiles = (await soduWorkAPI.conversationSession.outputs('website')).artifacts;
+      window.webTurn = { messages: [{ role: 'user', submissionId: 'web-turn' }, { role: 'assistant', done: true }] };
+      ChatWorkbench.render(fixtureRoot, { ...webTurn, status: 'streaming' }, webFiles);
+    })()`);
+    assert.equal(await js('webFiles.filter(file => file.versionId && file.turnId === "web-turn").length'), 1);
+    assert.equal(await js('ChatWorkbench.state().open'), false);
+    await js('ChatWorkbench.render(fixtureRoot, { ...webTurn, status: "idle" }, webFiles);');
+    const rightWebsite = async () => {
+      for (const view of win.contentView.children) {
+        if (view.getVisible() && !view.webContents.isDestroyed() && await view.webContents.executeJavaScript(
+          'document.querySelector("h1")?.textContent === "Frozen website" && getComputedStyle(document.querySelector("h1")).color === "rgb(111, 22, 33)"')) return true;
+      }
+      return false;
+    };
+    await until(rightWebsite, 'frozen HTML in the real right-hand WebContentsView');
+    assert.equal(await js('ChatWorkbench.state().open'), true);
+    await click('[data-wb-close]');
+    await js('ChatWorkbench.render(fixtureRoot, webTurn, webFiles);');
+    assert.equal(await js('ChatWorkbench.state().open'), false, 'a refresh respects the hidden pane');
+    await handle.close();
+    fs.rmSync(draft, { recursive: true });
+    const historyView = bridge.attachView(await deviceHistory.open(row.id, { historyPreview: true }), { historyPreview: true });
+    await js(`(async () => {
+      ChatWorkbench.reset(); fixtureContext.ref = ${JSON.stringify(historyView.ref)}; ChatWorkbench.bind(fixtureRoot, contextValue);
+      window.webFiles = (await soduWorkAPI.conversationSession.outputs(fixtureContext.ref)).artifacts;
+      ChatWorkbench.render(fixtureRoot, { ...webTurn, localReplica: true, execution: { readOnly: true } }, webFiles);
+    })()`);
+    assert.equal(await js('ChatWorkbench.state().open'), false, 'returning to passive history must not reactivate a result');
+    assert.equal(await js('ChatWorkbench.openOutput(webFiles.find(f => f.versionId).artifactId)'), true);
+    await until(rightWebsite, 'explicit reopen of frozen HTML from history');
+    await historyView.close();
+    report.cases.push('A settled live turn opens the frozen HTML with its CSS. After the draft is deleted, the artifact IPC lists the version through the native history source and the right pane opens the same version through its registered facade. Manual close survives refresh.');
     assert.deepEqual(report.errors, []);
     report.ok = true;
-  }).catch(error => { report.error = String(error.stack || error); }).finally(() => {
+  }).catch(error => { report.error = String(error.stack || error); }).finally(async () => {
+    await deviceHistory?.close();
     fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report)); win?.destroy(); app.exit(report.ok ? 0 : 1);
   });

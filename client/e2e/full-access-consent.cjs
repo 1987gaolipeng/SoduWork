@@ -86,9 +86,11 @@ function opening(confirmFullAccess) {
   const source = fs.readFileSync(path.resolve(__dirname, '../main/pi-session/ipc.js'), 'utf8');
   const handler = source.slice(source.indexOf('  async function openConversation('), source.indexOf("  ipcMain.handle('pi-session-open',"));
   const calls = [], cwd = profile;
+  const identity = require('../tests/helpers/platform-session-fixture.cjs').identity();
+  require('../main/conversation/requirement-context').cachedIdentity = () => identity;
   const context = vm.createContext({
     _cloudHandoff:{observe(){}}, skillTurn:require('../main/pi-session/skill-turn'), sendIdentityOf:null,
-    app, path, identityOf: async () => ({ hub: 'fixture', clientId: 'fixture' }),
+    app, path, identityOf: async () => identity, _sessionOwners: null, firstTurnTitle: { enroll() {} },
     memories: { context: async () => ({}), attach: async () => {} }, updateWorkloads: { guard: () => ({ ok: true }) },
     session: { open: async value => { calls.push(value); return { ok: true, session: {sessionId:'consent-fixture',cwd,close:async()=>{}} }; } },
     capabilities: { resolve: async () => ({ catalog: {}, selectedSkills: [], capabilityIds: [] }) },
@@ -98,7 +100,7 @@ function opening(confirmFullAccess) {
     _entryContextPrompts: () => [], _awaitBounded: value => value, OPEN_TIMEOUT_MS: 45000,
     _bindUsage() {}, _attach() {}, _detach() {}, _wire() {}, _openReply: () => ({ ok: true }),
     require: name => {
-      return require(path.resolve(__dirname, '../main/pi-session', name));
+      return name.startsWith('node:') ? require(name) : require(path.resolve(__dirname, '../main/pi-session', name));
     },
   });
   vm.runInContext(handler, context);
@@ -124,7 +126,9 @@ app.whenReady().then(async () => {
   const confirm = require('../main/access-control/full-access-consent').create({ ...electron, BrowserWindow: HiddenConsent, themeSource });
   let parent = await parentWindow();
   const newChat = opening(confirm);
-  let task = newChat.open(parent), dialog = await shown(parent);
+  let task = newChat.open(parent), dialog = await Promise.race([shown(parent), task.then(result => {
+    throw Error('New chat returned before native consent: ' + JSON.stringify(result));
+  })]);
   assert.equal(await dialog.webContents.executeJavaScript('document.activeElement.id'), 'consentCancel');
   assert.equal(await dialog.webContents.executeJavaScript('document.querySelector("#consentAllow").disabled'), true);
   await shot(dialog, 'full-access-zh', 448, 428);

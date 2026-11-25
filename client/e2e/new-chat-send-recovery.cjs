@@ -65,6 +65,7 @@ if (typeof electron === 'string') {
       model:{id:'fixture-model', label:'Isolated fixture'}, snapshot:handle.snapshot()};
   }
   async function open(options) {
+    if (options.modelName === 'unavailable-fixture-model') return {ok:false,reason:'Model unavailable'};
     if (options.chatId) {
       const handle = scenarios.get(options.chatId)?.handle;
       assert.ok(handle, 'Sidebar navigation can only attach an existing session');
@@ -389,6 +390,23 @@ if (typeof electron === 'string') {
     assert.equal(settled.status, 'accepted'); assert.equal(settled.sessionId, sidebar.handle.sessionId);
     ambiguous.releaseRead();
     report.cases.push('Mouse navigation from the sidebar edits a proven refusal in its original conversation and submits the revision once. Another draft, an uncertain send and a superseded asynchronous record opening remain isolated.');
+    const abandoned = 'first-' + require('node:crypto').randomUUID();
+    const source = path.join(root, 'original.csv'); fs.writeFileSync(source, 'isolated input');
+    const request = { intentId:abandoned, open:{adapterId:'kimi',modelName:'unavailable-fixture-model'},
+      text:'Review my file', attachments:[{name:'original.csv',path:source}] };
+    const bridge = 'soduWorkAPI.conversationSession';
+    assert.equal((await js(bridge + '.startFirstSend(' + JSON.stringify(request) + ')')).ok, true);
+    const refusal = (await js(bridge + '.waitFirstSend(' + JSON.stringify(abandoned) + ')')).row;
+    assert.equal(refusal.status,'failed'); assert.equal(refusal.sessionId,'');
+    const accountDir = path.join(app.getPath('userData'),'first-send-requests',
+      require('../main/platform-connections/runtime.cjs').connectionScope(identity));
+    const copies = path.join(accountDir,abandoned+'.inputs');
+    assert.ok(fs.readdirSync(copies).length);
+    assert.equal((await js(bridge + '.discardFirstSend(' + JSON.stringify(abandoned) + ',' + JSON.stringify(refusal.attemptId) + ')')).ok, true);
+    assert.equal(fs.existsSync(copies),false);
+    assert.equal(fs.readFileSync(source,'utf8'),'isolated input');
+    assert.equal((await js(bridge + '.firstSends()')).rows.some(row=>row.intentId===abandoned),false);
+    report.cases.push('Discarding an unallocated refusal through the production preload clears its staged files and preserves the source.');
     assert.deepEqual(await js('errors'), []);
     assert.deepEqual(report.errors, []);
     report.rpcCalls = calls;

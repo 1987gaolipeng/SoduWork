@@ -166,7 +166,7 @@ if (typeof electron === 'string') {
         list.innerHTML = ChatOutputLinks.decorate(html, ${JSON.stringify(files)}, 'delivery-groups', snapshot);
         return { groups: [...list.querySelectorAll('.ndelivery')].map(card => ({
           owner: card.closest('.nmsg')?.dataset.chatNode || 'session',
-          ids: [...card.querySelectorAll('[data-open-app]')].map(link => link.dataset.openApp).sort(),
+          ids: [...new Set([...card.querySelectorAll('[data-open-app]')].map(link => link.dataset.openApp))].sort(),
         })), installOwners: [...list.querySelectorAll('[data-install-plugin-draft]')].map(button => button.closest('.nmsg')?.dataset.chatNode) };
       })()`);
     }
@@ -191,6 +191,177 @@ if (typeof electron === 'string') {
     assert.deepEqual(await deliveryGroups([user, { ...oneTurn[1], installCard: true }], pair, page),
       { groups: [group('session', 'named', 'extra')], installOwners: ['message:1'] });
     report.cases.push({ historyDeliveries: 'single turn, bounded turns, undated turns, incomplete archive, paginated history and legacy installation card' });
+    for (const file of ['panels-library.css', 'chat-deliveries.css']) {
+      await win.webContents.insertCSS(fs.readFileSync(path.join(client, 'components/panels', file), 'utf8'));
+    }
+    const nativeIcon = await app.getFileIcon(path.join(client, 'desk.html'));
+    await run('window.soduWorkAPI = { fileTypeIcon: async () => ({ ok: true, dataUrl: ' + JSON.stringify(nativeIcon.toDataURL()) + ' }) }; void 0;');
+    await run(fs.readFileSync(path.join(client, 'components/panels/library-file-icons.js'), 'utf8') + '\nvoid 0;');
+    await run(fs.readFileSync(path.join(client, 'components/panels/chat-composer-bindings.js'), 'utf8') + '\nvoid 0;');
+    await run(`(() => {
+      const messages = [{ role: 'user', submissionId: 'first' }, { role: 'assistant', done: true }];
+      const ref = 'pi-history-card';
+      const live = { artifactId: 'original', primary: true, changedInTurn: true, name: 'index.html',
+        relative: 'index.html', kind: 'website', title: '我的简易网页', size: 128 };
+      const frozen = { ...live, artifactId: 'version:frozen', versionId: 'frozen', originalArtifactId: 'original',
+        userMessageIndex: 0, turnId: 'first', changedInTurn: false };
+      const notes = { ...frozen, artifactId: 'version:notes', versionId: 'notes', originalArtifactId: 'original-notes',
+        name: 'notes.pdf', relative: 'notes.pdf', kind: 'document', title: 'Notes' };
+      const calls = [];
+      const result = { ok: true, manifest: { revision: 'frozen-rev', files: [{ path: 'index.html' }] } };
+      const bundle = { ok: true, manifest: { revision: 'bundle-rev', files: [{ path: 'index.html' }, { path: 'notes.pdf' }] } };
+      const api = {
+        inspectDelivery: async (ref, ids) => { calls.push(['inspect', ref, ids]); return ids.length > 1 ? bundle : result; },
+        openLocalDelivery: async (ref, ids, options) => { calls.push(['reveal', ref, ids, options]); return { ok: true }; },
+        openDeliveryArchive: async (ref, ids, options) => { calls.push(['archive', ref, ids, options]); return { ok: true }; },
+        saveDelivery: async (ref, ids) => { calls.push(['export', ref, ids]); return { ok: true }; },
+        prepareDelivery: async (ref, ids) => { calls.push(['prepare', ref, ids]); return result; },
+      };
+      window.SoduWorkAPI = { saveLibraryDelivery: async payload => {
+        calls.push(['save', payload.manifest.revision]); return { ok: true, delivery: { id: 'saved', files: payload.manifest.files } };
+      } };
+      // Use the same delegated click binding as the conversation, with observable host commands.
+      const controls = document.createElement('div');
+      controls.hidden = true;
+      controls.innerHTML = '<textarea id="nchatInput"></textarea><button id="nchatSend"></button><div id="nchatQueue"></div><div id="nchatTaskSuggest"></div>';
+      document.body.append(controls);
+      list.id = 'nchatList'; list.style.width = '560px';
+      const context = { _ref: ref, _api: () => api, _paintBar() {} };
+      ChatComposerBindings.create(context)._bind(document.body);
+      window.ChatWorkbench = { openOutput(id, { source }) { calls.push(['preview', id, source.closest('.nmsg')?.dataset.chatNode || 'session']); } };
+      const passive = { messages, localReplica: true, execution: { readOnly: true } };
+      const incomplete = { ...passive, history: { truncated: true } };
+      const prior = { ...frozen, artifactId: 'version:prior', versionId: 'prior', userMessageIndex: undefined, turnId: 'pi-archive:prior' };
+      const loose = { ...live, artifactId: 'loose', name: 'old.html', relative: 'old.html' };
+      const cases = {
+        active: [[live, frozen], { messages }], away: [[], { messages: [] }],
+        reopened: [[live, frozen], passive], legacy: [[live], passive], multiple: [[frozen, notes], passive],
+        unassigned: [[prior], incomplete], unversioned: [[loose], incomplete], inferred: [[prior], passive],
+        resumed: [[frozen, { ...live, changedInTurn: false }], {
+          messages: [...messages, { role: 'user', submissionId: 'second' }, { role: 'assistant', done: true }],
+        }],
+      };
+      function describe() {
+        return [...list.querySelectorAll('.ndelivery')].map(card => ({
+          owner: card.closest('.nmsg')?.dataset.chatNode || 'session', title: card.querySelector('[data-delivery-title]')?.textContent,
+          icon: !!card.querySelector('.ndelivery-icon'), preview: card.querySelector('header [data-open-app]')?.dataset.openApp,
+          actions: [...card.querySelectorAll('.ndelivery-actions button')].filter(b => b.checkVisibility()).map(b => b.title),
+          list: !!card.querySelector('.ndelivery-files')?.checkVisibility(),
+          exports: [...card.querySelectorAll('[data-delivery-export-version]')].filter(b => b.checkVisibility()).map(b => b.dataset.deliveryExportVersion),
+        }));
+      }
+      window.deliveryFixture = { calls, describe, render(name) {
+        const [files, snapshot] = cases[name];
+        context._ref = name === 'away' ? 'other-chat' : ref;
+        const html = snapshot.messages.map((message, i) => message.role === 'user'
+          ? '<div class="nmsg user" data-chat-node="message:' + i + '"></div>'
+          : '<div class="nmsg ai" data-output-task="" data-delivery-final="true" data-chat-node="message:' + i +
+            '" data-delivery-current="' + (i === snapshot.messages.length - 1) + '"><div class="ntext">' +
+            (i === 1 ? '<code>index.html</code>' : 'Done') + '</div></div>').join('');
+        list.innerHTML = ChatOutputLinks.decorate(html, files, context._ref, { status: 'idle', ...snapshot });
+        SoduWorkLibraryFileIcons.hydrate(list);
+        return describe();
+      } };
+    })()`);
+    async function clickDelivery(selector) {
+      const point = await run(`(() => {
+        const button = list.querySelector(${JSON.stringify(selector)});
+        if (!button?.checkVisibility() || button.disabled) throw Error('Delivery button unavailable: ' + ${JSON.stringify(selector)});
+        button.scrollIntoView({ block: 'nearest' });
+        const bounds = button.getBoundingClientRect();
+        const x = Math.round(bounds.x + bounds.width / 2), y = Math.round(bounds.y + bounds.height / 2);
+        if (!button.contains(document.elementFromPoint(x, y))) throw Error('Delivery button occluded: ' + ${JSON.stringify(selector)});
+        return { x, y };
+      })()`);
+      for (const type of ['mouseDown', 'mouseUp']) win.webContents.sendInputEvent({ type, ...point, button: 'left', clickCount: 1 });
+    }
+    const card = { owner: 'message:1', title: '我的简易网页', icon: true, preview: 'version:frozen',
+      actions: ['打开所在位置', '保存到资料库'], list: false, exports: [] };
+    for (const view of ['active', 'away', 'reopened', 'resumed', 'legacy']) {
+      const cards = await run('deliveryFixture.render(' + JSON.stringify(view) + ')');
+      assert.deepEqual(cards, view === 'away' ? [] : [{ ...card, ...(view === 'legacy' ? { preview: 'original', actions: [] } : {}) }], view);
+      if (view === 'active' || view === 'reopened') {
+        await until('!!list.querySelector(".ndelivery-icon img:not([hidden])")?.naturalWidth');
+        const bounds = await run(`(() => { const r = list.querySelector('.ndelivery').getBoundingClientRect();
+          return { x: Math.floor(r.x) - 2, y: Math.floor(r.y) - 2, width: Math.ceil(r.width) + 4, height: Math.ceil(r.height) + 4 }; })()`);
+        await run('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+        fs.writeFileSync(path.join(output, 'single-' + view + '.png'), (await win.webContents.capturePage(bounds)).toPNG());
+        await clickDelivery('.ndelivery-heading button');
+        await until('deliveryFixture.calls.filter(item => item[0] === "preview").length === ' + (view === 'active' ? 1 : 2));
+      }
+    }
+    await run('deliveryFixture.render("reopened")');
+    await clickDelivery('[data-delivery-reveal]');
+    await until('deliveryFixture.calls.some(item => item[0] === "reveal")');
+    await clickDelivery('[data-delivery-retry]');
+    await until('deliveryFixture.calls.some(item => item[0] === "save")');
+    assert.equal((await run('deliveryFixture.describe()'))[0].list, false, 'inspection or saving may not reintroduce a single-file list');
+    const [multiple] = await run('deliveryFixture.render("multiple")');
+    assert.equal(multiple.title, '成果包.zip');
+    assert.ok(multiple.actions.includes('打开压缩包'));
+    assert.equal(multiple.list, true);
+    assert.deepEqual(multiple.exports.sort(), ['version:frozen', 'version:notes']);
+    await clickDelivery('.ndelivery-actions [data-delivery-archive]');
+    await until('deliveryFixture.calls.some(item => item[0] === "archive")');
+    for (const [i, id] of multiple.exports.entries()) {
+      await clickDelivery('[data-delivery-export-version="' + id + '"]');
+      await until('deliveryFixture.calls.filter(item => item[0] === "export").length === ' + (i + 1));
+    }
+    assert.deepEqual(await run('deliveryFixture.calls'), [
+      ['preview', 'version:frozen', 'message:1'], ['preview', 'version:frozen', 'message:1'],
+      ['inspect', 'pi-history-card', ['version:frozen']],
+      ['reveal', 'pi-history-card', ['version:frozen'], { bundle: false, revision: 'frozen-rev' }],
+      ['prepare', 'pi-history-card', ['version:frozen']], ['save', 'frozen-rev'],
+      ['inspect', 'pi-history-card', ['version:frozen', 'version:notes']],
+      ['archive', 'pi-history-card', ['version:frozen', 'version:notes'], { bundle: true, revision: 'bundle-rev' }],
+      ['export', 'pi-history-card', ['version:frozen']], ['export', 'pi-history-card', ['version:notes']],
+    ]);
+    for (const [view, owner, id] of [
+      ['inferred', 'message:1', 'version:prior'], ['unassigned', 'session', 'version:prior'], ['unversioned', 'session', 'loose'],
+    ]) {
+      const expected = { ...card, owner, preview: id, actions: view === 'unversioned' ? [] : card.actions };
+      assert.deepEqual(await run('deliveryFixture.render(' + JSON.stringify(view) + ')'), [expected], view);
+      await clickDelivery('.ndelivery-heading button');
+      await until('deliveryFixture.calls.at(-1)[0] === "preview" && deliveryFixture.calls.at(-1)[1] === ' + JSON.stringify(id) +
+        ' && deliveryFixture.calls.at(-1)[2] === ' + JSON.stringify(owner));
+    }
+    report.cases.push({ switchedChatDelivery: 'single-file cards stay compact when live, reopened, and continued; title, folder and library buttons work; multi-file versions export individually' });
+    const recovered = await run(`(() => {
+      const ordinary = { artifactId: 'current-index', name: 'index.html', relative: 'index.html', size: 99,
+        kind: 'website', title: 'New website', primary: true };
+      const old = { ...ordinary, artifactId: 'version:old', originalArtifactId: ordinary.artifactId, versionId: 'old',
+        title: 'Original website', changedInTurn: false, archivedReadOnly: true };
+      function render(files, prefixMessageCount, extraOld = false) {
+        const turn = id => [{ role: 'user', submissionId: id }, { role: 'assistant', done: true }];
+        const messages = [...turn('old'), ...(extraOld ? turn('another-old') : []), ...turn('new')];
+        const html = messages.map((m, i) => m.role === 'user' ? '<div class="nmsg user"></div>' :
+          '<div class="nmsg ai" data-output-task="" data-chat-node="message:' + i + '" data-delivery-final="true" data-delivery-current="' +
+          (i === messages.length - 1) + '"><div class="ntext nmd"><a href="index.html">Open page</a> <code>index.html</code></div></div>').join('');
+        const snap = { status: 'idle', messages, historyRecovery: { mode: 'device-history', prefixMessageCount } };
+        list.innerHTML = ChatOutputLinks.decorate(html, files, 'restored', snap);
+        ChatOutputLinks.linkify(list, files, 'second pass', false, snap);
+        return { replies: [...list.querySelectorAll('.nmsg.ai')].map(m => ({
+          title: m.querySelector('.ndelivery-heading [data-open-app]')?.dataset.openApp || null,
+          link: m.querySelector('.nmd button')?.dataset.openApp || null,
+          scoped: ChatOutputLinks.scoped(m, files).map(f => f.artifactId),
+        })), session: list.querySelector(':scope > .ndelivery [data-open-app]')?.dataset.openApp || null };
+      }
+      const inferred = { ...old, turnId: 'pi-archive:legacy' };
+      const known = { ...old, turnId: 'pi-history:legacy', userMessageIndex: 0 };
+      return { known: render([known, ordinary], 2), inferred: render([inferred, ordinary], 2),
+        emptyWorkspace: render([inferred], 2), noOriginal: render([ordinary], 2), ambiguous: render([inferred, ordinary], 4, true) };
+    })()`);
+    const oldReply = { title: 'version:old', link: 'version:old', scoped: ['version:old'] };
+    const unavailable = { title: null, link: null, scoped: [] };
+    assert.deepEqual(recovered.known.replies[0], oldReply);
+    assert.deepEqual(recovered.inferred.replies[0], oldReply);
+    assert.deepEqual(recovered.emptyWorkspace.replies[0], oldReply);
+    assert.deepEqual(recovered.noOriginal.replies[0], unavailable);
+    assert.deepEqual(recovered.ambiguous.replies.slice(0, 2), [unavailable, unavailable]);
+    assert.equal(recovered.ambiguous.session, 'version:old');
+    for (const result of [recovered.known, recovered.inferred, recovered.noOriginal, recovered.ambiguous])
+      assert.equal(result.replies.at(-1).link, 'current-index');
+    report.cases.push({ restoredWorkspace: 'card and Markdown resolve to the original in an empty or same-name workspace; ambiguous files stay at session scope' });
     report.ok = true;
   }).catch(error => { report.error = error.stack || String(error); }).finally(() => {
     fs.mkdirSync(output, { recursive: true });

@@ -505,3 +505,40 @@ test('deleting during first-send preflight prevents later dispatch and journal r
   assert.equal(submitted, 0); assert.deepEqual((await service.list(null)).rows, []);
   assert.equal((await service.start(null, req)).ok, false);
 });
+
+test('only the current unallocated refusal can discard its journal and owned attachment copies', async t => {
+  const f = fixture(t), waiting = gate();
+  let gateOpen = true;
+  const config = { ...f.config, open: async () => {
+    if (gateOpen) await waiting.promise;
+    return { ok: false, reason: 'Runner unavailable' };
+  } };
+  const service = create(config), req = f.request('read the attachment');
+  const source = path.join(f.root, 'original.txt');
+  fs.writeFileSync(source, 'user data');
+  req.attachments = [{ name: 'original.txt', path: source }];
+  await service.start(null, req);
+  const id = req.intentId, inputs = path.join(f.root, f.a, id + '.inputs');
+  await assert.rejects(service.discard(null, id, id), /状态已变化/);
+  gateOpen = false; waiting.resolve();
+  await service.act(null, id, 'wait');
+  const cold = create(config);
+  f.use(f.b);
+  await assert.rejects(cold.discard(null, id, id), /状态已变化/);
+  f.use(f.a);
+  const next = 'first-' + randomUUID();
+  await cold.start(null, { ...req, retryAttempt: { expected: id, next } });
+  await cold.act(null, id, 'wait');
+  await assert.rejects(cold.discard(null, id, id), /状态已变化/);
+  assert.ok(fs.readdirSync(inputs).length);
+  assert.equal((await cold.discard(null, id, next)).ok, true);
+  assert.equal((await cold.discard(null, id, next)).ok, true);
+  assert.equal((await cold.start(null, req)).ok, false);
+  assert.deepEqual((await create(config).list(null)).rows, []);
+  assert.equal(fs.existsSync(inputs), false);
+  assert.equal(fs.readFileSync(source, 'utf8'), 'user data');
+  const withSession = create({ ...f.config, send: async () => ({ ok: false, notSent: true }) });
+  const other = f.request();
+  await withSession.start(null, other); await withSession.act(null, other.intentId, 'wait');
+  await assert.rejects(withSession.discard(null, other.intentId, other.intentId), /状态已变化/);
+});

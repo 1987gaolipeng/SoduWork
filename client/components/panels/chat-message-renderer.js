@@ -952,7 +952,7 @@
     }
     global.ChatDeliveries?.hydrate(list, { ref: ctx._ref, api: ctx._api(), snapshot: ctx._snap });
     if (global.ChatTools && typeof ChatTools.linkifyOutputs === 'function') {
-      ChatTools.linkifyOutputs(list, ctx._outs, String(ctx._ref || '') + '\u0000' + (ctx._outAt || ''));
+      ChatTools.linkifyOutputs(list, ctx._outs, String(ctx._ref || '') + '\u0000' + (ctx._outAt || ''), ctx._snap);
     }
     global.PluginDebugCard?.reconcile?.({ ref: ctx._ref, snapshot: ctx._snap, list });
     ctx._renderTaskStartPrompt();

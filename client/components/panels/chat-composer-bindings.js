@@ -7,6 +7,11 @@
     let destroyed = false, loaded = false, loading = null, loadGeneration = 0, catalog = [], missing = [], defaultMode = 'standard', error = '';
     let choiceScope = null, preferenceVersion = 0;
     const devicePreview = () => Boolean(ctx._ref && ctx._snap?.execution?.canContinueOnDevice);
+    const continuationAccess = () => {
+      const saved = ctx._snap?.execution?.continuationAccess;
+      return devicePreview() && saved?.adapterId === (ctx._snap.adapterId || ctx._sessionOptions.adapterId) ? saved : null;
+    };
+    const previewMode = () => continuationAccess()?.mode || (defaultMode === 'readonly' ? 'readonly' : 'standard');
     const active = () => !destroyed && (devicePreview() || !ctx._ref && (!ctx._sessionId || ctx._snap?.workOnly === true));
     const owner = () => ctx._draftOwnerScope?.() || '';
     const scope = () => ({epoch:ctx._viewEpoch, sessionId:ctx._sessionId, owner:owner()});
@@ -60,10 +65,10 @@
       }
       const adapterId = previewAdapter || ctx._sessionOptions.adapterId || 'pi', runtime = catalog.find(item => item.id === adapterId);
       const mode = ctx._sessionOptions.accessMode || (ctx._sessionOptions.mode === 'readonly' ? 'readonly' :
-        devicePreview() && defaultMode === 'full' ? 'standard' : defaultMode);
+        devicePreview() ? previewMode() : defaultMode);
       const selection = ctx._snap?.modelSelection;
       const access = runtime?.accessControl;
-      const accessControl = devicePreview() && Array.isArray(access?.modes)
+      const accessControl = devicePreview() && !continuationAccess() && Array.isArray(access?.modes)
         ? { ...access, modes: access.modes.filter(value => value === 'readonly' || value === 'standard') } : access;
       return {draftOnly:true, devicePreview:devicePreview(), archivedModelName:ctx._sessionOptions.archivedModelName,
         draftId:ctx._sessionId || 'new:' + ctx._viewEpoch, adapterId,
@@ -91,7 +96,26 @@
       selectThinking(level) { return active() && ctx._sessionOptions.adapterId === 'codex'
         ? {ok:true,thinking:{level,enabled:true,supported:true}} : {ok:false,reason:'会话已变化，请重新选择推理强度'}; },
       async chooseAccess(mode, adapterId, anchor) {
-        if (!active() || !consent || (devicePreview() && mode === 'full')) return false;
+        if (!active() || !consent) return false;
+        const original = continuationAccess();
+        if (original) {
+          // Bind the normal session permission dialog to the executable handle,
+          // preserving its revision and native confirmation on a new full grant.
+          const requested = scope(), previewRef = ctx._ref;
+          ctx._sessionOptions.accessMode = original.mode;
+          if (!await ctx._ensure(ctx._sessionId, previewRef) || ctx._ref === previewRef) return false;
+          const ref = ctx._ref;
+          const current = () => !destroyed && ctx._viewEpoch === requested.epoch && owner() === requested.owner &&
+            ctx._sessionId === requested.sessionId && ctx._ref === ref;
+          if (!current()) return false;
+          const policy = ctx._snap.nextAccessPolicy || ctx._snap.accessPolicy;
+          const result = await api().setAccessMode(ref, mode, policy?.revision || 0, { anchor });
+          if (!current()) return false;
+          if (result?.snapshot) { ctx._snap = { ...ctx._snap, ...result.snapshot }; ctx._paintBar?.(); }
+          if (!result?.ok && !result?.cancelled) global.petSay?.(result?.reason || '权限更新失败，请重试');
+          return !!result?.ok;
+        }
+        if (devicePreview() && mode === 'full') return false;
         discardStaleChoice();
         const requested = choiceScope = scope(), oldDraft = ctx._sessionOptions.accessDraftId;
         if (mode === 'full' && ctx._sessionOptions.accessMode === 'full' && ctx._sessionOptions.accessConsentId) return true;
@@ -109,7 +133,7 @@
         if (devicePreview()) {
           if (!loaded) await load();
           if (!matches(requested) || error) return false;
-          ctx._sessionOptions.accessMode ||= defaultMode === 'readonly' ? 'readonly' : 'standard';
+          ctx._sessionOptions.accessMode ||= previewMode();
           return true;
         }
         const saved = await (ctx._workCards?.ensureDraftSelectionSaved?.() ?? true);
@@ -470,7 +494,11 @@ function _bind(el) {
         ctx._sessionOptions.displayName = result.snapshot?.displayName || result.displayName;
         ctx._sessionOptions.modelName = result.snapshot?.modelSelection?.name || '';
         ctx._sessionOptions.modelLabel = result.snapshot?.modelSelection?.model?.label || ctx._sessionOptions.modelName;
-        if (draft) { ctx._sessionOptions.reasoningEffort = ''; ctx._sessionOptions.thinkingLevel = ''; }
+        if (draft) {
+          ctx._sessionOptions.reasoningEffort = ''; ctx._sessionOptions.thinkingLevel = '';
+          if (ctx._snap?.execution?.canContinueOnDevice && ctx._sessionOptions.accessMode === 'full')
+            delete ctx._sessionOptions.accessMode;
+        }
         ctx._model = result.snapshot?.modelSelection?.model || null;
         if (draft && ctx._snap?.workOnly) void ctx._workCards?.saveDraftSelection?.(); ctx._render(); },
       modelSelected: selection => { const draft = draftControls.active();
@@ -771,7 +799,7 @@ function _bind(el) {
         e.preventDefault();
         const href = link.getAttribute('href') || '';
         const opened = global.ChatWorkbench && typeof ChatWorkbench.openLink === 'function'
-          ? ChatWorkbench.openLink(href) : false;
+          ? ChatWorkbench.openLink(href, { source: link }) : false;
         if (!opened && /^https?:\/\//i.test(href) && global.soduWorkAPI &&
             typeof global.soduWorkAPI.openExternal === 'function') {
           global.soduWorkAPI.openExternal(href);
@@ -795,7 +823,7 @@ function _bind(el) {
       }
       if (preview) {
         if (global.ChatWorkbench && typeof ChatWorkbench.openOutput === 'function') {
-          ChatWorkbench.openOutput(preview.getAttribute('data-open-app'));
+          ChatWorkbench.openOutput(preview.getAttribute('data-open-app'), { source: preview });
         }
         return;
       }

@@ -122,6 +122,9 @@
      */
     try { return global.localStorage || null; } catch (_) { return null; }
   }
+  function keepsEmptyFirstSend(key, marker) {
+    return Boolean(marker?.intentId && (key === 'first-send-draft:' + marker.intentId || key === marker.sessionId));
+  }
   function _loadConversationDrafts() {
     if (ctx._draftStorageLoaded) return;
     ctx._draftStorageLoaded = true;
@@ -135,7 +138,7 @@
         const text = String(row && row.text || '');
         const updatedAt = Number(row && row.updatedAt || 0);
         const skills = _skillDraftNames(row && row.skills);
-        const keptEmpty = row?.firstSendRetry?.intentId && key === 'first-send-draft:' + row.firstSendRetry.intentId;
+        const keptEmpty = keepsEmptyFirstSend(key, row?.firstSendRetry);
         if (key && (text.trim() || skills.length || keptEmpty))
           ctx._conversationDrafts.set(key, { text, skills, updatedAt: updatedAt || Date.now(),
             ...(row.firstSendRetry ? { firstSendRetry: row.firstSendRetry } : {}) });
@@ -171,7 +174,7 @@
     const skills = _skillDraftNames(selections === undefined ? ctx._conversationDrafts.get(resolvedKey)?.skills : selections);
     const firstSendRetry = ctx._conversationDrafts.get(resolvedKey)?.firstSendRetry;
     if (text.trim() || skills.length || firstSendRetry && (attachmentDrafts.get(resolvedKey)?.length ||
-        resolvedKey === 'first-send-draft:' + firstSendRetry.intentId))
+        keepsEmptyFirstSend(resolvedKey, firstSendRetry)))
       ctx._conversationDrafts.set(resolvedKey, { text, skills, updatedAt: Date.now(), ...(firstSendRetry ? { firstSendRetry } : {}) });
     else ctx._conversationDrafts.delete(resolvedKey);
     while (ctx._conversationDrafts.size > 30) {
@@ -304,9 +307,24 @@
       return row.sessionId ? 'editable' : 'starter';
     return 'reselect';
   }
-  function restoreFirstSendForEdit(row, hasHistory) {
-    if (!['editable', 'starter'].includes(firstSendEditState(row, hasHistory))) return false;
-    const key = row.sessionId || 'first-send-draft:' + row.intentId;
+  function restoreFirstSendForEdit(row, hasHistory, { reselect = false } = {}) {
+    const state = firstSendEditState(row, hasHistory);
+    const key = row?.sessionId || 'first-send-draft:' + row?.intentId;
+    if (state === 'reselect' && reselect && hasHistory && row.sessionId && row.canAttachFailed) {
+      // An explicit send with freshly selected inputs must settle the same failed
+      // intent. Retain independently edited text, never reconstruct missing inputs.
+      const stored = ctx._conversationDrafts.get(key);
+      const marker = { intentId: row.intentId, attemptId: row.attemptId, sessionId: key };
+      if (!stored?.firstSendRetry?.sessionId) {
+        const edited = stored && stored.text !== row.text;
+        ctx._conversationDrafts.set(key, { text: edited ? stored.text : '', skills: edited ? stored.skills : [],
+          firstSendRetry: marker, updatedAt: Date.now() });
+      }
+      ctx._failedConversationDrafts.delete(key);
+      _scheduleDraftStorage();
+      return true;
+    }
+    if (!['editable', 'starter'].includes(state)) return false;
     const retained = ctx._failedConversationDrafts.get(key);
     if (retained) retained.openEditor = true;
     if (!ctx._conversationDrafts.has(key)) {

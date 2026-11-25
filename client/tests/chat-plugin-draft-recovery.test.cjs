@@ -72,6 +72,22 @@ test('a refused first turn can restore its complete live selection or a known te
   assert.equal(restarted.api._conversationDraftText('text-only'), 'original');
   assert.equal(restarted.api.restoreFirstSendForEdit({ ...plain, status: 'uncertain' }, true), false);
 });
+test('cold reselection retains only an edited draft and correlates the next explicit send with the refused attempt', () => {
+  for (const [saved, expected] of [['Failed input', ''], ['My later edit', 'My later edit']]) {
+    const h = harness(), marker = { intentId:'first-1', attemptId:'first-1' };
+    const row = { ...marker, sessionId:'a', text:'Failed input', status:'failed', canAttachFailed:true,
+      canRestoreText:false, attachmentNames:['report.pdf'] };
+    h.ctx._conversationDrafts.set('a', { text:saved, skills:[], firstSendRetry:marker, updatedAt:1 });
+    assert.equal(h.api.restoreFirstSendForEdit(row, false, {reselect:true}), false);
+    assert.equal(h.api.restoreFirstSendForEdit(row, true, {reselect:true}), true);
+    h.api._restoreConversationDraft('a');
+    assert.equal(h.input.value, expected);
+    assert.deepEqual(h.getFiles(), []);
+    h.api._rememberConversationDraft('a');
+    assert.deepEqual(copy(h.ctx._conversationDrafts.get('a').firstSendRetry), { ...marker, sessionId:'a' });
+  }
+});
+
 test('a newer native draft keeps its text and selection even when the refused request used the same words', () => {
   const h = harness(), row = { intentId: 'i', attemptId: 'one', sessionId: 'a', status: 'failed', canAttachFailed: true, canRestoreText: true };
   h.input.value = 'failed request'; h.pick([plugin('new')]); h.switchTo('b');

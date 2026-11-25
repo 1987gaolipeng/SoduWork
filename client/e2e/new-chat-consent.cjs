@@ -14,8 +14,8 @@ const out = path.resolve(process.argv[2] || path.join(client, '../outputs/new-ch
 app.setPath('userData', path.join(profile, 'profile')); app.on('window-all-closed', () => {});
 const read = file => fs.readFileSync(path.join(client, file), 'utf8');
 const ownerPage = path.join(client, 'desk.html'), ownerURL = pathToFileURL(ownerPage).href;
-const report = { ok: false, cases: [], screenshots: [], errors: [], boundary: 'Production composer, runtime picker, NativeChat, preload, native consent, first-send journal and openConversation. Trusted desktop URL serves an isolated shell; identity, discovery and runtime execution are local fixtures. Hidden windows, blocked network, no business data or model calls.' };
-const calls = [], sends = [], sessions = new Map(); let win, dialogs = 0, failNextOpen = false, failNextSend = false;
+const report = { ok: false, cases: [], screenshots: [], errors: [], boundary: 'Production composer, runtime picker, NativeChat, preload, native consent, first-send journal and openConversation. A trusted desktop URL serves an isolated shell. The Pi history case uses the production Pi SDK, SQLite history and a loopback streaming model. Other runtime executions and discovery are fixtures.' };
+const calls = [], sends = [], sessions = new Map(); let win, piRecovery, dialogs = 0, failNextOpen = false, failNextSend = false;
 const catalog = require('../main/agent-runtime/runtime-catalog');
 const identity = require('../tests/helpers/platform-session-fixture.cjs').identity();
 const identityOf = async () => identity;
@@ -55,6 +55,21 @@ async function draft(text = 'Isolated consent message') {
   await js(`(()=>{const i=document.querySelector('#cpInput');i.value=${JSON.stringify(text)};i.dispatchEvent(new Event('input',{bubbles:true}));})()`);
 }
 function installOpening(confirmFullAccess, newChatAccess) {
+  const session = {
+    get: ref => sessions.get(ref), findBySessionId: id => [...sessions.values()].find(h => h.sessionId === id && !h.localReplica),
+    historyEntry: require('../main/pi-session/session').historyEntry,
+    attachView(view) { sessions.set(view.ref, view); return view; },
+    async open(options) {
+      calls.push({ adapterId: options.adapterId, accessPolicy: options.accessPolicy, ref: options.ref });
+      if (failNextOpen) { failNextOpen = false; return { ok: false, reason: 'Isolated initialization failure' }; }
+      const handle = piRecovery && options.adapterId === 'pi' ? await piRecovery.model.open({
+        app, ref: options.ref, identity, cwd: options.cwd, accessPolicy: options.accessPolicy, resumePath: '',
+      }) : { ...options, sessionId: options.ref, close: async () => { sessions.delete(options.ref); return true; },
+        snapshot: () => ({ status: 'idle', messages: [], tools: [], accessPolicy: options.accessPolicy, accessControl: catalog.runtime(options.adapterId).accessControl }) };
+      sessions.set(handle.ref, handle); return { ok: true, session: handle };
+    },
+  };
+  ipcMain.handle('pi-session-set-access-mode', require('../main/access-control/ipc').changeHandler({ session, BrowserWindow, confirmFullAccess }));
   const source = read('main/pi-session/ipc.js');
   const code = source.slice(source.indexOf('  async function openConversation('), source.indexOf("  ipcMain.handle('pi-session-open',"));
   const context = vm.createContext({ app, path, BrowserWindow, confirmFullAccess, newChatAccess,
@@ -62,27 +77,25 @@ function installOpening(confirmFullAccess, newChatAccess) {
     _cloudHandoff: { observe() {} }, firstTurnTitle: { enroll() {} }, _sessionOwners: null,
     skillTurn: require('../main/pi-session/skill-turn'), sendIdentityOf: null,
     identityOf, updateWorkloads: { guard: () => ({ ok: true }) },
-    memories: { context: async () => ({}), attach: async () => {} }, capabilityGrantsOf: null, _skillDirs: () => [],
-    workDir: () => profile, _newSessionCwd: () => profile, _conf: () => ({}),
+    memories: { assertOwner() {}, context: async () => ({}), attach: async () => {} }, capabilityGrantsOf: null, _skillDirs: () => [],
+    workDir: () => profile, _newSessionCwd: () => piRecovery?.model.cwd || profile, _conf: () => ({}),
     capabilities: { resolve: async () => ({ catalog: {}, selectedSkills: [], capabilityIds: [] }) },
     attachments: { stage: async () => ({ files: [], warnings: [] }) }, sessionSpec: require('../main/conversation/session-spec'),
-    session: { open: async options => {
-      calls.push({ adapterId: options.adapterId, accessPolicy: options.accessPolicy, ref: options.ref });
-      if (failNextOpen) { failNextOpen = false; return { ok: false, reason: 'Isolated initialization failure' }; }
-      const handle = { ...options, sessionId: options.ref, close: async () => { sessions.delete(options.ref); return true; },
-        snapshot: () => ({ status: 'idle', messages: [], tools: [], accessPolicy: options.accessPolicy, accessControl: catalog.runtime(options.adapterId).accessControl }) };
-      sessions.set(options.ref, handle); return { ok: true, session: handle };
-    } },
+    session, get _sharedHistory() { return piRecovery?.history; },
     _entryContextPrompts: () => [], _awaitBounded: value => value, OPEN_TIMEOUT_MS: 45000,
-    _bindUsage() {}, _attach() {}, _detach() {}, _wire() {},
+    _bindUsage(handle) { handle.usageIdentity = { accountScope: require('../main/platform-connections/runtime.cjs').scope(identity),
+      hub: identity.hub, clientId: identity.clientId }; },
+    _attach(handle, window) { handle.attachedWindow = window; }, _detach() {}, _wire() {},
     _openReply: openReply,
     require: name => name.startsWith('node:') ? require(name) : require(path.resolve(client, 'main/pi-session', name)),
   });
   vm.runInContext(code, context);
   ipcMain.handle('pi-session-open', (event, options) => context.openConversation(event, options));
-  return context.openConversation;
+  return { openConversation: context.openConversation, session };
 }
 function openReply(handle) {
+  if (piRecovery && (handle === piRecovery.model.handle || handle.localReplica))
+    return require('../main/pi-session/open-reply').openReply(app, handle);
   return { ok: true, ref: handle.ref, sessionId: handle.sessionId, adapterId: handle.adapterId,
     cwd: profile, mode: 'full', model: { id: 'isolated', label: 'Isolated test model' },
     accessControl: catalog.runtime(handle.adapterId).accessControl, snapshot: handle.snapshot() };
@@ -94,6 +107,12 @@ async function sendConversation(ref, text, _files, options, _observe, _request, 
   sends.push({ ref, text, submissionId: options?.submissionId });
   if (failNextSend) { failNextSend = false; return { ok: false, reason: 'Isolated send failure', accepted: false }; }
   guard?.beforeDispatch();
+  if (piRecovery && handle === piRecovery.model.handle) {
+    const result = await handle.submit(text, [], options).completion;
+    assert.ok(result.ok, result.reason);
+    await piRecovery.history.capture(handle, identity);
+    await piRecovery.history.backfill(handle.sessionId);
+  }
   return { ok: true, snapshot: handle.snapshot() };
 }
 app.whenReady().then(async () => {
@@ -115,9 +134,9 @@ app.whenReady().then(async () => {
   const newChatAccess = require('../main/access-control/new-chat-consent').create({ BrowserWindow, confirmFullAccess });
   require('../main/conversation/requirement-context').cachedIdentity = () => identity;
   newChatAccess.install(ipcMain);
-  const openConversation = installOpening(confirmFullAccess, newChatAccess);
+  const { openConversation, session } = installOpening(confirmFullAccess, newChatAccess);
   require('../main/conversation/first-send-ipc.cjs').install({ app, ipcMain, BrowserWindow, session: sessions,
-    identityOf, openConversation, sendConversation, detach() {}, attach: (_event, id) => openReply(sessions.get(id)) });
+    identityOf, openConversation, sendConversation, detach() {}, attach: (_event, id) => openReply(session.findBySessionId(id)) });
   require('../main/access-control/preferences').install({ app, ipcMain, BrowserWindow, confirmFullAccess });
   ipcMain.on('client-locale', (_event, value) => locale.setLocale(value));
   ipcMain.handle('pi-session-probe', (_event, id) => ({ ok: true, accessControl: catalog.runtime(id || 'pi').accessControl }));
@@ -126,16 +145,16 @@ app.whenReady().then(async () => {
   ipcMain.handle('pi-session-snapshot', (_event, ref) => ({ ok: true, snapshot: sessions.get(ref).snapshot() }));
   ipcMain.handle('pi-session-send', (_event, ...args) => sendConversation(...args));
   for (const [channel, value] of Object.entries({ 'pi-session-workdir': { ok: true, dir: profile }, 'conversation-capabilities': { ok: true, items: [] },
-    'pi-session-mode': { ok: true, mode: 'full' }, 'pi-session-history': { ok: true, chats: [] }, 'pi-session-outputs': { ok: true, items: [] },
+    'pi-session-open-application': { ok: true, handled: false }, 'pi-session-mode': { ok: true, mode: 'full' }, 'pi-session-history': { ok: true, chats: [] }, 'pi-session-outputs': { ok: true, items: [] },
     'pi-session-release': { ok: true }, 'recent-workspace-get': { ok: true, dir: '' },
-    'pi-session-runtime-models': { ok: true, models: [{ id: 'isolated', label: 'Isolated test model' }] },
+    'pi-session-runtime-models': { ok: true, models: [{ id: 'isolated', label: 'Isolated test model' }, { id: 'fixture-model', label: 'Local regression model' }] },
     'work-preview-hide': { ok: true }, 'work-preview-destroy': { ok: true }, 'work-preview-reset-embedded': { ok: true } })) ipcMain.handle(channel, () => value);
   win = new BrowserWindow({ show: false, width: 1100, height: 850, webPreferences: {
     preload: path.join(client, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false, offscreen: true } });
   win.webContents.on('console-message', event => { if (event.level === 'error') report.errors.push(event.message); });
   win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_request, callback) => callback({ cancel: true }));
   await win.loadFile(ownerPage);
-  await js("window.errors=[];window.notices=[];window.petSay=x=>notices.push(x);window.SoduWorkAPI={online:true,taskStorageKey:()=>'isolated-consent',myModels:async()=>({usable:[{name:'isolated',label:'Isolated test model'}],defaultModel:'isolated'}),listTeammates:async()=>[],pluginCatalog:async()=>({items:[]})};addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));void 0;");
+  await js("window.errors=[];window.notices=[];window.petSay=x=>notices.push(x);window.SoduWorkAPI={online:true,taskStorageKey:()=>'isolated-consent',myModels:async()=>({usable:[{name:'isolated',label:'Isolated test model'},{name:'fixture-model',label:'Local regression model'}],defaultModel:'isolated'}),listTeammates:async()=>[],pluginCatalog:async()=>({items:[]})};addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));void 0;");
   for (const file of JSON.parse(read('core/locales/manifest.json'))) await js(read('core/locales/' + file));
   for (const file of ['core/i18n-dom.js', 'core/i18n.js', 'components/settings/access-preferences.js']) await js(read(file));
   const loaded = new Set();
@@ -155,6 +174,12 @@ app.whenReady().then(async () => {
   assert.equal(calls.length, 0); report.cases.push('Selecting full opens the actual native dialog immediately; cancellation preserves readonly and the unsent draft without creating a session.');
   for (const [index, id] of ['pi', 'opencode', 'qwen', 'codex-harness'].entries()) {
     report.stage = 'prepare ' + id;
+    if (id === 'pi') {
+      const dir = app.getPath('userData');
+      const model = await require('./fixtures/resumed-pi.cjs').create(dir, { agentDir: path.join(dir, 'pi-agent') });
+      piRecovery = { model, history: require('../main/conversation/shared-history.cjs').create({
+        app, session, identityOf: () => identity, workRoot: () => dir }) };
+    }
     const lang = index % 2 ? 'en-US' : 'zh-CN';
     await js(`SoduWorkI18n.setLocale(${JSON.stringify(lang)});document.documentElement.dataset.theme=${JSON.stringify(index % 2 ? 'ruby' : 'azure')};soduWorkAPI.reportTheme({theme:document.documentElement.dataset.theme,tokens:{'--accent':getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()}});void 0;`);
     await draft('Consent fixture ' + id); await adapter(id);
@@ -170,6 +195,44 @@ app.whenReady().then(async () => {
     assert.equal(calls.length, before + 1); assert.equal(calls.at(-1).adapterId, id);
     assert.equal(calls.at(-1).accessPolicy.mode, 'full'); assert.equal(dialogs, beforeDialogs + 1);
     report.cases.push(id + ': real checkbox/mouse consent before send; full policy reaches runtime open once; first message sends without another native window.');
+    if (id === 'pi') {
+      report.stage = 'return to the original Pi conversation';
+      await until('document.querySelector("#nchatList")?.textContent.includes("Fixture complete.")', 'first Pi reply');
+      const handle = piRecovery.model.handle, chatId = handle.sessionId;
+      await draft('Another conversation'); await adapter('opencode'); await pick('standard');
+      await click('#cpGo');
+      await until(() => sends.at(-1).text === 'Another conversation', 'second conversation sent');
+      const otherRef = sends.at(-1).ref;
+      await until(`NativeChat.sessionInfo()?.ref === ${JSON.stringify(otherRef)} && document.querySelector('#nchatList')?.textContent.includes('Another conversation')`, 'second conversation open');
+      assert.notEqual(otherRef, handle.ref);
+      await js('openComposePanel({chatId:' + JSON.stringify(chatId) + '});void 0;');
+      await until('document.querySelector("#nchatList")?.textContent.includes("Fixture complete.")', 'restored Pi reply');
+      const view = await until(() => [...sessions.values()].find(h => h.localReplica && h.sessionId === chatId), 'main process passive view');
+      await until(`NativeChat.sessionInfo()?.ref === ${JSON.stringify(view.ref)} && !NativeChat.isBusy()`, 'history view attached');
+      assert.notEqual(view.ref, handle.ref, 'a passive history view must be opened');
+      await until(`document.querySelector('[data-access-mode="standard"]')?.disabled === false`, 'history permissions ready');
+      await click('#nchatMode');
+      await until('document.querySelector("#nchatAccessPop")?.checkVisibility()', 'returned permission menu is visible');
+      await shot('restored-pi-full-menu');
+      const restored = await js(`(() => {
+        const row = document.querySelector('[data-access-mode="full"]');
+        return { label: document.querySelector('#nchatModeName').textContent, selected: row.getAttribute('aria-pressed'), disabled: row.disabled };
+      })()`);
+      assert.deepEqual(restored, { label: '完全访问', selected: 'true', disabled: false });
+      await click('[data-access-mode="standard"]');
+      await until('document.querySelector("#nchatModeName")?.textContent === "默认权限"', 'applied standard permission');
+      assert.equal(handle.snapshot().accessPolicy.mode, 'standard');
+      assert.equal(await js('NativeChat.sessionInfo().ref'), handle.ref);
+      assert.equal(dialogs, beforeDialogs + 1);
+      await click('#nchatMode'); await click('[data-access-mode="full"]'); child = await dialog();
+      assert.equal(handle.snapshot().accessPolicy.mode, 'standard');
+      await click('#consentAcknowledged', child); await click('#consentAllow', child);
+      await until('document.querySelector("#nchatModeName")?.textContent === "完全访问"', 'confirmed session upgrade');
+      assert.equal(handle.snapshot().accessPolicy.mode, 'full');
+      assert.equal(dialogs, beforeDialogs + 2); assert.equal(piRecovery.model.requests.length, 1);
+      report.cases.push('After sending in another conversation, a completed Pi SDK turn reopens in the account’s passive history with Full access selected and enabled. Switching to Standard reattaches the original runtime; switching back to Full requires fresh native modal confirmation.');
+      await piRecovery.history.close(); await piRecovery.model.close(); piRecovery = null;
+    }
   }
   await js('SoduWorkI18n.setLocale("zh-CN");void 0;'); await draft('Switch adapter after consent'); await adapter('pi');
   await pick('full'); child = await dialog(); await click('#consentAcknowledged', child); await click('#consentAllow', child);
@@ -261,7 +324,16 @@ app.whenReady().then(async () => {
   report.cases.push('Mouse selection of a retained failed first send opens its editable draft directly. Returning to a new chat restores the independent draft without allocating a runtime or resending.');
   assert.deepEqual(await js('errors'), []); assert.deepEqual(report.errors, []);
   report.runtimeOpens = calls; report.nativeDialogs = dialogs; report.sentMessages = sends.length; report.ok = true;
-}).catch(async error => { report.error = error.stack || String(error); try { if (win) { report.rendererErrors = await js('errors'); await shot('failure'); } } catch {} }).finally(() => {
+}).catch(async error => {
+  report.error = error.stack || String(error);
+  try {
+    if (win) {
+      report.rendererErrors = await js('errors');
+      await shot('failure');
+    }
+  } catch {}
+}).finally(async () => {
+  if (piRecovery) { await piRecovery.history.close(); await piRecovery.model.close(); }
   for (const window of BrowserWindow.getAllWindows()) { try { window.destroy(); } catch {} }
   fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ ok: report.ok, cases: report.cases.length, error: report.error, errors: report.errors, report: path.join(out, 'report.json') }));

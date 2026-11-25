@@ -142,4 +142,4 @@ function current(policy, previous, cwd = policy.workspaceRoot, readScope) {
   const latest = operation(policy, previous.tool, previous.arguments, cwd, readScope);
   return latest.source === previous.source && latest.target === previous.target && (!previous.resourceRead || latest.verdict === 'allow');
 }
-module.exports = { SCHEMA, MODES, canonical, within, protectedPath, normalize, create, next, restore, restoreState, operation, current };
+module.exports = { SCHEMA, MODES, canonical, within, protectedPath, normalize, create, next, restore, restoreState, resolveToolPath, operation, current };

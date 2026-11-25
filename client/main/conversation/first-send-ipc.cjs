@@ -81,11 +81,12 @@ function install({ app, session, ipcMain, BrowserWindow, identityOf, openConvers
         { expected, ref, sessionId: handle.sessionId, attemptId });
     } catch (error) { return { ok: false, reason: String(error.message || error) }; }
   });
-  for (const action of ['start', 'list', 'wait', 'attach', 'associations', 'ack-associations']) {
+  for (const action of ['start', 'list', 'wait', 'attach', 'associations', 'ack-associations', 'discard']) {
     ipcMain.handle('pi-first-send-' + action, async (event, input, sessionId) => {
       try {
         if (action === 'start') return await service.start(event, input);
         if (action === 'list') return await service.list(event);
+        if (action === 'discard') return await service.discard(event, input, sessionId);
         if (action === 'associations') return await service.associations(event);
         if (action === 'ack-associations') return await service.ackAssociations(event, input, sessionId);
         if (action === 'attach') {

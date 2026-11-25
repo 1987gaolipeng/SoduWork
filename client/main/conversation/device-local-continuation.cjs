@@ -49,18 +49,39 @@ function guard(handle, identity, options = {}) {
   assert(token, value.app, identity, handle.sessionId); assertSelections(options);
   return true;
 }
+// A portable transcript carries content only. Restore permissions exclusively from
+// this account's original native runtime, for the same adapter and workspace.
+async function nativeAccessPolicy(app, row, actor, session, adapterId, cwd) {
+  if (!cwd || !access.usesDeviceChatContext(app, { chatId: row.id }, row) ||
+      access.assertDeviceReadable(app, row.id, actor, row)?.sharedOnDevice) return null;
+  const record = segments.read(app, row.id);
+  if (record?.deviceShared) return null;
+  const rules = require('../access-control/policy');
+  const live = session.findBySessionId(row.id);
+  if (live && !live.localReplica) {
+    const owner = live.usageIdentity;
+    if (live.adapterId !== adapterId || !owner || owner.accountScope !== actor.owner ||
+        owner.clientId !== actor.identity?.clientId || owner.hub !== actor.identity?.hub) return null;
+    const snap = live.snapshot();
+    return rules.normalize(snap.nextAccessPolicy || snap.accessPolicy, cwd);
+  }
+  if ((record?.active.adapterId || row.adapterId || 'pi') !== adapterId) return null;
+  if (adapterId === 'pi') return require('../pi-session/session').archivedAccessPolicy(app, record?.active.sessionId || row.id, cwd);
+  return rules.normalize(record?.accessPolicy, cwd);
+}
 function matchesLiveSelection(handle, options, identity, owner) {
   const actor = handle.usageIdentity;
   if (handle.localReplica || handle.adapterId !== options.adapterId || !actor || actor.accountScope !== owner ||
       actor.hub !== identity.hub || actor.clientId !== identity.clientId) return false;
   const snap = handle.snapshot();
   const selection = snap.modelSelection;
-  const mode = options.mode === 'readonly' || options.accessMode === 'readonly' ? 'readonly' : 'standard';
+  const mode = options.mode === 'readonly' ? 'readonly' : options.accessMode || 'standard';
+  const policy = snap.nextAccessPolicy || snap.accessPolicy || snap.accessControl;
   const thinking = snap.thinking?.level || '';
   const levels = [options.reasoningEffort, options.thinkingLevel].filter(Boolean);
   return Boolean(options.modelName && selection?.name === options.modelName && selection.activeName === options.modelName &&
     !selection.pending && !selection.model?.unavailable && !selection.activeModel?.unavailable &&
-    !snap.runtimeUnavailable && !snap.execution?.modelRecovery && snap.accessControl?.mode === mode &&
+    !snap.runtimeUnavailable && !snap.execution?.modelRecovery && policy?.mode === mode &&
     (levels.length ? levels.every(level => level === thinking) : !thinking || thinking === 'off'));
 }
 async function prepare(token, history, identity, session) {
@@ -87,4 +108,4 @@ async function prepare(token, history, identity, session) {
   return { ...recovery, historyRecovery: { ...recovery.historyRecovery,
     mode: 'device-account-continuation', nativeArchiveMissing } };
 }
-module.exports = { grant, assert, bind, tokenOf, guard, prepare, assertSelections, matchesLiveSelection };
+module.exports = { grant, assert, bind, tokenOf, guard, prepare, assertSelections, nativeAccessPolicy, matchesLiveSelection };
