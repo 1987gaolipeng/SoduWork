@@ -959,3 +959,21 @@
 
 .noutput-image>img{display:block;width:auto;max-width:100%;max-height:360px;object-fit:contain;border-radius:10px}
 .noutput-image[data-image-state="ready"]>.noutput-image-caption{display:none}
+
+.nchat-skill-failure-dialog {
+  box-sizing: border-box;
+  width: min(680px, 90vw);
+  max-height: 86vh;
+  margin: auto;
+  padding: 22px;
+  font: 14px/1.5 var(--font-ui, system-ui), sans-serif;
+  color: var(--ink, #252a31);
+  background: var(--bg-0, Canvas);
+  border: 1px solid var(--line, #a8adb5);
+  border-radius: 12px;
+}
+.nchat-skill-failure-dialog::backdrop { background: rgb(0 0 0 / 32%); }
+.nchat-skill-failure-dialog h3 { margin: 0; }
+.nchat-skill-failure-dialog p { margin: 4px 0 14px; color: var(--ink-2); }
+.nchat-skill-failure-dialog pre { padding: 12px; margin-bottom: 16px; background: var(--bg-1); border-radius: 6px; max-height: 52vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.nchat-skill-failure-dialog button { padding: 6px 12px; margin-inline-end: 8px; background: var(--bg-1); border: 1px solid var(--line); color: var(--ink); border-radius: 6px; cursor: pointer; }

@@ -591,6 +591,8 @@ function _bind(el) {
       if (rework) { void ctx._collabAction('rework-task', { taskId: rework.getAttribute('data-task-rework') }); return; }
       const receipt = e.target.closest('[data-task-receipt]');
       if (receipt) { ctx._collabAction('open-task', { taskId: receipt.getAttribute('data-task-receipt') }); return; }
+      const failure = e.target.closest('[data-skill-failure]');
+      if (failure) { void global.ChatToolDetails?.openSkillFailure(ctx, failure); return; }
       const record = e.target.closest('[data-command-record]');
       if (record) { global.ChatToolDetails?.openRecord(ctx, record.dataset.commandRecord, record); return; }
       const detailRetry = e.target.closest('[data-tool-detail-retry]');

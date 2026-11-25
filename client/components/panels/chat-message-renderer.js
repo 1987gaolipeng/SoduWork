@@ -850,6 +850,12 @@
       const cards = pluginBadges?.cards(selected) || '';
       if (cards) parts.push('<div class="nmessage-app-cards" data-chat-node="application:failed">' + cards + '</div>');
     }
+    if (ctx._snap.skillFailure?.id) {
+      const failureId = ctx.esc(ctx._snap.skillFailure.id);
+      parts.push('<div class="nmessage-tools" data-chat-node="skill-failure:' + failureId + '">' +
+        '<button type="button" class="ntool-record-link" data-skill-failure="' + failureId +
+        '" data-command-owner="' + ctx.esc(global.ChatTools.recordOwner(ctx)) + '">' + uiText('查看技能失败报告') + '</button></div>');
+    }
     parts.push(String(_uiHtml(ctx._snap.pendingUi, st)).replace('<div class="nask-ui',
       '<div data-chat-node="runtime-ui" class="nask-ui'));
     /* Append outputs whose after index exceeds the message count rather than dropping early events. */
