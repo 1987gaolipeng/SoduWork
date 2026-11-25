@@ -76,7 +76,7 @@ async def _windows_release_rows(session):
 
 
 async def _stable_release_rows(session, platform: str, arch: str | None = None):
-    """List trusted public artifacts, preferring explicit candidates on the beta channel."""
+    """List trusted public artifacts by version within the configured channel."""
     channel = _public_channel()
     filters = [
         ClientRelease.enabled.is_(True),
@@ -97,10 +97,9 @@ async def _stable_release_rows(session, platform: str, arch: str | None = None):
         trusted.append(row)
     def order(row):
         version = client_contract.parse_version(row.version)
-        # Historical beta-channel uploads can have an unsuffixed version. Keep
-        # them downloadable, but do not let them hide actual beta candidates.
-        candidate = channel == "beta" and version is not None and version[3] == 0
-        return (candidate, version or (0, 0, 0, 0, 0),
+        # Manual downloads include unsuffixed versions registered on beta.
+        # Automatic update eligibility is enforced separately by client_updates.
+        return (version or (0, 0, 0, 0, 0),
                 -client_contract.format_rank(row.artifact_name),
                 -client_contract.installer_brand_rank(row.artifact_name))
 
