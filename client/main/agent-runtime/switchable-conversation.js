@@ -204,7 +204,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       // Its original scan boundary cannot be reconstructed from chat text later.
       const artifactSnapshot = await require('../conversation/artifact-runtime').snapshotAsync(handle);
       const versions = require('../conversation/runtime-artifacts.cjs');
-      const artifactHistory = versions.capture(old.cwd, artifactSnapshot, { sessionId: old.sessionId, adapterId: old.adapterId },
+      const artifactHistory = versions.capture(require('../conversation/delivery-workspace.cjs').root(old.cwd, old.deliveryWorkspace), artifactSnapshot, { sessionId: old.sessionId, adapterId: old.adapterId },
         versions.continuedPlugins(handle)?.receipt);
       await selection.validate?.();
       switchIdentity(selection);
@@ -242,7 +242,9 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       // Old native close must not unsubscribe the conversation's memory observer.
       if (old.ui === overlays.ui) old.ui = {};
       raw.ui = overlays.ui;
-      if (typeof overlays.captureDelivery === 'function') raw.captureDelivery = overlays.captureDelivery;
+      for (const key of ['captureDelivery', 'captureArtifactTurn']) {
+        if (typeof overlays[key] === 'function') raw[key] = overlays[key];
+      }
       await disposeNative(oldDescriptor).catch(() => {});
       overlays.usageAgentKey = agentId;
       switching = false; emit({ kind: 'runtime-changed' });
@@ -323,7 +325,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       return methods.get(key).call;
     },
     set(_target, key, value) { overlays[key] = value;
-      if (key === 'captureDelivery' || typeof value !== 'function') Reflect.set(raw, key, value); return true; },
+      if (key === 'captureDelivery' || key === 'captureArtifactTurn' || typeof value !== 'function') Reflect.set(raw, key, value); return true; },
   });
   subscribe(); return handle;
 }

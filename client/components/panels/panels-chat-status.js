@@ -485,13 +485,15 @@
     }
     function statusHtml(busy) {
       const current = state();
+      const notices = [];
       if (current.snap?.historyRecovery?.bodyMissing || current.snap?.historyRecovery?.incomplete ||
           current.snap?.localReplica && !current.snap.execution?.canContinueOnDevice)
+        notices.push(current.snap.historyRecovery?.reason || '这条历史当前仅可查看');
+      if (!busy && (current.snap?.artifactCaptureWarning || current.snap?.artifactBackupIncomplete))
+        notices.push(current.snap.artifactCaptureWarning || '部分成果尚未保存到会话档案，请保留原工作目录');
+      if (notices.length)
         return '<div data-chat-node="runtime-status" class="nstatus show"><span class="nstatus-copy">' +
-          escape(tx(current.snap.historyRecovery?.reason || '这条历史当前仅可查看')) + '</span></div>';
-      if (!busy && current.snap?.artifactBackupIncomplete)
-        return '<div data-chat-node="runtime-status" class="nstatus show"><span class="nstatus-copy">' +
-          escape(tx('部分成果尚未保存到会话档案，请保留原工作目录')) + '</span></div>';
+          notices.map(note => escape(tx(note))).join('<br>') + '</span></div>';
       if (!current.pending && waiting(current.snap)) return '<div data-chat-node="runtime-status" class="nstatus show">' +
         '<span class="nstatus-copy">' + escape(work(current.snap, '', current.ref)) + '</span></div>';
       return '<div data-chat-node="runtime-status" class="nstatus' + (busy ? ' show' : '') + '">' +

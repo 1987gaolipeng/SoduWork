@@ -22,6 +22,13 @@ function locallyReceivedArtifacts(row, data) {
   return Boolean(row?.deviceTransferId && row.deviceTransferId === data?.imported?.transferId &&
     row.deviceTransferId === data?.localArtifactHistory?.transferId);
 }
+function currentReceiver(row, data, manifest, identity) {
+  return Boolean(identity && row.deviceTransferId && row.deviceTransferId === data?.imported?.transferId &&
+    row.deviceTransferDigest === data.imported.sha256 && row.creator?.account === accountId(identity) &&
+    row.creator?.hub === identity.hub && manifest?.deviceTransferId === row.deviceTransferId &&
+    manifest.owner === row.workOwner && manifest.hub === identity.hub &&
+    row.workOwner === require('../platform-connections/runtime.cjs').scope(identity));
+}
 function assertSettled(data) {
   if (data?.coverage?.unresolvedTools?.length || native.unresolvedTools(data?.snapshot).length)
     throw Object.assign(Error('历史中有工具缺少终结回执，结果尚未确认，暂时只能查看，不能恢复执行或迁移'), { code: 'HISTORY_UNRESOLVED_TOOLS' });
@@ -75,6 +82,75 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     current();
     if (concurrent?.digest === digest(updated)) return concurrent;
     throw Object.assign(Error('历史记录已变化，请重新读取'), { code: 'HISTORY_CONCURRENT_UPDATE' });
+  }
+  // Commit the immutable bytes before releasing the runtime's turn queue. A
+  // native transcript read can lag that boundary and is refreshed separately.
+  function captureTurn(id, { workspace, ref, journal, snapshot, assertCurrent }) {
+    const predecessor = writers.get(id);
+    const work = (async () => {
+      await predecessor?.catch(() => {});
+      const row = await resolve(id);
+      if (!row || row.deleted || row.cached || row.cloud) return;
+      const check = readGuard(row, assertCurrent);
+      const priorBody = await store.deviceHistory(row.id);
+      check(priorBody?.historyProtection ? { historyProtection: priorBody.historyProtection } : undefined);
+      if (row.historyProtection || priorBody?.historyProtection) return;
+      if (priorBody?.imported || row.deviceTransferId) {
+        const manifest = require('./runtime-segments').read(app, row.id);
+        if (!currentReceiver(row, priorBody, manifest, identityOf())) return;
+        authorize(row);
+      } else if (!allowsArtifacts(row)) return;
+      const workspaces = require('./delivery-workspace.cjs');
+      let root;
+      if (workspace) {
+        if (workspace.key !== row.deliveryWorkspaceKey) throw Error('会话成果目录已变化');
+        root = workspaces.root(row.cwd, workspace);
+      } else {
+        // A shared project cannot supply a scratch receipt by using its basename.
+        if (!workRoot || row.deliveryWorkspaceKey || !/^chat-(?:[a-z0-9]+-[a-z0-9]{4,6}|[a-f0-9-]{36})$/.test(ref)) return;
+        const base = await fs.realpath(workRoot());
+        const expected = path.join(base, 'temp', ref);
+        if (await fs.realpath(row.cwd).catch(() => '') !== expected) return;
+        require('../plugin-resources').assertNoLinks(base, expected);
+        root = expected;
+      }
+      if (journal.cwd !== root || !journal.turnId || !journal.files?.length || journal.truncated) return;
+      const prior = !priorBody?.imported || locallyReceivedArtifacts(row, priorBody) ? priorBody?.localArtifactHistory : undefined;
+      const collected = await require('./device-history-artifacts.cjs').capture({ row: { ...row, cwd: root },
+        previous: prior, journal, verifiedTurn: true });
+      if (!collected) return;
+      check();
+      const profile = app.getPath('userData');
+      const history = await archive.preserve(profile, row.id, collected, prior, check);
+      if (row.deviceTransferId) history.transferId = row.deviceTransferId;
+      const { digest: oldDigest, savedAt, ...body } = priorBody || {
+        snapshot: native.publicSnapshot(snapshot), coverage: { complete: false, sources: [] },
+      };
+      check();
+      const saved = await store.saveDeviceHistory(row.id, { ...body, localArtifactHistory: history }, {
+        expectedRevision: row.replicaRevision, expectedTransferId: row.deviceTransferId || '', expectedHistoryDigest: oldDigest ?? null,
+      });
+      await archive.retire(profile, row.id, prior?.archive, history.archive, saved.ok).catch(() => {});
+      check();
+      if (!saved.ok) throw Error('会话成果保存时历史已变化');
+      let publicationError;
+      if (workspace && history.archive) {
+        try {
+          const copies = await require('./artifact-versions.cjs').exportTurn({ profile, id: row.id, archive: history.archive,
+            turnId: journal.turnId, workspace: workspace.projectRoot, workspaceKey: workspace.key, guard: check });
+          if (copies.some(copy => copy.conflict))
+            publicationError = Error('会话成果原件已保存。工作目录已有不同内容的同名副本，可从历史成果卡另存。');
+        } catch (error) {
+          check();
+          if (error.historyAccessFailure) throw error;
+          publicationError = Error('已归档的原件可从历史成果卡另存。工作副本未能投递，请检查目录权限和可用空间。', { cause: error });
+        }
+      }
+      if (history.archivePending || history.archive?.omitted) throw Error('部分会话成果未完成归档，请保留工作目录中的文件。');
+      if (publicationError) throw publicationError;
+    })().finally(() => { if (writers.get(id) === work) writers.delete(id); });
+    writers.set(id, work);
+    return work;
   }
   async function refresh(id, { verify, journal } = {}) {
     // A stricter caller must inspect its own native ownership receipt instead
@@ -141,16 +217,15 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       check(previous?.historyProtection ? { historyProtection: previous.historyProtection } : undefined);
       if (check.evidence().historyProtection === 'account') data.historyProtection = 'account';
       const identity = data.imported && journal ? identityOf() : null;
-      const receivingTurn = Boolean(identity && row.deviceTransferId && row.deviceTransferId === data.imported.transferId &&
-        row.deviceTransferDigest === data.imported.sha256 && row.creator?.account === accountId(identity) &&
-        row.creator?.hub === identity.hub && manifest?.owner === row.workOwner && manifest.hub === identity.hub &&
-        row.workOwner === require('../platform-connections/runtime.cjs').scope(identity));
+      const receivingTurn = currentReceiver(row, data, manifest, identity);
       if (!data.historyProtection && (receivingTurn || !data.imported && allowsArtifacts(check.evidence()))) {
         if (receivingTurn) authorize(check.evidence());
         const prior = data.imported ? data.localArtifactHistory : previous?.localArtifactHistory;
         // Incoming messages and segment metadata cannot attest to files. A new
         // local turn can contribute only its verified on-disk change receipts.
-        const collected = await require('./device-history-artifacts.cjs').capture({ row, previous: prior, journal,
+        // The terminal callback owns collection in a managed delivery directory.
+        // A passive replay must not attribute unrelated project changes to it.
+        const collected = row.deliveryWorkspaceKey ? prior : await require('./device-history-artifacts.cjs').capture({ row, previous: prior, journal,
           ...(!receivingTurn ? { workspace, workRoot: workspace ? workRoot?.() : null, retained: manifest?.artifactHistory } : {}) });
         const artifacts = archive.retain(prior, collected);
         check();
@@ -182,6 +257,14 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       if (writers.get(id) === work) writers.delete(id);
     });
     writers.set(id, work); pending.set(key, work); return work;
+  }
+  async function canBackfill(row, receipt) {
+    const cwd = await fs.realpath(row.cwd).catch(() => null);
+    if (!cwd) return false;
+    if (cwd === receipt.root) return true;
+    if (!row.deliveryWorkspaceKey) return false;
+    try { return require('./delivery-workspace.cjs').resolve(cwd, row.deliveryWorkspaceKey).draftRoot === receipt.root; }
+    catch (_) { return false; }
   }
   async function saved(id, { refresh: update = false, verify, preferRecorded = false, onlyUpgrade = false } = {}) {
     const row = await resolve(id);
@@ -237,7 +320,7 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     // Legacy replicas can outlive the native CLI journal. Upgrade only their
     // already-verified file identities while the original workspace exists.
     if (archive.needsBackup(data?.localArtifactHistory) && !data.imported && !data.historyProtection &&
-        allowsArtifacts(check.evidence()) && await fs.realpath(row.cwd).catch(() => null) === data.localArtifactHistory.root) {
+        allowsArtifacts(check.evidence()) && await canBackfill(row, data.localArtifactHistory)) {
       const { digest: oldDigest, savedAt, nativeReadError, ...stored } = data;
       const prior = data.localArtifactHistory;
       const updated = await archive.preserve(app.getPath('userData'), row.id, prior, prior, check)
@@ -399,7 +482,7 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       });
     }
     await current();
-    const [row] = await register([{ ...metadata(bundle.conversation), cwd, cached: false, cloud: false,
+    const [row] = await register([{ ...metadata(bundle.conversation), cwd, cached: false, cloud: false, deliveryWorkspaceKey: null,
       deviceHistory: true, deviceTransferId: transferId, deviceTransferDigest: sha256,
       workOwner, creator: { account: accountId(identity), hub: identity.hub }, historyAliasIds: [] }],
       { expectedRevision: old?.revision, expectedAbsent: !old, expectedHistoryDigest });
@@ -455,8 +538,8 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       });
     }
   }
-  return { refresh, saved, schedule, transferSources, exportPortable, importPortable, prepareContinuation,
+  return { captureTurn, refresh, saved, schedule, transferSources, exportPortable, importPortable, prepareContinuation,
     attachments: message => attachments({ messages: [message] }),
-    async close() { await background; await Promise.allSettled([...pending.values()]); } };
+    async close() { await background; await Promise.allSettled([...pending.values(), ...writers.values()]); } };
 }
 module.exports = { create, SCHEMA, locallyReceivedArtifacts };

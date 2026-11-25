@@ -6,11 +6,22 @@ const attachments = require('./attachments');
 const cacheAccess = require('./task-attachment-access.cjs');
 const attachmentContract = require('./attachment-contract');
 const artifactRuntime = require('../conversation/artifact-runtime');
+const { root: deliveryRoot } = require('../conversation/delivery-workspace.cjs');
 const shareArchive = require('../conversation/zip-archive');
 const mateMessageIpc = require('./mate-message-ipc');
 const { readOutputText } = require('./read-output-text.cjs');
 const { shell, nativeImage, dialog } = require('electron');
 const imageClipboard = require('../conversation/image-clipboard');
+
+// Project source files stay editable. Generated drafts are accessible only
+// through the owning conversation, including when a project uses symlinks.
+function outputRoot(handle, target) {
+  const own = deliveryRoot(handle.cwd, handle.deliveryWorkspace);
+  if (!handle.deliveryWorkspace) return own;
+  const file = fs.realpathSync.native(target);
+  const relative = path.relative(handle.deliveryWorkspace.projectRoot, file);
+  return relative.split(path.sep)[0]?.toLowerCase() === '.soduwork-drafts' ? own : handle.cwd;
+}
 
 function install({ app, ipcMain, BrowserWindow, session, workDir, resolveSession = async handle => handle }) {
   async function outputAccess(ref, target) {
@@ -18,7 +29,7 @@ function install({ app, ipcMain, BrowserWindow, session, workDir, resolveSession
     if (!original) throw Error('会话不在了');
     const handle = await resolveSession(original);
     const access = await cacheAccess.authorize(app, original, ref, target);
-    if (!access && !require('./outputs').inside(handle.cwd, target)) throw Error('这个文件不在这条对话的工作目录里');
+    if (!access && !require('./outputs').inside(outputRoot(handle, target), target)) throw Error('这个文件不在这条对话的工作目录里');
     return { handle, access };
   }
   require('./tool-detail-ipc').install({ ipcMain, session, BrowserWindow });
@@ -189,11 +200,15 @@ async function _attachmentImage(handle, ref, token) {
     win.setMenuBarVisibility(false);
     // Preserve the output-specific native title against document.title changes.
     win.webContents.on('page-title-updated', (e) => { e.preventDefault(); });
+    function permitted(nav) {
+      try { return nav.kind === 'inside' && !cacheAccess.isPrivate(app, nav.path) && outputs.inside(outputRoot(s, nav.path), nav.path); }
+      catch (_) { return false; }
+    }
     // Validate same-window navigation against workspace boundaries to prevent generated links from reading unrelated local files.
     win.webContents.on('will-navigate', (e, url) => {
       if (preview && url.startsWith(new URL(preview.url).origin + '/')) return;
       const nav = outputs.navigation(s.cwd, url);
-      if (!preview && nav.kind === 'inside' && !cacheAccess.isPrivate(app, nav.path)) return;
+      if (!preview && permitted(nav)) return;
       e.preventDefault();
       if (nav.kind === 'external') shell.openExternal(nav.url).catch(() => {});
     });
@@ -201,7 +216,7 @@ async function _attachmentImage(handle, ref, token) {
     win.webContents.setWindowOpenHandler(({ url }) => {
       const nav = outputs.navigation(s.cwd, url);
       if (nav.kind === 'external') shell.openExternal(nav.url).catch(() => {});
-      else if (!preview && nav.kind === 'inside' && !cacheAccess.isPrivate(app, nav.path)) setImmediate(() => win.loadURL(nav.url));
+      else if (!preview && permitted(nav)) setImmediate(() => win.loadURL(nav.url));
       return { action: 'deny' };
     });
     win.once('ready-to-show', () => win.show());
@@ -242,7 +257,10 @@ async function _attachmentImage(handle, ref, token) {
     const outputs = require('./outputs');
     const rawTarget = String(target || '');
     const candidate = path.isAbsolute(rawTarget) ? path.resolve(rawTarget) : path.resolve(s.cwd, rawTarget);
-    if (cacheAccess.isPrivate(app, candidate) || !outputs.inside(s.cwd, candidate)) return { ok: false, reason: '这个文件不在当前会话工作目录里' };
+    let permitted = false;
+    try { permitted = !cacheAccess.isPrivate(app, candidate) && outputs.inside(outputRoot(s, candidate), candidate); }
+    catch (_) { /* A missing or replaced file is outside the write grant. */ }
+    if (!permitted) return { ok: false, reason: '这个文件不在当前会话工作目录里' };
     const value = String(text == null ? '' : text);
     const CAP = 4 * 1024 * 1024;
     if (Buffer.byteLength(value, 'utf8') > CAP) return { ok: false, reason: '代码文件超过 4 MB，暂不支持在线保存' };
@@ -290,9 +308,10 @@ async function _attachmentImage(handle, ref, token) {
     catch (error) { return { ok: false, reason: String(error.message || error) }; }
     if (!s) return { ok: false, reason: '会话不在了' };
     try {
-      const st = fs.statSync(s.cwd);
+      const dir = deliveryRoot(s.cwd, s.deliveryWorkspace);
+      const st = fs.statSync(dir);
       if (!st.isDirectory()) return { ok: false, reason: '这条会话的工作目录已不存在' };
-      const err = await shell.openPath(String(s.cwd));
+      const err = await shell.openPath(String(dir));
       return err ? { ok: false, reason: err } : { ok: true };
     } catch (e) { return { ok: false, reason: String((e && e.message) || e) }; }
   });

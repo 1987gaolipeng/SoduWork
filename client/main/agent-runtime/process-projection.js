@@ -3,7 +3,7 @@
 const toolDetail = require('../pi-session/tool-detail');
 const PROPERTIES = Object.freeze(['ref', 'sessionId', 'adapterId', 'displayName', 'cwd', 'startedAt', 'outputSince',
   'taskRef', 'taskTitle', 'taskIds', 'taskBindings', 'activeTaskId', 'intent', 'goal', 'skills',
-  'skillWarnings', 'fileChanges', 'desktopControlScope', 'deliveryCaptureAtTurnBoundary', 'pluginDebug',
+  'skillWarnings', 'fileChanges', 'deliveryWorkspace', 'deliveryFileChanges', 'desktopControlScope', 'deliveryCaptureAtTurnBoundary', 'pluginDebug',
   'taskMessageStreaming']);
 
 // Keep all transcript messages available to synchronous platform consumers.

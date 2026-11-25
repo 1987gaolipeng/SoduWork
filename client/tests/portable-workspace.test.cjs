@@ -94,3 +94,22 @@ test('existing folder export still returns a readable archive after sharing the 
   const result = createZip(root);
   assert.equal(result.files, 1); assert.equal(entries(result.data).get('report.txt').toString(), 'Existing export\n');
 });
+
+test('only top-level managed result namespaces are excluded from transfer and workspace inventories', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-portable-results-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const key = require('node:crypto').randomUUID();
+  const owned = '会话成果/' + key + '/report.md';
+  const legacy = ['会话成果/business/report.md', '会话成果/manual.md', 'department/会话成果/' + key + '/report.md'];
+  for (const name of [owned, ...legacy]) {
+    const target = path.join(root, name);
+    await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, 'fixture');
+  }
+  const entries = (await workspace.scan(root)).files.map(file => file.path);
+  const changes = await require('../main/conversation/file-change-journal').snapshot(root);
+  const outputs = require('../main/pi-session/outputs');
+  for (const actual of [entries, Object.keys(changes.files), outputs.list(root, 0).map(file => file.relative),
+    (await outputs.scanAsync(root, 0, 0)).files.map(file => file.relative)]) {
+    assert.deepEqual(actual.sort(), [...legacy].sort());
+  }
+});

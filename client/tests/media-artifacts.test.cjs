@@ -306,3 +306,22 @@ test('rejects a signed URL whose attachment id does not match the artifact', asy
     /附件标识不一致/,
   );
 });
+
+test('an attachment download cannot publish into a replaced conversation namespace', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-draft-media-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workspaces = require('../main/conversation/delivery-workspace.cjs');
+  const first = workspaces.allocate(root), second = workspaces.allocate(root);
+  workspaces.ensure(root, second);
+  const bytes = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 109, 112, 52, 50]);
+  const target = { kind: 'video', attachmentId: 'signed-attachment-test', filename: 'clip.mp4',
+    url: '/api/v1/attachments/signed-attachment-test?ticket=fixture', mimeType: 'video/mp4', size: bytes.length };
+  const download = async () => {
+    fs.renameSync(first.draftRoot, first.draftRoot + '.retired');
+    fs.symlinkSync(second.draftRoot, first.draftRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    return new Response(bytes, { headers: { 'content-type': 'video/mp4' } });
+  };
+  await assert.rejects(media.materialize(target, { hub: 'https://hub.test' }, first.draftRoot, download,
+    undefined, workspaces.fileGuard(root, first)), /链接|联接点/);
+  assert.deepEqual(fs.readdirSync(second.draftRoot), []);
+});

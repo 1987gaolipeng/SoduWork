@@ -122,14 +122,20 @@ async function prepare(session, ids, options = {}) {
   if (!session?.cwd || !session.sessionId) throw Error('请重新打开会话后下载成果');
   if (!Array.isArray(ids) || !ids.length || ids.length > MAX_FILES || new Set(ids).size !== ids.length) throw Error('请选择有效的交付文件');
   const state = session.snapshot?.();
-  if (!options.completedTurn && (session.inFlight?.() || ['running', 'streaming', 'queued'].includes(state?.status))) throw Error('文件仍在生成，请等本轮完成后下载');
-  const root = await fs.realpath(session.cwd), entries = new Map(), caseNames = new Set();
+  if (!options.frozen && !options.completedTurn && (session.inFlight?.() || ['running', 'streaming', 'queued'].includes(state?.status))) throw Error('文件仍在生成，请等本轮完成后下载');
+  const root = await fs.realpath(require('./delivery-workspace.cjs').root(session.cwd, session.deliveryWorkspace)), entries = new Map(), caseNames = new Set();
   const manifestPath = path.join(root, '.soduwork/delivery.json');
-  const statManifest = () => fs.stat(manifestPath).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
+  const frozenFiles = options.frozen && require('./frozen-file-index.cjs').index(options.frozen.files);
+  // Evidence images have a reserved storage directory. Only the individually
+  // selected, receipt-backed image may be exported under a public filename.
+  const frozenName = options.frozen?.item.relative;
+  const evidenceImage = /^\.soduwork\/evidence\/([^/.][^/]*\.(?:png|jpe?g|gif|webp))$/i.exec(frozenName || '');
+  const selectedName = evidenceImage ? evidenceImage[1] : frozenName;
+  const statManifest = () => frozenFiles ? null : fs.stat(manifestPath).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
   const manifestBefore = await statManifest();
-  const declared = contract.readManifest(root);
+  const declared = frozenFiles ? null : contract.readManifest(root);
   if (declared?.invalid) throw Error(declared.reason);
-  const indexed = options.snapshot || runtime.snapshot(session);
+  const indexed = frozenFiles ? null : options.snapshot || runtime.snapshot(session);
   // Evidence can live in a reserved directory. Index its identity without
   // applying the stricter export-path policy to files that will not be exported.
   const evidencePath = value => String(value || '').replace(/\\/g, '/').normalize('NFC');
@@ -146,7 +152,12 @@ async function prepare(session, ids, options = {}) {
     if (entries.has(name)) { if (role === 'primary') entries.get(name).role = role; return; }
     if (caseNames.has(lower)) throw Error('成果中有大小写或 Unicode 冲突的文件名，请先重命名');
     if (entries.size >= MAX_FILES) throw Error('一份交付最多包含 500 个文件，请精简交付目录');
-    const filename = path.resolve(root, name), real = await fs.realpath(filename).catch(error => {
+    const selectedEvidence = evidenceImage && name === selectedName;
+    const receipt = frozenFiles?.get(selectedEvidence ? frozenName : name);
+    if (receipt && !selectedEvidence) safeRelative(receipt.relative);
+    if (frozenFiles && !receipt) throw Error('该轮成果缺少已保存的依赖：' + name);
+    const fileRoot = receipt?.root || root;
+    const filename = path.resolve(fileRoot, receipt?.relative || name), real = await fs.realpath(filename).catch(error => {
       if (error.code === 'ENOENT' || error.code === 'ENOTDIR') throw Error('成果依赖缺失：' + name);
       throw Error('无法读取成果文件：' + name + '，请检查文件访问权限', { cause: error });
     });
@@ -155,13 +166,13 @@ async function prepare(session, ids, options = {}) {
       // APFS/HFS may return another Unicode spelling for the same name. Do
       // not mistake that for a link, but never authorize a real symlink by
       // normalizing its target (also check every containing directory).
-      let current = root;
-      for (const part of name.split('/')) {
+      let current = fileRoot;
+      for (const part of (receipt?.relative || name).split('/')) {
         current = path.join(current, part);
         if ((await fs.lstat(current)).isSymbolicLink()) { equivalentSpelling = false; break; }
       }
     }
-    if (real !== filename && !equivalentSpelling || !(path.relative(root, real)) || path.relative(root, real).startsWith('..') || path.isAbsolute(path.relative(root, real))) throw Error('成果不支持链接到其他位置：' + name);
+    if (real !== filename && !equivalentSpelling || !(path.relative(fileRoot, real)) || path.relative(fileRoot, real).startsWith('..') || path.isAbsolute(path.relative(fileRoot, real))) throw Error('成果不支持链接到其他位置：' + name);
     const handle = await fs.open(real, 'r');
     let bytes, before, after;
     try {
@@ -171,7 +182,9 @@ async function prepare(session, ids, options = {}) {
     } finally { await handle.close(); }
     if (before.mtimeMs !== after.mtimeMs || before.size !== bytes.length || after.size !== bytes.length) throw Error('成果正在更新，请稍后重试');
     const digest = hash(bytes);
-    const sourcePath = path.relative(root, real).split(path.sep).join('/');
+    if (receipt && (digest !== receipt.sha256 || before.nlink !== 1 || after.nlink !== 1))
+      throw Error('该轮成果原件已变化');
+    const sourcePath = path.relative(fileRoot, real).split(path.sep).join('/');
     const change = options.snapshot?.got?.fileChanges?.files?.find(row => row.path === sourcePath &&
       ['created', 'modified', 'renamed'].includes(row.action) && row.after?.exists);
     if (options.completedTurn && /^[a-f0-9]{64}$/.test(change?.after?.hash || '') && change.after.hash !== digest)
@@ -195,8 +208,13 @@ async function prepare(session, ids, options = {}) {
       }
     }
   }
-  const selected = ids.map(id => { const found = runtime.resolveSnapshot(session, id, indexed);
-    if (!found.ok) throw Error(found.reason); return found; });
+  const selected = frozenFiles
+    ? [{ item: options.frozen.item, path: path.join(root, safeRelative(selectedName)) }]
+    : ids.map(id => {
+      const found = runtime.resolveSnapshot(session, id, indexed);
+      if (!found.ok) throw Error(found.reason);
+      return found;
+    });
   for (const found of selected) {
     const relative = path.relative(root, found.path).split(path.sep).join('/');
     await add(relative, 'primary', path.posix.dirname(relative));
@@ -255,4 +273,4 @@ async function prepare(session, ids, options = {}) {
   return { manifest, bytes, changedInTurn, filename, contentType,
     ...(options.includeEntries ? { entries: rows.map(row => ({ name: row.name, bytes: row.bytes, contentType: row.contentType, role: row.role })) } : {}) };
 }
-module.exports = { prepare, references, safeRelative, deliveryTitle, zipName, MAX_BYTES, MAX_FILES };
+module.exports = { prepare, references, dependencyText, safeRelative, deliveryTitle, zipName, MAX_BYTES, MAX_FILES };

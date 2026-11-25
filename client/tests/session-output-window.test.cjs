@@ -96,3 +96,89 @@ test('输入暂存目录保持原位置，附件仍走相对路径', () => {
   assert.match(ipc, /'temp', ref, '\.soduwork-inputs'/);
   assert.doesNotMatch(ipc, /'temp', '\.soduwork-inputs', ref/);
 });
+
+test('Pi indexes identical names in each conversation delivery directory while editing one project', async t => {
+  const root = workspace(t);
+  const workspaces = require('../main/conversation/delivery-workspace.cjs');
+  const start = Date.now() - 1000;
+  const a = workspaces.allocate(root), b = workspaces.allocate(root);
+  assert.notEqual(a.key, b.key);
+  assert.equal(fs.existsSync(a.draftRoot), false);
+  fs.writeFileSync(path.join(root, 'report.md'), 'shared project');
+  for (const [assignment, content] of [[a, 'first report'], [b, 'second report']]) {
+    workspaces.ensure(root, assignment);
+    fs.writeFileSync(path.join(assignment.draftRoot, 'report.md'), content);
+  }
+  for (const [assignment, content] of [[a, 'first report'], [b, 'second report']]) {
+    const options = { startedAt: start, opts: { deliveryWorkspace: workspaces.resolve(root, assignment.key) } };
+    const pi = open(root, options);
+    assert.equal(pi.cwd, root);
+    const output = await pi.outputSnapshotAsync();
+    assert.deepEqual(output.files.map(row => row.relative), ['report.md']);
+    assert.equal(fs.readFileSync(output.files[0].path, 'utf8'), content);
+    assert.deepEqual(pi.outputSnapshot().files, output.files);
+  }
+});
+
+test('delivery namespaces reject a forged key, a sibling root and a replaced directory', t => {
+  const cwd = workspace(t);
+  const workspaces = require('../main/conversation/delivery-workspace.cjs');
+  const a = workspaces.allocate(cwd), b = workspaces.allocate(cwd);
+  assert.throws(() => workspaces.resolve(cwd, '../private'));
+  assert.throws(() => workspaces.root(cwd, { ...a, draftRoot: b.draftRoot }));
+  workspaces.ensure(cwd, b);
+  fs.symlinkSync(b.draftRoot, a.draftRoot, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.throws(() => workspaces.root(cwd, a));
+});
+
+test('private turn receipts include verified browser evidence, skipping other hidden files', async t => {
+  const cwd = workspace(t), spaces = require('../main/conversation/delivery-workspace.cjs');
+  const journal = require('../main/conversation/file-change-journal');
+  const assignment = spaces.allocate(cwd);
+  const before = await spaces.deliverySnapshot(cwd, assignment, journal.snapshot);
+  const folder = path.join(spaces.ensure(cwd, assignment), '.soduwork', 'evidence');
+  fs.mkdirSync(folder, { recursive: true });
+  const png = Buffer.from('89504e470d0a1a0a0000000d494844520000000100000001', 'hex');
+  fs.writeFileSync(path.join(folder, 'preview.png'), png);
+  fs.writeFileSync(path.join(folder, 'invalid.png'), 'not a raster');
+  fs.writeFileSync(path.join(folder, 'other.txt'), 'not a screenshot');
+  const after = await spaces.deliverySnapshot(cwd, assignment, journal.snapshot);
+  const changes = spaces.changes(before, after, 'turn');
+  assert.deepEqual(changes.files.map(file => file.path), ['.soduwork/evidence/preview.png']);
+  assert.equal(changes.files[0].after.hash, require('node:crypto').createHash('sha256').update(png).digest('hex'));
+  assert.deepEqual((await journal.snapshot(assignment.draftRoot)).files, {});
+});
+
+test('private capture reports incomplete or oversized receipts without retrying the turn or leaking error text', async () => {
+  const { freezeTurn } = require('../main/conversation/delivery-workspace.cjs');
+  const warnings = [], captures = [];
+  const handle = { deliveryWorkspace: {}, async captureArtifactTurn(value) { captures.push(value); } };
+  const messages = [{ role: 'user' }];
+  const report = value => warnings.push(value);
+  await freezeTurn(handle, null, messages, report);
+  await freezeTurn(handle, { truncated: true, files: [] }, messages, report);
+  assert.equal(warnings.length, 2);
+  assert.ok(warnings.every(message => message.includes('未能完整核对')));
+  assert.equal(captures.length, 0);
+  const mixed = { files: [{ after: { hash: 'meta:100:999' } }, { after: { hash: 'a'.repeat(64) } }] };
+  await freezeTurn(handle, mixed, messages, report);
+  assert.deepEqual(captures, [mixed]);
+  assert.match(warnings.at(-1), /1 个文件超过 32 MiB/);
+  handle.captureArtifactTurn = () => { throw Error('/private/path/secret'); };
+  await freezeTurn(handle, { files: [mixed.files[1]] }, messages, report);
+  assert.doesNotMatch(warnings.at(-1), /secret/);
+  assert.match(warnings.at(-1), /归档失败/);
+});
+
+test('a changed project alias cannot rebind a conversation delivery directory', t => {
+  const dir = workspace(t), spaces = require('../main/conversation/delivery-workspace.cjs');
+  const a = path.join(dir, 'a'), b = path.join(dir, 'b'), alias = path.join(dir, 'alias');
+  fs.mkdirSync(a); fs.mkdirSync(b);
+  const type = process.platform === 'win32' ? 'junction' : 'dir';
+  fs.symlinkSync(a, alias, type);
+  const scope = spaces.allocate(alias);
+  assert.equal(scope.projectRoot, fs.realpathSync.native(a));
+  fs.unlinkSync(alias);
+  fs.symlinkSync(b, alias, type);
+  assert.throws(() => spaces.root(alias, scope));
+});

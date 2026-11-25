@@ -6,13 +6,14 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { createEntries } = require('./zip-archive');
+const { publishedDirectory } = require('./delivery-workspace.cjs');
 const SCHEMA = 'soduwork.workspace-handoff/v1';
 const MAX_FILES = 4000;
 const MAX_BYTES = 96 * 1024 * 1024;
 const MAX_TRANSCRIPT = 2 * 1024 * 1024;
 const MAX_DEPTH = 32;
 const SKIP_DIRS = new Set(['.git', '.svn', '.hg', 'node_modules', '.venv', 'venv', '__pycache__',
-  '.ssh', '.aws', '.azure', '.config', '.soduwork', '.soduwork-inputs', '.pi', '.codex', '.claude', '.opencode', 'soduworklibrary']);
+  '.ssh', '.aws', '.azure', '.config', '.soduwork', '.soduwork-drafts', '.soduwork-inputs', '.pi', '.codex', '.claude', '.opencode', 'soduworklibrary']);
 const SECRET_FILE = /^(?:\.env(?:\..*)?|\.npmrc|\.pypirc|credentials(?:\..*)?|id_(?:rsa|dsa|ecdsa|ed25519)(?:\..*)?)$|\.(?:pem|p12|pfx|key)$/i;
 const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
@@ -20,7 +21,7 @@ function portablePath(value) {
   if (typeof value !== 'string' || !value || value.length > 500 || value.includes('\\')) throw Error('工作文件路径不适合跨机器传输');
   const parts = value.split('/');
   if (parts.some(x => !x || x === '.' || x === '..' || /[<>:"|?*\x00-\x1f\x7f]/.test(x) || /[. ]$/.test(x) ||
-    /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(x))) throw Error('工作文件包含不安全或不兼容的路径');
+    /^(?:con|conin\$|conout\$|prn|aux|nul|(?:com|lpt)[1-9¹²³]) *(?:\.|$)/i.test(x))) throw Error('工作文件包含不安全或不兼容的路径');
   return value;
 }
 
@@ -57,6 +58,9 @@ async function scan(root, limits = {}) {
       const relative = prefix ? prefix + '/' + item.name : item.name;
       const file = path.join(dir, item.name);
       if (item.isSymbolicLink()) { excluded.push({ path: relative, reason: 'link' }); continue; }
+      if (item.isDirectory() && publishedDirectory(base, dir, item.name)) {
+        excluded.push({ path: relative, reason: 'conversation-results' }); continue;
+      }
       if (SKIP_DIRS.has(item.name.toLowerCase())) {
         excluded.push({ path: relative, reason: 'runtime-or-credentials' }); continue;
       }

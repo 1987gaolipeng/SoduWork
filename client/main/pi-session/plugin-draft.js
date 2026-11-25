@@ -6,6 +6,8 @@
 const fs = require('fs');
 const path = require('path');
 const outputs = require('./outputs');
+const deliveryWorkspaces = require('../conversation/delivery-workspace.cjs');
+const outputRoot = handle => deliveryWorkspaces.root(handle.cwd, handle.deliveryWorkspace);
 const resources = require('../plugin-resources');
 const candidates = require('./plugin-draft-candidates');
 const { continuedPlugins } = require('../conversation/runtime-artifacts.cjs');
@@ -23,7 +25,7 @@ function _candidate(handle, snapshot) {
     try { snapshot = handle.outputSnapshot(); } catch (_) { return null; }
   }
   const recorded = continuedPlugins(handle);
-  return newest(handle, candidates.collect(handle.cwd, recorded ? { ...snapshot, excludedDrafts: recorded.paths } : snapshot));
+  return newest(handle, candidates.collect(outputRoot(handle), recorded ? { ...snapshot, excludedDrafts: recorded.paths } : snapshot));
 }
 
 function newest(handle, matches) {
@@ -51,7 +53,7 @@ async function readRecentAsync(handles, app) {
       const snapshot = typeof handle?.outputSnapshotAsync === 'function'
         ? await handle.outputSnapshotAsync() : handle?.outputSnapshot?.();
       const recorded = continuedPlugins(handle);
-      return snapshot && handle.cwd ? newest(handle, await candidates.collectAsync(handle.cwd,
+      return snapshot && handle.cwd ? newest(handle, await candidates.collectAsync(outputRoot(handle),
         recorded ? { ...snapshot, excludedDrafts: recorded.paths } : snapshot)) : null;
     } catch (_) { return null; }
   }))).filter(Boolean).sort((a, b) => b.at - a.at);
@@ -71,9 +73,9 @@ function readSession(handle, target, indexed, app) {
   let file = files.find(item => String(item.artifactId || item.path || '') === String(target || ''));
   const recorded = continuedPlugins(handle);
   if (recorded?.paths.includes(file?.path)) return { ok: false, reason: '请通过会话安装卡片核验历史插件' };
-  const described = file && candidates.describe(handle.cwd, file);
+  const described = file && candidates.describe(outputRoot(handle), file);
   if (!file || !file.path || !described ||
-      !outputs.inside(handle.cwd, file.path)) {
+      !outputs.inside(outputRoot(handle), file.path)) {
     return { ok: false, reason: '这份插件草稿不属于当前会话成果，请刷新后重试' };
   }
   // Resolve stale history cards only within the current conversation and with the same actual plugin key.
@@ -84,8 +86,8 @@ function readSession(handle, target, indexed, app) {
   // Do not use old delivery entries to recover packages whose merged manifest no longer marks them as plugin drafts.
   if (file.pluginSuperseded || (!file.pluginDraft && replacements.length)) {
     const current = replacements.find(item => !recorded?.paths.includes(item.path) && described.pluginKey &&
-      candidates.describe(handle.cwd, item)?.pluginKey === described.pluginKey);
-    if (!current || !outputs.inside(handle.cwd, current.path)) {
+      candidates.describe(outputRoot(handle), item)?.pluginKey === described.pluginKey);
+    if (!current || !outputs.inside(outputRoot(handle), current.path)) {
       return { ok: false, reason: '这份插件草稿已有新稿，请刷新后安装最新稿' };
     }
     file = current;
@@ -148,7 +150,7 @@ function readCandidate(found, app, options = {}) {
     if (!options.staticValidation && typeof found.handle.inFlight === 'function' && found.handle.inFlight()) {
       return { ok: false, reason: '插件还在制作中，请等本轮完成后安装' };
     }
-    resources.assertNoLinks(path.resolve(found.handle.cwd), path.resolve(found.file.path));
+    resources.assertNoLinks(path.resolve(outputRoot(found.handle)), path.resolve(found.file.path));
     const stat = fs.statSync(found.file.path);
     if (!stat.isFile()) return { ok: false, reason: '插件草稿已经不在了' };
     if (stat.size > MAX_BYTES) return { ok: false, reason: '插件草稿超过 24MB，无法安全读取' };
@@ -170,7 +172,7 @@ function readCandidate(found, app, options = {}) {
     if (!body || Array.isArray(body) || typeof body !== 'object') {
       return { ok: false, reason: '插件草稿不是有效的 JSON 对象' };
     }
-    const collected = resources.collect(body, found.file.path, found.handle.cwd);
+    const collected = resources.collect(body, found.file.path, outputRoot(found.handle));
     if (verify && !candidates.ARCHIVE.test(found.file.path)) {
       const digests = new Map((collected.resources || []).map(row => [row.path, row.sha256]));
       const signatures = [found.file.pluginManifestDigest, ...(body.resources || [])

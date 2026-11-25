@@ -59,9 +59,10 @@ function createProcessHandle({ ref, invoke, setProperty, release, onClose, confi
     },
   });
   const outputs = require('../pi-session/outputs');
-  local.outputs = () => outputs.list(local.cwd, local.outputSince ?? local.startedAt ?? 0);
-  local.outputSnapshot = () => ({ ...outputs.scan(local.cwd, local.outputSince ?? local.startedAt ?? 0,
-    state.data?.state?.execution?.startedAt || 0), fileChanges: local.fileChanges || null });
+  const outputRoot = () => require('../conversation/delivery-workspace.cjs').root(local.cwd, local.deliveryWorkspace);
+  local.outputs = () => outputs.list(outputRoot(), local.outputSince ?? local.startedAt ?? 0);
+  local.outputSnapshot = () => ({ ...outputs.scan(outputRoot(), local.outputSince ?? local.startedAt ?? 0,
+    state.data?.state?.execution?.startedAt || 0), fileChanges: (local.deliveryWorkspace ? local.deliveryFileChanges : local.fileChanges) || null });
   for (const method of ['submit', 'continueGoal', 'pauseGoal', 'disableGoal', 'cancel', 'cancelQueued', 'updateQueue',
     'setAccessPolicy', 'selectModel', 'setThinkingMode', 'bindTask', 'answerUi', 'toolDetail',
     'outputSnapshotAsync', 'appendTaskMessage', 'appendTaskTool',
@@ -76,7 +77,7 @@ function createProcessHandle({ ref, invoke, setProperty, release, onClose, confi
   const handle = new Proxy(local, {
     set(target, key, value) {
       Reflect.set(target, key, value);
-      if (key === 'captureDelivery') {
+      if (key === 'captureDelivery' || key === 'captureArtifactTurn') {
         const pending = setProperty(ref, key, value); pending.catch(() => {});
       }
       return true;

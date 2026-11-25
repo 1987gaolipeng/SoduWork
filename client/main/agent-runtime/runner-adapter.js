@@ -28,6 +28,7 @@ const TURN_SKILLS = Symbol('trusted-turn-skills');
 const taskOutputJournal = require('../conversation/task-output-journal');
 const conversationInputPreparation = require('../conversation/conversation-input-preparation.cjs');
 const fileChangeJournal = require('../conversation/file-change-journal');
+const deliveryWorkspaces = require('../conversation/delivery-workspace.cjs');
 const messageTime = require('../conversation/message-time');
 const agentSource = require('../conversation/agent-source.cjs');
 const _runnerConfig = require('./runner-config.cjs').createForConversation;
@@ -368,7 +369,8 @@ function _snapshot(state) {
     adapterId: state.adapterId, displayName: state.displayName,
     appliedAccessPolicy: state.appliedAccessPolicy || null,
     pendingPermissions: state.pendingPermissions || [],
-    fileChanges: state.fileChanges || null,
+    fileChanges: (state.deliveryWorkspace ? state.deliveryFileChanges : state.fileChanges) || null,
+    ...(state.artifactCaptureWarning ? { artifactCaptureWarning: state.artifactCaptureWarning } : {}),
     pendingUi: state.pendingPermissions?.length ? { ...state.pendingPermissions[0], method: 'permission' } : null,
     completion: state.completion ? { ...state.completion } : null,
     ...(state.taskGoal ? { taskGoal: { ...state.taskGoal, objective: state.goal, acceptance: state.acceptance } } : {}),
@@ -534,6 +536,9 @@ async function createRunnerHandle(request, defaults, initialSession) {
     if (!bound.ok) throw new Error(bound.reason);
   }
   const cwd = path.resolve(String(opts.cwd || process.cwd()));
+  const deliveryWorkspace = opts.deliveryWorkspace || null;
+  const outputRoot = () => deliveryWorkspaces.root(cwd, deliveryWorkspace);
+  const outputChanges = () => (deliveryWorkspace ? state.deliveryFileChanges : state.fileChanges) || null;
   let accessControl = { schema: 'soduwork.access-policy/v1', supported: false, modes: [], canChangeDuringSession: false };
   if (opts.accessPolicy) {
     const probe = await runtime.rpc('runtime.detect', { key: adapterId }, 15000);
@@ -606,7 +611,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
   const taskGoalSupported = runtimeSpec.goalMode === 'native' && taskGoal.supported(adapterId);
   const initialTaskGoal = taskGoalSupported ? taskGoal.fromOptions(opts) : null;
   const state = {
-    alias, runnerRef, dispatchId, cwd, adapterId, displayName, taskBindings,
+    alias, runnerRef, dispatchId, cwd, deliveryWorkspace, adapterId, displayName, taskBindings,
     accessPolicy: require('../access-control/policy').normalize(opts.accessPolicy, cwd),
     accessControl,
     pendingPermissions: [],
@@ -717,7 +722,12 @@ async function createRunnerHandle(request, defaults, initialSession) {
   async function beginFileJournal(turnId) {
     const journal = { turnId: String(turnId || ''), before: null };
     activeFileJournal = journal;
-    try { journal.before = await fileChangeJournal.snapshot(cwd); } catch (_) { journal.before = null; }
+    state.artifactCaptureWarning = '';
+    if (deliveryWorkspace) state.deliveryFileChanges = null;
+    [journal.before, journal.draftBefore] = await Promise.all([
+      fileChangeJournal.snapshot(cwd).catch(() => null),
+      deliveryWorkspaces.deliverySnapshot(cwd, deliveryWorkspace, fileChangeJournal.snapshot),
+    ]);
   }
   async function finishFileJournal() {
     const journal = activeFileJournal;
@@ -734,6 +744,10 @@ async function createRunnerHandle(request, defaults, initialSession) {
       state.fileChanges = { schemaVersion: fileChangeJournal.SCHEMA_VERSION, turnId: journal.turnId,
         capturedAt: Date.now(), truncated: true, files: [],
         stats: { created: 0, modified: 0, deleted: 0, renamed: 0, total: 0 } };
+    }
+    if (deliveryWorkspace) {
+      const after = await deliveryWorkspaces.deliverySnapshot(cwd, deliveryWorkspace, fileChangeJournal.snapshot);
+      state.deliveryFileChanges = deliveryWorkspaces.changes(journal.draftBefore, after, journal.turnId);
     }
   }
 
@@ -1642,7 +1656,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
         // Filesystem clocks can lag the conversation clock, so time filtering
         // here could let a newly generated invalid draft bypass validation.
         // Public output snapshots retain their conversation ownership boundary.
-        outputSnapshot: () => outputs.scanAsync(cwd, 0, state.startedAt),
+        outputSnapshot: () => outputs.scanAsync(outputRoot(), 0, state.startedAt),
         repair: prompt => continueTurn(prompt, [], { ...options, promptText: prompt, recordUser: false }, true),
         changed() {
           const phase = pluginGeneration.records(handle).find(row => ['checking', 'repairing'].includes(row.state))?.state;
@@ -1699,6 +1713,13 @@ async function createRunnerHandle(request, defaults, initialSession) {
           state.completion = { reason: 'cancelled' };
         }
       } else if (result?.ok && !result.paused && !result.recovering && !cancelled()) {
+        // The validation gate may have run a repair in the same user turn.
+        // Publish its final journal once, before admitting the next queued turn.
+        await deliveryWorkspaces.freezeTurn(handle, outputChanges(), state.messages,
+          reason => {
+            state.artifactCaptureWarning = reason;
+            emit('artifact-capture-error', { reason });
+          });
         state.status = 'idle'; state.statusText = '';
       }
       return result;
@@ -1892,7 +1913,9 @@ async function createRunnerHandle(request, defaults, initialSession) {
       // The child can start before the next poll publishes its incremented round.
       return round === state.round || round === state.round + 1;
     },
-    cwd,
+    cwd, deliveryWorkspace,
+    get fileChanges() { return state.fileChanges || null; },
+    get deliveryFileChanges() { return state.deliveryFileChanges || null; },
     model: prepared.model.id,
     get intent() { return state.intent; },
     get goal() { return state.goal; },
@@ -2201,12 +2224,12 @@ async function createRunnerHandle(request, defaults, initialSession) {
       if (state.goalVisible) observationCancellation++;
       return goalControls.disableGoal();
     } } : {}),
-    outputs() { return outputs.list(cwd, outputSince); },
-    outputSnapshot() { return { ...outputs.scan(cwd, outputSince, state.startedAt), fileChanges: state.fileChanges || null, pluginValidation: pluginGeneration.records(handle) }; },
+    outputs() { return outputs.list(outputRoot(), outputSince); },
+    outputSnapshot() { return { ...outputs.scan(outputRoot(), outputSince, state.startedAt), fileChanges: outputChanges(), pluginValidation: pluginGeneration.records(handle) }; },
     async outputSnapshotAsync() {
-      const since = outputSince, turnSince = state.startedAt, fileChanges = state.fileChanges || null;
-      const scanned = await outputs.scanAsync(cwd, since, turnSince);
-      if (outputSince !== since || state.startedAt !== turnSince || (state.fileChanges || null) !== fileChanges)
+      const since = outputSince, turnSince = state.startedAt, fileChanges = outputChanges();
+      const scanned = await outputs.scanAsync(outputRoot(), since, turnSince);
+      if (outputSince !== since || state.startedAt !== turnSince || outputChanges() !== fileChanges)
         throw Error('当前轮次的成果已变化，请刷新后重试');
       return { ...scanned, fileChanges, pluginValidation: pluginGeneration.records(handle) };
     },

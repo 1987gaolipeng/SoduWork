@@ -431,3 +431,147 @@ test('the image index still rejects unlisted, deleted and out-of-workspace files
     assert.equal((await runtime.action(session, 'scope', id, 'image-full', {})).ok, false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('two chats in one project open their own turn revisions after the working copy changes', async t => {
+  const drafts = require('../main/conversation/delivery-workspace.cjs');
+  const journal = require('../main/conversation/file-change-journal');
+  const history = require('../main/conversation/device-history-artifacts.cjs');
+  const storage = require('../main/conversation/device-artifact-archive.cjs');
+  const versions = require('../main/conversation/artifact-versions.cjs');
+  const links = require('../components/panels/chat-output-links');
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-turn-links-')));
+  const profile = path.join(root, 'profile'), project = path.join(root, 'project');
+  fs.mkdirSync(profile); fs.mkdirSync(project);
+  t.after(() => { runtime.closeAll(); fs.rmSync(root, { recursive: true, force: true }); });
+  const makeChat = id => {
+    const workspace = drafts.allocate(project), cwd = drafts.ensure(project, workspace);
+    const handle = { cwd: project, sessionId: id, deliveryWorkspace: workspace, outputs: () => {
+      const file = path.join(cwd, 'report.md');
+      if (!fs.existsSync(file)) return [];
+      const stat = fs.statSync(file);
+      return [{ path: file, relative: 'report.md', name: 'report.md', size: stat.size, at: Math.round(stat.mtimeMs) }];
+    } };
+    let saved, allowed = true;
+    const guard = () => { if (!allowed) throw Error('Inactive conversation'); };
+    runtime.bindTurnArchives(handle, () => versions.readers(profile, id, saved?.archive, guard));
+    async function write(turnId, text) {
+      const before = await journal.snapshot(cwd);
+      const entries = typeof text === 'string' ? { 'report.md': text } : text;
+      for (const [relative, bytes] of Object.entries(entries)) {
+        const target = path.join(cwd, relative);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, bytes);
+      }
+      const change = journal.compare(before, await journal.snapshot(cwd), { turnId });
+      const captured = await history.capture({ row: { id, cwd }, previous: saved, journal: change, verifiedTurn: true });
+      saved = await storage.preserve(profile, id, captured, saved, guard);
+    }
+    return { cwd, handle, write, revoke() { allowed = false; } };
+  };
+  const a = makeChat('chat-A'), b = makeChat('chat-B');
+  await a.write('a-one', 'A / first');
+  await a.write('a-two', 'A / next revision');
+  await b.write('b-one', 'B / separate conversation');
+  async function cards(chat) {
+    const snapshot = await runtime.viewSnapshotAsync(chat.handle);
+    return runtime.decorate(chat.handle.sessionId, snapshot);
+  }
+  const first = links.filesForTurn(await cards(a), 'a-one', false);
+  const next = links.filesForTurn(await cards(a), 'a-two', true);
+  const sibling = links.filesForTurn(await cards(b), 'b-one', true);
+  assert.deepEqual(first.map(file => file.relative), ['report.md']);
+  assert.deepEqual(next.map(file => file.relative), ['report.md']);
+  assert.deepEqual(sibling.map(file => file.relative), ['report.md']);
+  const ids = [first[0], next[0], sibling[0]].map(file => file.artifactId);
+  assert.equal(new Set(ids).size, 3);
+  fs.unlinkSync(path.join(a.cwd, 'report.md'));
+  fs.writeFileSync(path.join(b.cwd, 'report.md'), 'later edit');
+  const read = (chat, id) => runtime.action(chat.handle, chat.handle.sessionId, id, 'read', {});
+  assert.equal((await read(a, ids[0])).text, 'A / first');
+  assert.equal((await read(a, ids[1])).text, 'A / next revision');
+  assert.equal((await read(b, ids[2])).text, 'B / separate conversation');
+  assert.equal((await read(b, ids[0])).ok, false);
+  const html = '<link rel="stylesheet" href="../theme.css"><h1>first</h1>';
+  await b.write('web-first', { 'site/page/index.html': html, 'site/theme.css': 'body{color:red}' });
+  await b.write('web-second', { 'site/page/index.html': html.replace('first', 'second'), 'site/theme.css': 'body{color:blue}' });
+  const web = (await cards(b)).find(file => file.turnId === 'web-first' && file.kind === 'website');
+  assert.ok(web);
+  const preview = await runtime.action(b.handle, b.handle.sessionId, web.artifactId, 'preview', {});
+  assert.equal(preview.ok, true);
+  assert.equal((await request(preview.url)).body, html);
+  assert.equal((await request(new URL('../theme.css', preview.url))).body, 'body{color:red}');
+  assert.equal((await request(new URL('/file-from-another-turn.css', preview.url))).status, 404);
+  const originalStyle = 'body{background:url(icon.png)}', originalImage = 'original image';
+  const mixedHtml = '<link rel="stylesheet" href="/ASSETS/style.css">';
+  await a.write('site-assets', { 'web/Assets/Style.CSS': originalStyle, 'web/Assets/Icon.PNG': originalImage });
+  const aliasExists = fs.existsSync(path.join(a.cwd, 'web', 'ASSETS', 'style.css'));
+  await a.write('site-entry', { 'web/index.html': mixedHtml, 'ASSETS/style.css': 'unrelated root file' });
+  const mixedCard = (await cards(a)).find(file => file.turnId === 'site-entry' && file.relative === 'web/index.html');
+  assert.ok(mixedCard);
+  await a.write('site-modified', { 'web/Assets/Style.CSS': 'new style', 'web/Assets/Icon.PNG': 'new image' });
+  fs.rmSync(a.cwd, { recursive: true });
+  fs.rmSync(project, { recursive: true, force: true });
+  await t.test('frozen preview resolves source-volume spellings after removing the project', async () => {
+    const result = await runtime.preview(a.handle, a.handle.sessionId, mixedCard.artifactId);
+    assert.equal(result.ok, true, result.reason);
+    assert.equal((await request(result.url)).body, mixedHtml);
+    const css = await request(new URL('/ASSETS/style.css', result.url));
+    const image = await request(new URL('/ASSETS/icon.png', result.url));
+    if (aliasExists) {
+      assert.equal(css.body, originalStyle);
+      assert.equal(image.body, originalImage);
+    } else {
+      assert.equal(css.status, 404);
+      assert.equal(image.status, 404);
+    }
+    assert.equal((await request(new URL('ASSETS/private.png', result.url))).status, 404);
+  });
+  await t.test('frozen download packages original bytes at the referenced paths after removing the project', async () => {
+    const packages = require('../main/conversation/delivery-package-worker');
+    const job = packages.prepare(a.handle, [mixedCard.artifactId]);
+    if (!aliasExists) { await assert.rejects(job, /缺少已保存的依赖/); return; }
+    const result = await job;
+    const digest = value => require('node:crypto').createHash('sha256').update(value).digest('hex');
+    assert.deepEqual(new Map(result.manifest.files.map(row => [row.path, row.sha256])),
+      new Map([['web/index.html', digest(mixedHtml)], ['web/ASSETS/style.css', digest(originalStyle)],
+        ['web/ASSETS/icon.png', digest(originalImage)]]));
+  });
+  b.revoke();
+  assert.equal((await request(preview.url)).status, 404);
+  a.revoke();
+  await assert.rejects(read(a, ids[0]), /Inactive conversation/);
+});
+
+test('legacy frozen aliases require a matching regular file receipt on the archive volume', t => {
+  const { index } = require('../main/conversation/frozen-file-index.cjs');
+  const { stamp } = require('../main/conversation/runtime-artifacts.cjs');
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-frozen-index-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const first = path.join(root, 'first'), second = path.join(root, 'second');
+  fs.mkdirSync(first); fs.mkdirSync(second);
+  const relative = 'Assets/Style Sheet.css', alias = relative.toUpperCase();
+  function receipt(dir, body) {
+    const file = path.join(dir, relative);
+    fs.mkdirSync(path.dirname(file));
+    fs.writeFileSync(file, body);
+    return { root: dir, relative, stamp: stamp(fs.lstatSync(file, { bigint: true })) };
+  }
+  const old = receipt(first, 'old'), other = receipt(second, 'other');
+  const insensitive = fs.existsSync(path.join(first, alias));
+  const accepted = index([old]);
+  assert.equal(accepted.get(relative), old);
+  assert.equal(accepted.get(alias), insensitive ? old : undefined);
+  fs.symlinkSync(path.join(first, 'Assets'), path.join(first, 'Linked'), 'junction');
+  assert.equal(accepted.get('Linked/Style Sheet.css'), undefined);
+  assert.equal(accepted.get('../first/' + relative), undefined);
+  // An explicit empty list is a source-volume decision, even if the archive
+  // now resides on a volume where more spellings resolve to the same file.
+  assert.equal(index([{ ...old, aliases: [] }]).get(alias), undefined);
+  assert.equal(index([old, other]).get(alias), undefined);
+  fs.linkSync(path.join(first, relative), path.join(first, 'hard.css'));
+  assert.equal(accepted.get('hard.css'), undefined);
+  fs.unlinkSync(path.join(first, 'hard.css'));
+  fs.unlinkSync(path.join(first, relative));
+  fs.writeFileSync(path.join(first, relative), 'replaced asset');
+  assert.equal(accepted.get(alias), undefined);
+});

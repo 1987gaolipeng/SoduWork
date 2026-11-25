@@ -177,12 +177,44 @@
     let end=-1;
     return hits.filter(hit => { if(hit.start<end)return false;end=hit.end;return true; });
   }
+  // Each archived link names the bytes from its own user turn. A later edit of
+  // the same relative path remains separately addressable in the workbench.
+  function filesForTurn(files, turn, current) {
+    const archived = files.filter(file => file.versionId);
+    if (!archived.length) return files;
+    const captured = new Set(archived.filter(file => file.turnId === turn).map(file => file.originalArtifactId));
+    const recorded = new Set(archived.map(file => file.originalArtifactId));
+    return files.filter(file => file.versionId ? file.turnId === turn :
+      !captured.has(key(file)) && (current || !recorded.has(key(file))));
+  }
+  function assignDeliveryTurns(root, snapshot, files) {
+    const recorded = new Map();
+    for (const file of files) {
+      if (file.versionId && Number.isSafeInteger(file.userMessageIndex)) {
+        const prior = recorded.get(file.userMessageIndex);
+        recorded.set(file.userMessageIndex, prior === undefined || prior === file.turnId ? file.turnId : '');
+      }
+    }
+    let turn = '';
+    const turns = (snapshot.messages || []).map((message, index) => {
+      if (message?.role === 'user') {
+        const absolute = snapshot.history?.messageIndices?.[index] ?? ((snapshot.history?.messageStart || 0) + index);
+        turn = message.submissionId || recorded.get(absolute) || '';
+      }
+      return turn;
+    });
+    root.querySelectorAll('.nmsg.ai').forEach(message => {
+      const index = /^message:(\d+)$/.exec(message.dataset.chatNode || '');
+      if (index) message.dataset.deliveryTurn = turns[Number(index[1])] || '';
+    });
+  }
   function scoped(node, files) {
     files = asFiles(files);
     const owner = node.closest('[data-output-task]');
     if (!owner) return files;
     const taskId = owner.dataset.outputTask;
-    if (!taskId) return files;
+    if (!taskId) return owner.dataset.deliveryTurn === undefined ? files :
+      filesForTurn(files, owner.dataset.deliveryTurn, owner.dataset.deliveryCurrent !== 'false');
     const own = files.filter(file => file.taskId === taskId);
     return own.length ? own : files.filter(file => !file.taskId);
   }
@@ -203,17 +235,25 @@
     files = asFiles(files);
     if (!root || !files.length) return 0;
     const doc=root.ownerDocument, filter=doc.defaultView.NodeFilter;
+    const byMessage = new Map(), versioned = files.some(file => file.versionId);
+    function localFiles(node) {
+      if (!versioned) return scoped(node, files);
+      const owner = node.closest('[data-output-task]');
+      if (!byMessage.has(owner)) byMessage.set(owner, scoped(node, files));
+      return byMessage.get(owner);
+    }
     let count=0;
     root.querySelectorAll('.ntext a,.nmd a').forEach(anchor => {
       if (anchor.closest('.user,.ntool,.nthink,pre')) return;
       const href = anchor.getAttribute('data-output-href') || anchor.getAttribute('href') || '';
       if (explicitWeb(href)) return;
-      const file = strictPaths ? workspaceFileTarget(href || anchor.textContent, scoped(anchor,files)) :
-        fileTarget(href || anchor.textContent, scoped(anchor,files));
+      const file = strictPaths ? workspaceFileTarget(href || anchor.textContent, localFiles(anchor)) :
+        fileTarget(href || anchor.textContent, localFiles(anchor));
       if (!file) return;
       anchor.replaceWith(button(doc,file,anchor.textContent)); count++;
     });
-    const index = LEGACY ? null : buildLinkIndex(files);
+    const index = LEGACY || versioned ? null : buildLinkIndex(files);
+    const turnIndexes = new Map();
     const walker=doc.createTreeWalker(root,filter.SHOW_TEXT,{acceptNode(node){
       const parent=node.parentElement;
       return parent && !parent.closest('a,button,pre,textarea,input,[contenteditable="true"],.user,.ntool,.nthink,.ndelivery,.noutput-library,.noutput-image,.noutput-video,.nplugin-draft') &&
@@ -223,15 +263,21 @@
     nodes.forEach(node => {
       const text=node.nodeValue;
       let hits;
-      if (LEGACY || !index) {
-        hits = mentions(text, scoped(node.parentElement, files), '', strictPaths);
+      if (LEGACY) {
+        hits = mentions(text, localFiles(node.parentElement), '', strictPaths);
       } else {
         const cached = linkScanCache.get(node);
         if (cached && cached.sig === filesSig && cached.text === text) return;
         const parent = node.parentElement;
         const owner = parent && parent.closest ? parent.closest('[data-output-task]') : null;
         const scopeKey = owner && owner.dataset && owner.dataset.outputTask ? String(owner.dataset.outputTask) : '';
-        hits = mentions(text, index, scopeKey, strictPaths);
+        let selected = index;
+        if (versioned) {
+          const available = localFiles(parent);
+          if (!turnIndexes.has(available)) turnIndexes.set(available, buildLinkIndex(available));
+          selected = turnIndexes.get(available);
+        }
+        hits = mentions(text, selected, scopeKey, strictPaths);
         if (!hits.length) {
           if (filesSig) linkScanCache.set(node, { sig: filesSig, text });
           return;
@@ -277,7 +323,7 @@
         truncated: s.history.truncated, totalMessages: s.history.totalMessages } : undefined };
     if (s.execution && typeof s.execution === 'object') slim.execution = { ...s.execution, fileChanges: undefined };
     return JSON.stringify([slim, latestUser, runningTools, messages.flatMap((m, i) => m?.role === 'user'
-      ? [[i, m.sentAt || m.timestamp || 0]] : m?.role === 'assistant' && (s.localReplica || m.done !== false && m.completedAt)
+      ? [[i, m.sentAt || m.timestamp || 0, m.submissionId || '']] : m?.role === 'assistant' && (s.localReplica || m.done !== false && m.completedAt)
         ? [[i, m.completedAt || 0, m.done !== false]] : [])]);
   }
   let decorateMemo = null;
@@ -298,6 +344,8 @@
     const historyMedia = snapshot.localReplica === true && html.includes('<pre>');
     if (!files.length && !historyMedia && !snapshot?.artifactUrl && !snapshot?.cloudHandoff?.artifactUrl && !snapshot?.execution?.artifactUrl && !carrySig) return html;
     const root = document.createElement('div'); root.innerHTML = html;
+    const hasVersions = files.some(file => file.versionId);
+    if (hasVersions) assignDeliveryTurns(root, snapshot, files);
     if (carrySig) {
       const messageKey = node => node.dataset.messageOwner != null
         ? 'owner:' + node.dataset.messageOwner : node.dataset.chatNode;
@@ -308,8 +356,9 @@
       root.querySelectorAll('[data-delivery-current="false"][data-delivery-final="true"]').forEach(message => {
         const old = previous.get(messageKey(message));
         if (!old) return;
+        const frozen = hasVersions && files.some(file => file.versionId && file.turnId === message.dataset.deliveryTurn);
         [...old.children].filter(node => node.matches('.ndelivery,.noutput-library,.noutput-image,.noutput-video,.nplugin-draft'))
-          .filter(node => !supersededDraftCard(node, files))
+          .filter(node => (!frozen || node.classList.contains('nplugin-draft')) && !supersededDraftCard(node, files))
           .filter(node => !node.classList.contains('nplugin-draft') || draftPlacement?.matchesOwner(node, message, snapshot) !== false)
           .forEach(node => message.appendChild(node.cloneNode(true)));
       });
@@ -997,7 +1046,7 @@
   // keyed by (ref + files) signatures so they can never leak across sessions,
   // and the WeakMap drops entries for replaced nodes on its own.
   function resetDecorateCache() { decorateMemo = null; }
-  const api={fileTarget,workspaceFileTarget,mergeFileChanges,mentions,linkify,decorate,sanitize,load,taskAttachment,openTaskFile,materialize,materializeTask,shouldRefresh,
+  const api={filesForTurn,fileTarget,workspaceFileTarget,mergeFileChanges,mentions,linkify,decorate,sanitize,load,taskAttachment,openTaskFile,materialize,materializeTask,shouldRefresh,
     isImage,isVideo,readPreview,imageUrl,videoUrl,hydrateImages,hydrateVideos,
     isPluginDraft,pluginDrafts,_supersededDraftCard:supersededDraftCard,_claimInlineMedia:claimInlineMedia,
     _buildLinkIndex:buildLinkIndex,_decorateStateSignature:decorateStateSignature,resetDecorateCache};

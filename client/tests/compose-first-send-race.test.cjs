@@ -9,13 +9,13 @@ async function until(check) { for (let i = 0; i < 40 && !check(); i++) await tic
 
 function fixture(t, { modelReady = Promise.resolve(true), send } = {}) {
   const calls = [], releases = [], opens = [];
-  let owner = 'account-a', compose, picked = [], modelRequests = 0;
+  let owner = 'account-a', compose, picked = [], modelRequests = 0, receive;
   let runtime = 'pi', location = 'local', executionRevision = 0;
   const api = {
     open: async options => { opens.push(options); return { ok: true, ref: 'ref-first', sessionId: 'first-chat', snapshot: { messages: [] } }; },
     snapshot: async () => ({ ok: true, snapshot: { messages: [] } }),
     send: async (...args) => { calls.push(args); return send ? send(...args) : { ok: true }; },
-    onEvent() { return () => {}; }, release: async ref => { releases.push(ref); return { ok: true }; },
+    onEvent(fn) { receive = fn; return () => {}; }, release: async ref => { releases.push(ref); return { ok: true }; },
     history: async () => ({ ok: true, chats: [] }),
   };
   const f = makeGlobals(); stubGlobals(f.g, { piSession: api });
@@ -56,7 +56,7 @@ function fixture(t, { modelReady = Promise.resolve(true), send } = {}) {
   input.addEventListener('input', () => compose._rememberComposeDraft());
   f.g.openComposePanel({ newSession: true });
   t.after(() => f.g.NativeChat.reset());
-  return { ...f, input, panel, calls, releases, opens, compose,
+  return { ...f, input, panel, calls, releases, opens, compose, receive: event => receive(event),
     readyCalls: () => modelRequests,
     owner: value => { owner = value; },
     runtime: value => { runtime = value; },
@@ -150,4 +150,18 @@ test('a refused first send retains the unsent input in its original conversation
   assert.equal(f.calls.length, 1);
   assert.equal(f.document.getElementById('nchatInput').value, 'unsent original request');
   assert.equal(f.draft('first-chat'), 'unsent original request');
+});
+
+
+test('capture failures without a snapshot notify only the active conversation and never resend the turn', async t => {
+  const f = fixture(t);
+  f.type('complete a report'); await f.submit();
+  await until(() => f.calls.length === 1);
+  const notices = [];
+  f.g.petSay = text => notices.push(text);
+  const reason = 'The archived original can still be exported.';
+  f.receive({ kind: 'artifact-capture-error', ref: 'another-chat', reason });
+  f.receive({ kind: 'artifact-capture-error', ref: 'ref-first', reason });
+  assert.deepEqual(notices, [reason]);
+  assert.equal(f.calls.length, 1);
 });

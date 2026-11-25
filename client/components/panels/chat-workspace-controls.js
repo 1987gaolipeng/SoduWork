@@ -78,7 +78,7 @@ function fileKey(file) {
 // ordinary file in this chat by its exact trusted workspace path; never merge
 // snapshots, inputs, remote attachments, ambiguous paths or basename matches.
 function promoteFileTab(tab, files) {
-    const ordinary = file => file && !file.taskId && !file.attachmentId && !file.cloudPending && !file.readSnapshot;
+    const ordinary = file => file && !file.versionId && !file.taskId && !file.attachmentId && !file.cloudPending && !file.readSnapshot;
     const previous = tab.file, scope = ctx.workScope();
     const root = ctx.context().cwd || ctx.context().intent?.cwd || ctx.WB.fileChanges?.cwd;
     if (!ctx.context().ref || !root || tab.inputFile || !ordinary(previous) ||

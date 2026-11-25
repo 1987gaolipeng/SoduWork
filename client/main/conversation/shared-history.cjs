@@ -387,6 +387,30 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     };
     return { guard, authorize };
   }
+  function bindTurnArtifacts(handle, getId, captured, current) {
+    const runtime = require('./artifact-runtime');
+    let lastDigest, readers;
+    runtime.bindTurnArchives(handle, async () => {
+      current();
+      const id = getId();
+      if (!id) return [];
+      scoped.guard(captured);
+      const version = await store.deviceHistoryVersion(id);
+      if (!version) return [];
+      if (version === lastDigest) return readers;
+      const row = await resolve(id, captured), content = await store.deviceHistory(id);
+      if (content?.digest !== version || !row) return [];
+      const guards = artifactGuards(row, content, captured, current);
+      if (!guards) return [];
+      const result = await require('./artifact-versions.cjs').readers(app.getPath('userData'), row.id,
+        content.localArtifactHistory.archive, guards.guard, guards.authorize);
+      current();
+      scoped.guard(captured);
+      lastDigest = version;
+      readers = result;
+      return readers;
+    });
+  }
   function bindContinuationArtifacts(handle, recovery, current) {
     if (!recovery?.artifactHistory?.archive?.files?.length) return;
     const { id, deviceTransferId } = recovery.row, captured = scoped.actor();
@@ -456,6 +480,7 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
         if (disposed) throw Error('会话已关闭，请重新打开成果');
       });
       if (guards) {
+        bindTurnArtifacts(view, () => row.id, captured, guards.guard);
         const close = view.close;
         view.close = async () => { disposed = true; return close(); };
         view.historyArtifacts = require('./device-history-artifacts.cjs').archivedView(
@@ -515,7 +540,7 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     if (result?.stale && retry)
       await recordDialogue(await store.get(row.id), snapshot, original, identity, false);
   }
-  async function capture(handle, identity, { initialReplay = false, onRegistered } = {}) {
+  async function capture(handle, identity, { initialReplay = false, onRegistered, completedJournal } = {}) {
     if (closed || handle.localReplica || typeof handle.snapshot !== 'function') return;
     const snapshot = handle.snapshot(), original = handle.historyRow?.(snapshot);
     if (!original?.id) return;
@@ -527,7 +552,7 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     // account-authorized cloud original in the cloud directory.
     const remote = original.cloud || original.accountProjection;
     const id = remote ? capturedCopyId(identity?.hub, accountId(identity), original.id) : original.id;
-    let displayed = remote ? original : require('./acceptance-session').projectHistory(app, original);
+    let displayed = remote ? { ...original } : require('./acceptance-session').projectHistory(app, original);
     if (!remote) {
       let retainedFailure = false;
       if (initialReplay) {
@@ -548,7 +573,17 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     // Some runtime rows omit task fields once the binding is no longer active.
     // A later snapshot cannot downgrade an already protected conversation.
     const protection = remote ? 'account' : mergeNativeEvidence(previousImport?.id === id ? previousImport : { id }, displayed).historyProtection;
+    const workspace = !remote && !protection && handle.deliveryWorkspace;
+    // The runtime assigns the namespace. Native imports and remote rows cannot
+    // choose a sibling's directory or replace an existing local allocation.
+    delete displayed.deliveryWorkspaceKey;
+    if (workspace) {
+      require('./delivery-workspace.cjs').root(handle.cwd, workspace);
+      if (previousImport?.deliveryWorkspaceKey && previousImport.deliveryWorkspaceKey !== workspace.key)
+        throw Error('已记录的会话成果目录与当前运行不一致');
+    }
     const [row] = await register([{ ...displayed, id, cloud: false, accountProjection: false,
+      ...(workspace ? { deliveryWorkspaceKey: workspace.key } : {}),
       accountConversation: false,
       ...(protection ? { historyProtection: protection } : {}),
       ...(original.taskProjectionId && !original.taskId ? { taskId: original.taskProjectionId } : {}),
@@ -562,7 +597,19 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
         try { await recordDialogue(row, snapshot, displayed, identity); }
         catch (failure) { handle.localHistoryError = failure.message; }
       }
-      try { await deviceHistory.refresh(row.id, { journal: handle.fileChanges || snapshot.fileChanges }); }
+      if (completedJournal) {
+        const captured = scoped.actor();
+        const userIndex = (snapshot.messages || []).findLastIndex(message => message.role === 'user');
+        const userMessageIndex = userIndex >= 0 ? snapshot.history?.messageIndices?.[userIndex] ??
+          (snapshot.history?.messageStart || 0) + userIndex : completedJournal.userMessageIndex;
+        await deviceHistory.captureTurn(row.id, { workspace, ref: handle.ref,
+          journal: { ...completedJournal, userMessageIndex }, snapshot, assertCurrent: () => {
+            scoped.guard(captured);
+            access.assertCurrent(app, access.actor(app, identity), identityOf());
+          } });
+        return;
+      }
+      try { await deviceHistory.refresh(row.id, { journal: workspace ? undefined : handle.fileChanges || snapshot.fileChanges }); }
       catch (error) {
         // A failed native read keeps the previous complete copy. The runtime
         // snapshot is still useful as explicitly partial crash-recovery data.
@@ -598,6 +645,22 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     if (!handle || observed.has(handle) || handle.localReplica) return;
     let pending, timer, disposed = false, error = '', dirty = false, executionObserved = false;
     let dialogueId, writing, dialogueDirty = false;
+    let confirmWorkspace, failWorkspace;
+    const workspaceReady = handle.deliveryWorkspace && new Promise((resolve, reject) => {
+      confirmWorkspace = resolve;
+      failWorkspace = reject;
+    });
+    workspaceReady?.catch(() => {});
+    const captured = scoped.actor();
+    const current = () => {
+      if (disposed || closed) throw Error('会话已关闭，请重新打开成果');
+      scoped.guard(captured);
+    };
+    bindTurnArtifacts(handle, () => dialogueId || handle.sessionId, captured, current);
+    handle.captureArtifactTurn = async journal => {
+      current();
+      await capture(handle, identity, { completedJournal: journal });
+    };
     const checkpoint = () => {
       if (!dialogueId || !executionObserved) return;
       dialogueDirty = true;
@@ -613,6 +676,12 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
       })().catch(failure => { handle.localHistoryError = failure.message; }).finally(() => { writing = null; });
     };
     const onRegistered = row => {
+      if (confirmWorkspace) {
+        if (row.deleted || row.deliveryWorkspaceKey !== handle.deliveryWorkspace.key) {
+          failWorkspace(Error('无法保存本机会话成果目录'));
+        } else confirmWorkspace();
+        confirmWorkspace = null;
+      }
       dialogueId = !row.deleted && !row.cached && !row.historyProtection && !row.deviceTransferId ? row.id : null;
       // An accepted turn may arrive before the first index commit or while
       // native replay is waiting. Persist the latest display independently.
@@ -625,8 +694,15 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
       pending = (async () => {
         while (dirty) {
           dirty = false;
-          try { await capture(handle, identity, { initialReplay: !executionObserved, onRegistered }); error = ''; }
-          catch (failure) { error = failure.message; handle.localHistoryError = error; }
+          try {
+            await capture(handle, identity, { initialReplay: !executionObserved, onRegistered });
+            if (confirmWorkspace) failWorkspace(Error('无法确认本机会话标识'));
+            error = '';
+          } catch (failure) {
+            failWorkspace?.(failure);
+            error = failure.message;
+            handle.localHistoryError = error;
+          }
         }
       })().finally(() => { pending = null; });
       return pending;
@@ -644,7 +720,7 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
         void flush();
       }, 1000); timer.unref?.();
     });
-    const entry = { flush: async () => { await flush(); await writing; }, error: () => error, dispose: () => { disposed = true; clearTimeout(timer); dispose?.(); } };
+    const entry = { workspaceReady, flush: async () => { await flush(); await writing; }, error: () => error, dispose: () => { disposed = true; clearTimeout(timer); dispose?.(); } };
     observed.set(handle, entry);
     // Registry facades intercept close; decorating that facade would make the
     // native close await its own registry disposal and deadlock shutdown.
@@ -673,6 +749,10 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
   }
   return { resolve, read, open, register, projectRows, lifecycle, deleteCloudCaches, remoteLifecycle, accountDisplayLinks, capture, observe, store, directory, preserveLegacyOutbox,
     transferSources: deviceHistory.transferSources, exportPortable: deviceHistory.exportPortable, importPortable: deviceHistory.importPortable,
+    deliveryWorkspaceReady(handle) {
+      if (!observed.has(handle)) throw Error('本机会话尚未登记');
+      return observed.get(handle).workspaceReady;
+    },
     bindContinuationArtifacts, prepareContinuation: deviceHistory.prepareContinuation, backfill: deviceHistory.refresh,
     captureScope: () => scoped.actor(), guardScope: captured => scoped.guard(captured),
     async indexedRow(id) {

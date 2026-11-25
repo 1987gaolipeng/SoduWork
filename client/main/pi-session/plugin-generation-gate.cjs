@@ -1,4 +1,6 @@
 'use strict';
+const deliveryWorkspaces = require('../conversation/delivery-workspace.cjs');
+const outputRoot = handle => deliveryWorkspaces.root(handle.cwd, handle.deliveryWorkspace);
 
 // Only execution calls begin/finish. Snapshot readers can copy receipts but never
 // request a repair, submit a turn, install a package or execute bundled code.
@@ -58,7 +60,7 @@ async function validateFile(handle, file, app, preflight) {
   let draft;
   try {
     const skillRuntimeEntry = require('../conversation/skill-frontmatter').runtimeEntry(app, true);
-    draft = await require('../app-resource-cache.cjs').request({ action: 'draft-check', cwd: handle.cwd,
+    draft = await require('../app-resource-cache.cjs').request({ action: 'draft-check', cwd: outputRoot(handle),
       file, profile: app?.getPath?.('userData'), skillRuntimeEntry, readOnly: Boolean(preflight) });
   } catch (error) { throw Object.assign(error, { retryable: true }); }
   if (!draft.ok) throw draft;
@@ -67,7 +69,7 @@ async function validateFile(handle, file, app, preflight) {
     const failures=(checked?.checks || []).filter(row=>row.ok===false);
     if(!checked?.ok || failures.length)throw Error(failures.map(row=>row.label || row.key).join('; ') || 'Static package validation failed');
   }
-  const [fresh] = await candidates.collectAsync(handle.cwd, { files: [{ path: file.path }] });
+  const [fresh] = await candidates.collectAsync(outputRoot(handle), { files: [{ path: file.path }] });
   if(!fresh || fresh.pluginRevision!==file.pluginRevision)throw Error('Draft or resource bytes changed during validation');
 }
 // Restored drafts have no in-memory generation receipt. This read-only path can
@@ -77,8 +79,8 @@ async function inspect({handle, snapshot, files: indexedFiles, app, preflight} =
   const remote=Array.isArray(snapshot?.pluginValidation)?snapshot.pluginValidation:[];
   if(activeGates.has(handle))return records(handle);
   if(handle.inFlight?.())return remote;
-  const cwd=handle.cwd,sessionId=handle.sessionId,owner=JSON.stringify(handle.deliveryOwner);
-  const current=()=>handle.cwd===cwd && handle.sessionId===sessionId && JSON.stringify(handle.deliveryOwner)===owner;
+  const cwd=outputRoot(handle),sessionId=handle.sessionId,owner=JSON.stringify(handle.deliveryOwner);
+  const current=()=>outputRoot(handle)===cwd && handle.sessionId===sessionId && JSON.stringify(handle.deliveryOwner)===owner;
   const files = indexedFiles || await candidates.collectAsync(cwd, snapshot || {});
   const signature=JSON.stringify([cwd,sessionId,owner,files.map(file=>[file.relative,file.pluginRevision])]);
   const pending=inspections.get(handle);
@@ -121,7 +123,7 @@ function finalDeliveryRevision(snapshot) {
 }
 async function begin({handle, app, identity, logicalOwner, outputSnapshot, selectedPluginIds = [], cancelled = () => false, pauseConfirmed = () => false, repair, changed = () => {}, preflight} = {}) {
   if (!handle?.cwd) return { canStart: () => !cancelled(), finish: async result => result, dispose() {} };
-  const cwd=handle.cwd, sessionId=handle.sessionId, owner=handle.deliveryOwner;
+  const cwd=outputRoot(handle), sessionId=handle.sessionId, owner=handle.deliveryOwner;
   const scope = () => JSON.stringify([handle.deliveryOwner, identity?.hub, identity?.clientId,
     identity ? require('../device-auth-request').accountScopeKey(identity) : '']);
   const logicalToken=logicalOwner && typeof logicalOwner==='object' ? logicalOwner : {};
@@ -141,7 +143,7 @@ async function begin({handle, app, identity, logicalOwner, outputSnapshot, selec
   }
   const originalScope = logical.scope;
   let disposed=false;
-  const owned=()=>!disposed && logical.handle===handle && handle.cwd === cwd && handle.sessionId === sessionId && handle.deliveryOwner === owner && scope() === originalScope;
+  const owned=()=>!disposed && logical.handle===handle && outputRoot(handle) === cwd && handle.sessionId === sessionId && handle.deliveryOwner === owner && scope() === originalScope;
   const current=()=>owned() && !cancelled();
   const baseline=logical.baseline, touched=logical.touched;
   const collectTargets=async()=>{
@@ -161,7 +163,7 @@ async function begin({handle, app, identity, logicalOwner, outputSnapshot, selec
     return files;
   };
   const store=new Map(records(handle).map(row=>[row.relative,row]));receipts.set(handle,store);
-  const sameScope=()=>handle.cwd === cwd && handle.sessionId === sessionId && scope() === originalScope;
+  const sameScope=()=>outputRoot(handle) === cwd && handle.sessionId === sessionId && scope() === originalScope;
   receiptScopes.set(handle,sameScope);
   const gateToken={};activeGates.set(handle,gateToken);
   const put=(file,state,attempt,issue)=>{

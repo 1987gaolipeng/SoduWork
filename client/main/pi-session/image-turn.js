@@ -37,7 +37,9 @@ async function generate({ handle, identity, choice, text, submissionId, signal, 
       throw Error(typeof result?.detail === 'string' ? result.detail.slice(0, 400) : '图片生成未完成，请检查图片模型配置');
     }
     generated = true;
-    const file = await media.materialize(result.artifact, identity, handle.cwd, fetchImpl, signal);
+    const workspaces = require('../conversation/delivery-workspace.cjs');
+    const file = await media.materialize(result.artifact, identity, workspaces.root(handle.cwd, handle.deliveryWorkspace),
+      fetchImpl, signal, workspaces.fileGuard(handle.cwd, handle.deliveryWorkspace));
     handle.appendTaskTool({ ...event, type: 'tool_execution_end', isError: false,
       result: { content: [{ type: 'text', text: JSON.stringify({ file: file.relative, model: selected.name }) }] } }, '');
     const link = file.relative.split('/').map(encodeURIComponent).join('/');

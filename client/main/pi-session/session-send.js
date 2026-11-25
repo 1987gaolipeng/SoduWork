@@ -91,7 +91,7 @@ async send(text, turnAttachments, sendOptions) {
           return (deliveryResult = result);
         } finally {
           runControl.finishTurn(ctx.run);
-          await ctx.finishTurnJournal();
+          await ctx.finishTurnJournal(deliveryResult);
           const capture = ctx._captureDirectDelivery(turn, deliveryResult);
           if (capture) await capture;
           ctx.imageController = null; ctx.inFlight = false;
@@ -210,8 +210,8 @@ async send(text, turnAttachments, sendOptions) {
         : ctx.acc.state.tools.length;
       const profile = goalQuality.deliveryProfile(ctx.goal);
       const evidenceNow = async () => {
-        const scanned = await require('./outputs').scanAsync(ctx.effectiveCwd, ctx.run.startedAt, ctx.run.startedAt);
-        const outputSnapshot = require('../conversation/delivery-contract').fromReply(ctx.effectiveCwd, ctx.acc.state, scanned);
+        const scanned = await require('./outputs').scanAsync(ctx.outputRoot, ctx.run.startedAt, ctx.run.startedAt);
+        const outputSnapshot = require('../conversation/delivery-contract').fromReply(ctx.outputRoot, ctx.acc.state, scanned);
         // Scanning yields to stop/pause and goal-disable actions. Let the
         // existing catch path preserve their receipts before changing audit state.
         if (interrupted() || ctx.closed || ctx.goalCancelled || ctx.run.stopReason || ctx.acc.status() !== 'idle')
@@ -388,7 +388,7 @@ async send(text, turnAttachments, sendOptions) {
             reviewed = await independentReview({
               sdk: ctx.sdk, runtime: ctx.runtime, model: ctx.model, cwd: ctx.effectiveCwd, agentDir: ctx.prep.agentDir,
               goal: ctx.goal, spec: ctx.harness, evidence, profile, accessPolicy: ctx.accessPolicy,
-              outputSnapshot: bundle.outputSnapshot,
+              outputSnapshot: bundle.outputSnapshot, outputRoot: ctx.outputRoot,
             });
             const deterministicChecks = reviewed.deterministic &&
               Array.isArray(reviewed.deterministic.checks)
@@ -614,7 +614,7 @@ async send(text, turnAttachments, sendOptions) {
           connectors?.cleanup();
           if (pluginGrant && typeof pluginGrant.cleanup === 'function') pluginGrant.cleanup();
           ctx.turnReadScope = undefined;
-          await ctx.finishTurnJournal();
+          await ctx.finishTurnJournal(deliveryResult);
           const capture = ctx._captureDirectDelivery(turn, deliveryResult);
           if (capture) await capture;
           ctx.inFlight = false;

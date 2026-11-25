@@ -751,8 +751,8 @@ function _bind(el) {
         }
         return;
       }
-      const deliveryAction = e.target.closest('[data-delivery-reveal],[data-delivery-archive],[data-delivery-retry],[data-delivery-open],[data-delivery-local],[data-cloud-artifact-url]');
-      if (deliveryAction) { void global.ChatDeliveries?.handle(deliveryAction, ctx._api()); return; }
+      const deliveryAction = e.target.closest('[data-delivery-export-version],[data-delivery-reveal],[data-delivery-archive],[data-delivery-retry],[data-delivery-open],[data-delivery-local],[data-cloud-artifact-url]');
+      if (deliveryAction) { void global.ChatDeliveries?.handle(deliveryAction, ctx._api(), ctx._ref); return; }
       const librarySave = e.target.closest('[data-library-output]');
       const libraryBundle = e.target.closest('[data-library-bundle]');
       if (libraryBundle) { void global.LibraryTransfer?.downloadBundle(libraryBundle); return; }

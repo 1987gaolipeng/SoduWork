@@ -1,5 +1,12 @@
 (function (global) {
   const messages = {
+    "本轮成果未能完整核对，未自动归档。请在会话生成目录中查看原文件。": "The files from this turn could not be fully verified or archived. The originals are in this conversation’s draft folder.",
+    "本轮有 {count} 个文件超过 32 MiB，未自动归档。请在会话生成目录中查看原文件。": "Files over 32 MiB were not archived ({count}). The originals are in this conversation’s draft folder.",
+    "本轮成果归档失败。请在会话生成目录中查看原文件。": "Archiving failed. Check the originals in this conversation’s draft folder.",
+    "会话成果保存时历史已变化": "The conversation changed before its files could be archived.",
+    "部分会话成果未完成归档，请保留工作目录中的文件。": "Some files could not be archived. Keep the files in the working directory.",
+    "已归档的原件可从历史成果卡另存。工作副本未能投递，请检查目录权限和可用空间。": "The originals are archived. Export them from the conversation’s result card. The working copies could not be saved. Check folder permissions and free disk space.",
+    "会话成果原件已保存。工作目录已有不同内容的同名副本，可从历史成果卡另存。": "The originals are archived. A file with the same name and different contents already exists in the working directory. Export the archived copy from the conversation’s result card.",
     "Codex CLI 版本过低，请到 Agent 管理更新。": "This Codex CLI is too old. Update it in Agent management.",
     "Codex CLI 版本过低，正在自动更新。更新完成后将重新加载模型。": "Updating the outdated Codex CLI. The model list will reload automatically.",
     "Codex CLI 更新后仍无法读取模型目录，请到 Agent 管理检查并重试。": "The Codex catalog is still unavailable after the update attempt. Check Agent management and retry.",

@@ -118,7 +118,7 @@ async function journalFiles(root, journal, maxFileBytes) {
   return files;
 }
 
-async function capture({ row, workRoot, workspace, previous, retained, journal, verifiedTransfer = false }) {
+async function capture({ row, workRoot, workspace, previous, retained, journal, verifiedTransfer = false, verifiedTurn = false }) {
   if (!row.cwd || !path.isAbsolute(row.cwd)) return null;
   let root;
   try { root = realpath(row.cwd); } catch (_) { return previous || null; }
@@ -133,7 +133,12 @@ async function capture({ row, workRoot, workspace, previous, retained, journal, 
     const older = records.get(relative);
     if (older && versions.same(older.stamp, entry.stamp)) continue;
     const stat = stable(root, relative);
-    if (stat && versions.same(entry.stamp, versions.stamp(stat))) records.set(relative, entry);
+    if (stat && versions.same(entry.stamp, versions.stamp(stat))) {
+      // A retained segment can prove a file revision but cannot assign that
+      // revision to a message in a different execution segment.
+      const { turnId, userMessageIndex, ...source } = entry.source || {};
+      records.set(relative, turnId || userMessageIndex !== undefined ? { ...entry, source } : entry);
+    }
   }
   let window;
   try { window = allocation(row, workRoot, workspace); } catch (_) { /* A removed or relinked directory is unavailable. */ }
@@ -153,13 +158,27 @@ async function capture({ row, workRoot, workspace, previous, retained, journal, 
     }
   }
   const completeJournal = journal?.turnId && !journal.truncated && Array.isArray(journal.files) && matchesJournalRoot(root, journal.cwd);
-  if (completeJournal && (journal.turnId !== prior?.turnId || journal.turnId !== prior?.packageTurnId))
-    files.push(...await journalFiles(root, journal, verifiedTransfer ? BigInt(MAX_TRANSFER_BYTES) : 32n * 1024n * 1024n));
+  // A passive refresh can see the journal before the runtime's terminal callback.
+  // Recheck those bytes when binding them to an authenticated turn.
+  const changes = completeJournal && (verifiedTurn || journal.turnId !== prior?.turnId || journal.turnId !== prior?.packageTurnId)
+    ? await journalFiles(root, journal, verifiedTransfer ? BigInt(MAX_TRANSFER_BYTES) : 32n * 1024n * 1024n) : [];
+  const turnFiles = new Map(changes.map(file => [file.relative, file.verifiedStamp]));
+  files.push(...changes);
   if (files.length) {
     const expected = new Map(files.map(file => [file.relative, file.verifiedStamp]));
     const indexed = versions.capture(root, { items: classify(root, files, window) }, { sessionId: row.id, adapterId: row.adapterId });
-    for (const entry of indexed.items) if (versions.same(expected.get(entry.metadata.relative), entry.stamp))
-      records.set(entry.metadata.relative, entry);
+    for (const entry of indexed.items) {
+      const relative = entry.metadata.relative;
+      if (!versions.same(expected.get(relative), entry.stamp)) continue;
+      if (verifiedTurn && !verifiedTransfer && versions.same(turnFiles.get(relative), entry.stamp)) {
+        entry.source = { ...entry.source, turnId: journal.turnId };
+        if (Number.isSafeInteger(journal.userMessageIndex) && journal.userMessageIndex >= 0)
+          entry.source.userMessageIndex = journal.userMessageIndex;
+      }
+      if (!entry.source?.turnId && versions.same(records.get(relative)?.stamp, entry.stamp))
+        entry.source = records.get(relative).source;
+      records.set(relative, entry);
+    }
   }
   if (!records.size && !window) return null;
   const all = [...records.values()];
