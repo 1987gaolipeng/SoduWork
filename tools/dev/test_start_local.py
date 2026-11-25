@@ -1013,6 +1013,32 @@ class LocalStartupTests(unittest.TestCase):
                 self.assertNotIn('network/proxy', message)
                 self.assertNotIn('private diagnostic fixture', message + console.getvalue())
 
+    def test_portablegit_download_failure_shows_recovery_options_without_echoing_logs(self):
+        self.state.mkdir()
+        log = self.state / 'startup.log'
+        prefix = 'Error: [SoduWork shell runtime] PortableGit download failed: '
+        for reason in ('Runtime download failed: ECONNREFUSED', 'Runtime download exceeded total time limit',
+                       'Runtime download failed: UND_ERR_BODY_TIMEOUT', 'Runtime download failed: HTTP 503'):
+            with self.subTest(reason=reason):
+                log.write_text(prefix + reason + '\nprivate diagnostic fixture', encoding='utf-8')
+                message = str(build.command_failure('Preparing the command runtime failed', log, 0))
+                for option in ('HTTP_PROXY', 'HTTPS_PROXY', 'SODUWORK_PORTABLE_GIT_MIRROR',
+                               'SODUWORK_PORTABLE_GIT_ARCHIVE'):
+                    self.assertIn(option, message)
+                self.assertIn(str(log), message)
+                self.assertNotIn('private diagnostic fixture', message)
+
+        for reason in ('SHA-256 mismatch', 'Runtime download failed: EACCES',
+                       'Runtime download exceeds the expected archive size'):
+            with self.subTest(reason=reason):
+                offset = log.stat().st_size
+                with log.open('ab') as output:
+                    output.write(('\n' + prefix + reason).encode())
+                self.assertNotIn('SODUWORK_PORTABLE_GIT_MIRROR', str(build.command_failure('Failed', log, offset)))
+        with log.open('ab') as output:
+            output.write(b'\nENOSPC')
+        self.assertIsInstance(build.command_failure('Failed', log, 0), build.DiskFullError)
+
     def test_failed_command_does_not_reuse_an_old_disk_full_diagnostic(self):
         self.state.mkdir()
         log = self.state / 'startup.log'
