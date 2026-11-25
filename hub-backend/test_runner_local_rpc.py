@@ -88,7 +88,11 @@ class LocalRpcTests(unittest.IsolatedAsyncioTestCase):
                 {"slug": "review-only", "visibility": "hide"}, {"slug": name, "visibility": "list"},
             ]}, indent=2), encoding="utf-8")
 
-        def scoped_cli(executable, args, env, *unused):
+        def scoped_cli(executable, args, env, *unused, status_output=False):
+            if args == ["login", "status"]:
+                self.assertTrue(status_output)
+                return b"Not logged in"
+            self.assertFalse(status_output)
             if args == ["--version"]:
                 return b"codex-cli 0.1.0"
             if args == ["debug", "models", "--bundled"]:
