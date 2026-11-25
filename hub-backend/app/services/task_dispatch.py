@@ -296,8 +296,8 @@ async def dispatch(tid, body, client, session, *, actor=None):
     try:
         # Handoffs load their own verified archive or cloud input manifest below.
         files, input_manifest = ([], []) if handoff else await ai_exec.collect_task_files(session, tid)
-        if not handoff and "inputManifest" in body and body["inputManifest"] != input_manifest:
-            raise ai_exec.TaskAttachmentError("需求附件自预览后已变化，请重新预览后再派发")
+        if not handoff and "inputManifest" in body:
+            ai_exec.check_task_file_manifest(body["inputManifest"], input_manifest)
         extra = await ai_exec.collect_task_context(session, tid)
     except ai_exec.TaskAttachmentError as error:
         await _fail("context", str(error), 409, False)

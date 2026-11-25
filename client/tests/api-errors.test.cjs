@@ -6,13 +6,13 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'api.js'), 'utf8');
 
-function load(fetchImpl, seed = {}, internal = false) {
+function load(fetchImpl, seed = {}, internal = false, extraWindow = {}) {
   const values = new Map(Object.entries(seed));
   const localStorage = {
     getItem: (key) => values.has(key) ? values.get(key) : null,
     setItem: (key, value) => values.set(key, String(value)),
   };
-  const window = { __SODUWORK_TEST_HUB_CONFIG__: { allowSwitch: internal } };
+  const window = { ...extraWindow, __SODUWORK_TEST_HUB_CONFIG__: { allowSwitch: internal } };
   const context = {
     window, localStorage, fetch: fetchImpl, User: { id: 'u-test' },
     navigator: { platform: 'test' }, console: { log() {}, error() {} },
@@ -127,6 +127,23 @@ test('结构化派活错误保留重试和诊断字段', async () => {
       && error.retryable === true
       && error.attemptId === detail.attemptId,
   );
+});
+
+test('empty and populated previews reach the Hub or desktop queue, while legacy calls omit the manifest', async () => {
+  for (const native of [false, true]) {
+    const bodies = [];
+    const api = load(async (_url, options) => {
+      bodies.push(JSON.parse(options.body));
+      return response(200, '{"ok":true}');
+    }, {}, false, native ? { NativeChat: { enqueueTask: async (_id, options) => {
+      bodies.push(options); return {ok: true};
+    } } } : {});
+    for (const manifest of [undefined, [], [{id: 'file', name: 'brief.txt', size: 1, sha256: 'digest'}]]) {
+      await api.dispatchToAI('task', {id: 'pi'}, '', null, '', null, '', manifest);
+      assert.equal(Object.hasOwn(bodies.at(-1), 'inputManifest'), manifest !== undefined);
+      assert.deepEqual(bodies.at(-1).inputManifest, manifest);
+    }
+  }
 });
 
 test('字段校验数组整理成人能读懂的一句话', async () => {

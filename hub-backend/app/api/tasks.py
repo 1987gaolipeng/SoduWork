@@ -543,6 +543,8 @@ async def ai_dispatch_preview(
     ctx = await ai_exec.load(session)
     try:
         manifest, omitted = await ai_exec.preview_task_files(session, tid)
+        if "inputManifest" in body:
+            ai_exec.check_task_file_manifest(body["inputManifest"], manifest)
     except ai_exec.TaskAttachmentError as error:
         raise HTTPException(409, str(error)) from error
     names = [entry["name"] for entry in manifest]

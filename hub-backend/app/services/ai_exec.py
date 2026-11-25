@@ -967,6 +967,24 @@ async def preview_task_files(session, task_id: str):
     return manifest, omitted
 
 
+def check_task_file_manifest(expected, actual):
+    if expected == actual:
+        return
+    name = ""
+    if isinstance(expected, list) and len(expected) <= 5:
+        for index in range(max(len(expected), len(actual))):
+            previous = expected[index] if index < len(expected) else None
+            current = actual[index] if index < len(actual) else None
+            if previous != current:
+                entry = previous if isinstance(previous, dict) else current
+                value = entry.get("name") if isinstance(entry, dict) else None
+                if isinstance(value, str):
+                    name = " ".join(value[:200].split())
+                break
+    label = f"「{name}」" if name else ""
+    raise TaskAttachmentError(f"需求附件{label}自预览后已变化，请重新预览后再派发")
+
+
 async def collect_task_files(session, task_id: str, limit: int = 5,
                              max_mb: int = 10):
     import asyncio

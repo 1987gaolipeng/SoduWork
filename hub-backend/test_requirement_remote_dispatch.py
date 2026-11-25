@@ -23,7 +23,7 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app import models, automation_models as am
-from app.api import tasks
+from app.api import attachments, tasks
 from app.db import get_session
 from app.deps import current_client
 from app.services import (ai_exec, ai_remote, conversation_handoffs, dispatch_identity,
@@ -105,6 +105,7 @@ class RequirementRemoteDispatchTests(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(item.stop)
         app = FastAPI()
         app.include_router(tasks.router)
+        app.include_router(attachments.router)
 
         async def db():
             async with self.sessions() as session:
@@ -195,6 +196,48 @@ class RequirementRemoteDispatchTests(unittest.IsolatedAsyncioTestCase):
             digest = hashlib.sha256(b"good").hexdigest()
             self.assertEqual(event.detail["carried"]["inputManifest"], [
                 {"id": str(i), "name": f"{i}.txt", "size": 4, "sha256": digest} for i in range(5)])
+
+    async def test_confirmed_inputs_reject_deletion_and_same_name_replacement_until_previewed_again(self):
+        digest = hashlib.sha256(b"good").hexdigest()
+        async with self.sessions() as session:
+            session.add(models.Attachment(id="original", task_id="r3", filename="brief.txt",
+                size=4, storage_key="original", evidence_meta={"sha256": digest}))
+            await session.commit()
+        preview = await self.http.post("/api/v1/tasks/r3/ai-preview", json={})
+        self.assertEqual(preview.status_code, 200, preview.text)
+        confirmed = preview.json()["carried"]["inputManifest"]
+        self.assertEqual(confirmed, [{"id": "original", "name": "brief.txt", "size": 4, "sha256": digest}])
+        with patch("app.services.storage.delete"):
+            deleted = await self.http.delete("/api/v1/attachments/original")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        body = {**self.body(), "inputManifest": confirmed}
+        response = await self.post(body)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("重新预览", response.json()["detail"]["message"])
+        self.assertIn("brief.txt", response.json()["detail"]["message"])
+        self.assertEqual(self.calls, [])
+        # Legacy rows have no stored checksum. Their preview is still bound to the exact bytes.
+        async with self.sessions() as session:
+            session.add(models.Attachment(id="replacement", task_id="r3", filename="brief.txt",
+                size=4, storage_key="replacement"))
+            await session.commit()
+        with patch("app.services.storage.open_stream", side_effect=lambda *args: io.BytesIO(b"good")):
+            response = await self.post(body)
+            self.assertEqual(response.status_code, 409, response.text)
+            self.assertIn("brief.txt", response.json()["detail"]["message"])
+            self.assertEqual(self.calls, [])
+            preview = await self.http.post("/api/v1/tasks/r3/ai-preview", json={})
+            self.assertEqual(preview.status_code, 200, preview.text)
+            body["inputManifest"] = preview.json()["carried"]["inputManifest"]
+        self.assertEqual(body["inputManifest"], [{**confirmed[0], "id": "replacement"}])
+        with patch("app.services.storage.open_stream", side_effect=lambda *args: io.BytesIO(b"edit")):
+            response = await self.post(body)
+            self.assertEqual(response.status_code, 409, response.text)
+            self.assertEqual(self.calls, [])
+        with patch("app.services.storage.open_stream", side_effect=lambda *args: io.BytesIO(b"good")):
+            response = await self.post(body)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(len(self.calls), 1)
 
     async def test_catalog_cloud_selection_dispatches_exact_runner_once(self):
         async with self.sessions() as session:

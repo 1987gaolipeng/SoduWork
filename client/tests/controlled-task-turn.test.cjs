@@ -63,6 +63,20 @@ test('controlled Runner compares execution ref, not the database record id', asy
   assert.equal(result.ok,true);assert.equal(messages.length,2);
 });
 
+test('the queued Runner dispatch retains the exact preview even when the preview is empty', async () => {
+  for (const inputManifest of [undefined, [], [{id: 'file', name: 'brief.txt', size: 1, sha256: 'digest'}]]) {
+    const spec = executionSpec({repoId: 'repo'}, {agentId: 'runner:node:pi', inputManifest});
+    let sent;
+    const adapter = create({task: {id: 't'}, spec, scope: {}, request: async (_url, body) => {
+      if (body) { sent = body; return {issueId: 'ref'}; }
+      return {ref: 'ref', status: 'done', items: []};
+    }});
+    await adapter.execute({appendTaskMessage() {}, taskExecutionChanged() {}}, 'work', []);
+    assert.equal(Object.hasOwn(sent, 'inputManifest'), inputManifest !== undefined);
+    assert.deepEqual(sent.inputManifest, inputManifest);
+  }
+});
+
 test('controlled dispatch retains the selected engine and attributes replayed output to the actual Hub receipt', async () => {
   for (const engine of ['opencode', 'kimi']) {
     const messages = [], calls = []; let page = 0;

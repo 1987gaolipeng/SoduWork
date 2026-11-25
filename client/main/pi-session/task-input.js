@@ -16,6 +16,7 @@ async function request(identity, route, body) {
   if (!response.ok || data.ok === false) {
     const status = Number(response.status) || 0;
     const error = new Error(typeof data.detail === 'string' ? data.detail
+      : typeof data.detail?.message === 'string' ? data.detail.message
       : status === 401 ? '登录已过期，请重新连接 SoduWork 服务后继续'
       : status === 403 ? '当前连接没有执行此操作的权限'
       : '需求服务暂不可用，请稍后重试');
@@ -95,11 +96,21 @@ function latestDeliveryAttachments(rows) {
 
 async function loadTaskAttachments(identity, route, selection) {
   const options = Array.isArray(selection) ? {selectedIds: selection} : (selection || {});
+  const manifest = options.inputManifest;
+  const changed = name => new Error('需求附件' + (name ? '「' + String(name).slice(0, 200) + '」' : '') +
+    '自预览后已变化，请重新预览后再派发');
+  if (manifest) {
+    const preview = await request(identity, route + '/ai-preview', {inputManifest: manifest});
+    if (!require('node:util').isDeepStrictEqual(manifest, preview.carried?.inputManifest)) throw changed();
+  }
   const selectedIds = Array.isArray(options.selectedIds) ? options.selectedIds : null;
   const listed = await request(identity, route + '/attachments');
   const available = Array.isArray(listed) ? listed : listed.attachments || [];
   const scoped = options.latestDelivery ? latestDeliveryAttachments(available) : available;
-  const files = selectedIds ? scoped.filter(file => selectedIds.includes(file.id)) : scoped;
+  const files = manifest ? manifest.map(entry => scoped.find(file => file.id === entry.id))
+    : selectedIds ? scoped.filter(file => selectedIds.includes(file.id)) : scoped;
+  const missing = manifest && files.findIndex(file => !file);
+  if (manifest && missing >= 0) throw changed(manifest[missing].name);
   if (Array.isArray(selectedIds) && selectedIds.some(id => !files.some(file => file.id === id)))
     throw Error('本次验收材料已变化或不可读，请刷新需求后重新分析');
   if (files.length > MAX_FILES) throw new Error('需求附件超过本轮可接收的数量，请先调整附件');
@@ -109,7 +120,10 @@ async function loadTaskAttachments(identity, route, selection) {
     const response = await fetch(attachmentUrl(identity, file), {
       redirect: 'error', signal: AbortSignal.timeout(30000),
     });
-    if (!response.ok) throw new Error('需求附件未能读取，请重试；本次没有开始执行');
+    if (!response.ok) {
+      if (manifest) throw changed(file.filename || file.name);
+      throw new Error('需求附件未能读取，请重试；本次没有开始执行');
+    }
     const reader = response.body.getReader(), chunks = [];
     try {
       for (;;) {
@@ -120,7 +134,13 @@ async function loadTaskAttachments(identity, route, selection) {
         chunks.push(Buffer.from(part.value));
       }
     } finally { await reader.cancel().catch(() => {}); }
-    attachments.push({ name: file.filename || file.name, data: Buffer.concat(chunks),
+    const name = file.filename || file.name, data = Buffer.concat(chunks);
+    if (manifest) {
+      const expected = manifest[attachments.length];
+      if (name !== expected.name || data.byteLength !== expected.size ||
+          require('node:crypto').createHash('sha256').update(data).digest('hex') !== expected.sha256) throw changed(expected.name);
+    }
+    attachments.push({ name, data,
       mimeType: file.contentType || file.content_type || file.mimeType || '',
       attachmentId: String(file.id || file.attachmentId || ''), role: String(file.role || ''),
       evidenceMeta: file.evidenceMeta || {}, sourceRef: String(file.sourceRef || '') });
@@ -244,7 +264,7 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
     taskPrompt(task, instruction);
   if (!followUp && text.length > 50000) throw new Error('需求文字超过 50000 字符，请把长材料作为附件后重试；内容没有被截断或执行');
   let attachments = followUp || runnerContinuation ? [] : await loadTaskAttachments(identity, route,
-    reworkSession ? {latestDelivery: true} : undefined);
+    requested.inputManifest ? {inputManifest: requested.inputManifest} : reworkSession ? {latestDelivery: true} : undefined);
   const scope = { conversationId, turnId };
   const nativeReceiptScope = () => capturedModel.source === 'device'
     ? { ...scope, modelSource: 'device', modelAgentId: capturedModel.agentId } : scope;
