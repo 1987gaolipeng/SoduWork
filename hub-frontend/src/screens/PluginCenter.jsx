@@ -509,7 +509,7 @@ export default function PluginCenter({ setupContext, onNavigate }) {
           setData(old => (old || []).map(item => item.id === id ? { ...item, catalogPolicy: policy } : item))
           setDetail(old => old?.id === id ? { ...old, catalogPolicy: policy } : old)
         }}
-        queues={(governance && governance.queues) || {}}
+        queues={(governance && governance.queues) || {}} pluginCounts={governance?.pluginCounts}
         selected={detailOpen ? selected : ''} onSelect={(id) => { requestedDetailSection.current = ''; setSelected(id); setDetailSection('overview'); setDetailOpen(true) }}
         actions={<>
           <button className="btn btn-ghost" onClick={() => setAuthorOpen(true)}>{tx("制作与上架说明")}</button>
@@ -538,6 +538,7 @@ export default function PluginCenter({ setupContext, onNavigate }) {
           audienceData={audienceData} busy={busy} evaluationBusy={evaluationBusy}
           categoryRevision={categoryRevision}
           issues={pluginIssues(governance?.queues)[selected] || []}
+          issueCount={governance?.pluginCounts?.[selected]?.attention}
           actions={{
             openIssue: openGovernanceItem,
             selectSection: setDetailSection,

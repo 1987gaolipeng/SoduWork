@@ -1,5 +1,6 @@
 // Authored governance and shared-shell copy. Business names remain unchanged.
 export default {
+  "当前预览显示 {0} 项待处理事项。": "This preview shows {0} pending items.",
   "请输入完整的 HTTP 或 HTTPS Issuer 地址，不含账号、查询参数或片段。": "Enter a full HTTP or HTTPS issuer URL without credentials, a query, or a fragment.",
   "Client ID 不能为空。": "Enter a client ID.",
   "权限范围用空格或逗号分隔，最多 12 个自定义项；每项最多 80 个可打印 ASCII 字符，不能包含双引号或反斜杠。": "Separate scopes with spaces or commas. Use up to 12 custom scopes, each up to 80 printable ASCII characters without double quotes or backslashes.",
@@ -109,6 +110,7 @@ export default {
 }
 
 export const ja = {
+  "当前预览显示 {0} 项待处理事项。": "このプレビューには対応待ちの項目が {0} 件表示されています。",
   "请输入完整的 HTTP 或 HTTPS Issuer 地址，不含账号、查询参数或片段。": "認証情報、クエリ、フラグメントを含まない完全な HTTP または HTTPS の Issuer URL を入力してください。",
   "Client ID 不能为空。": "Client ID を入力してください。",
   "权限范围用空格或逗号分隔，最多 12 个自定义项；每项最多 80 个可打印 ASCII 字符，不能包含双引号或反斜杠。": "スコープは空白またはコンマで区切ってください。カスタムスコープは最大 12 件で、各項目は二重引用符とバックスラッシュを除く表示可能な ASCII 文字 80 字までです。",
@@ -218,6 +220,7 @@ export const ja = {
 }
 
 export const ko = {
+  "当前预览显示 {0} 项待处理事项。": "이 미리보기에는 대기 중인 항목이 {0}개 표시됩니다.",
   "请输入完整的 HTTP 或 HTTPS Issuer 地址，不含账号、查询参数或片段。": "인증 정보, 쿼리 또는 프래그먼트가 없는 전체 HTTP 또는 HTTPS 발급자 URL을 입력하세요.",
   "Client ID 不能为空。": "클라이언트 ID를 입력하세요.",
   "权限范围用空格或逗号分隔，最多 12 个自定义项；每项最多 80 个可打印 ASCII 字符，不能包含双引号或反斜杠。": "범위는 공백 또는 쉼표로 구분하세요. 사용자 지정 범위는 최대 12개이며, 각 범위에는 큰따옴표와 역슬래시를 제외한 출력 가능한 ASCII 문자를 최대 80자까지 사용할 수 있습니다.",

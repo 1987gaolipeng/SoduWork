@@ -195,7 +195,8 @@ ok("id: 'plugins'" in app_shell and "perm: 'plugin.manage'" in app_shell
 ok("pluginIssues" in center_screen and "pluginGovernance" in client
    and '@router.get("/governance")' in routes
    and "issues={pluginIssues(governance?.queues)[selected] || []}" in plugin_center
-   and "issues.length" in plugin_catalog and "待处理事项" in plugin_workspace,
+   and "issueCount" in plugin_catalog and "issueCount" in plugin_workspace
+   and "actions.openIssue(item)" in plugin_workspace and "待处理事项" in plugin_workspace,
    "plugin cards and detail actions must retain the real governance read model")
 ok(all(label in center_screen for label in (
        "企业插件", "插件说明", "审核与版本", "使用配置", "运行记录"))

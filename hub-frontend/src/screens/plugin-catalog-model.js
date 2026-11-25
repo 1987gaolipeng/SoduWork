@@ -73,15 +73,24 @@ export function pluginIssues(queues = {}) {
   return result
 }
 
-export function selectCatalog(items = [], queues = {}, filters = {}) {
+export function selectCatalog(items = [], queues = {}, filters = {}, pluginCounts = {}) {
   const { query = '', status = 'all', source = 'all', kind = 'all', category = 'all', sort = 'updated', catalogType = 'all' } = filters
   const issues = pluginIssues(queues)
   const needle = query.trim().toLocaleLowerCase()
-  const rows = items.map(plugin => catalogPlugin(plugin, getLocale())).map((plugin) => ({
-    plugin, source: pluginSource(plugin), kind: pluginKind(plugin),
-    category: String(plugin.catalogPolicy?.category || 'general'),
-    publication: pluginPublication(plugin), issues: issues[plugin.id] || [],
-  })).filter((row) => {
+  const rows = items.map(item => {
+    const plugin = catalogPlugin(item, getLocale())
+    const publication = pluginPublication(plugin)
+    const preview = issues[plugin.id] || []
+    const counts = pluginCounts[plugin.id]
+    const pending = counts?.review != null ? counts.review > 0
+      : publication.key === 'pending' || preview.some(issue => issue.kind === 'review')
+    return {
+      plugin, publication, pending, issues: preview,
+      source: pluginSource(plugin), kind: pluginKind(plugin),
+      category: String(plugin.catalogPolicy?.category || 'general'),
+      issueCount: counts?.attention ?? preview.length,
+    }
+  }).filter((row) => {
     if (catalogType === 'app' && row.kind.key !== 'app') return false
     if (catalogType === 'plugin' && row.kind.key === 'app') return false
     if (source !== 'all' && row.source.key !== source) return false
@@ -94,9 +103,13 @@ export function selectCatalog(items = [], queues = {}, filters = {}) {
       row.plugin.createdBy, row.category, ...(cap.skills || []), ...(cap.mcpServers || [])]
       .some((value) => String(value || '').toLocaleLowerCase().includes(needle))
   })
-  const matchesStatus = (row, key) => key === 'all' || (key === 'featured'
-    ? Boolean(row.plugin.catalogPolicy?.featured)
-    : key === 'attention' ? row.issues.length > 0 : row.publication.key === key)
+  function matchesStatus(row, key) {
+    if (key === 'all') return true
+    if (key === 'pending') return row.pending
+    if (key === 'attention') return row.issueCount > 0
+    if (key === 'featured') return Boolean(row.plugin.catalogPolicy?.featured)
+    return row.publication.key === key
+  }
   const counts = Object.fromEntries(CATALOG_FILTERS.map(([key]) => [key, rows.filter((row) => matchesStatus(row, key)).length]))
   const shown = rows.filter((row) => matchesStatus(row, status))
   shown.sort((a, b) => {
