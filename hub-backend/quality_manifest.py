@@ -152,6 +152,7 @@ RELEASE_SMOKES = tuple(sorted((
     "smoke/smoke_client_release_bundle.py",
     "smoke/smoke_client_release_uploader.py",
     "test_client_release_upload_io.py",
+    "test_client_release_auto_signing.py",
     "smoke/smoke_client_release_pipeline.py",
     "smoke/smoke_client_update_api.py",
     "smoke/smoke_client_update_supersession.py",

@@ -32,6 +32,32 @@ FastAPI + SQLAlchemy(async) + PostgreSQL（本地开发可回退 SQLite）。
 不含 Runner 直连、单独的视觉调用和设备私有模型。断开连接、过大的流式事件或写入失败
 可能造成观测缺失。采样结束后关闭开关并重启，已采集记录可继续用于比对。
 
+## 登记客户端安装包
+
+拥有 `client.update` 权限的管理员向 `POST /api/v1/admin/client-releases/upload`
+提交一个 multipart 文件 `installer` 即可。可选 `channel` 为 `stable` 或 `beta`；
+省略时优先使用环境配置 `SODUWORK_PUBLIC_DOWNLOAD_CHANNEL`，否则带 `-beta.N`
+的版本进入 beta，普通版本进入 stable。Hub 读取包内版本和主程序架构、核对文件名、
+计算原始文件哈希、签署更新清单并登记为停用状态。成功表示登记已完成。
+重复上传相同内容返回原记录并保留启停状态；同通道、版本、安装包名称的不同内容返回 409。
+每个包独立处理，不依赖 GitHub 集成，也不要求一次凑齐六个包。
+
+各发布环境一次性配置 `CLIENT_UPDATE_SIGNING_KEY_FILE` 和 `CLIENT_UPDATE_SIGNING_KEY_ID`。
+文件包含规范 Base64 编码的 32 字节 Ed25519 seed，由 Hub 账号读取；POSIX 权限为
+0400 或 0600，Windows 使用等效的受限 ACL。容器中以只读方式挂载，服务运行账号为
+UID/GID 10001。对应公钥须与 Hub 信任配置匹配，且已被已安装的客户端信任。
+不得在启动时生成新密钥，或将私钥放入镜像、源码、接口返回值及安装包。
+配置缺失、不可读或不受信任时，发布返回 503；既有下载继续可用。
+
+桌面包解析需要 PATH 上受维护的 `7zz` 或 `7z`，也可通过 `CLIENT_UPDATE_ARCHIVE_TOOL`
+指定可执行文件路径；APK 解析需要 PATH 上的 `aapt`。自托管镜像的 `deps` 阶段已包含两者。
+复用 `HUB_BASE_IMAGE` 时需重建包含这两个工具的依赖镜像，或使用 `HUB_BASE_IMAGE=deps`；
+运行镜像构建会拒绝缺少任一工具的基础镜像。
+EXE、DMG、ZIP、DEB、RPM、tar.gz 和 AppImage 解析不执行上传的代码；临时解包受时间、
+大小和嵌套层数限制。APK 从 Android manifest 读取元数据。请保留安装包原始文件名。
+可选 `bundle` 字段继续兼容离线签名上传，无需配置服务器签名；部署任务上传接口不变。
+选择 beta 通道不会改写包内版本：无 beta 后缀的包仅供手动安装，不作为自动升级目标。
+
 ## 快速开始（本地 SQLite，零配置）
 
 ```bash
