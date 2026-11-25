@@ -188,13 +188,33 @@ test('every pool entry restores current actionable work instead of archived or s
   }
 });
 
-test('visible pool refresh and repeated open preserve explicit view; navigation back resets scope', async () => {
-  const f = fixture({});
+test('ordinary entry starts without review filtering for fresh and legacy preferences', () => {
+  for (const saved of [undefined, {phase: 'reviewing', scope: 'all', v: 2}]) {
+    const f = fixture(saved);
+    f.api.open();
+    assert.equal(JSON.parse(f.stored.get('account:requirement-view')).phase, '');
+    assert.deepEqual(f.rendered.at(-1).ids, ['running']);
+  }
+});
+
+test('review shortcut survives refresh and preserves ordinary filters across navigation and restart', async () => {
+  const f = fixture({phase: 'delivering'});
+  f.api.open();
+  const saved = f.stored.get('account:requirement-view');
   f.api.open({phase: 'reviewing'});
-  f.api.render(true); await f.api.refresh(); f.api.open();
+  f.api.render(true); await f.api.refresh(); f.api.open({phase: 'reviewing'});
   assert.equal(f.rendered.at(-1).state.scope, 'all');
   assert.equal(f.rendered.at(-1).state.phase, 'reviewing');
+  assert.equal(f.stored.get('account:requirement-view'), saved);
+  const restart = fixture(JSON.parse(f.stored.get('account:requirement-view')));
+  restart.api.open();
+  assert.equal(restart.rendered.at(-1).state.phase, 'delivering');
+  f.api.open();
+  assert.equal(f.rendered.at(-1).state.phase, 'delivering');
+  assert.equal(f.rendered.at(-1).state.scope, 'actionable');
+  f.api.open({phase: 'reviewing'});
   f.api.close(); f.api.open();
+  assert.equal(f.rendered.at(-1).state.phase, 'delivering');
   assert.equal(f.root.querySelector('#rqScope').value, 'actionable');
   assert.equal(f.root.querySelector('#rqArchive').value, 'active');
 });

@@ -5,17 +5,20 @@
   const state = { ...R.defaults, limits: {}, drag: '', movingId: '', pending: false, busy: false, signature: '', year: null, month: null, onlyOverdue: false };
   let identity = '', epoch = 0, projects = new Map(), projectRequest = 0, menuAnchor = null;
   let createMenuDismiss = null;
+  let viewBeforeReview = null;
   const panel = () => document.getElementById('historyBoard');
   const rows = () => typeof tasks === 'undefined' ? [] : tasks.filter(R.isRequirement);
   const notify = text => global.petSay?.(text);
   const storageKey = () => global.SoduWorkAPI?.taskStorageKey?.('tasks');
   function syncIdentity() {
     const key = storageKey() || ''; if (identity === key) return;
-    identity = key; epoch++; projectRequest++; projects = new Map();
+    identity = key; epoch++; projectRequest++; projects = new Map(); viewBeforeReview = null;
     let saved = null;
     try {
       if (key && !key.endsWith('@unbound')) {
         saved = JSON.parse(localStorage.getItem(key + ':requirement-view') || 'null');
+        // Older clients also saved the acceptance shortcut as a normal phase filter.
+        if (saved?.phase === 'reviewing') saved.phase = '';
         /*
          * Migrate unchanged legacy defaults to actionable tasks and recent updates. Preserve
          * explicit alternative choices; versioned preferences use the user's selections directly.
@@ -31,7 +34,7 @@
     const filters = panel()?.querySelector('#rqFilters'); if (filters) filters.innerHTML = '';
   }
   function persist() {
-    if (!identity || identity.endsWith('@unbound') || identity !== storageKey()) return;
+    if (viewBeforeReview || !identity || identity.endsWith('@unbound') || identity !== storageKey()) return;
     try { localStorage.setItem(identity + ':requirement-view', JSON.stringify({ ...R.viewSettings(state), v: 2 })); } catch (_) {}
   }
   function context() {
@@ -461,13 +464,17 @@
     if (options?.phase === 'reviewing') {
       // A direct review entry must not inherit a previous archive/search/filter
       // that would hide the work the shortcut promised to show.
+      viewBeforeReview ??= { ...R.viewSettings(state), q: state.q, onlyOverdue: state.onlyOverdue,
+        year: state.year, month: state.month };
       Object.keys(V.labels).forEach(key => { state[key] = ''; });
       Object.assign(state, { phase: 'reviewing', scope: 'all', archive: 'active', q: '',
         view: 'kanban', group: 'stage', limits: {}, onlyOverdue: false, year: null, month: null });
-      persist();
-    } else if (!showing) {
-      // Every navigation back to the pool starts with current work needing me.
-      // In-place refresh/repeated open and explicit review entry retain their view.
+    } else if (!showing || viewBeforeReview || state.phase === 'reviewing') {
+      if (viewBeforeReview) {
+        Object.assign(state, viewBeforeReview);
+        viewBeforeReview = null;
+      }
+      if (state.phase === 'reviewing') state.phase = '';
       Object.assign(state, { scope: 'actionable', archive: 'active', limits: {} });
       persist();
     }
