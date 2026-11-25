@@ -208,7 +208,7 @@
       const ownerRound = outputRound(message, snapshot);
       // Once the turn is archived, every action on its delivery card must
       // resolve the frozen bytes, even if a replacement has the same size and mtime.
-      const available = groupFiles(versionsForReply.length ? versionsForReply : files, taskId, ownerRound)
+      const available = groupFiles(versionsForReply.length ? versionsForReply : message.dataset.deliveryRestored ? [] : files, taskId, ownerRound)
         .filter(f => !used.has(key(f)) && !alreadyDelivered(f) && (f.versionId ||
         (taskId && ownerRound > 0 && Number(f.round) === ownerRound) ||
         mentioned.has(key(f)) ||
@@ -298,13 +298,13 @@
           const card = deliveryCard(doc, frozen, ref, snapshot);
           owner.appendChild(card);
           joinPreviews(owner, card);
-          rows = rows.filter(file => !file.versionId);
+          rows = rows.filter(file => !frozen.includes(file));
           if (!rows.length) return;
         }
       }
       const card = deliverySection(doc, owner === root ? '' : '<header>' + deliveryHeading(rows, false) + '</header>');
       if (owner === root) card.dataset.chatNode = 'history-deliverables';
-      if (owner === root || rows.length > 1) {
+      if (owner === root || rows.length > 1 || rows.some(file => file.versionId)) {
         const details = doc.createElement('details'); details.open = true; details.className = 'ndelivery-files';
         const summary = doc.createElement('summary'); summary.textContent = tx(owner === root ? '会话成果' : text.title);
         details.append(summary, fileList(doc, rows, file => file)); card.append(details);
@@ -315,8 +315,9 @@
       reply.dataset.deliveryFinal !== 'false' && !reply.querySelector('.nacceptance-result')).reverse();
     const rowsByReply = new Map(replies.map(reply => [reply, []]));
     for (const reply of replies) {
+      const legacy = new Set((reply.dataset.deliveryArchiveIds || '').split(' '));
       for (const [id, file] of remaining) {
-        if (file.versionId && reply.dataset.deliveryTurn === file.turnId) {
+        if (file.versionId && (reply.dataset.deliveryTurn === file.turnId || legacy.has(id))) {
           rowsByReply.get(reply).push(file);
           remaining.delete(id);
         }

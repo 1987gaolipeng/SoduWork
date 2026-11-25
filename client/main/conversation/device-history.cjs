@@ -59,6 +59,8 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       if (received) authorize(check.evidence());
     }
     let localArtifactHistory = await archive.rebind(app.getPath('userData'), row.id, data.localArtifactHistory, current);
+    if (!received) localArtifactHistory = await require('./artifact-versions.cjs')
+      .pinLegacyWebsites(app.getPath('userData'), row.id, localArtifactHistory, current);
     if (localArtifactHistory.archive?.pendingFiles?.length) {
       try {
         localArtifactHistory = await archive.preserve(app.getPath('userData'), row.id, localArtifactHistory,
@@ -121,7 +123,7 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       if (!collected) return;
       check();
       const profile = app.getPath('userData');
-      const history = await archive.preserve(profile, row.id, collected, prior, check);
+      const history = await archive.preserve(profile, row.id, collected, prior, check, { pinPiWebsites: !row.deviceTransferId });
       if (row.deviceTransferId) history.transferId = row.deviceTransferId;
       const { digest: oldDigest, savedAt, ...body } = priorBody || {
         snapshot: native.publicSnapshot(snapshot), coverage: { complete: false, sources: [] },
@@ -151,6 +153,44 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     })().finally(() => { if (writers.get(id) === work) writers.delete(id); });
     writers.set(id, work);
     return work;
+  }
+  async function saveOriginalPi(row, body, original, check) {
+    const journal = original.journal, prior = body.localArtifactHistory, profile = app.getPath('userData');
+    const sameRoot = prior?.root === journal?.cwd;
+    const collected = journal && await require('./device-history-artifacts.cjs').capture({
+      row: { ...row, cwd: journal.cwd, adapterId: 'pi' }, journal, nativePiEvidence: true, previous: sameRoot ? prior : undefined });
+    if (journal && !collected?.items?.length) return body;
+    const backup = collected && await archive.preserve(profile, row.id, collected, sameRoot ? prior : undefined, check);
+    if (journal && !backup?.archive) return body;
+    let history = backup || prior;
+    // A newer workspace may already have its own index.html. Keep its current
+    // inventory and attach only retired versions that have their own bytes.
+    if (backup?.archive && prior?.archive && !sameRoot) {
+      const versions = prior.archive.versions || [];
+      const key = file => JSON.stringify([file.turnId, file.relative]);
+      const recorded = new Set(versions.map(key));
+      const added = (backup.archive.versions || []).filter(file => !recorded.has(key(file)));
+      history = added.length ? { ...prior, archive: { ...prior.archive, versions: [...versions, ...added] } } : prior;
+    }
+    const { digest, savedAt, ...updated } = body;
+    if (history) updated.localArtifactHistory = history;
+    if (!journal || backup?.archive && !backup.archivePending && !backup.archive.omitted) updated.localPiOriginReviewed = original.id;
+    let committed = false;
+    try {
+      check();
+      const saved = await store.saveDeviceHistory(row.id, updated, { expectedRevision: row.replicaRevision,
+        expectedTransferId: '', expectedHistoryDigest: digest });
+      committed = saved.ok;
+      if (!committed) throw Object.assign(Error('历史记录已变化，请重新读取'), { code: 'HISTORY_CONCURRENT_UPDATE' });
+      check();
+      return { ...updated, digest: saved.digest };
+    } finally {
+      if (committed) {
+        await archive.retire(profile, row.id, prior?.archive, history?.archive, true).catch(() => {});
+        if (backup?.archive && backup.archive !== history?.archive)
+          await archive.retire(profile, row.id, backup.archive, history?.archive, true).catch(() => {});
+      } else await archive.retire(profile, row.id, prior?.archive, backup?.archive, false).catch(() => {});
+    }
   }
   async function refresh(id, { verify, journal } = {}) {
     // A stricter caller must inspect its own native ownership receipt instead
@@ -200,6 +240,10 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       check();
       previous = await restoreArchiveReceipts(row, previous, check);
       expected.expectedHistoryDigest = previous?.digest ?? null;
+      if (previous?.localPiOriginReviewed) data.localPiOriginReviewed = previous.localPiOriginReviewed;
+      const original = !data.localPiOriginReviewed && !previous?.imported && !row.deviceTransferId &&
+        !check.evidence().historyProtection && allowsArtifacts(check.evidence()) && native.retiredPiOrigin(manifest)
+        ? await native.originalPiJournal({ app, session, row, record: manifest, guard: check, previousSources: previous?.coverage?.sources }) : null;
       const workspace = data.localWorkspace, nativeJournal = data.localJournal;
       delete data.localWorkspace;
       delete data.localJournal;
@@ -227,13 +271,14 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
         // The terminal callback owns collection in a managed delivery directory.
         // A passive replay must not attribute unrelated project changes to it.
         const collected = row.deliveryWorkspaceKey ? prior : await require('./device-history-artifacts.cjs').capture({ row, previous: prior,
-          journal: journal || (!receivingTurn && nativeJournal),
+          journal: journal || (!receivingTurn && nativeJournal), nativePiEvidence: !receivingTurn && !journal && Boolean(nativeJournal),
           ...(!receivingTurn ? { workspace, workRoot: workspace ? workRoot?.() : null, retained: manifest?.artifactHistory } : {}) });
         const artifacts = archive.retain(prior, collected);
         check();
         if (artifacts) {
           try {
-            data.localArtifactHistory = await archive.preserve(app.getPath('userData'), row.id, artifacts, prior, check);
+            data.localArtifactHistory = await archive.preserve(app.getPath('userData'), row.id, artifacts, prior, check,
+              { pinPiWebsites: !data.imported });
           } catch (error) {
             check();
             if (error.historyAccessFailure) throw error;
@@ -250,10 +295,20 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       await archive.retire(app.getPath('userData'), row.id, previous?.localArtifactHistory?.archive,
         data.localArtifactHistory?.archive, saved.ok).catch(() => {});
       if (!saved.ok) throw Object.assign(Error('历史记录已变化，请重新读取'), { code: 'HISTORY_CONCURRENT_UPDATE' });
+      data = { ...data, digest: saved.digest };
+      if (original && !data.historyProtection && allowsArtifacts(check.evidence())) {
+        try { data = await saveOriginalPi(row, data, original, check); }
+        catch (error) {
+          // The current transcript was already committed. A temporarily
+          // offline legacy volume can retry without blocking that history.
+          check();
+          if (error.historyAccessFailure || error.code === 'HISTORY_CONCURRENT_UPDATE') throw error;
+        }
+      }
       await register([{ ...current, deviceHistory: true, historyContentState: 'available',
         ...replayedUsage(data.snapshot, current),
         ...(data.historyProtection ? { historyProtection: data.historyProtection } : {}) }], { expectedRevision: current.revision }); check();
-      return { ...data, digest: saved.digest };
+      return data;
     })().finally(() => {
       pending.delete(key);
       if (writers.get(id) === work) writers.delete(id);
@@ -300,10 +355,12 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     // A v1.13.20 replica can contain a complete native body and dialogue but
     // no Pi file receipts. Migrate it on the first open so the preview handle
     // is bound to the recovered archive in the same visit.
-    const legacyPi = !data?.imported && !data?.historyProtection && !row.deliveryWorkspaceKey &&
-      data?.coverage?.sources?.some(source => source.id === row.id && source.adapterId === 'pi' && !source.artifactEvidenceVersion);
+    const legacyPi = !data?.imported && !data?.historyProtection && !row.deviceTransferId && allowsArtifacts(check.evidence()) &&
+      (!row.deliveryWorkspaceKey && data?.coverage?.sources?.some(source => source.id === row.id &&
+        source.adapterId === 'pi' && !(source.artifactEvidenceVersion >= 2)) ||
+        !data?.localPiOriginReviewed && native.retiredPiOrigin(require('./runtime-segments').read(app, row.id)));
     const localDisplay = preferRecorded && !shared && !verify && dialogue.length > 0 && !legacyPi;
-    if (!onlyUpgrade && !localDisplay && (update || !data || !data.coverage?.complete || transcriptError)) {
+    if (!onlyUpgrade && !localDisplay && (update || legacyPi || !data || !data.coverage?.complete || transcriptError)) {
       try { data = await refresh(row.id, { verify }); }
       catch (error) {
         if (error.historyAccessFailure || error.code === 'HISTORY_CONCURRENT_UPDATE') throw error;
@@ -330,7 +387,7 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
         allowsArtifacts(check.evidence()) && await canBackfill(row, data.localArtifactHistory)) {
       const { digest: oldDigest, savedAt, nativeReadError, ...stored } = data;
       const prior = data.localArtifactHistory;
-      const updated = await archive.preserve(app.getPath('userData'), row.id, prior, prior, check)
+      const updated = await archive.preserve(app.getPath('userData'), row.id, prior, prior, check, { pinPiWebsites: true })
         .catch(error => { if (error.historyAccessFailure) throw error; return null; });
       check();
       if (updated) {

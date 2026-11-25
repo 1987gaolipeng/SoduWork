@@ -32,7 +32,23 @@ if (typeof electron === 'string') {
     { seq: 2, kind: 'say', text: '报告已落盘（`2026-09-30-soduwork-2026-09-30.md`）。' },
   ];
   async function click(expression) {
-    const point = await js(`(()=>{const e=${expression};if(!e)throw Error('Missing click target');e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect(),x=Math.round(r.x+r.width/2),y=Math.round(r.y+r.height/2);if(!e.contains(document.elementFromPoint(x,y)))throw Error('Occluded click target');return {x,y}})()`);
+    let point, previous, geometry;
+    try {
+      await until(async () => {
+        geometry = await js(`(() => {
+          const e = ${expression};
+          if (!e) return null;
+          e.scrollIntoView({block:'center', behavior:'instant'});
+          const r = e.getBoundingClientRect(), x = Math.round(r.x+r.width/2), y = Math.round(r.y+r.height/2);
+          const hit = document.elementFromPoint(x,y);
+          return {x,y,visible:e.contains(hit), hit:hit?.className};
+        })()`);
+        if (geometry?.visible && previous?.visible && geometry.x === previous.x && geometry.y === previous.y)
+          point = { x: geometry.x, y: geometry.y };
+        previous = geometry;
+        return point;
+      });
+    } catch { throw Error('Click did not settle: ' + expression + ' ' + JSON.stringify(geometry)); }
     for (const type of ['mouseDown','mouseUp']) win.webContents.sendInputEvent({type,...point,button:'left',clickCount:1});
   }
   function makeFiles(work, runtime) {
@@ -79,47 +95,24 @@ if (typeof electron === 'string') {
     sessions.set(handle.ref, handle);
     return { ok: true, ref: handle.ref, cwd, sessionId: handle.sessionId, adapterId: id, displayName: handle.displayName, snapshot: handle.snapshot() };
   }
-  async function createLegacyHistory() {
-    const identity = require('../tests/helpers/platform-session-fixture.cjs').identity();
-    const id = 'legacy-pi-website', cwd = path.join(root, 'legacy-project'), file = path.join(root, 'pi-agent', 'sessions', 'legacy-project', id + '.jsonl');
-    const html = '<!doctype html><meta charset="utf-8"><h1>旧版 Pi 生成的网站</h1>';
-    fs.mkdirSync(cwd, { recursive: true }); fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(path.join(cwd, 'index.html'), html);
-    const entries = [{ type: 'session', id, cwd },
-      { type: 'custom', customType: 'soduwork.access.policy', data: require('../main/access-control/policy').create('full', cwd) }, ...[
-      { role: 'user', content: '创建一个网站' },
-      { role: 'assistant', stopReason: 'toolUse', content: [{ type: 'toolCall', id: 'write1', name: 'write', arguments: { path: 'index.html', content: html } }] },
-      { role: 'toolResult', toolCallId: 'write1', toolName: 'write', isError: false, content: [] },
-      { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: '已创建 `index.html`。' }] },
-    ].map(message => ({ type: 'message', message }))];
-    fs.writeFileSync(file, entries.map(entry => JSON.stringify(entry)).join('\n'));
-    const row = { id, cwd, adapterId: 'pi', path: file, count: entries.length - 1,
-      workOwner: require('../main/platform-connections/runtime.cjs').scope(identity), creator: { account: 'one', hub: identity.hub } };
-    const session = { historyEntry: require('../main/pi-session/session').historyEntry, findBySessionId: () => null };
-    const store = require('../main/conversation/replica-store.cjs').create(path.join(root, 'legacy.sqlite'));
-    legacyHistory = require('../main/conversation/shared-history.cjs').create({ app, session, store, identityOf: () => identity, workRoot: () => root });
-    const [registered] = await legacyHistory.register([row]);
-    const { snapshot, coverage } = await require('../main/conversation/device-history-native.cjs').read({ app, session, row, guard() {} });
-    delete coverage.sources[0].artifactEvidenceVersion;
-    const guard = { expectedRevision: registered.replicaRevision, expectedCatalogRevision: registered.revision };
-    await store.saveDeviceHistory(id, { snapshot, coverage }, guard);
-    await store.saveConversationTranscript(id, snapshot.messages, guard);
-    return id;
-  }
   app.whenReady().then(async () => {
     const bridge = require('../main/agent-runtime/pi-session-bridge'); bridge.get = ref => sessions.get(ref);
     require('../main/pi-session/artifact-ipc').install({ app, ipcMain, BrowserWindow, session: sessions, workDir: () => root });
     ipcMain.handle('pi-session-snapshot', (_event, ref) => ({ ok: true, snapshot: sessions.get(ref)?.snapshot() }));
     require('../main/work-preview').install({ app, ipcMain, BrowserWindow, WebContentsView, shell: { openExternal: async () => { throw Error('No external navigation in fixture'); } } });
-    const legacyId = await createLegacyHistory();
+    legacyHistory = await require('./fixtures/legacy-pi-website.cjs').create(app, root, sessions);
+    const legacyId = legacyHistory.id;
+    let continuation;
     ipcMain.handle('pi-session-open-application', () => ({ ok: true, handled: false }));
     ipcMain.handle('access-preferences-get', () => ({ ok: true, mode: 'standard' }));
     ipcMain.handle('pi-session-runtimes', () => ({ ok: true, runtimes: catalog.runtimes() }));
     ipcMain.handle('pi-session-open', async (_event, options) => {
-      if (options.chatId !== legacyId) return restore(options.adapterId || 'pi');
-      const view = await legacyHistory.open(legacyId, { historyPreview: true, allowContinuation: true });
+      if (![legacyId, legacyHistory.retiredId].includes(options.chatId)) return restore(options.adapterId || 'pi');
+      const view = options.chatId === legacyId && continuation
+        ? await legacyHistory.continued(continuation === 'collision') : await legacyHistory.preview(options.chatId);
       sessions.set(view.ref, view);
-      return { ok: true, ref: view.ref, sessionId: legacyId, adapterId: 'pi', localReplica: true, snapshot: view.snapshot() };
+      return { ok: true, ref: view.ref, cwd: view.cwd, sessionId: view.sessionId, adapterId: 'pi',
+        localReplica: Boolean(view.localReplica), snapshot: view.snapshot() };
     });
     ipcMain.handle('pi-session-history', () => ({ ok: true, chats: [] }));
     ipcMain.handle('pi-session-runtime-models', () => ({ ok: true, items: [] }));
@@ -204,18 +197,9 @@ if (typeof electron === 'string') {
     await js(fs.readFileSync(path.join(client, 'components/panels/chat-deliveries.js'), 'utf8'));
     win.showInactive();
     await js('SoduWorkI18n.setLocale("zh-CN");void 0;');
-    for (let visit = 0; visit < 2; visit++) {
-      await js('NativeChat.enter("",' + JSON.stringify(legacyId) + ',{adapterId:"pi"});void 0');
-      const link = visit ? 'document.querySelector(".ndelivery [data-open-app]")'
-        : 'Array.from(document.querySelectorAll(".nmsg.ai [data-open-app]")).find(e => e.textContent === "index.html")';
-      await until(() => js('Boolean(' + link + ')'));
-      await click('document.querySelector("#nchatMode")');
-      await until(() => js(`!document.querySelector('#nchatAccessPop').hidden &&
-        document.querySelector('[data-access-mode="full"]').matches('[aria-pressed="true"]:enabled')`));
-      await click('document.querySelector("#nchatMode")');
-      await click(link);
+    async function website(heading) {
       let visibleWebsite;
-      await until(async () => {
+      const check = async () => {
         const slot = await js(`(() => {
           const rect = document.querySelector('[data-wb-native]')?.getBoundingClientRect();
           if (!rect || rect.x < innerWidth / 3 || rect.width < 240 || rect.height < 200 ||
@@ -227,21 +211,76 @@ if (typeof electron === 'string') {
           if (!view.getVisible() || !view.webContents || view.webContents.isDestroyed()) continue;
           const bounds = view.getBounds();
           if (Object.keys(slot).some(key => Math.abs(slot[key] - bounds[key]) > 2)) continue;
-          if (await view.webContents.executeJavaScript('document.querySelector("h1")?.textContent') === '旧版 Pi 生成的网站') {
+          if (await view.webContents.executeJavaScript('document.querySelector("h1")?.textContent') === heading) {
             visibleWebsite = view; return true;
           }
         }
         return false;
-      });
+      };
+      try { await until(check); }
+      catch {
+        const headings = await Promise.all(win.contentView.children.filter(view => view.getVisible() && !view.webContents.isDestroyed())
+          .map(view => view.webContents.executeJavaScript('document.body?.innerText.slice(0, 200)')));
+        const panel = await js('({open:ChatWorkbench.state().open, text:document.querySelector("[data-wb-native]")?.innerText, notices:window.notices.slice(-2)})');
+        throw Error('Expected visible website ' + heading + ', observed ' + JSON.stringify({ headings, panel }));
+      }
       assert.equal(await js('ChatWorkbench.state().open'), true);
+      return visibleWebsite;
+    }
+    const reset = async () => {
+      await js('NativeChat.reset();void 0;');
+      await until(() => win.contentView.children.length === 0);
+    };
+    const enter = id => js('NativeChat.enter("",' + JSON.stringify(id) + ',{adapterId:"pi"});void 0');
+    for (let visit = 0; visit < 2; visit++) {
+      await enter(legacyId);
+      const link = visit ? 'document.querySelector(".ndelivery [data-open-app]")'
+        : 'Array.from(document.querySelectorAll(".nmsg.ai [data-open-app]")).find(e => e.textContent === "index.html")';
+      await until(() => js('Boolean(' + link + ')'));
+      await click('document.querySelector("#nchatMode")');
+      await until(() => js(`!document.querySelector('#nchatAccessPop').hidden &&
+        document.querySelector('[data-access-mode="full"]').matches('[aria-pressed="true"]:enabled')`));
+      await click('document.querySelector("#nchatMode")');
+      await click(link);
+      const visibleWebsite = await website(legacyHistory.oldHeading);
       if (visit) {
         const pixels = await visibleWebsite.webContents.capturePage();
         assert.ok(!pixels.isEmpty());
         fs.writeFileSync(path.join(out, 'legacy-pi-website-preview.png'), pixels.toPNG());
       }
-      await js('NativeChat.reset();void 0;'); await until(() => win.contentView.children.length === 0);
+      await reset();
     }
     report.cases.push('Pi 1.13.19 archive: full permission remains selected and available; click the historical HTML filename, reopen the chat, click its delivery card and verify the original heading in the right WebContentsView');
+    for (const scenario of ['empty', 'collision', 'retired']) {
+      continuation = scenario;
+      await enter(scenario === 'retired' ? legacyHistory.retiredId : legacyId);
+      async function checkResult(heading, selector) {
+        const reply = 'Array.from(document.querySelectorAll(".nmsg.ai")).find(e => e.querySelector(".ntext")?.textContent.includes(' +
+          JSON.stringify(heading) + '))';
+        const target = '(' + reply + ')?.querySelector(' + JSON.stringify(selector) + ')';
+        try { await until(() => js('Boolean(' + target + ')')); }
+        catch { throw Error(scenario + ': ' + heading + ' missing ' + selector); }
+        if (await js('ChatWorkbench.state().open')) {
+          await click('document.querySelector("[data-wb-close]")');
+          await until(() => !win.contentView.children.some(view => view.getVisible()));
+        }
+        await click(target);
+        return website(heading);
+      }
+      const oldPage = await checkResult(legacyHistory.oldHeading, '.ndelivery [data-open-app]');
+      if (scenario === 'collision') {
+        const image = await oldPage.webContents.capturePage();
+        assert.ok(!image.isEmpty());
+        fs.writeFileSync(path.join(out, 'continued-pi-website-preview.png'), image.toPNG());
+      }
+      await checkResult(legacyHistory.oldHeading, '.ntext [data-open-app]');
+      await reset();
+      report.cases.push({
+        empty: 'Pi continuation in an empty workspace: original card and filename open the original website',
+        collision: 'Pi continuation with a different same-named file: original card and filename open the original website',
+        retired: 'Upgraded multi-segment Pi history: retired turn card and filename open the original website',
+      }[scenario]);
+    }
     report.ok = true;
   }).catch(error => { report.error = error.stack || String(error); })
     .finally(async () => {

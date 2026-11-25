@@ -108,7 +108,9 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
   function snapshot(value) {
     const s = nativeSource.snapshot(value || raw.snapshot(), raw.adapterId);
     if (!record) return { ...s, runtimeSwitching: switching };
-    return { ...s, runtimeSwitching: switching, ...(record.historyRecovery ? { historyRecovery: record.historyRecovery } : {}),
+    return { ...s, runtimeSwitching: switching, ...(record.historyRecovery ? {
+      historyRecovery: { ...record.historyRecovery, prefixMessageCount: prefix.messages.length },
+    } : {}),
       usageReceipts: [...(prefix.usageReceipts || []), ...(s.usageReceipts || [])],
       turnMetrics: [...(prefix.turnMetrics || []), ...(s.turnMetrics || []).map(metric => ({ ...metric,
         fromMessage: metric.fromMessage + prefix.messages.length, toMessage: metric.toMessage + prefix.messages.length }))],

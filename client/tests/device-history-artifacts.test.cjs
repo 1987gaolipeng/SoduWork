@@ -139,7 +139,9 @@ test('first open migrates a legacy Pi write from the native archive and previews
   const store = require('../main/conversation/replica-store.cjs').create(path.join(f.workRoot, 'history.sqlite'));
   history = require('../main/conversation/shared-history.cjs').create({ app, session, store, identityOf: () => identity, workRoot: () => f.workRoot });
   const [registered] = await history.register([row]);
-  const { snapshot, coverage } = await native.read({ app, session, row, guard() {} });
+  const { snapshot, coverage, localJournal } = await native.read({ app, session, row, guard() {} });
+  assert.deepEqual(localJournal.files.find(change => change.path === 'index.html').piTurn,
+    { turnId: 'pi-history:old-pi:1', userMessageIndex: 0 });
   delete coverage.sources[0].artifactEvidenceVersion;
   const guard = { expectedRevision: registered.replicaRevision, expectedCatalogRevision: registered.revision };
   await store.saveDeviceHistory(id, { snapshot, coverage }, guard);
@@ -156,6 +158,83 @@ test('first open migrates a legacy Pi write from the native archive and previews
     assert.equal(await (await fetch(new URL('site.css', opened.url))).text(), css);
     assert.equal((await fetch(new URL('other.md', opened.url))).status, 404);
   } finally { runtime.closeRef(view.ref); await view.close(); }
+});
+
+test('retired Pi writes retain their original turn and bytes beside a newer same-name archive', async t => {
+  let history;
+  const f = fixture(t, () => history?.close()), app = { getPath: () => f.workRoot };
+  const identity = require('./helpers/platform-session-fixture.cjs').identity();
+  const segments = require('../main/conversation/runtime-segments');
+  const id = crypto.randomUUID(), next = crypto.randomUUID(), currentRoot = path.join(f.workRoot, 'temp', 'chat-abcdef-9876');
+  const nativeDir = path.join(f.workRoot, 'pi-agent', 'sessions');
+  fs.mkdirSync(nativeDir, { recursive: true }); fs.mkdirSync(currentRoot);
+  function save(id, cwd, messages) {
+    const file = path.join(nativeDir, id + '.jsonl');
+    const entries = [{ type: 'session', id, cwd }, ...messages.map((message, i) => ({ type: 'message', id: 'm' + i, message }))];
+    fs.writeFileSync(file, entries.map(entry => JSON.stringify(entry)).join('\n'));
+    return { id, cwd, adapterId: 'pi', path: file };
+  }
+  const ask = text => ({ role: 'user', content: text });
+  const reply = text => ({ role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text }] });
+  function write(callId, file, content) {
+    return [{ role: 'assistant', content: [{ type: 'toolCall', id: callId, name: 'write', arguments: { path: file, content } }] },
+      { role: 'toolResult', toolCallId: callId, toolName: 'write', isError: false, content: [] }];
+  }
+  f.write('index.html', 'original'); f.write('notes.md', 'first');
+  fs.writeFileSync(path.join(currentRoot, 'index.html'), 'latest');
+  const old = save(id, f.cwd, [ask('create notes'), ...write('call', 'notes.md', 'first'), reply('done'),
+    { ...ask('make a website'), submissionId: 'old-website' }, ...write('call', 'index.html', 'original'), reply('done')]);
+  const active = save(next, currentRoot, [ask('continue'), reply('latest')]);
+  let reads = 0, restriction;
+  const session = { historyEntry: async (_, wanted) => {
+    if (wanted === id) reads++;
+    const row = wanted === id ? old : active;
+    return fs.existsSync(row.path) ? { ok: true, entry: { ...row, ...(wanted === id ? restriction : {}) } } : { ok: false, notFound: true };
+  }, findBySessionId: () => null };
+  const store = require('../main/conversation/replica-store.cjs').create(path.join(f.workRoot, 'history.sqlite'));
+  history = require('../main/conversation/shared-history.cjs').create({ app, session, store, identityOf: () => identity, workRoot: () => f.workRoot });
+  const { snapshot, localJournal } = await native.read({ app, session, row: old, guard() {} });
+  const websiteIndex = snapshot.messages.findIndex(m => m.submissionId === 'old-website');
+  assert.ok(websiteIndex > 1);
+  assert.deepEqual(localJournal.files.map(change => change.piTurn),
+    [{ turnId: 'pi-history:' + id + ':m0', userMessageIndex: 0 }, { turnId: 'old-website', userMessageIndex: websiteIndex }]);
+  const record = { version: 1, id, originAdapter: 'pi', segments: [], prefix: snapshot, deviceHistoryComplete: true,
+    active: { sessionId: next, adapterId: 'pi', ref: path.basename(currentRoot) }, cwd: currentRoot, owner: segments.scope(identity) };
+  await segments.save(app, record);
+  const row = { ...old, cwd: currentRoot, ref: path.basename(currentRoot), workOwner: record.owner, creator: { account: 'one', hub: identity.hub } };
+  const [registered] = await history.register([row]);
+  const body = await native.read({ app, session, row, guard() {} });
+  const journal = { cwd: currentRoot, turnId: 'new-website', userMessageIndex: snapshot.messages.length, files: [
+    { action: 'created', path: 'index.html', after: { path: 'index.html', exists: true, size: 6,
+      hash: crypto.createHash('sha256').update('latest').digest('hex') } }] };
+  const archive = require('../main/conversation/device-artifact-archive.cjs');
+  const collected = await project.capture({ row, journal, verifiedTurn: true });
+  const prior = await archive.preserve(f.workRoot, id, collected, null, () => {});
+  await store.saveDeviceHistory(id, { ...body, localArtifactHistory: prior }, { expectedRevision: registered.replicaRevision });
+  fs.renameSync(old.path, old.path + '.gone');
+  const missing = await history.prepareContinuation(id, { refresh: true });
+  assert.equal(missing.artifactHistory.archive.generation, prior.archive.generation);
+  fs.renameSync(old.path + '.gone', old.path);
+  restriction = { historyProtection: 'account' };
+  await assert.rejects(native.originalPiJournal({ app, session, row, record, guard: entry => {
+    if (entry?.historyProtection) throw Object.assign(Error('restricted original'), { historyAccessFailure: true });
+  } }), /restricted original/);
+  restriction = null;
+  const diverged = structuredClone(record);
+  diverged.prefix.tools.find(tool => tool.name === 'write').args.content = 'a different receipt';
+  assert.equal(await native.originalPiJournal({ app, session, row, record: diverged, guard() {} }), null);
+  const restored = await history.prepareContinuation(id, { refresh: true });
+  assert.equal(restored.artifactHistory.archive.generation, prior.archive.generation);
+  const versions = restored.artifactHistory.archive.versions;
+  for (const [turn, content] of [['old-website', 'original'], ['new-website', 'latest']]) {
+    const version = versions.find(item => item.turnId === turn && item.relative === 'index.html');
+    assert.ok(version);
+    const directory = archive.location(f.workRoot, id, { version: 1, generation: version.generation });
+    assert.equal(fs.readFileSync(path.join(directory, version.relative), 'utf8'), content);
+  }
+  const after = reads;
+  await history.prepareContinuation(id, { refresh: true });
+  assert.equal(reads, after);
 });
 
 test('explicit workspaces require a matching local change receipt or a retained file version', async t => {

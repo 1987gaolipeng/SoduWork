@@ -105,6 +105,58 @@ test('reopened cards reveal and package their own turn after the workspace is re
   assert.equal(calls.length, 2);
 });
 
+test('a Pi backup without turn receipts remains addressable after an empty or same-name replacement workspace', async t => {
+  const f = fixture(t);
+  async function capture(cwd, html, css, turnId, completed) {
+    const before = await journal.snapshot(cwd);
+    fs.writeFileSync(path.join(cwd, 'index.html'), html);
+    fs.writeFileSync(path.join(cwd, 'page.css'), css);
+    fs.writeFileSync(path.join(cwd, 'notes.md'), 'unrelated');
+    const changes = journal.compare(before, await journal.snapshot(cwd), { turnId });
+    return history.capture({ row: { id: f.id, cwd, adapterId: 'pi' }, journal: changes, verifiedTurn: completed });
+  }
+  const html = '<link rel="stylesheet" href="page.css"><h1>original</h1>';
+  const old = await storage.preserve(f.profile, f.id, await capture(f.cwd, html, '/* original */', 'old-scan', false), null, f.guard);
+  assert.deepEqual(versions.list(old.archive), []);
+  fs.rmSync(f.cwd, { recursive: true });
+  const cwd = fs.mkdtempSync(path.join(f.root, 'next-'));
+  const runtime = require('../main/conversation/artifact-runtime');
+  const handle = { cwd, outputs: () => [] }, ref = 'reopened';
+  t.after(() => runtime.closeRef(ref));
+  let saved = await versions.pinLegacyWebsites(f.profile, f.id, old, f.guard);
+  const [original] = versions.list(saved.archive);
+  assert.match(original.turnId, /^pi-archive:/);
+  assert.equal(await versions.pinLegacyWebsites(f.profile, f.id, saved, f.guard), saved);
+  runtime.bindTurnArchives(handle, () => versions.readers(f.profile, f.id, saved.archive, f.guard));
+  async function previewOriginal(id = 'version:' + original.versionId) {
+    const result = await runtime.preview(handle, ref, id);
+    assert.equal(result.ok, true, result.reason);
+    assert.equal(await (await fetch(result.url)).text(), html);
+    assert.equal(await (await fetch(new URL('page.css', result.url))).text(), '/* original */');
+    assert.equal((await fetch(new URL('notes.md', result.url))).status, 404);
+    runtime.closeRef(ref);
+  }
+  await previewOriginal();
+  // A later replay can recover the old message index without its workspace.
+  // Previously issued links still work, while the card has one visible owner.
+  const located = structuredClone(saved);
+  const page = located.items.find(row => row.metadata.relative === 'index.html');
+  page.source = { ...page.source, turnId: 'pi-history:first', userMessageIndex: 0 };
+  saved = await storage.preserve(f.profile, f.id, located, saved, f.guard, { readWorkspace: false });
+  const index = await runtime.viewSnapshotAsync(handle);
+  assert.deepEqual(index.items.filter(item => item.versionId && item.relative === 'index.html').map(item => item.turnId),
+    ['pi-history:first']);
+  await previewOriginal(index.items.find(item => item.turnId === 'pi-history:first').artifactId);
+  await previewOriginal();
+  const changed = await capture(cwd, '<h1>replacement</h1>', '/* replacement */', 'new-turn', true);
+  saved = await storage.preserve(f.profile, f.id, changed, old, f.guard, { pinPiWebsites: true });
+  await storage.retire(f.profile, f.id, old.archive, saved.archive, true);
+  await previewOriginal();
+  const newest = versions.list(saved.archive).find(item => item.relative === 'index.html' && item.turnId === 'new-turn');
+  const current = await runtime.resolveView(handle, 'version:' + newest.versionId);
+  assert.equal(fs.readFileSync(current.path, 'utf8'), '<h1>replacement</h1>');
+});
+
 test('working copies are independent per turn, preserve local edits and include owned resources', async t => {
   const f = fixture(t);
   await f.deliver('first', { 'web/index.html': '<title>A</title>', 'web/style.css': 'body{background:url(logo.png)}',

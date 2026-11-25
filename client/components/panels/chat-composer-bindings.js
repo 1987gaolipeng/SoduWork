@@ -772,7 +772,7 @@ function _bind(el) {
         e.preventDefault();
         const href = link.getAttribute('href') || '';
         const opened = global.ChatWorkbench && typeof ChatWorkbench.openLink === 'function'
-          ? ChatWorkbench.openLink(href) : false;
+          ? ChatWorkbench.openLink(href, { source: link }) : false;
         if (!opened && /^https?:\/\//i.test(href) && global.soduWorkAPI &&
             typeof global.soduWorkAPI.openExternal === 'function') {
           global.soduWorkAPI.openExternal(href);
@@ -796,7 +796,7 @@ function _bind(el) {
       }
       if (preview) {
         if (global.ChatWorkbench && typeof ChatWorkbench.openOutput === 'function') {
-          ChatWorkbench.openOutput(preview.getAttribute('data-open-app'));
+          ChatWorkbench.openOutput(preview.getAttribute('data-open-app'), { source: preview });
         }
         return;
       }

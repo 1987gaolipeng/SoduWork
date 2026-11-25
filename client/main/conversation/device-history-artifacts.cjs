@@ -118,7 +118,7 @@ async function journalFiles(root, journal, maxFileBytes) {
   return files;
 }
 
-async function capture({ row, workRoot, workspace, previous, retained, journal, verifiedTransfer = false, verifiedTurn = false }) {
+async function capture({ row, workRoot, workspace, previous, retained, journal, verifiedTransfer = false, verifiedTurn = false, nativePiEvidence = false }) {
   if (!row.cwd || !path.isAbsolute(row.cwd)) return null;
   let root;
   try { root = realpath(row.cwd); } catch (_) { return previous || null; }
@@ -160,9 +160,16 @@ async function capture({ row, workRoot, workspace, previous, retained, journal, 
   const completeJournal = journal?.turnId && !journal.truncated && Array.isArray(journal.files) && matchesJournalRoot(root, journal.cwd);
   // A passive refresh can see the journal before the runtime's terminal callback.
   // Recheck those bytes when binding them to an authenticated turn.
-  const changes = completeJournal && (verifiedTurn || journal.turnId !== prior?.turnId || journal.turnId !== prior?.packageTurnId)
-    ? await journalFiles(root, journal, verifiedTransfer ? BigInt(MAX_TRANSFER_BYTES) : 32n * 1024n * 1024n) : [];
+  const alreadyCaptured = completeJournal && journal.turnId === prior?.turnId && journal.turnId === prior?.packageTurnId;
+  let pending = completeJournal && (!alreadyCaptured || verifiedTurn) ? journal : null;
+  if (nativePiEvidence && alreadyCaptured && !verifiedTurn) {
+    const files = journal.files.filter(change => change.piTurn &&
+      records.get(change.path)?.source?.turnId !== change.piTurn.turnId);
+    if (files.length) pending = { ...journal, files };
+  }
+  const changes = pending ? await journalFiles(root, pending, verifiedTransfer ? BigInt(MAX_TRANSFER_BYTES) : 32n * 1024n * 1024n) : [];
   const turnFiles = new Map(changes.map(file => [file.relative, file.verifiedStamp]));
+  const piTurns = new Map(nativePiEvidence && !verifiedTransfer ? journal?.files?.map(change => [change.path, change.piTurn]) : []);
   files.push(...changes);
   if (files.length) {
     const expected = new Map(files.map(file => [file.relative, file.verifiedStamp]));
@@ -170,10 +177,11 @@ async function capture({ row, workRoot, workspace, previous, retained, journal, 
     for (const entry of indexed.items) {
       const relative = entry.metadata.relative;
       if (!versions.same(expected.get(relative), entry.stamp)) continue;
-      if (verifiedTurn && !verifiedTransfer && versions.same(turnFiles.get(relative), entry.stamp)) {
-        entry.source = { ...entry.source, turnId: journal.turnId };
-        if (Number.isSafeInteger(journal.userMessageIndex) && journal.userMessageIndex >= 0)
-          entry.source.userMessageIndex = journal.userMessageIndex;
+      const owner = verifiedTurn && !verifiedTransfer ? journal : piTurns.get(relative);
+      if (owner?.turnId && versions.same(turnFiles.get(relative), entry.stamp)) {
+        entry.source = { ...entry.source, turnId: owner.turnId };
+        if (Number.isSafeInteger(owner.userMessageIndex) && owner.userMessageIndex >= 0)
+          entry.source.userMessageIndex = owner.userMessageIndex;
       }
       if (!entry.source?.turnId && versions.same(records.get(relative)?.stamp, entry.stamp))
         entry.source = records.get(relative).source;

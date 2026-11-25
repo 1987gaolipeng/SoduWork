@@ -120,7 +120,7 @@ function extendsPiArchive(bytes, revision, previous) {
   }
   return false;
 }
-async function pi(app, session, id, guard, previous, row) {
+async function pi(app, session, id, guard, previous, row, { retired = false } = {}) {
   const found = await session.historyEntry(app, id, { strict: true }); guard(found?.entry);
   if (!found?.ok || !found.entry?.path) throw failure(found?.notFound ? 'NATIVE_HISTORY_MISSING' : 'NATIVE_HISTORY_UNAVAILABLE',
     found?.reason || '原生会话暂时无法读取');
@@ -149,8 +149,12 @@ async function pi(app, session, id, guard, previous, row) {
     throw failure('NATIVE_HISTORY_DIVERGED', '原生会话记录与已保存的完整历史不一致，已保留本机副本。请恢复原档后继续');
   const original = distinguishPiCalls(entries);
   const acc = require('../pi-session/event-stream').create();
+  const turns = new Map();
   require('../pi-session/history-seed').seed(acc, { state: {}, sessionManager: { getEntries: () => entries } },
-    { completeHistory: true, nativeAgentId: 'pi' });
+    { completeHistory: true, nativeAgentId: 'pi', onUserMessage(entry, userMessageIndex, message, sequenceIndex) {
+      const turnId = message.submissionId || 'pi-history:' + id + ':' + (entry.id || sequenceIndex);
+      turns.set(entry, { turnId, userMessageIndex });
+    } });
   guard();
   const snapshot = publicSnapshot(acc.state); piTools(entries, snapshot);
   if (original.size) {
@@ -161,8 +165,12 @@ async function pi(app, session, id, guard, previous, row) {
       if (original.has(call?.toolCallId)) call.toolCallId = original.get(call.toolCallId);
     }
   }
-  return { snapshot, source: { id, adapterId: 'pi', revision, byteLength: bytes.length, artifactEvidenceVersion: 1 },
-    ...(id === row.id && !row.deliveryWorkspaceKey ? require('./pi-history-artifacts.cjs').evidence(entries, row, revision) : {}) };
+  // The retired segment's indexed native cwd, not a newer logical chat's cwd,
+  // must agree with the JSONL before a write can be verified on disk.
+  const workspace = retired ? { id: row.id, cwd: found.entry.cwd } : row;
+  return { snapshot, source: { id, adapterId: 'pi', revision, byteLength: bytes.length, artifactEvidenceVersion: 2 },
+    ...(retired || id === row.id && !row.deliveryWorkspaceKey
+      ? require('./pi-history-artifacts.cjs').evidence(entries, workspace, revision, turns) : {}) };
 }
 function canonicalJson(value) {
   return JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
@@ -362,6 +370,40 @@ async function read({ app, session, row, guard, previousToolReceipts = [], previ
   return { snapshot, ...(localWorkspace ? { localWorkspace } : {}), ...(localJournal ? { localJournal } : {}), coverage: { complete: true, sources, unresolvedTools: unresolvedTools(snapshot) },
     ...(localToolReceipts.length ? { localToolReceipts } : {}) };
 }
+// A complete device transcript can keep the first segment only in its
+// prefix. Its original local bytes are optional and never extend coverage.
+function retiredPiOrigin(record) {
+  if (!record?.deviceHistoryComplete || record.originAdapter !== 'pi' || record.deviceTransferId ||
+      !record.prefix?.messages?.length || record.active.sessionId === record.id) return null;
+  return record.segments[0]?.adapterId === 'pi' ? record.segments[0].sessionId : record.id;
+}
+async function originalPiJournal({ app, session, row, record, guard, previousSources = [] }) {
+  const origin = retiredPiOrigin(record);
+  if (!origin) return null;
+  // Later same-account continuations can omit the logical ID's original
+  // segment from segments[]. Try that native ID first when still indexed.
+  for (const id of new Set([row.id, origin])) {
+    let saved;
+    try { saved = await pi(app, session, id, guard, previousSources.find(source => source.id === id), row, { retired: true }); }
+    catch (error) {
+      guard();
+      if (error.historyAccessFailure) throw error;
+      continue;
+    }
+    const prefix = publicSnapshot(record.prefix), messages = saved.snapshot.messages;
+    if (!messages.length || !messages.every((m, i) => m.role === prefix.messages[i]?.role &&
+        m.text === prefix.messages[i].text && (!m.submissionId || m.submissionId === prefix.messages[i].submissionId))) continue;
+    // Public prose can stay unchanged when a tool call is replaced. The
+    // frozen prefix must also contain the same completed writes and arguments.
+    const frozenTools = new Map(prefix.tools.map(tool => [tool.id, tool]));
+    const matches = saved.snapshot.tools.filter(tool => tool.name === 'write' && tool.state === 'done').every(tool => {
+      const frozen = frozenTools.get(id + ':' + tool.id) || frozenTools.get(tool.id);
+      return frozen?.name === tool.name && frozen.state === tool.state && canonicalJson(frozen.args) === canonicalJson(tool.args);
+    });
+    if (matches) return { id, journal: saved.localJournal };
+  }
+  return null;
+}
 async function probe({ app, session, row, guard }) {
   const record = require('./runtime-segments').read(app, row.id);
   const parts = record ? [...record.segments, record.active] : [{ sessionId: row.id, adapterId: row.adapterId || 'pi' }];
@@ -374,4 +416,4 @@ async function probe({ app, session, row, guard }) {
     guard(found.entry);
   }
 }
-module.exports = { read, probe, publicSnapshot, unresolvedTools, MAX_BYTES };
+module.exports = { read, probe, originalPiJournal, retiredPiOrigin, publicSnapshot, unresolvedTools, MAX_BYTES };

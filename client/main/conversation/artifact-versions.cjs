@@ -13,6 +13,10 @@ function versionId(turnId, relative, sha256) {
   return digest(JSON.stringify([turnId, relative, sha256]));
 }
 
+function unassignedPiTurn(row) {
+  return 'pi-archive:' + digest(JSON.stringify([row.source.sessionId, row.metadata.relative, row.stamp]));
+}
+
 // These references can only select from the host's committed inventory.
 function dependencies(name, bytes) {
   if (bytes.length > 4 * 1024 * 1024) return [];
@@ -74,7 +78,7 @@ function dependencyLookup(root, byName) {
 
 // The archive receipt, not a filename supplied by the model, identifies the bytes.
 // Keep each completed turn's first committed version when a later capture retries.
-function record(archive, prior, history) {
+function record(archive, prior, history, dependencyRows) {
   const versions = [...(prior?.versions || [])];
   const turnPath = (turnId, relative) => JSON.stringify([turnId, relative]);
   const indices = new Map(versions.map((row, index) => [turnPath(row.turnId, row.relative), index]));
@@ -85,9 +89,10 @@ function record(archive, prior, history) {
   }
   let aliasesChanged = false;
   const committed = new Map(archive.files.map(file => [file.relative, file]));
-  const newDeliveries = [];
-  const byName = new Map([...(history.items || []), ...(history.resources || [])]
-    .filter(row => row.source?.turnId && !row.archiveOnly &&
+  const newDeliveries = [], identifiedWebsites = new Map();
+  const candidates = dependencyRows || [...(history.items || []), ...(history.resources || [])].filter(row => row.source?.turnId);
+  const byName = new Map(candidates
+    .filter(row => !row.archiveOnly &&
       same(row.stamp, committed.get(row.metadata.relative)?.sourceStamp)).map(row => [row.metadata.relative, row]));
   function add(rows, resource, owner) {
     for (const row of rows || []) {
@@ -97,6 +102,8 @@ function record(archive, prior, history) {
       if (!file || indices.has(key) || !same(file.sourceStamp, row.stamp)) continue;
       indices.set(key, versions.length);
       if (!resource) newDeliveries.push({ relative, source });
+      if (!resource && !dependencyRows && row.metadata.kind === 'website' && source.adapterId === 'pi')
+        identifiedWebsites.set(unassignedPiTurn(row), source);
       versions.push({ turnId, relative, versionId: versionId(turnId, relative, file.sha256),
         generation: archive.generation, sha256: file.sha256, stamp: file.stamp,
         metadata: row.metadata, source, resource, aliases: [] });
@@ -136,8 +143,71 @@ function record(archive, prior, history) {
       }
     }
   }
+  // Native evidence can identify the owner after the original directory is
+  // gone. Retain the dependency proofs already frozen with that exact page.
+  for (const file of prior?.versions || []) {
+    const source = identifiedWebsites.get(file.turnId);
+    if (!source || !file.resource) continue;
+    const key = turnPath(source.turnId, file.relative);
+    if (indices.has(key) || aliasOwners.has(key)) continue;
+    const aliases = (file.aliases || []).filter(name => {
+      const alias = turnPath(source.turnId, name), count = aliasCounts.get(source.turnId) || 0;
+      if (count >= MAX_FILES || indices.has(alias) || aliasOwners.has(alias)) return false;
+      aliasOwners.set(alias, file.relative); aliasCounts.set(source.turnId, count + 1);
+      return true;
+    });
+    indices.set(key, versions.length);
+    versions.push({ ...file, source, turnId: source.turnId, versionId: versionId(source.turnId, file.relative, file.sha256), aliases });
+  }
   if (versions.length) archive.versions = versions;
   return aliasesChanged || versions.length !== (prior?.versions?.length || 0);
+}
+
+// Older Pi backups have authenticated bytes but may have no generating turn.
+// Pin their websites before a writable segment can replace a same-name file.
+// Use only the archived generation for both the entry and its dependencies.
+async function pinLegacyWebsites(profile, id, history, guard) {
+  const archive = history?.archive;
+  if (!archive?.files?.length || history.transferId) return history;
+  const receipts = new Map(archive.files.map(file => [file.relative, file]));
+  const signature = (name, hash, at) => JSON.stringify([name, hash, at]);
+  const pinned = new Set((archive.versions || []).filter(file => !file.resource)
+    .map(file => signature(file.relative, file.sha256, file.metadata.at)));
+  const websites = (history.items || []).filter(row => {
+    const file = receipts.get(row.metadata.relative);
+    return row.metadata.kind === 'website' && row.source?.adapterId === 'pi' && row.source.sessionId === id &&
+      !row.source.turnId && file && same(row.stamp, file.sourceStamp) &&
+      !pinned.has(signature(file.relative, file.sha256, row.metadata.at));
+  });
+  if (!websites.length) return history;
+  const root = storage().location(profile, id, archive);
+  if (!root) return history;
+  const copies = new Map(), files = [];
+  for (const row of [...history.items, ...(history.resources || [])]) {
+    guard();
+    const file = receipts.get(row.metadata.relative);
+    if (row.source?.sessionId !== id || !file || !same(row.stamp, file.sourceStamp)) continue;
+    let refs = file.dependencies;
+    if (!refs && row.metadata.size <= 4 * 1024 * 1024 && /\.(?:html?|css|m?js|svg|md|markdown)$/i.test(file.relative)) {
+      let bytes;
+      try { bytes = await storage().readVersion(root, file.relative, file.stamp); }
+      catch (_) { /* A missing, unreadable or relinked backup cannot supply a preview. */ }
+      if (!bytes || digest(bytes) !== file.sha256) continue;
+      refs = dependencies(file.relative, bytes);
+    }
+    copies.set(file.relative, { ...row, archiveOnly: false, stamp: file.stamp });
+    files.push({ ...file, sourceStamp: file.stamp, dependencies: refs });
+  }
+  guard();
+  const items = websites.flatMap(row => {
+    const copy = copies.get(row.metadata.relative);
+    if (!copy) return [];
+    const turnId = unassignedPiTurn(row);
+    return [{ ...copy, source: { ...row.source, turnId } }];
+  });
+  const saved = { ...archive, files };
+  if (!record(saved, archive, { root, items }, [...copies.values()])) return history;
+  return { ...history, archive: { ...archive, versions: saved.versions } };
 }
 
 function list(archive) {
@@ -158,7 +228,7 @@ function mergedReader(groups, guard, authorize) {
   const ids = new Map(groups.flatMap(group => [...group.ids]));
   const owners = groups.map(group => group.reader);
   function decorate(parts) {
-    const items = parts.flatMap(part => part.items).map(item => ({ ...item, versionId: ids.get(item.path) }));
+    const items = parts.flatMap(part => part.items).map(item => ({ ...item, ...ids.get(item.path) }));
     const delivery = { schemaVersion: 1, source: 'history', items: items.filter(item => item.primary && !item.processEvidence) };
     return { items, delivery, got: { files: [], delivery } };
   }
@@ -206,7 +276,7 @@ async function readers(profile, id, archive, guard, authorize = guard) {
     const group = turn.groups.get(root) || { version: 1, root, items: [], resources: [], ids: new Map(), proofs: [] };
     turn.groups.set(root, group);
     group[version.resource ? 'resources' : 'items'].push({ metadata: version.metadata, source: version.source, stamp: checked.stamp });
-    group.ids.set(path.resolve(root, version.relative), version.versionId);
+    group.ids.set(path.resolve(root, version.relative), { versionId: version.versionId, versionHash: version.sha256 });
     group.proofs.push({ relative: version.relative, aliases: version.aliases,
       root, sha256: version.sha256, stamp: checked.stamp });
   }
@@ -359,4 +429,4 @@ async function exportCopy(options) {
   return copies.find(copy => copy.versionId === version.versionId);
 }
 
-module.exports = { dependencies, record, list, readers, exportCopy, exportTurn };
+module.exports = { dependencies, record, pinLegacyWebsites, list, readers, exportCopy, exportTurn };

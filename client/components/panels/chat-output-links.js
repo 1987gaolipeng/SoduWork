@@ -199,25 +199,80 @@
     return (snapshot.messages || []).map((message, index) => {
       if (message?.role === 'user') {
         const absolute = snapshot.history?.messageIndices?.[index] ?? ((snapshot.history?.messageStart || 0) + index);
-        turn = message.submissionId || recorded.get(absolute) || '';
+        const saved = recorded.get(absolute);
+        turn = saved?.startsWith('pi-history:') ? saved : message.submissionId || saved || '';
       }
       return turn;
     });
   }
   function assignDeliveryTurns(root, snapshot, files) {
     const turns = deliveryTurns(snapshot, files);
-    root.querySelectorAll('.nmsg.ai').forEach(message => {
-      const index = /^message:(\d+)$/.exec(message.dataset.chatNode || '');
-      if (index) message.dataset.deliveryTurn = turns[Number(index[1])] || '';
-    });
+    const prefix = snapshot.historyRecovery?.prefixMessageCount;
+    const replies = [];
+    for (const message of root.querySelectorAll('.nmsg.ai')) {
+      const match = /^message:(\d+)$/.exec(message.dataset.chatNode || '');
+      if (!match) continue;
+      const index = Number(match[1]);
+      message.dataset.deliveryTurn = turns[index] || '';
+      const absolute = snapshot.history?.messageIndices?.[index] ?? ((snapshot.history?.messageStart || 0) + index);
+      const restored = Number.isSafeInteger(prefix) && absolute < prefix;
+      if (restored) message.dataset.deliveryRestored = 'true';
+      else delete message.dataset.deliveryRestored;
+      delete message.dataset.deliveryArchiveIds;
+      if ((restored || snapshot.localReplica && prefix == null) && message.dataset.deliveryFinal !== 'false')
+        replies.push(message);
+    }
+    // Legacy files without a recorded turn may have only a verified session
+    // copy. Attribute a unique reference within the restored transcript, never
+    // a reference from the new execution segment or an incomplete page.
+    const unassigned = files.filter(file => file.versionId && file.turnId?.startsWith('pi-archive:') &&
+      !Number.isSafeInteger(file.userMessageIndex));
+    if (!unassigned.length || !replies.length || root.querySelector('[data-load-older]') || snapshot.historyRecovery?.incomplete ||
+        snapshot.history?.truncated || snapshot.history?.messageStart > 0 ||
+        (snapshot.history?.totalMessages != null && snapshot.history.totalMessages !== turns.length)) return;
+    const index = buildLinkIndex(unassigned);
+    const byId = new Map(unassigned.map(file => [key(file), file]));
+    const owners = new Map();
+    for (const message of replies) {
+      const named = new Set();
+      for (const body of message.querySelectorAll('.ntext')) {
+        for (const hit of mentions(body.textContent || '', index, '', true)) named.add(hit.file);
+        for (const anchor of body.querySelectorAll('a')) {
+          const target = anchor.getAttribute('data-output-href') || anchor.getAttribute('href');
+          const file = workspaceFileTarget(target, unassigned);
+          if (file) named.add(file);
+        }
+        for (const link of body.querySelectorAll('[data-open-app]')) {
+          const file = byId.get(link.dataset.openApp);
+          if (file) named.add(file);
+        }
+      }
+      for (const file of named) owners.set(file, owners.has(file) ? null : message);
+    }
+    const singleTurn = (snapshot.messages || []).slice(0, prefix).filter(message => message?.role === 'user').length === 1;
+    for (const file of unassigned) {
+      const owner = owners.has(file) ? owners.get(file) : singleTurn && replies.length === 1 && replies[0];
+      if (owner && !files.some(row => row.versionId && row.turnId === owner.dataset.deliveryTurn &&
+          row.originalArtifactId === file.originalArtifactId)) {
+        owner.dataset.deliveryArchiveIds = [owner.dataset.deliveryArchiveIds, key(file)].filter(Boolean).join(' ');
+      }
+    }
   }
   function scoped(node, files) {
     files = asFiles(files);
     const owner = node.closest('[data-output-task]');
     if (!owner) return files;
     const taskId = owner.dataset.outputTask;
-    if (!taskId) return owner.dataset.deliveryTurn === undefined ? files :
-      filesForTurn(files, owner.dataset.deliveryTurn, owner.dataset.deliveryCurrent !== 'false');
+    if (!taskId) {
+      if (owner.dataset.deliveryTurn === undefined && !owner.dataset.deliveryRestored) return files;
+      const selection = filesForTurn(files, owner.dataset.deliveryTurn, owner.dataset.deliveryCurrent !== 'false');
+      const selected = owner.dataset.deliveryRestored ? selection.filter(file => file.versionId) : selection;
+      if (!owner.dataset.deliveryArchiveIds) return selected;
+      const archiveIds = new Set(owner.dataset.deliveryArchiveIds.split(' '));
+      const inferred = files.filter(file => file.versionId && archiveIds.has(key(file)));
+      const originals = new Set(inferred.map(file => file.originalArtifactId));
+      return selected.filter(file => !originals.has(key(file))).concat(inferred);
+    }
     const own = files.filter(file => file.taskId === taskId);
     return own.length ? own : files.filter(file => !file.taskId);
   }
@@ -234,11 +289,15 @@
      entry stores the exact nodeValue plus the (ref + files) signature, so any
      text growth or file-set change invalidates it and forces a rescan. */
   const linkScanCache = new WeakMap();
-  function linkify(root, files, filesSig = '', strictPaths = false) {
+  function linkify(root, files, filesSig = '', strictPaths = false, snapshot) {
     files = asFiles(files);
-    if (!root || !files.length) return 0;
+    if (!root) return 0;
+    const hasVersions = files.some(file => file.versionId);
+    if (snapshot && (hasVersions || snapshot.historyRecovery?.prefixMessageCount) &&
+        root.querySelector?.('.nmsg.ai[data-chat-node]:not([data-delivery-turn])')) assignDeliveryTurns(root, snapshot, files);
+    if (!files.length) return 0;
     const doc=root.ownerDocument, filter=doc.defaultView.NodeFilter;
-    const byMessage = new Map(), versioned = files.some(file => file.versionId);
+    const byMessage = new Map(), versioned = hasVersions || Boolean(root.querySelector?.('[data-delivery-restored]'));
     function localFiles(node) {
       if (!versioned) return scoped(node, files);
       const owner = node.closest('[data-output-task]');
@@ -348,7 +407,7 @@
     if (!files.length && !historyMedia && !snapshot?.artifactUrl && !snapshot?.cloudHandoff?.artifactUrl && !snapshot?.execution?.artifactUrl && !carrySig) return html;
     const root = document.createElement('div'); root.innerHTML = html;
     const hasVersions = files.some(file => file.versionId);
-    if (hasVersions) assignDeliveryTurns(root, snapshot, files);
+    if (hasVersions || snapshot.historyRecovery?.prefixMessageCount) assignDeliveryTurns(root, snapshot, files);
     if (carrySig) {
       const messageKey = node => node.dataset.messageOwner != null
         ? 'owner:' + node.dataset.messageOwner : node.dataset.chatNode;
@@ -359,7 +418,8 @@
       root.querySelectorAll('[data-delivery-current="false"][data-delivery-final="true"]').forEach(message => {
         const old = previous.get(messageKey(message));
         if (!old) return;
-        const frozen = hasVersions && files.some(file => file.versionId && file.turnId === message.dataset.deliveryTurn);
+        const frozen = message.dataset.deliveryRestored || message.dataset.deliveryArchiveIds ||
+          hasVersions && files.some(file => file.versionId && file.turnId === message.dataset.deliveryTurn);
         [...old.children].filter(node => node.matches('.ndelivery,.noutput-library,.noutput-image,.noutput-video,.nplugin-draft'))
           .filter(node => (!frozen || node.classList.contains('nplugin-draft')) && !supersededDraftCard(node, files))
           .filter(node => !node.classList.contains('nplugin-draft') || draftPlacement?.matchesOwner(node, message, snapshot) !== false)
@@ -1049,7 +1109,7 @@
   // keyed by (ref + files) signatures so they can never leak across sessions,
   // and the WeakMap drops entries for replaced nodes on its own.
   function resetDecorateCache() { decorateMemo = null; }
-  const api={filesForTurn,deliveryTurns,fileTarget,workspaceFileTarget,mergeFileChanges,mentions,linkify,decorate,sanitize,load,taskAttachment,openTaskFile,materialize,materializeTask,shouldRefresh,
+  const api={filesForTurn,deliveryTurns,scoped,fileTarget,workspaceFileTarget,mergeFileChanges,mentions,linkify,decorate,sanitize,load,taskAttachment,openTaskFile,materialize,materializeTask,shouldRefresh,
     isImage,isVideo,readPreview,imageUrl,videoUrl,hydrateImages,hydrateVideos,
     isPluginDraft,pluginDrafts,_supersededDraftCard:supersededDraftCard,_claimInlineMedia:claimInlineMedia,
     _buildLinkIndex:buildLinkIndex,_decorateStateSignature:decorateStateSignature,resetDecorateCache};

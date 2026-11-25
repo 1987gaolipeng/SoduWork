@@ -301,9 +301,10 @@
       // directly in CodeMirror. Existing edits still open in Diff by default.
       view: editorFile ? (change && change.action !== 'created' ? 'diff' : 'code') : 'preview' }, activate);
   }
-  function openOutput(target) {
+  function openOutput(target, { source } = {}) {
     const value = String(target || '');
-    const file = WB.files.find((item) => fileKey(item) === value || item.path === value);
+    const files = source && !value.startsWith('version:') ? links.scoped(source, WB.files) : WB.files;
+    const file = files.find((item) => fileKey(item) === value || item.path === value);
     if (!file) return false;
     if (openPendingCloud(file, true)) return true;
     if (isTaskPreview(file)) { openTaskPreview(file, true); return true; }
@@ -338,7 +339,7 @@
     return url ? { kind: 'url', url } : null;
   }
   function outputMentions(value, files) { return links ? links.mentions(String(value || ''), files) : []; }
-  function linkifyOutputs(root, files, filesSig) { return links ? links.linkify(root, files, filesSig) : 0; }
+  function linkifyOutputs(root, files, filesSig, snapshot) { return links ? links.linkify(root, files, filesSig, snapshot?.localReplica === true, snapshot) : 0; }
   function openTaskOutput(file) {
     if (!file || !file.taskId || !file.attachmentId) return false;
     if (previewKind(file) !== 'external') return false;
@@ -352,7 +353,7 @@
     return true;
   }
   function openLink(value, options = {}) {
-    const target = linkTarget(value, WB.files);
+    const target = linkTarget(value, options.source ? links.scoped(options.source, WB.files) : WB.files);
     if (!target) return false;
     const mediaType = ['image', 'video'].includes(options.mediaType) ? options.mediaType : '';
     if (mediaType && target.kind === 'url') {

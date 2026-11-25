@@ -247,6 +247,42 @@ if (typeof electron === 'string') {
       ['save', 'frozen-rev'],
     ]);
     report.cases.push({ switchedChatDelivery: 'same titled card and frozen actions when live, reopened, and continued; legacy preview retained' });
+    const recovered = await run(`(() => {
+      const ordinary = { artifactId: 'current-index', name: 'index.html', relative: 'index.html', size: 99,
+        kind: 'website', title: 'New website', primary: true };
+      const old = { ...ordinary, artifactId: 'version:old', originalArtifactId: ordinary.artifactId, versionId: 'old',
+        title: 'Original website', changedInTurn: false, archivedReadOnly: true };
+      function render(files, prefixMessageCount, extraOld = false) {
+        const turn = id => [{ role: 'user', submissionId: id }, { role: 'assistant', done: true }];
+        const messages = [...turn('old'), ...(extraOld ? turn('another-old') : []), ...turn('new')];
+        const html = messages.map((m, i) => m.role === 'user' ? '<div class="nmsg user"></div>' :
+          '<div class="nmsg ai" data-output-task="" data-chat-node="message:' + i + '" data-delivery-final="true" data-delivery-current="' +
+          (i === messages.length - 1) + '"><div class="ntext nmd"><a href="index.html">Open page</a> <code>index.html</code></div></div>').join('');
+        const snap = { status: 'idle', messages, historyRecovery: { mode: 'device-history', prefixMessageCount } };
+        list.innerHTML = ChatOutputLinks.decorate(html, files, 'restored', snap);
+        ChatOutputLinks.linkify(list, files, 'second pass', false, snap);
+        return { replies: [...list.querySelectorAll('.nmsg.ai')].map(m => ({
+          title: m.querySelector('.ndelivery-heading [data-open-app]')?.dataset.openApp || null,
+          link: m.querySelector('.nmd button')?.dataset.openApp || null,
+          scoped: ChatOutputLinks.scoped(m, files).map(f => f.artifactId),
+        })), session: list.querySelector(':scope > .ndelivery [data-open-app]')?.dataset.openApp || null };
+      }
+      const inferred = { ...old, turnId: 'pi-archive:legacy' };
+      const known = { ...old, turnId: 'pi-history:legacy', userMessageIndex: 0 };
+      return { known: render([known, ordinary], 2), inferred: render([inferred, ordinary], 2),
+        emptyWorkspace: render([inferred], 2), noOriginal: render([ordinary], 2), ambiguous: render([inferred, ordinary], 4, true) };
+    })()`);
+    const oldReply = { title: 'version:old', link: 'version:old', scoped: ['version:old'] };
+    const unavailable = { title: null, link: null, scoped: [] };
+    assert.deepEqual(recovered.known.replies[0], oldReply);
+    assert.deepEqual(recovered.inferred.replies[0], oldReply);
+    assert.deepEqual(recovered.emptyWorkspace.replies[0], oldReply);
+    assert.deepEqual(recovered.noOriginal.replies[0], unavailable);
+    assert.deepEqual(recovered.ambiguous.replies.slice(0, 2), [unavailable, unavailable]);
+    assert.equal(recovered.ambiguous.session, 'version:old');
+    for (const result of [recovered.known, recovered.inferred, recovered.noOriginal, recovered.ambiguous])
+      assert.equal(result.replies.at(-1).link, 'current-index');
+    report.cases.push({ restoredWorkspace: 'card and Markdown resolve to the original in an empty or same-name workspace; ambiguous files stay at session scope' });
     report.ok = true;
   }).catch(error => { report.error = error.stack || String(error); }).finally(() => {
     fs.mkdirSync(output, { recursive: true });

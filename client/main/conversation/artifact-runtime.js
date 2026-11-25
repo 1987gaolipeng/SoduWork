@@ -123,7 +123,13 @@ async function snapshotAsync(session) {
 async function viewSnapshotAsync(session) {
   const current = await appendArchivedItems(session, await snapshotAsync(session));
   if (!turnArchives.has(archiveSource(session)) || !current) return current;
-  return { ...current, items: [...current.items, ...await turnArtifacts(session)] };
+  const archived = await turnArtifacts(session);
+  const provisional = file => file.turnId.startsWith('pi-archive:');
+  const revision = file => JSON.stringify([file.relative, file.at, file.versionHash]);
+  // A later native replay can identify the turn that produced a previously
+  // unassigned backup. Keep issued IDs readable, but show that revision once.
+  const located = new Set(archived.filter(file => !provisional(file)).map(revision));
+  return { ...current, items: [...current.items, ...archived.filter(file => !provisional(file) || !located.has(revision(file)))] };
 }
 
 async function turnArtifacts(session, requestedId) {
