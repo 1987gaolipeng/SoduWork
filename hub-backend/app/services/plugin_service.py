@@ -605,10 +605,11 @@ async def delete_plugin(session: AsyncSession, plugin: am.Plugin,
 async def save_binding(session: AsyncSession, plugin: am.Plugin, body: dict,
                        binding: am.PluginBinding | None = None, *,
                        commit: bool = True, flush: bool = True,
-                       verify_readiness: bool = True) -> am.PluginBinding:
+                       verify_readiness: bool = True, managed_org_id: str | None = None) -> am.PluginBinding:
     return await plugin_bindings.save_binding(
         session, plugin, body, binding, commit=commit, flush=flush,
-        verify_readiness=verify_readiness, readiness_check=binding_readiness)
+        verify_readiness=verify_readiness, readiness_check=binding_readiness,
+        managed_org_id=managed_org_id)
 
 
 async def bootstrap_example(session: AsyncSession) -> None:
