@@ -314,6 +314,21 @@ function create({ root, actor, assertCurrent, open, send, received, notify }) {
     return { ok: true, rows: rows.filter(row => row.status !== 'accepted' || Date.now() - row.acceptedAt < 60000)
       .sort((a,b) => b.at - a.at) };
   }
+  async function discard(event, id, expectedAttempt) {
+    const context = await actor(event, true);
+    if (!context) throw Error('请重新登录后丢弃发送记录');
+    await assertCurrent(context);
+    const files = paths(context.owner, id), row = activeRow(files);
+    if (!row && read(files.receipt)?.deleted) return { ok: true };
+    // Check the attempt after the last await. A concurrent edit can start a
+    // different attempt on this same intent, including one already in dispatch.
+    if (!row || row.status !== 'failed' || row.sessionId || row.confirmed ||
+        attemptOf(row) !== expectedAttempt || flights.has(files.key))
+      throw Error('发送状态已变化，请刷新后重试');
+    retire(files, row, true);
+    notify();
+    return { ok: true };
+  }
   async function associations(event) {
     const context = await actor(event, true);
     if (!context) return { ok: true, rows: [] };
@@ -347,6 +362,6 @@ function create({ root, actor, assertCurrent, open, send, received, notify }) {
       throw Error('请从历史记录重新打开这条会话');
     return { ok: true, ...result };
   }
-  return { start, list, act, associations, ackAssociations, forgetSession };
+  return { start, list, act, discard, associations, ackAssociations, forgetSession };
 }
 module.exports = { create };

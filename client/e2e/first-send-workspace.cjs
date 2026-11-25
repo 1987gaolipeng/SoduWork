@@ -30,6 +30,9 @@ const rows = [
     status:'failed',reason:'执行底座尚未启动。',canRestoreText:true,
     draftOptions:{adapterId:'kimi',modelName:'GLM-5',accessMode:'standard',workspaceLabel:'工作区'},at:Date.now()-3000 },
 ];
+rows.push({ intentId:'first-cold-file',attemptId:'first-cold-file',sessionId:'cold-file-history',adapterId:'kimi',
+  title:'校验附件',text:'核对附件的内容。',attachmentNames:['report.pdf'],status:'failed',reason:'执行底座不可用。',
+  canAttachFailed:true,canRestoreText:false,at:Date.now()-4000 });
 const report = { screenshots: [], opened: [], sends: [], errors: [] };
 const read = file => fs.readFileSync(path.join(client, file), 'utf8');
 function configure(data) {
@@ -42,6 +45,12 @@ function configure(data) {
   const runtimes = [{id:'kimi',displayName:'Kimi Code',modelMode:'managed',accessControl:support}];
   api.runtimes = async () => ({ ok:true, runtimes, availableRuntimes:runtimes, missing:[] });
   api.probe = async () => ({ ok:true, accessControl:support });
+  window.validation.discarded = [];
+  api.discardFirstSend = async (id, attempt) => {
+    const index = data.findIndex(row => row.intentId === id && row.attemptId === attempt && row.status === 'failed' && !row.sessionId);
+    if (index < 0) return {ok:false};
+    data.splice(index,1); validation.discarded.push(id); return {ok:true};
+  };
   api.firstSends = async () => ({ok:true,rows:structuredClone(data)});
   api.history = async () => ({ok:true,chats:data.filter(row=>row.sessionId).map(row => ({id:row.sessionId,title:row.title,adapterId:'kimi',at:row.at,count:1}))});
   api.openApplication = async () => ({ok:true,handled:false});
@@ -62,6 +71,10 @@ function configure(data) {
   for (const name of ['send','startFirstSend','retryFirstSend','retryFirstSendInPlace','dismissFirstSend']) {
     api[name] = async () => { validation.sends.push(name); throw Error('Unexpected ' + name + ' on sidebar navigation'); };
   }
+  window.validation.corrected = [];
+  api.retryFirstSendInPlace = async (id, attempt, ref, text) => {
+    validation.corrected.push({id, attempt, ref, text}); return {ok:true,accepted:true};
+  };
 }
 app.setPath('userData', profile);
 app.disableHardwareAcceleration();
@@ -127,6 +140,33 @@ app.whenReady().then(async () => {
   await shoot('04-failed-before-allocation');
   await click(edit);
   await until('document.querySelector("#nchatInput")?.value === '+JSON.stringify(laterDraft));
+  // A cold refusal with missing inputs still has an ordinary, navigable session.
+  const cold = rows[4];
+  await click(button(cold.intentId));
+  await until('NativeChat.sessionInfo()?.sessionId==="cold-file-history" && document.querySelector("#nchatInput")?.checkVisibility()');
+  assert.equal(await js('document.querySelector("#nchatInput").value'), '');
+  assert.equal(await js('validation.opened.at(-1)'), cold.sessionId);
+  assert.deepEqual(await js('validation.corrected'), []);
+  await click('#nchatInput'); await win.webContents.insertText('改为只整理文字。');
+  await click('#nchatSend');
+  await until('validation.corrected.length === 1');
+  assert.deepEqual(await js('validation.corrected[0]'), {
+    id:cold.intentId,attempt:cold.attemptId,ref:cold.sessionId,text:'改为只整理文字。',
+  });
+  // Discard the unallocated draft from its sidebar action; cancel is a no-op.
+  await click(button(rows[3].intentId));
+  await until('document.querySelector("#cpChat [data-first-send-draft-id]")?.dataset.firstSendDraftId === "first-starter"');
+  const discard = '.ws-chat-row:has(' + button(rows[3].intentId) + ') .ws-first-send-discard';
+  // Hover exposes the row actions for a real mouse click.
+  const point = await js('(()=>{const r=document.querySelector('+JSON.stringify(button(rows[3].intentId))+').getBoundingClientRect();return {x:Math.round(r.x+10),y:Math.round(r.y+r.height/2)}})()');
+  win.webContents.sendInputEvent({type:'mouseMove',...point});
+  await js('window.confirm=()=>false; void 0');
+  await click(discard); assert.deepEqual(await js('validation.discarded'),[]);
+  await js('window.confirm=()=>true; void 0');
+  await click(discard);
+  await until('validation.discarded.length===1 && !document.querySelector('+JSON.stringify(button(rows[3].intentId))+')');
+  await until('document.querySelector("#cpInput")?.checkVisibility()');
+  assert.equal(await js('document.querySelector('+JSON.stringify('.ws-chat-row:has('+unknown+') .ws-first-send-discard')+').hidden'),true);
   Object.assign(report,await js('validation'));
   assert.deepEqual(report.sends,[]); assert.equal(report.opened.includes('new'),false);
   const styleOrder=await js('[...document.querySelectorAll("link[rel=stylesheet]")].map(n=>n.getAttribute("href"))');
