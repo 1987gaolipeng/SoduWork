@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timezone
 import logging
 import os
-from pathlib import Path
 import stat
 import struct
-from types import SimpleNamespace
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
 
 from cryptography.hazmat.primitives import serialization
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +19,6 @@ from ..config import get_settings
 from . import client_release_files as files
 from . import client_updates as contract
 from .client_installer_metadata import inspect_installer
-
 
 logger = logging.getLogger(__name__)
 

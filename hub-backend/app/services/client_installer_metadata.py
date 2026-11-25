@@ -8,15 +8,15 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import struct
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 
-from .client_updates import UpdateContractError, VERSION_RE, _expected_installer_names
+from .client_updates import VERSION_RE, UpdateContractError, _expected_installer_names
 
 
 class InstallerInspectionUnavailable(RuntimeError):

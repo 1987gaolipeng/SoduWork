@@ -14,7 +14,17 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,15 +36,16 @@ from ..db import get_session
 from ..deps import current_client, require_perm
 from ..models import Client, ClientRelease, ClientUpdateAttempt, User
 from ..realtime import hub
-from ..services import audit
+from ..services import (
+    audit,
+    client_release_files,
+    client_release_signing,
+    rbac,
+    update_safety,
+)
 from ..services import client_updates as contract
-from ..services import client_release_files
-from ..services import client_release_signing
 from ..services.client_installer_metadata import InstallerInspectionUnavailable
-from ..services import rbac
-from ..services import update_safety
 from .input_validation import parse_integer
-
 
 router = APIRouter(prefix="/api/v1/client-updates", tags=["client-updates"])
 deployment_router = APIRouter(
