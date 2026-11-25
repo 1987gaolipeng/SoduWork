@@ -16,7 +16,7 @@ from ..models import Attachment, Client, Role, Task, User
 from ..schemas import attachment_to_api
 from ..permissions import ALL_KEYS
 from ..realtime import hub
-from ..services import (approval_routing, code_delivery, deployments, release_control,
+from ..services import (approval_routing, approval_summaries, code_delivery, deployments, release_control,
                         resource_access, storage, task_access, task_rework, task_trace)
 from ..services.task_requirements import public_content
 
@@ -57,6 +57,7 @@ async def _item(session: AsyncSession, request: am.ApprovalRequest,
         decisions = await release_control._decisions(session, request.id)
     return {
         **release_control.request_api(request, decisions),
+        "context": approval_summaries.pending_context(request, task, artifact),
         "task": {
             "id": task.id, **public_content(task),
             "projectId": task.project_id or "", "repoId": task.repo_id or "",

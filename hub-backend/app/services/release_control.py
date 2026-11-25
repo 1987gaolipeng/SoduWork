@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
 from .. import models
-from . import approval_policies, approval_routing, task_events
+from . import approval_policies, approval_routing, approval_summaries, task_events
 
 ENV_TEST = "env-system-test"
 ENV_PRODUCTION = "env-system-production"
@@ -263,8 +263,7 @@ async def _new_artifact(session: AsyncSession, task: models.Task, *, kind: str,
         # context-free duplicate while materialising code or office output.
         if not managed_workflow:
             await ensure_request(session, task, row, action, context={
-                "summary": "需求基线待确认" if stream == "spec" else
-                           ("代码待审阅" if kind == "code" else "产出待审阅"),
+                "summary": approval_summaries.for_artifact(task, row),
                 "version": seq, "checksum": digest,
             })
     except ValueError as exc:
@@ -466,7 +465,8 @@ async def _check_assignment_count(session, task, request):
 
 
 async def ensure_request(session: AsyncSession, task: models.Task, artifact: am.ArtifactVersion,
-                         action: str, environment_id: str = "", context: dict | None = None
+                         action: str, environment_id: str = "", context: dict | None = None,
+                         *, submission_note: str = ""
                          ) -> am.ApprovalRequest:
     existing = (await session.execute(select(am.ApprovalRequest).where(
         am.ApprovalRequest.artifact_version_id == artifact.id,
@@ -487,6 +487,11 @@ async def ensure_request(session: AsyncSession, task: models.Task, artifact: am.
                     raise ValueError("验收策略已停用，请联系管理员启用策略。")
                 existing.policy_snapshot = dict(policy.rules or {})
                 existing.required_count = max(1, int(existing.policy_snapshot.get("required") or 1))
+        if (submission_note and existing.status == "pending"
+                and approval_summaries.auto_context(existing.context or {}, artifact)):
+            summary = approval_summaries.summary_text(submission_note)
+            if summary:
+                existing.context = {**existing.context, "summary": summary}
         await _check_assignment_count(session, task, existing)
         return existing
     pid = {"baseline": POLICY_BASELINE, "review": POLICY_REVIEW,
@@ -509,6 +514,9 @@ async def ensure_request(session: AsyncSession, task: models.Task, artifact: am.
     rules = dict((policy.rules if policy else {}) or {})
     # Freeze version, criteria and evidence refs when a gate is created.
     from . import gate_contract
+    if context is None and action in ("review", "baseline"):
+        context = {"summary": approval_summaries.summary_text(submission_note)
+                   or approval_summaries.for_artifact(task, artifact)}
     gate_context = await gate_contract.prepare_context(
         session, task, artifact, action, environment_id or "", context)
     row = am.ApprovalRequest(

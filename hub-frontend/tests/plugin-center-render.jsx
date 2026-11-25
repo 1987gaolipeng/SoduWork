@@ -84,7 +84,11 @@ if (params.get('view') === 'locale-review') {
     'en-US': { name: 'Old Operations Plugin', description: 'Old version' },
   }
 }
-const queues = { issues: [{ id: 'missing-identity', pluginId: 'contracts', versionId: 'contracts-v1', target: 'versions', title: '核对发布身份' }, { id: 'runtime', pluginId: 'prototype', target: 'runs', title: '上次运行需要检查' }] }
+const reviewDetail = 'Compare invoice totals <draft> & currency changes'
+const queues = {
+  review: [{ id: 'missing-identity', kind: 'review', pluginId: 'contracts', versionId: 'contracts-v1', target: 'versions', title: '核对发布身份', detail: reviewDetail }],
+  runtime: [{ id: 'runtime', kind: 'runtime', pluginId: 'prototype', target: 'runs', title: '上次运行需要检查' }],
+}
 for (const key of Object.keys(api)) api[key] = async () => { failures.push('Unexpected API: ' + key); throw new Error('Unmocked API: ' + key) }
 // HTTP responses are immutable snapshots, not shared references to server state.
 api.pluginGovernance = async () => structuredClone({ items: plugins, queues })
@@ -552,7 +556,10 @@ try {
   } else if (view === 'app-review') {
     await open('contracts'); const drawer = q('.plugin-detail-drawer')
     check(q('.plugin-title-copy .plugin-app-tag')?.textContent === '应用', 'selected application version has a detail tag')
-    await click(button('审核与版本', drawer))
+    await click(q('.plugin-issue-list').closest('details').querySelector('summary'))
+    const reviewRow = q('.plugin-issue-list button')
+    check(reviewRow.textContent.includes('核对发布身份') && reviewRow.textContent.includes(reviewDetail), 'review row shows the target and literal version summary')
+    await click(reviewRow)
     check(q('.plugin-review-callout .plugin-app-tag')?.textContent === '应用', 'application review reuses the plugin review callout with a tag')
     const disclosure = all('details').find(item => item.querySelector('summary')?.textContent.includes('版本记录与回退'))
     await click(disclosure.querySelector('summary'))

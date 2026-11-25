@@ -738,6 +738,57 @@ class PluginAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len({row["versionId"] for row in result["queues"]["review"]}), 27)
         self.assertEqual(result["pluginCounts"][self.plugin.id], {"review": 2, "attention": 2})
 
+    async def test_review_queue_describes_each_version_and_its_own_changes(self):
+        await self.seed_governance_reviews(1, 3)
+        first = self.version
+        second = await self.session.get(am.PluginVersion, "pending-version-1")
+        third = await self.session.get(am.PluginVersion, "pending-version-2")
+        for index, (version, description, node) in enumerate([
+            (first, "Read invoice <draft> & amount", "Import invoices"),
+            (second, "Export expense records", "Export expenses"),
+            (third, "Notify accounting", "Notify team"),
+        ]):
+            version.created_at = datetime(2025, 1, index + 1, tzinfo=timezone.utc)
+            version.manifest = {"description": description}
+            version.workflow = {"nodes": [{"key": f"step-{index}", "name": node, "type": "tool"}]}
+        second.provenance = {"signatureState": "unknown-key"}
+        await self.session.commit()
+        rows = {row["versionId"]: row for row in (await self.governance())["queues"]["review"]}
+        self.assertIn("Read invoice <draft> & amount", rows[first.id]["detail"])
+        self.assertIn("Export expense records", rows[second.id]["detail"])
+        self.assertIn("删除节点「Import invoices」", rows[second.id]["detail"])
+        self.assertIn("发布者未登记，需先核对签名身份", rows[second.id]["detail"])
+        self.assertIn("删除节点「Export expenses」", rows[third.id]["detail"])
+        self.assertNotIn("Notify accounting", rows[second.id]["detail"])
+
+    async def test_review_queue_handles_legacy_and_long_version_descriptions(self):
+        self.version.trust_state = "quarantined"
+        self.version.provenance = {"signatureState": "unknown-key"}
+        self.version.workflow = {"nodes": [{"key": "export", "name": "Export report"}]}
+        for description, expected in [(None, "Export report"), ("  ", "Export report"),
+                                      ({"unexpected": True}, "Export report"),
+                                      ("Long summary " * 40, "Long summary")]:
+            with self.subTest(description=type(description).__name__):
+                self.version.manifest = {"description": description}
+                await self.session.commit()
+                row, = (await self.governance())["queues"]["review"]
+                self.assertIn("发布者未登记，需先核对签名身份", row["detail"])
+                self.assertIn(expected, row["detail"])
+                self.assertLessEqual(len(row["detail"]), 240)
+
+    async def test_review_queue_identifies_versions_without_descriptions_or_nodes(self):
+        await self.seed_governance_reviews(1, 2)
+        second = await self.session.get(am.PluginVersion, "pending-version-1")
+        for index, version in enumerate((self.version, second)):
+            version.created_at = datetime(2025, 1, index + 1, tzinfo=timezone.utc)
+            version.manifest = {}
+            version.workflow = {}
+            version.capability_report = {}
+        await self.session.commit()
+        rows = {row["versionId"]: row["detail"] for row in (await self.governance())["queues"]["review"]}
+        self.assertIn("首次提交 v1.0.0，未提供版本说明", rows[self.version.id])
+        self.assertIn("v2.0.1 未提供版本说明；相对 v1.0.0 的兼容性检查未报告变更", rows[second.id])
+
     async def test_governance_plugin_counts_do_not_depend_on_queue_preview(self):
         await self.seed_governance_reviews(40, 40)
         result = await self.governance()

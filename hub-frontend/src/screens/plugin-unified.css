@@ -146,6 +146,7 @@
 .plugin-issue-list button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; border: 1px solid var(--pc-line); border-radius: 8px; color: var(--ink-2); background: var(--surface-1); font: inherit; font-size: max(var(--font-min-readable, 14.5px), 12px); text-align: left; cursor: pointer; }
 .plugin-issue-list svg { width: 16px; height: 16px; flex: none; color: var(--warn); }
 .plugin-issue-list button > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.plugin-issue-list button small { display: block; margin-top: 3px; color: var(--pc-muted); font-size: inherit; line-height: 1.5; }
 .plugin-issue-list button > svg:last-child { color: var(--pc-muted); }
 .plugin-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .plugin-catalog button:focus-visible, .plugin-catalog select:focus-visible, .plugin-detail-overlay button:focus-visible, .plugin-detail-overlay summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
