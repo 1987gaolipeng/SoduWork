@@ -290,26 +290,30 @@
     const append = (owner, rows) => {
       if (!rows.length) return;
       const doc = root.ownerDocument;
-      if (owner !== root) {
-        // Bundle actions are scoped to a single frozen turn. Legacy files can
-        // still open through their individual artifact IDs.
-        const frozen = rows.filter(file => file.versionId && file.turnId === owner.dataset.deliveryTurn);
-        if (frozen.length) {
-          const card = deliveryCard(doc, frozen, ref, snapshot);
-          owner.appendChild(card);
-          joinPreviews(owner, card);
-          rows = rows.filter(file => !frozen.includes(file));
-          if (!rows.length) return;
+      const mount = card => {
+        if (owner === root) {
+          card.dataset.chatNode = 'history-deliverables';
+          card.setAttribute('aria-label', tx('会话成果'));
         }
+        owner.appendChild(card);
+        if (owner !== root && card.dataset.delivery) joinPreviews(owner, card);
+      };
+      // One verified version is sufficient for its own title and file actions.
+      // Bundles must still belong to a single recorded turn.
+      const turn = owner !== root && owner.dataset.deliveryTurn;
+      const frozen = rows.filter(file => file.versionId && (rows.length === 1 || turn && file.turnId === turn));
+      if (frozen.length) {
+        mount(deliveryCard(doc, frozen, ref, snapshot));
+        rows = rows.filter(file => !frozen.includes(file));
+        if (!rows.length) return;
       }
-      const card = deliverySection(doc, owner === root ? '' : '<header>' + deliveryHeading(rows, false) + '</header>');
-      if (owner === root) card.dataset.chatNode = 'history-deliverables';
-      if (owner === root || rows.length > 1 || rows.some(file => file.versionId)) {
+      const card = deliverySection(doc, owner === root && rows.length > 1 ? '' : '<header>' + deliveryHeading(rows, false) + '</header>');
+      if (rows.length > 1) {
         const details = doc.createElement('details'); details.open = true; details.className = 'ndelivery-files';
         const summary = doc.createElement('summary'); summary.textContent = tx(owner === root ? '会话成果' : text.title);
         details.append(summary, fileList(doc, rows, file => file)); card.append(details);
       }
-      owner.append(card);
+      mount(card);
     };
     const replies = [...root.querySelectorAll('.nmsg.ai,[data-task-stream]')].filter(reply =>
       reply.dataset.deliveryFinal !== 'false' && !reply.querySelector('.nacceptance-result')).reverse();
@@ -432,9 +436,9 @@
       }
     }
     card.querySelector('[data-delivery-files-count]')?.replaceChildren(document.createTextNode(count + ' ' + text.files));
-    if (rows?.length === 1) card.querySelector('.ndelivery-files').hidden = !group.files[0]?.versionId;
+    const details = card.querySelector('.ndelivery-files');
+    details.hidden = count === 1;
     if (rows?.length > 1) {
-      const details = card.querySelector('.ndelivery-files'); details.hidden = false;
       card.querySelector('[data-delivery-count]').textContent = rows.length + ' ' + text.files + ' · ' + text.structure;
       const expanded = details.querySelector('.ndelivery-more')?.open;
       details.querySelector('[data-delivery-file-list]').replaceWith(fileList(card.ownerDocument, rows,

@@ -77,7 +77,8 @@ test('settled local and cloud outputs render a delivery card without the unused 
   for (const remote of [false, true]) {
     const child = () => ({ textContent: '', hidden: false, dataset: {}, classList: { toggle() {} },
       setAttribute() {}, appendChild() {}, replaceWith() {}, replaceChildren() {}, querySelector: child });
-    const card = { ...child(), dataset: {}, querySelector: child }, appended = [];
+    const details = child(), appended = [];
+    const card = { ...child(), querySelector: selector => selector === '.ndelivery-files' ? details : child() };
     const document = { createElement: tag => tag === 'section' ? card : child(), createTextNode: text => ({ textContent: text }) };
     const message = { dataset: { deliveryCurrent: 'true' }, ownerDocument: document,
       querySelector: () => null, querySelectorAll: () => [], appendChild: value => appended.push(value) };
@@ -92,7 +93,7 @@ test('settled local and cloud outputs render a delivery card without the unused 
     assert.equal(card.className, 'ndelivery');
     assert.match(card.innerHTML, /data-delivery-retry/);
     assert.match(card.innerHTML, /保存到资料库/);
-    assert.match(card.innerHTML, /<details class="ndelivery-files" open>/);
+    assert.equal(details.hidden, true);
     assert.ok(!card.innerHTML.includes('data-delivery-continue'));
     assert.ok(!card.innerHTML.includes('M5 12h13m-5-5 5 5-5 5'));
     assert.ok(!card.innerHTML.includes(remote ? '在云端继续' : '继续会话'));
@@ -117,7 +118,7 @@ test('a recorded unfinished tool allows file viewing only in a passive history s
   assert.equal(deliveries.isSettled({ ...snapshot, localReplica: true, execution: { readOnly: true } }), true);
 });
 
-test('the last settled card previews and exports its archived revision despite a same-size and same-time replacement', async t => {
+test('the single-file card title opens its archived revision despite a same-size and same-time replacement', t => {
   const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'soduwork-card-revision-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const file = path.join(directory, 'report.md'), at = new Date(1700000000000);
@@ -126,11 +127,12 @@ test('the last settled card previews and exports its archived revision despite a
   assert.equal(original.size, replacement.size);
   assert.equal(original.mtimeMs, replacement.mtimeMs);
 
-  const buttons = [], appended = [];
+  const appended = [];
   const child = () => ({ dataset: {}, classList: { toggle() {} }, setAttribute() {},
     appendChild() {}, replaceWith() {}, replaceChildren() {}, querySelector: child });
-  const card = child(), document = { createTextNode: textContent => ({ textContent }),
-    createElement(tag) { const node = tag === 'section' ? card : child(); if (tag === 'button') buttons.push(node); return node; } };
+  const details = child(), card = { ...child(), querySelector: selector => selector === '.ndelivery-files' ? details : child() };
+  const document = { createTextNode: textContent => ({ textContent }),
+    createElement: tag => tag === 'section' ? card : child() };
   const message = { dataset: { deliveryCurrent: 'true', deliveryFinal: 'true', deliveryTurn: 'first' },
     ownerDocument: document, querySelector: () => null, querySelectorAll: () => [], appendChild: node => appended.push(node) };
   const root = { ownerDocument: document, querySelectorAll: selector => selector === '[data-delivery]' ? [] : [message] };
@@ -142,12 +144,7 @@ test('the last settled card previews and exports its archived revision despite a
   deliveries.decorate(root, [live, archived], 'chat', { status: 'idle',
     messages: [{ role: 'user', submissionId: 'first' }, { role: 'assistant' }] });
   assert.deepEqual(appended, [card]);
-  assert.deepEqual(buttons.filter(b => b.dataset.openApp).map(b => b.dataset.openApp), ['version:frozen']);
+  assert.equal(details.hidden, true);
   assert.match(card.innerHTML, /data-open-app="version:frozen"/);
   assert.doesNotMatch(card.dataset.delivery, /"live"/);
-  const save = buttons.find(b => b.dataset.deliveryExportVersion);
-  save.closest = () => save;
-  let request;
-  await deliveries.handle(save, { async saveDelivery(ref, ids) { request = [ref, ...ids]; return { ok: true }; } }, 'chat');
-  assert.deepEqual(request, ['chat', 'version:frozen']);
 });
