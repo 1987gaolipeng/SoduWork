@@ -10,7 +10,7 @@ async function create(root, options = {}) {
   signal?.throwIfAborted();
   const config = require('../../main/pi-session/model-config');
   const sessions = require('../../main/pi-session/session');
-  const cwd = path.join(root, 'workspace'), agentDir = path.join(root, 'agent');
+  const cwd = path.join(root, 'workspace'), agentDir = options.agentDir || path.join(root, 'agent');
   fs.mkdirSync(cwd, { recursive: true }); fs.mkdirSync(path.join(agentDir, 'extensions'), { recursive: true });
   const loaded = path.join(root, 'extension-loads.txt'), executed = path.join(root, 'executions.txt');
   fs.writeFileSync(path.join(agentDir, 'settings.json'), JSON.stringify({ compaction: { enabled: false }, retry: { enabled: false } }));
