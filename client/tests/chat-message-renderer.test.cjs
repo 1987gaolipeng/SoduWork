@@ -475,6 +475,77 @@ test('read-only history keeps the draft in a visible disabled composer and relea
   assert.equal(input.disabled, false, 'A read-only tool permission still allows chatting');
 });
 
+test('the undispatched tail appears once as a copyable user bubble without changing history or drafts', () => {
+  const { ctx, list, renderer } = setupRender();
+  const el = ctx._mount(), query = el.querySelector.bind(el);
+  const input = { value: 'my other draft', disabled: false, dispatchEvent() { assert.fail('history cannot modify the draft'); } };
+  el.querySelector = selector => selector === '#nchatInput' ? input : query(selector);
+  ctx._messageAttachments = { has: () => true };
+  ctx._send = () => assert.fail('opening history cannot submit a turn');
+  const text = '<tag>\nsecond line';
+  const prefix = [{ role: 'user', text }, { role: 'assistant', done: true, blocks: [{ kind: 'text', text: 'Previous reply' }] }];
+  ctx._pending = '';
+  ctx._sessionOptions = {};
+  ctx._snap = { status: 'idle', messages: Object.freeze(prefix), tools: [], localReplica: true,
+    execution: { canContinueOnDevice: true }, historyRecovery: { reasonCode: 'HISTORY_UNDISPATCHED_USER_TAIL', pendingUserText: text } };
+  for (let render = 0; render < 2; render++) {
+    renderer._render();
+    assert.equal((list.innerHTML.match(/class="nmsg user"/g) || []).length, 2, 'an earlier identical question remains separate');
+    const node = list.innerHTML.indexOf('data-chat-node="history-unconfirmed-user"');
+    assert.ok(node > list.innerHTML.indexOf('Previous reply'));
+    const tail = list.innerHTML.slice(node);
+    assert.match(tail, /^data-chat-node="history-unconfirmed-user" class="nmsg user"><div class="nbubble">&lt;tag&gt;\nsecond line<\/div>/);
+    assert.match(tail, /<div class="nmessage-footer"><span data-delivery-unconfirmed>发送未确认<\/span><button[^>]+data-copy-message="&lt;tag&gt;\nsecond line"/);
+    assert.doesNotMatch(tail, /<tag>|<time|data-restore-pending-user|<aside/);
+    assert.equal(input.value, 'my other draft');
+    assert.equal(ctx._snap.messages, prefix);
+  }
+
+  ctx._pending = text;
+  renderer._render();
+  assert.match(list.innerHTML, /data-chat-node="message:pending"/);
+  assert.doesNotMatch(list.innerHTML, /history-unconfirmed-user/);
+  ctx._pending = 'A different submission';
+  renderer._render();
+  assert.ok(list.innerHTML.indexOf('history-unconfirmed-user') < list.innerHTML.indexOf('A different submission'));
+  ctx._pending = '';
+  ctx._snap.history = { messageEnd: 2, totalMessages: 8 };
+  renderer._render();
+  assert.doesNotMatch(list.innerHTML, /data-delivery-unconfirmed/);
+  ctx._snap.history = {};
+  ctx._snap.execution.canContinueOnDevice = false;
+  renderer._render();
+  assert.doesNotMatch(list.innerHTML, /data-delivery-unconfirmed/);
+  ctx._snap.execution.canContinueOnDevice = true;
+  ctx._snap.localReplica = false;
+  renderer._render();
+  assert.doesNotMatch(list.innerHTML, /data-delivery-unconfirmed/);
+});
+
+test('a read-only unconfirmed tail marks only the existing final user bubble on the latest page', () => {
+  const { ctx, list, renderer } = setupRender();
+  ctx._pending = '';
+  ctx._sessionOptions = {};
+  const text = 'Repeat this question';
+  const messages = [{ role: 'user', text }, { role: 'assistant', done: true, blocks: [{ kind: 'text', text: 'First reply' }] },
+    { role: 'user', text }];
+  ctx._snap = { status: 'idle', tools: [], localReplica: true, messages, execution: { canContinueOnDevice: false },
+    history: { totalMessages: 3, messageEnd: 3 }, historyRecovery: { reasonCode: 'HISTORY_UNCONFIRMED_USER_TAIL' } };
+  renderer._render();
+  assert.equal((list.innerHTML.match(/class="nmsg user"/g) || []).length, 2);
+  assert.equal((list.innerHTML.match(/data-delivery-unconfirmed/g) || []).length, 1);
+  assert.ok(list.innerHTML.indexOf('data-delivery-unconfirmed') > list.innerHTML.indexOf('data-chat-node="message:2"'));
+  assert.doesNotMatch(list.innerHTML, /history-unconfirmed-user/);
+
+  ctx._snap = { ...ctx._snap, history: { messageEnd: 1, totalMessages: 3 }, messages: [messages[0]] };
+  renderer._render();
+  assert.doesNotMatch(list.innerHTML, /data-delivery-unconfirmed/);
+  ctx._snap = { status: 'idle', tools: [], messages, execution: {} };
+  renderer._render();
+  assert.equal((list.innerHTML.match(/class="nmsg user"/g) || []).length, 2);
+  assert.doesNotMatch(list.innerHTML, /data-delivery-unconfirmed|history-unconfirmed-user/);
+});
+
 test('passive local history renders every saved assistant answer across reopen and stream pages', async () => {
   const { create } = require('../main/conversation/local-history-view.cjs');
   for (const format of ['messages', 'events']) {

@@ -143,11 +143,12 @@ function createTurnQueue(now, onCompleted) {
         queueId: item.id, status, reason, executor: item.options.executor || 'native', at: clock() });
       while (taskTurns.size > 100) taskTurns.delete(taskTurns.keys().next().value);
     };
-    let result;
+    let result, enteredSend = false;
     try {
       if (typeof item.options.beforeTurn === 'function') await item.options.beforeTurn({ modelName: item.options.modelName });
       record('running');
       try {
+        enteredSend = true;
         result = await send();
       } catch (error) {
         if (!item.stopRequested) throw error;
@@ -189,6 +190,7 @@ function createTurnQueue(now, onCompleted) {
       }
     } catch (error) {
       result = { ok: false, reason: String(error && error.message || error),
+        ...(!enteredSend ? { notSent: true } : {}),
         ...require('../../core/token-quota').fields(error) };
       record('failed', result.reason);
       if (pauseRevision === startingPauseRevision) {

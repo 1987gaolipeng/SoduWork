@@ -121,11 +121,11 @@ if (typeof electron === 'string') {
         ...['shots/menu.png', 'shots/fight.png', 'other/lost.png', 'old/ko.png', 'old/ko.png'].map((relative, i) =>
           ({ artifactId: 's' + i, relative, name: relative.split('/').pop(), primary: false, processEvidence: true }))
       ];
-      window.paintHistory = (files, urls) => {
+      window.paintHistory = (files, urls, historyImagesLoading = false) => {
         const md = '<div class="nmd"><p>Open <code>index.html</code></p><pre><code class="language-soduwork-media">' +
           JSON.stringify({ type: 'gallery', items: urls.map(url => ({ url })) }) + '</code></pre></div>';
         list.innerHTML = ChatOutputLinks.decorate('<div class="nmsg ai" data-delivery-final="true">' +
-          ChatMedia.prepare(md, 'history') + '</div>', files, 'history', { localReplica: true, status: 'idle' });
+          ChatMedia.prepare(md, 'history') + '</div>', files, 'history', { localReplica: true, status: 'idle', historyImagesLoading });
       };
       window.historyReads = [];
       paintHistory(historyFiles, ['shots/menu.png', './shots/fight.png', 'shots/lost.png', 'old/ko.png']);
@@ -143,7 +143,11 @@ if (typeof electron === 'string') {
     assert.equal(await run('list.querySelectorAll("[data-delivery-retry],[data-delivery-reveal],[data-delivery-archive]").length'), 0);
     assert.deepEqual(await run(`[...list.querySelectorAll('.nmd [role="status"]')].map(n => n.textContent).filter(Boolean)`),
       ['图片暂时无法预览 · shots/lost.png', '图片暂时无法预览 · old/ko.png']);
+    await run(`paintHistory([], ['shots/lost.png'], true); void 0;`);
+    assert.equal(await run('list.querySelector(".nmd [role=status]").textContent'), '正在读取图片… · shots/lost.png');
+    const loadingMedia = await run('list.querySelector("[data-chat-media]").dataset.chatMedia');
     await run(`paintHistory([], ['shots/lost.png']); void 0;`);
+    assert.notEqual(await run('list.querySelector("[data-chat-media]").dataset.chatMedia'), loadingMedia);
     assert.equal(await run('list.querySelector(".nmd [role=status]").textContent'), '图片暂时无法预览 · shots/lost.png');
     assert.equal(await run('list.querySelectorAll("button,img,a").length'), 0);
     await run(`paintHistory(historyFiles, ['shots/menu.png', '../shots/fight.png']); void 0;`);

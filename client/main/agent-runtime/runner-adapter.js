@@ -82,6 +82,8 @@ function _uuidV5(namespace, name) {
     hex.slice(16, 20), hex.slice(20)].join('-');
 }
 
+const runnerRefForDispatch = dispatchId => _uuidV5(EXECUTION_NAMESPACE, dispatchId);
+
 function _legacyOptions(request) {
   const native = request && request.native || {};
   return native.runner && native.runner.openOptions ||
@@ -309,17 +311,24 @@ function _snapshot(state) {
   const validating = Boolean((state.pluginGenerationActive || state.pluginGenerationPreparing) &&
     !state.goalPaused && !state.cancelRequested && (state.status === 'idle' ||
       state.pluginGenerationPreparing && state.status === 'aborted'));
-  const waitingForStart = (state.status === 'streaming' || state.status === 'queued') &&
+  // A host-side quota, model or plugin check can outlive the view that sent
+  // this turn. Its queue item owns the wait even before the first native RPC.
+  const preparingTurn = turn && !turn.options.controlled && !turn.nativeSubmissionStarted &&
+    !turn.stopRequested && !state.cancelRequested && !state.goalPaused;
+  const waitingForStart = Boolean(preparingTurn) || (state.status === 'streaming' || state.status === 'queued') &&
     (state.status === 'queued' || state.executionStartedAt === 0);
-  const executing = state.status === 'streaming' && !waitingForStart || validating;
+  const executing = !waitingForStart && (state.status === 'streaming' || validating);
   const running = executing || Boolean(state.pendingPermissions?.length);
   const occupied = running || waitingForStart;
+  const stoppingNative = state.manualStopRequested && (state.turnSubmissionPending || state.stopPending || state.stopAwaitingTerminal);
+  const statusText = stoppingNative && state.statusText === '已停止' ? '正在停止…' : state.statusText;
   const now = Date.now();
-  const executionStart = state.executionStartedAt;
+  const executionStart = preparingTurn ? 0 : state.executionStartedAt;
+  const submittedAt = preparingTurn ? turn.at : state.submittedAt;
   const elapsedStart = executionStart === null ? state.startedAt : executionStart;
   const elapsed = elapsedStart ? Math.max(0, (state.turnEndedAt || now) - elapsedStart) : 0;
-  const queueWaitMs = state.submittedAt && executionStart !== null
-    ? Math.max(0, (executionStart || state.turnEndedAt || now) - state.submittedAt) : null;
+  const queueEnd = preparingTurn ? now : executionStart || state.turnEndedAt || now;
+  const queueWaitMs = submittedAt && executionStart !== null ? Math.max(0, queueEnd - submittedAt) : null;
   const active = state.tools.find((tool) => tool.state === 'running') || null;
   const latestProgressAt = Math.max(
     Number(state.lastActivityAt || elapsedStart || now),
@@ -340,7 +349,7 @@ function _snapshot(state) {
     ...(state.thinking ? { thinking: { ...state.thinking, levels: state.thinking.levels.slice() } } : {}),
     ...(state.modelSelection ? { modelSelection: state.modelSelection.view() } : {}),
     ...(state.taskBindings ? state.taskBindings.view() : {}),
-    statusText: controlledView?.statusText ?? (validating ? '\u6b63\u5728\u6574\u7406\u672c\u8f6e\u6210\u679c\u2026' : state.statusText),
+    statusText: controlledView?.statusText ?? (validating ? '\u6b63\u5728\u6574\u7406\u672c\u8f6e\u6210\u679c\u2026' : statusText),
     messages: state.messages.map((row) => ({ ...row,
       attachments: attachmentContract.publicFiles(row.attachments),
       blocks: Array.isArray(row.blocks) ? row.blocks.map((block) => ({ ...block })) : row.blocks })),
@@ -382,16 +391,17 @@ function _snapshot(state) {
       visible: state.goalVisible,
       active: occupied,
       stopped: state.status === 'aborted' && !state.goalPaused,
+      manualStopPending: state.manualStopRequested,
       running,
       step: state.taskGoal?.steps ?? state.step,
       maxSteps: state.taskGoal?.maxSteps ?? Number(state.maxSteps || 0),
       elapsedMs: state.taskGoal?.elapsedMs ?? elapsed,
       ...(state.taskGoal ? { elapsedObservedAt: state.taskGoalElapsedAt || null } : {}),
       executionStartedAt: executionStart,
-      submittedAt: state.submittedAt || null,
+      submittedAt: submittedAt || null,
       waitingForStart,
       queueWaitMs,
-      startupWaitSince: state.startupWaitSince || null,
+      startupWaitSince: (preparingTurn ? turn.at : state.startupWaitSince) || null,
       budgetMs: state.taskGoal?.budgetMs ?? Math.max(0, Number(state.budgetMinutes || 0) * 60000),
       paused: state.goalPaused,
       limitRequest: state.goalLimit ? { ...state.goalLimit,
@@ -402,7 +412,7 @@ function _snapshot(state) {
         phase: goalPhase === 'working' ? 'implementing' : goalPhase,
         reason: state.taskGoal.reason,
       } } : {}),
-      reason: state.statusText,
+      reason: statusText,
       queuePosition: Number(state.queuePosition || 0),
       queueClass: String(state.queueClass || ''),
       longRunning: Boolean(executing && active &&
@@ -474,7 +484,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
   const identity = opts.identity || request.identity;
   const alias = String(opts.ref || 'chat-' + Date.now().toString(36));
   const dispatchId = String(opts.nativeDispatchId || 'chat:' + alias + ':' + adapterId);
-  const predictedRef = _uuidV5(EXECUTION_NAMESPACE, dispatchId);
+  const predictedRef = runnerRefForDispatch(dispatchId);
   const resumedRef = String(opts.resumePath || '');
   const runnerRef = resumedRef || predictedRef;
   const resumeNative = Boolean(resumedRef && opts.nativeSessionStarted !== false);
@@ -757,7 +767,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
     if (state.status === 'idle' && turnQueue.size()) queueMicrotask(drainTurns);
   }
 
-  function fail(reason, preserveQueue = false, retrySafe = false) {
+  function fail(reason, preserveQueue = false, outcome = {}) {
     messageStream.finish();
     state.turnEndedAt = Date.now();
     state.status = 'unreachable';
@@ -768,7 +778,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
       turnQueue.pause(RECOVERY_PAUSE_REASON);
     }
     emit('failed', { reason: state.statusText });
-    const result = { ok: false, reason: state.statusText, ...(retrySafe ? { retrySafe: true } : {}) };
+    const result = { ok: false, reason: state.statusText, ...outcome };
     void finishFileJournal();
     settle(result);
     if (!preserveQueue && !state.queueImmediate?.blocked()) turnQueue.clear(result);
@@ -965,7 +975,11 @@ async function createRunnerHandle(request, defaults, initialSession) {
       state.terminalConfirmed = false;
       if (!state.stopPending) state.stopSent = false;
     }
-    if (state.pluginGenerationPreparing || state.preparingPlugins || !state.started || !state.dispatchReady || state.stopSent || state.stopPending) return false;
+    // A follow-up shares the previous turn's ref. Stopping by ref before its
+    // admission is confirmed can stop the old turn and leave the new one running.
+    if (state.turnSubmissionPending || state.stopAwaitingTerminal && state.unconfirmedAdmissionKey ||
+        state.pluginGenerationPreparing || state.preparingPlugins || !state.started ||
+        !state.dispatchReady || state.stopSent || state.stopPending) return false;
     state.stopSent = true;
     state.stopPending = true;
     if (state.stopAwaitingTerminal) state.recoveryRequired = true;
@@ -1043,6 +1057,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
   // UI's monotonic turn clock to an earlier user turn before replay catches up.
   let historyItems = [], historySince = null, submissionGeneration = 0, submissionFailed = false;
   let observationCancellation = 0, recoveryCheck = null, pollFinished = null, stopRequest = null;
+  let sameDispatchConnection = null;
   let skillSelectionFailure = null;
   function invalidateObservation() {
     submissionGeneration++;
@@ -1051,6 +1066,11 @@ async function createRunnerHandle(request, defaults, initialSession) {
     return submissionGeneration;
   }
   function beginSubmission() {
+    const turn = turnQueue.active();
+    if (turn) {
+      turn.nativeSubmissionStarted = true;
+      if (turn.runnerUserMessage) delete turn.runnerUserMessage.runnerPreparing;
+    }
     // A stopped snapshot belongs to the old native turn until this admission
     // is acknowledged. Invalidate both its refresh timer and in-flight reads.
     submissionFailed = false;
@@ -1099,14 +1119,32 @@ async function createRunnerHandle(request, defaults, initialSession) {
     try {
       const firstResume = state.initialSession;
       state.initialSession = null;
+      const verifyAbsent = stopOnly && state.manualStopRequested && !state.dispatchReady &&
+        !state.stopPending && !state.pendingTaskGoalControl && sameDispatchConnection?.();
       const reply = firstResume || await runtime.rpc('job.session', {
         ref: state.runnerRef, since: historySince ?? state.seq, limit: 500,
+        ...(verifyAbsent ? { historyRead: true } : {}),
       }, 15000);
       if (unavailable() || stalePoll()) return;
       const data = reply && reply.data || {};
       if (typeof data.activeExecutionSelection?.modelName === 'string') state.lastExecutionModelId = data.activeExecutionSelection.modelName;
       if (typeof data.activeExecutionSelection?.reasoningEffort === 'string') state.lastExecutionReasoningEffort = data.activeExecutionSelection.reasoningEffort;
       if (!reply || reply.ok === false || data.ok === false) {
+        if (verifyAbsent) {
+          const admission = require('./runner-dispatch-absence.cjs');
+          if (admission.missingArchive(reply, state.runnerRef) &&
+              await admission.confirmedAbsent(runtime, state.runnerRef, sameDispatchConnection)) {
+            if (unavailable() || stalePoll() || !sameDispatchConnection?.()) return;
+            state.started = false;
+            state.recoveryRequired = false;
+            state.terminalConfirmed = true;
+            state.unconfirmedAdmissionKey = '';
+            submissionFailed = false;
+            sameDispatchConnection = null;
+            releaseManualStop();
+            return;
+          }
+        }
         throw new Error(String(reply && reply.error || data.error || '读不到 ' + displayName + ' 会话'));
       }
       if (state.recoveryRequired && !recoveryReceipt(data) || data.ref && String(data.ref) !== state.runnerRef)
@@ -1141,8 +1179,16 @@ async function createRunnerHandle(request, defaults, initialSession) {
       // A running admission can still be preparing the native process. Only
       // the executor's timestamp starts model execution and its visible clock.
       state.executionStartedAt = _executionTime(data.executionStartedAt) ?? (data.status === 'queued' ? 0 : null);
+      const acceptedAt = _executionTime(data.queueAcceptedAt);
+      if (acceptedAt) state.submittedAt = acceptedAt;
       if (data.status === 'queued') state.startupWaitSince = 0;
-      else if (state.executionStartedAt === 0) state.startupWaitSince ||= Date.now();
+      else if (state.executionStartedAt === 0 && data.status === 'running') {
+        // Admission timestamps belong to the current operation. Old Runner
+        // histories may also carry a firstStarted from a previous round.
+        state.startupWaitSince = _executionTime(data.startupWaitSince) ||
+          _executionTime(data.started) || state.startupWaitSince ||
+          (state.status === 'queued' ? Date.now() : 0);
+      }
       if (state.executionStartedAt > 0) void turnQueue.markStarted();
       if (data.authorizationRequired && !readOnly) {
         const authorization = await runtime.rpc('job.authorize', {
@@ -1368,7 +1414,12 @@ async function createRunnerHandle(request, defaults, initialSession) {
     return { ok: false, recovering: true, reason: '原会话执行状态尚未确认，正在核实执行状态…', snapshot: _snapshot(state) };
   }
 
-  function appendUser(text, attachments, plugins, sentAt, submissionId) {
+  function discardPreparingUser(row) {
+    if (!row?.runnerPreparing) return;
+    const index = state.messages.indexOf(row);
+    if (index >= 0) state.messages.splice(index, 1);
+  }
+  function appendUser(text, attachments, plugins, sentAt, submissionId, preparing = true) {
     const badges = publicPluginBadges(plugins);
     if (badges.length) state.activePluginIds = _pluginIds(badges);
     const active = turnQueue.active();
@@ -1382,12 +1433,13 @@ async function createRunnerHandle(request, defaults, initialSession) {
     const row = { role: 'user', text: redact(text), sentAt: messageTime.epoch(sentAt) || Date.now(),
       ...(id ? { submissionId: id } : {}),
       attachments: Array.isArray(attachments) ? attachments : [], plugins: badges,
-      runnerPersisted: false };
+      ...(preparing ? { runnerPreparing: true } : {}), runnerPersisted: false };
     state.messages.push(row);
     if (active) active.runnerUserMessage = row;
   }
 
   function dispatch(text, attachments, turnOptions) {
+    sameDispatchConnection = null;
     const generation = beginSubmission();
     const turnPolicy = state.nextAccessPolicy || state.accessPolicy;
     const next = turnOptions || {};
@@ -1447,6 +1499,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
         skills: next[TURN_SKILLS] || _skillRows(state.selectedSkills),
         requiredAgentCapabilities: state.capabilityIds,
         conversationUserText: text, conversationSentAt: messageTime.epoch(next.sentAt),
+        ...(next.submissionId ? { conversationSubmissionId: next.submissionId } : {}),
         conversationPlugins: publicPluginBadges(next.plugins),
         agentExecution: state.agentExecution,
       },
@@ -1456,15 +1509,17 @@ async function createRunnerHandle(request, defaults, initialSession) {
       state.turnSubmissionPending = false;
       const data = reply && reply.data || {};
       if (!reply || reply.ok === false || !data.ref) {
+        const error = new Error(String(reply && reply.error || displayName + ' 没有成功启动'));
         // An explicit refusal before admission has no native session to resume.
         // A timeout or an uncertain/ref-bearing receipt must remain unresolved.
         if (reply?.ok === false && !reply.uncertain && !data.uncertain && !data.ref) {
+          error.notSent = true;
           state.started = false;
           state.recoveryRequired = false;
           state.terminalConfirmed = true;
           state.unconfirmedAdmissionKey = '';
         }
-        throw new Error(String(reply && reply.error || displayName + ' 没有成功启动'));
+        throw error;
       }
       if (String(data.ref) !== state.runnerRef) {
         throw new Error(displayName + ' 返回了不一致的会话标识');
@@ -1496,6 +1551,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
       submissionFailed = true;
       // This local error is returned before a request is written to Runner.
       const notWritten = error?.code === 'RUNNER_NOT_RUNNING';
+      sameDispatchConnection = error?.sameDispatchConnection || null;
       if (notWritten) {
         state.started = false;
         state.recoveryRequired = false;
@@ -1506,8 +1562,10 @@ async function createRunnerHandle(request, defaults, initialSession) {
         if (state.recoveryRequired) state.stopAwaitingTerminal = true;
         else releaseManualStop();
       }
-      else if (!state.cancelRequested && !state.disposed)
-        fail(error && error.message || error, !notWritten || turnQueue.size() > 0, notWritten);
+      else if (!state.cancelRequested && !state.disposed) {
+        const outcome = notWritten ? { notSent: true, retrySafe: true } : { notSent: error?.notSent === true };
+        fail(error && error.message || error, !notWritten || turnQueue.size() > 0, outcome);
+      }
       if (state.recoveryRequired) scheduleRecovery();
     });
     return completion;
@@ -1567,7 +1625,6 @@ async function createRunnerHandle(request, defaults, initialSession) {
       .then((reply) => {
         if (generation !== submissionGeneration) return;
         state.turnSubmissionPending = false;
-        if (state.cancelRequested || state.disposed) return;
         const data = reply && reply.data || {};
         if (!reply || reply.ok === false || data.ok === false) {
           if (reply?.ok === false && !reply.uncertain && !data.uncertain) {
@@ -1585,6 +1642,10 @@ async function createRunnerHandle(request, defaults, initialSession) {
         if (turnPolicy && !data.queued) {
           state.accessPolicy = turnPolicy;
           if (state.nextAccessPolicy === turnPolicy) state.nextAccessPolicy = null;
+        }
+        if (state.cancelRequested || state.disposed) {
+          requestStop();
+          return;
         }
         if (taskContext) taskJournal.append(state.seq, { kind: 'context-sent' });
         state.status = _status(data.state || (data.queued ? 'queued' : 'running'));
@@ -1607,13 +1668,25 @@ async function createRunnerHandle(request, defaults, initialSession) {
           state.terminalConfirmed = true;
           state.unconfirmedAdmissionKey = '';
         }
-        if (!state.cancelRequested && !state.disposed)
-          fail(error && error.message || error, !notWritten || turnQueue.size() > 0, notWritten);
+        if (state.disposed) {
+          // Closing relinquishes observation on this existing native session.
+          // Deliver its requested stop even when the comment receipt was lost.
+          requestStop();
+        } else if (state.pendingTaskGoalControl && !state.recoveryRequired) {
+          // A rejected follow-up leaves the existing native goal to be stopped.
+          requestStop();
+        } else if (state.manualStopRequested) {
+          if (state.recoveryRequired) state.stopAwaitingTerminal = true;
+          else releaseManualStop();
+        } else if (!state.cancelRequested)
+          fail(error && error.message || error, !notWritten || turnQueue.size() > 0,
+            notWritten ? { notSent: true, retrySafe: true } : {});
         if (state.recoveryRequired) scheduleRecovery();
       });
     return completion;
   }
   async function sendWithGenerationGate(send, text, attachments, options, stopRequested = () => false) {
+    const turn = turnQueue.active();
     const revision = (state.nextAccessPolicy || state.accessPolicy)?.revision;
     const cancellation = observationCancellation;
     const owner = handle.deliveryOwner;
@@ -1679,6 +1752,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
       activeFileJournal = null;
       const result = checkFailure(preparationError, true);
       if (!result.ok) {
+        discardPreparingUser(turn?.runnerUserMessage);
         emit('failed', { reason: result.reason });
         return { ...result, snapshot: _snapshot(state) };
       }
@@ -1687,11 +1761,10 @@ async function createRunnerHandle(request, defaults, initialSession) {
       gate?.dispose();
       activeFileJournal = null;
       const result = state.goalPaused ? { ok: true, paused: true } : { ok: true, cancelled: true, manualStop: true };
-      if (state.goalPaused && turnQueue.active()) {
-        const active = turnQueue.active();
-        pausedPreparation = { text: active.text, attachments: active.attachments, options: active.options,
-          user: state.messages.findLast(row => row.role === 'user'), owner, account };
-      }
+      if (state.goalPaused && turn && turnQueue.active() === turn) {
+        pausedPreparation = { text: turn.text, attachments: turn.attachments, options: turn.options,
+          user: turn.runnerUserMessage, owner, account };
+      } else discardPreparingUser(turn?.runnerUserMessage);
       if (state.manualStopRequested) releaseManualStop();
       return { ...result, snapshot: _snapshot(state) };
     }
@@ -1839,6 +1912,10 @@ async function createRunnerHandle(request, defaults, initialSession) {
       }
       return applyAndSend();
     });
+    // beforeTurn and model selection can wait without producing a native
+    // event. Publish the cancellable preparation to the original sender too.
+    if (turnQueue.active() === next && !next.options.controlled && !next.nativeSubmissionStarted)
+      emit('queue-changed');
     Promise.resolve(completion).then(
       (result) => turnQueue.complete(next, result),
       (error) => turnQueue.complete(next, {
@@ -1854,7 +1931,8 @@ async function createRunnerHandle(request, defaults, initialSession) {
           !state.cancelRequested && !['streaming', 'queued'].includes(state.status)) {
         taskGoal.observe(state, state.taskGoal, true);
       }
-      if (state.manualStopRequested && !state.started && !state.preparingPlugins) releaseManualStop();
+      // A cancelled preparation has no native stop receipt to release it.
+      if (state.manualStopRequested && next.stopRequested && !next.nativeSubmissionStarted) releaseManualStop();
       emit('queue-changed');
       if (state.status !== 'streaming' && state.status !== 'queued') queueMicrotask(drainTurns);
     });
@@ -1874,8 +1952,10 @@ async function createRunnerHandle(request, defaults, initialSession) {
       pausedPreparation = null;
       if (!pending) return sendWithGenerationGate(state.started ? continueTurn : dispatch, text, files, options);
       if (pending.owner !== handle.deliveryOwner ||
-          pending.account !== require('../device-auth-request').accountScopeKey(identity))
+          pending.account !== require('../device-auth-request').accountScopeKey(identity)) {
+        discardPreparingUser(pending.user);
         return Promise.resolve({ ok: true, cancelled: true, manualStop: true });
+      }
       // Baseline preparation paused before admission. Re-enter the queue with
       // the original inputs so runtime selection and grants are resolved afresh.
       return handle.submit(pending.text, pending.attachments, {
@@ -1976,7 +2056,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
       taskJournal.append(state.seq, { kind: 'message', role, text, files, taskId, taskOutputKey, ...timing, ...source,
         ...(role === 'user' ? { plugins: badges } : {}) });
       if (role === 'user') {
-        appendUser(text, files, [], timing.sentAt, turnQueue.active()?.options?.submissionId);
+        appendUser(text, files, [], timing.sentAt, turnQueue.active()?.options?.submissionId, false);
         Object.assign(state.messages[state.messages.length - 1], { plugins: badges, taskOutputKey });
         if (taskId) state.messages[state.messages.length - 1].taskId = String(taskId);
       }
@@ -2156,6 +2236,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
     },
 
     cancel() {
+      discardPreparingUser(pausedPreparation?.user);
       pausedPreparation = null;
       observationCancellation++;
       state.queueImmediate.cancel();
@@ -2184,7 +2265,8 @@ async function createRunnerHandle(request, defaults, initialSession) {
       turnQueue.clear({ ok: true, cancelled: true, queued: true, manualStop: true });
       if (state.timer) clearTimeout(state.timer);
       state.timer = null;
-      requestStop();
+      if (!active || active.nativeSubmissionStarted) requestStop();
+      else discardPreparingUser(active.runnerUserMessage);
       messageStream.finish();
       state.turnEndedAt = Date.now();
       state.status = 'aborted';
@@ -2193,7 +2275,9 @@ async function createRunnerHandle(request, defaults, initialSession) {
       emit('cancelled');
       settle({ ok: true, cancelled: true, manualStop: true, snapshot: _snapshot(state) });
       if (state.stopAwaitingTerminal) scheduleRecovery();
-      return { ok: true };
+      return active && !active.nativeSubmissionStarted
+        ? { ok: true, stopped: true, cancelledBeforeDispatch: active.options.submissionId || '' }
+        : { ok: true };
     },
     cancelQueued(id) {
       if (state.queueImmediate.locked(id)) return { ok: false, reason: '这条消息正在引导，请稍候' };
@@ -2220,6 +2304,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
     },
     ...goalControls,
     ...(goalControls.disableGoal ? { disableGoal() {
+      discardPreparingUser(pausedPreparation?.user);
       pausedPreparation = null;
       if (state.goalVisible) observationCancellation++;
       return goalControls.disableGoal();
@@ -2447,19 +2532,14 @@ function createRunnerRuntimeAdapter(options) {
         // dispatched. Verify both the archive and durable admission journal;
         // a timeout, an old Runner or an active admission must remain fenced.
         let probe;
-        try { probe = await runtime.rpc('job.session', { ref: resumePath, since: 0, limit: 1 }, 5000); }
+        try { probe = await runtime.rpc('job.session', { ref: resumePath, since: 0, limit: 1, historyRead: true }, 5000); }
         catch (error) { if (_resumeCredentialError(error)) throw error; }
         const failure = probe?.error || probe?.data?.error;
         if (_resumeCredentialError(failure) && !(probe?.ok && !probe.error && probe.data?.ok !== false &&
             rejectedAccountModel(adapterId, probe.data) !== null)) throw Error(String(failure));
-        if (probe?.ok === true && probe.data?.ok === false && !probe.data?.items?.length) {
-          let proof;
-          try { proof = await runtime.rpc('job.has', { ref: resumePath }, 5000); }
-          catch (_) { /* Missing proof never authorizes a new dispatch. */ }
-          const absent = proof?.ok === true && proof.data?.has === false &&
-            proof.data.inflight === false && proof.data.persisted === false &&
-            proof.data.admissionDurable === true && Boolean(proof.data.bootId);
-          if (absent) {
+        const admission = require('./runner-dispatch-absence.cjs');
+        if (admission.missingArchive(probe, resumePath)) {
+          if (await admission.confirmedAbsent(runtime, resumePath)) {
             const dormantOptions = { ...options, nativeSessionStarted: false };
             const dormantRequest = { ...request, native: { ...request.native,
               runner: { ...request.native?.runner, openOptions: dormantOptions } } };
@@ -2561,5 +2641,6 @@ module.exports = {
   getRunnerSessionDetails,
   _runnerInventory, _dropRunnerInventory,
   _uuidV5,
+  runnerRefForDispatch,
   _skillRows,
 };

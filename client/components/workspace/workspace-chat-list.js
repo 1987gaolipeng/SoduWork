@@ -105,6 +105,33 @@
   let localError = '', accountError = '', nativeRefreshStarted = false;
   let localRefreshTimer = null, localRefreshPending = false, closed = false;
   const historyApi = () => global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
+  function sidebarProjectContext(id) {
+    const project = ctx.sidebarProjects?.projectForChat(id);
+    return project ? { sidebarProjectId: project.id, sidebarProjectName: project.name, projectId: project.businessProjectId || '' } : {};
+  }
+  const firstSends = global.WorkspaceFirstSends?.create({ api: historyApi, owner: accountOwner,
+    repaint() { if (!closed && ctx.root) ctx.renderChats(); },
+    associationState(id) {
+      if (supportsLocalHistory() && !localReady) return 'pending';
+      const record = localRecords.get(canonicalLocalId(id) || id);
+      return record?.archived || record?.deleted || hiddenRow({ id }) ? 'hidden' : 'active';
+    },
+    fileProject: row => ctx.sidebarProjects?.recoverFirstSend(row),
+    openRecord: id => global.WorkspaceHost?.open('create', { firstSendIntentId: id }),
+    openDraft: row => global.WorkspaceHost?.open('create', { firstSendDraft: row }),
+    hasHistory(id) {
+      if (!id || historyOwner !== accountOwner() || hiddenRow({ id })) return false;
+      const local = localRecords.get(canonicalLocalId(id) || id);
+      if (local) return !local.archived && !local.deleted && !hiddenRow(local);
+      return ctx.chatItems.some(row => !row.pending && !row.archived && !row.deleted && !hiddenRow(row) &&
+        (row.id === id || row.historyAliasIds?.includes(id)));
+    },
+    openChat(row) {
+      const opened = global.WorkspaceHost?.open('create', { tab: 'chat', chatId: row.sessionId, chatTitle: row.title || '',
+        ...sidebarProjectContext(row.sessionId) });
+      ctx.setActiveChat(row.sessionId);
+      return opened;
+    } });
   const supportsLocalHistory = () => historyApi()?.localHistorySupported === true;
   const isLocalId = id => localAliases.has(String(id || ''));
   const canonicalLocalId = id => global.WorkspaceSidebarState?.localHistoryId(id) || '';
@@ -239,6 +266,7 @@
     const next = accountOwner();
     if (next === historyOwner) return false;
     historyOwner = next;
+    firstSends?.clear();
     accountDisplayLinks.clear();
     cloudCacheKeys.clear();
     historyEpoch++;
@@ -266,6 +294,7 @@
   global.addEventListener?.('soduwork-data-scope-changed', refreshAccount);
   global.addEventListener?.('beforeunload', () => {
     closed = true; localRefreshPending = false;
+    firstSends?.clear();
     if (localRefreshTimer !== null) global.clearTimeout(localRefreshTimer);
     localRefreshTimer = null;
   });
@@ -665,12 +694,12 @@ function _newChatRow() {
     bindTitleScroll(row, title, titleText);
     b.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (b.dataset.firstSend) { firstSends?.show(b.dataset.firstSend); return; }
       const id = b.dataset.chatId || '';
       if (id && global.WorkspaceHost) {
-        const project = ctx.sidebarProjects?.projectForChat(b.dataset.sidebarChatId || id);
         global.WorkspaceHost.open('create', {
           tab: 'chat', chatId: id, chatTitle: title.textContent || '', taskSession: b.dataset.taskSession === '1',
-          ...(project ? { sidebarProjectId: project.id, sidebarProjectName: project.name, projectId: project.businessProjectId || '' } : {}),
+          ...sidebarProjectContext(b.dataset.sidebarChatId || id),
         });
         ctx.setActiveChat(id);
         return;
@@ -786,11 +815,12 @@ function _paintChatLocale(button) {
     if (!copy) return;
     const label = copy.title || ctx.wsT('chat.untitled', '未命名对话');
     const missing = copy.historyContentState === 'missing';
-    button.dataset.historyContent = missing ? 'missing' : '';
-    button.dataset.historyLabel = missing ? historyText('workspace.history.bodyMissing', '正文缺失') : '';
-    const status = missing ? historyText('workspace.history.metadataOnly', '仅剩标题，正文缺失')
+    const firstStatus = copy.firstSend && global.WorkspaceFirstSends.status(copy.firstSend);
+    button.dataset.historyContent = firstStatus ? 'first-send' : missing ? 'missing' : '';
+    button.dataset.historyLabel = firstStatus || (missing ? historyText('workspace.history.bodyMissing', '正文缺失') : '');
+    const status = firstStatus || (missing ? historyText('workspace.history.metadataOnly', '仅剩标题，正文缺失')
       : copy.offlineCloudCache ? historyText('workspace.history.cloudCache', '本地缓存（只读）')
-      : ctx.wsT('chat.state.' + copy.state, ctx.CHAT_STATE[copy.state]);
+      : ctx.wsT('chat.state.' + copy.state, ctx.CHAT_STATE[copy.state]));
     // The title is user data. Translate only the surrounding status, and keep
     // the generic DOM adapter from interpreting the combined attribute text.
     button.setAttribute('data-user-attributes', 'title aria-label');
@@ -807,7 +837,8 @@ function _paintChatLocale(button) {
 
 function _paintChatRow(row, c, isPinned) {
     const id = String(c.id || '');
-    const selected = ctx.active === 'create' && (selectedChat(id) || selectedCloudCache(id));
+    const selected = ctx.active === 'create' && (c.firstSend ? firstSends?.activeId === c.firstSend.intentId || selectedChat(c.firstSend.sessionId) :
+      selectedChat(id) || selectedCloudCache(id));
     const state = ctx.chatState(c);
     const label = c.title || '未命名对话';
     const b = row.querySelector('.ws-chat');
@@ -822,12 +853,13 @@ function _paintChatRow(row, c, isPinned) {
     row.dataset.chatKey = ctx._chatUiKey(c);
     b.className = 'ws-task ws-chat is-' + state + (c.pending ? ' is-pending' : '') +
       (selected ? ' is-active' : '');
-    b.dataset.chatId = id; b.disabled = !id;
+    b.dataset.chatId = id; b.dataset.firstSend = c.firstSend?.intentId || ''; b.disabled = !id && !c.firstSend;
+    b.dataset.firstSendSession = c.firstSend?.sessionId || '';
     b.dataset.sidebarChatId = c.displaySlotId || id;
     b.setAttribute('aria-current', selected ? 'page' : 'false');
     const { ids: harnesses, draft } = displayedHarnesses(c);
     const runtimeName = harnesses.map(id => harnessNames()[id]).join('、');
-    b._localeChat = { title: c.title, state, harnesses: runtimeName,
+    b._localeChat = { title: c.title, state, harnesses: runtimeName, firstSend: c.firstSend,
       draftHarness: draft, offlineCloudCache: c.offlineCloudCache, historyContentState: c.historyContentState };
     _paintChatLocale(b);
     dot.className = 'st-chat st-chat-' + state;
@@ -846,9 +878,11 @@ function _paintChatRow(row, c, isPinned) {
     runtime.setAttribute('aria-hidden', 'true');
     runtime.setAttribute('data-user-attributes', 'title');
     pin.title = isPinned ? '取消置顶' : '置顶聊天';
+    pin.hidden = Boolean(c.firstSend);
     pin.setAttribute('aria-label', pin.title);
     pin.setAttribute('aria-pressed', String(isPinned));
     if (more) {
+      more.hidden = Boolean(c.firstSend);
       more.title = '会话操作';
       more.setAttribute('aria-label', '会话操作：' + label);
       more.setAttribute('aria-expanded', String(menuOpen));
@@ -970,6 +1004,16 @@ function renderChats() {
     const visible = items => items.filter(item => !hiddenRow(item)).flatMap(item => displayed.has(item.id) ? [displayed.get(item.id)] : []);
     const pinned = visible(groups ? groups.pinned : list.filter((item) => pins.has(String(item.id || ''))));
     const recent = visible(groups ? groups.recent : list.filter((item) => !pins.has(String(item.id || ''))));
+    const pending = firstSends?.recent(list, id => hiddenRow({ id }) || localRecords.get(id)?.archived || localRecords.get(id)?.deleted) || [];
+    for (const item of pending) {
+      const native = item.firstSend.sessionId;
+      const duplicate = native ? recent.findIndex(row => row.id === native || row.historyAliasIds?.includes(native)) : -1;
+      if (duplicate >= 0) recent[duplicate] = item;
+      else {
+        const index = recent.findIndex(row => global.WorkspaceChatHistory._chatAt(row) < item.at);
+        recent.splice(index < 0 ? recent.length : index, 0, item);
+      }
+    }
     const pinnedBox = ctx.root.querySelector('#wsPinnedBox');
     pinnedBox.hidden = !pinned.length;
     pinnedBox.classList.toggle('is-empty', !pinned.length);
@@ -1135,6 +1179,7 @@ function refreshAccountHistory() {
       localReady = true; localError = got.refreshError ? 'refresh' : '';
       const remote = ctx.chatItems.filter(row => !isLocalId(row.id));
       ctx.setChats([...localRows, ...remote]);
+      if (catalog.revision !== previousRevision) void firstSends?.refresh();
       if (catalog.revision !== previousRevision && !ctx.historyLoad) void refreshAccountHistory();
       return true;
     }).catch(() => { if (!current()) return false; localError = 'unavailable'; ctx.chatsLoading = false; ctx.renderChats(); return false; })
@@ -1143,6 +1188,8 @@ function refreshAccountHistory() {
     return job;
   }
   function refreshConversationHistory() {
+    syncHistoryOwner();
+    void firstSends?.refresh();
     const local = supportsLocalHistory() ? refreshLocalHistory() : null;
     if (local && !nativeRefreshStarted) {
       nativeRefreshStarted = true;
@@ -1200,14 +1247,15 @@ function refreshAccountHistory() {
     ctx.activeChatId = next;
     global.WorkspaceNavigation?.chatChanged(next);
     for (const button of ctx.root?.querySelectorAll('.ws-chat') || []) {
-      const selected = ctx.active === 'create' && (selectedChat(button.dataset.chatId, next) || selectedCloudCache(button.dataset.chatId, next));
+      const selected = ctx.active === 'create' && (button.dataset.firstSend ? firstSends?.activeId === button.dataset.firstSend || selectedChat(button.dataset.firstSendSession, next) :
+        selectedChat(button.dataset.chatId, next) || selectedCloudCache(button.dataset.chatId, next));
       if (button.classList.contains('is-active') === selected) continue;
       button.classList.toggle('is-active', selected);
       button.setAttribute('aria-current', selected ? 'page' : 'false');
     }
   }
 
-  return { setChats, upsertChat, removeChat, setActiveChat, pinStorageKey, legacyPinnedIds, pinnedIds, togglePinned, forgetPinned, deleteHistoryChat, archiveHistoryChat, rememberChatName, updateChatState, renameChat, closeChatMenu, openChatRename, chatMenuItem, _newChatRow, _paintChatLocale, _paintChatRow, _syncChatList, renderChats, subscribeConversationPresence, refreshConversationHistory, refreshLocalHistory };
+  return { mountFirstSend: (id, host) => firstSends?.mount(id, host), setChats, upsertChat, removeChat, setActiveChat, pinStorageKey, legacyPinnedIds, pinnedIds, togglePinned, forgetPinned, deleteHistoryChat, archiveHistoryChat, rememberChatName, updateChatState, renameChat, closeChatMenu, openChatRename, chatMenuItem, _newChatRow, _paintChatLocale, _paintChatRow, _syncChatList, renderChats, subscribeConversationPresence, refreshConversationHistory, refreshLocalHistory };
   }
   global.WorkspaceChatList = { create };
 })(window);

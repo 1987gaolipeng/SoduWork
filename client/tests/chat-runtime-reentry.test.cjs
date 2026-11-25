@@ -46,7 +46,7 @@ function fixture(runtime = 'opencode') {
   vm.createContext(ctx);
   vm.runInContext(section('  async function _ensure(chatId)', '  async function _ensureOnce(') +
     section('  function _fail(', '  async function refreshHistory') +
-    section('  async function enter(first, chatId, options)', '  function _paintOpening()') +
+    section('  async function enter(', '  function _paintOpening()') +
     section('  function sessionInfo()', '  function hasSession()'), ctx);
   return { ctx, opened, reset, api, applicationChecks };
 }

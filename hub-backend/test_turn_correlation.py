@@ -45,6 +45,15 @@ class RuntimeCorrelationTests(unittest.TestCase):
         self.assertEqual(archived[-1]["admissionKey"], "comment:desktop-turn")
         self.assertEqual(archived[-1]["round"], 3)
 
+    def test_only_a_local_dispatch_can_record_a_bounded_desktop_submission(self):
+        context = {"conversationSubmissionId": "first-runner-test"}
+        self.assertEqual(turn_correlation.desktop_submission({"_eventDestination": "local"}, context),
+                         {"submissionId": "first-runner-test"})
+        self.assertEqual(turn_correlation.desktop_submission({"_eventDestination": "hub"}, context), {})
+        for invalid in [None, "", "one\ntwo", "x" * 65, 42]:
+            self.assertEqual(turn_correlation.desktop_submission(
+                {"_eventDestination": "local"}, {"conversationSubmissionId": invalid}), {})
+
     def test_heartbeat_pagination_keeps_old_turn_identity_and_late_terminal_marker(self):
         for i in range(305):
             local_base._record_event(self.ref, {"kind":"say", "text":str(i)})

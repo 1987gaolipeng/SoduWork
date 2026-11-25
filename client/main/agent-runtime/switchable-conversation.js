@@ -46,6 +46,7 @@ function implicitDeviceModel(identity, agentId) {
 function descriptor(raw, history = raw.historyRow?.()) {
   const nativeDispatchId = history?.nativeDispatchId;
   return { sessionId: raw.sessionId, adapterId: raw.adapterId, ref: raw.ref,
+    ...(typeof history?.nativeSessionStarted === 'boolean' ? { started: history.nativeSessionStarted } : {}),
     ...(nativeDispatchId ? { nativeDispatchId } : {}),
     path: raw.resumeLocation?.() || (raw.adapterId !== 'pi' ? raw.sessionId : '') };
 }
@@ -82,7 +83,8 @@ function resumeOptions(options) {
         cwd: row.cwd, attachments: row.deviceHistoryContext?.attachments || row.historyRecovery?.attachments || [] })
       : segments.brief(row.prefix)] } };
 }
-function create({ raw: initial, options, restored, openNative, disposeNative, probe, catalog, changed }) {
+function create({ raw: initial, options, restored, openNative, disposeNative, probe, catalog, changed,
+  verifyRecoveredTurn, checkpointRetiringRunner }) {
   let raw = initial, record = restored, switching = false, closed = false, unsub = null, switchingCompletion = null, pendingModel = null;
   let prefix = restored?.prefix || { messages: [], tools: [] }, persistError = '';
   const listeners = new Set(), overlays = Object.create(null), methods = new Map();
@@ -162,14 +164,41 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       // Routine process projections deliberately defer large tool bodies.
       // Freeze the complete old segment before it is disposed, so historical
       // tool details and a later reopen retain the original receipts.
-      if (typeof raw.snapshotAsync === 'function') {
-        before = snapshot(await raw.snapshotAsync());
+      const archive = raw.adapterId === 'pi' && before.archiveWindow;
+      if (archive || typeof raw.snapshotAsync === 'function') {
+        const options = archive ? { completeHistory: true } : undefined;
+        const full = typeof raw.snapshotAsync === 'function' ? await raw.snapshotAsync(options) : raw.snapshot(options);
+        if (archive && full.archiveWindow) throw Error('未能取得完整的会话历史，请重新打开后再切换 Agent');
+        before = snapshot(full);
         if (closed || busy(raw)) throw Error(closed ? '会话已关闭，本次切换已取消' : BUSY);
         if (goalSwitchBlocked(before)) throw Error('请先结束目标模式，再切换 Agent');
       }
       await selection.validate?.();
       const identity = switchIdentity(selection);
       if (persistError) { await segments.save(options.app, record); persistError = ''; }
+      let recovery = record?.historyRecovery;
+      if (recovery?.retiredRunnerSources?.length && raw.adapterId !== 'pi') {
+        await segments.flush(options.app, publicId);
+        const sources = await checkpointRetiringRunner?.(publicId, raw.sessionId);
+        if (!sources?.length) throw Error('无法核验当前执行段的原始记录，请稍后再切换 Agent');
+        recovery = { ...recovery, retiredRunnerSources: sources };
+      }
+      if (recovery?.transcriptTail) {
+        const visible = require('../conversation/conversation-transcript.cjs').conversationTranscriptMessages;
+        const index = recovery.transcriptTail.prefixLength;
+        const displayed = visible(before.messages)[index];
+        if (displayed) {
+          // Once retired, this segment will be read from the frozen display.
+          // Commit the user's actual native receipt while the source is active.
+          await segments.flush(options.app, publicId);
+          const confirmed = await verifyRecoveredTurn?.(publicId);
+          const signed = visible(confirmed?.prefix?.messages)[index];
+          if (displayed.role !== 'user' || signed?.role !== 'user' || displayed.text !== signed.text)
+            throw Error('这条消息的执行回执尚未确认，请稍后再切换 Agent');
+          const { transcriptTail, ...settled } = recovery;
+          recovery = settled;
+        }
+      }
       const ready = await probe(options.app, agentId);
       if (!ready?.ok) throw Error(ready?.reason || '此 Agent 尚不可用');
       const policy = before.nextAccessPolicy || before.accessPolicy;
@@ -220,7 +249,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       const nextRecord = { version: 1, id: publicId, owner: record?.deviceShared ? record.owner : owner,
         ...(record?.deviceShared ? { deviceShared: true, executionOwner: owner } : {}),
         ...(record?.deviceHistoryComplete ? { deviceHistoryComplete: true, usedHarnesses: record.usedHarnesses, deviceTransferId: record.deviceTransferId || '',
-          deviceHistoryContext: record.deviceHistoryContext, historyRecovery: record.historyRecovery } : {}),
+          deviceHistoryContext: record.deviceHistoryContext, historyRecovery: recovery } : {}),
         title: segments.title(record) || old.historyRow?.()?.title || '', cwd: old.cwd, originAdapter,
         at: Date.now(), prefix: historical, artifactHistory,
         accessPolicy: policy, readOnly: options.readOnly,
@@ -259,6 +288,36 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
     const job = selectAgent(...args).finally(() => { if (switchingCompletion === job) switchingCompletion = null; });
     switchingCompletion = job; return job;
   }
+  function segmentWindow(value) {
+    const end = windowed.requestedEnd(value);
+    return { ...windowed.limits(value), ...(end === null ? {} : { messageEnd: Math.max(0, end - prefix.messages.length) }) };
+  }
+  function combinedArchivePage(value, nativePage) {
+    const page = nativeSource.snapshot(nativePage, raw.adapterId), nativeHistory = page.history;
+    const { messageLimit, toolLimit } = windowed.limits(value), offset = prefix.messages.length;
+    const total = offset + nativeHistory.totalMessages, end = Math.min(windowed.requestedEnd(value) ?? total, total);
+    const prefixEnd = Math.min(offset, end);
+    // A synchronous Pi process projection may contain only its latest 240 raw
+    // rows. Never put frozen prefix entries on the other side of an unread gap.
+    const prefixCount = nativeHistory.messageStart === 0 ? prefixEnd - Math.max(0, end - messageLimit) : 0;
+    const earlier = prefixCount > 0 ? windowed.limitSnapshot(prefix, {
+      messageEnd: prefixEnd, messageLimit: prefixCount, toolLimit,
+    }) : null;
+    const leading = earlier?.messages.length || 0;
+    const messages = [...(earlier?.messages || []), ...page.messages];
+    const tools = windowed.selectTools([...(earlier?.tools || []),
+      ...page.tools.map(tool => ({ ...tool, after: leading + tool.after }))], 0, toolLimit);
+    const indices = [...(earlier?.history.messageIndices || []), ...nativeHistory.messageIndices.map(index => offset + index)];
+    const start = earlier?.history.messageStart ?? Math.min(end, offset + nativeHistory.messageStart);
+    const totalTools = prefix.tools.length + nativeHistory.totalTools;
+    return { ...page, runtimeSwitching: switching, ...(record.historyRecovery ? { historyRecovery: record.historyRecovery } : {}),
+      messages, tools, turnMetrics: [...(earlier?.turnMetrics || []), ...(page.turnMetrics || []).map(turn => ({
+        ...turn, fromMessage: offset + turn.fromMessage, toMessage: offset + turn.toMessage }))],
+      toolPreparations: (page.toolPreparations || []).map(row => ({ ...row, after: leading + row.after })),
+      history: { ...nativeHistory, ...(end < offset ? { nextIsUser: prefix.messages[end]?.role === 'user' } : {}),
+        messageLimit, messageStart: start, messageEnd: end, messageIndices: indices, totalMessages: total, totalTools,
+        loadedMessages: messages.length, loadedTools: tools.length, truncated: start > 0 || end < total || tools.length < totalTools } };
+  }
   const own = {
     selectAgent: beginSwitch, snapshot,
     toolDetail(id) {
@@ -268,8 +327,20 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       const fallback = value => value || raw.snapshot().tools?.find(tool => String(tool.id) === String(id)) || null;
       return detail?.then ? Promise.resolve(detail).then(fallback) : fallback(detail);
     },
-    uiSnapshot: value => record ? windowed.limitSnapshot(snapshot(), value) :
-      { ...nativeSource.snapshot(raw.uiSnapshot?.(value) || windowed.limitSnapshot(snapshot(), value), raw.adapterId), runtimeSwitching: switching },
+    uiSnapshot(value) {
+      if (!record) return { ...nativeSource.snapshot(raw.uiSnapshot?.(value) || windowed.limitSnapshot(snapshot(), value), raw.adapterId), runtimeSwitching: switching };
+      const state = raw.snapshot();
+      if (raw.adapterId === 'pi' && state.archiveWindow && raw.uiSnapshot) return combinedArchivePage(value, raw.uiSnapshot(segmentWindow(value)));
+      return windowed.limitSnapshot(snapshot(state), value);
+    },
+    async readHistoryPage(value) {
+      if (!raw.readHistoryPage || (record && (raw.adapterId !== 'pi' || !raw.snapshot().archiveWindow))) return own.uiSnapshot(value);
+      const owner = raw, request = record ? segmentWindow(value) : value;
+      const page = await owner.readHistoryPage(request);
+      if (closed || raw !== owner || switching) throw Error('执行底座已变化，请重新打开历史');
+      if (record) return combinedArchivePage(value, page);
+      return { ...nativeSource.snapshot(page, owner.adapterId), runtimeSwitching: switching };
+    },
     on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     applyGeneratedTitle(title) {
       generatedTitle = title;
@@ -294,6 +365,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
     get(_target, key) {
       if (key === 'ref') return publicRef;
       if (key === 'sessionId') return publicId;
+      if (key === 'nativeSessionId') return raw.sessionId;
       if (key === 'runtimeOriginAdapter') return originAdapter;
       if (key === 'artifactHistory') return record?.artifactHistory;
       if (key === 'artifactState') return record ? raw.snapshot() : undefined;

@@ -242,7 +242,9 @@ test('switching conversations preserves each unsent composer draft by conversati
   assert.match(chat, /(?:ctx\.)?_restoreConversationDraft\((?:ctx\.)?_draftKey\)/);
   assert.match(chat, /const activeDraftKey = (?:ctx\.)?_ref[\s\S]*activeDraftKey \|\| 'new'/);
   assert.match(chat, /(?:ctx\.)?_draftKey = 'new';/);
-  assert.match(chat, /if \(first\) (?:ctx\.)?_clearConversationDraft\((?:ctx\.)?_draftKey\);/);
+  // Durable ordinary sends consume the draft after main-process admission.
+  // All other entry points retain their existing eager draft cleanup.
+  assert.match(chat, /if \(first && !global\.ChatSessionController\?\.ordinaryFirstSend/);
   // Read the owner module for ordering; dependencies have their own reset().
   const nativeChat = require('node:fs').readFileSync(path.join(root, 'components/panels/panels-chat.js'), 'utf8');
   const resetBody = nativeChat.slice(nativeChat.indexOf('function reset() {'));

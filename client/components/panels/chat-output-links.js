@@ -195,7 +195,9 @@
         recorded.set(file.userMessageIndex, prior === undefined || prior === file.turnId ? file.turnId : '');
       }
     }
-    let turn = '';
+    // A bounded historical page can start halfway through a turn. Only the
+    // indexed user boundary from the host can identify its archived files.
+    let turn = recorded.get(snapshot.history?.leadingUserMessageIndex) || '';
     const turns = (snapshot.messages || []).map((message, index) => {
       if (message?.role === 'user') {
         const absolute = snapshot.history?.messageIndices?.[index] ?? ((snapshot.history?.messageStart || 0) + index);
@@ -320,6 +322,7 @@
     const runningTools = (Array.isArray(s.tools) ? s.tools : []).filter(t => t && t.state === 'running').map(t => Number(t.after) || 0);
     const slim = { ...s, messages: undefined, tools: undefined, notices: undefined, fileChanges: undefined,
       history: s.history ? { messageStart: s.history.messageStart, messageIndices: s.history.messageIndices,
+        leadingUserMessageIndex: s.history.leadingUserMessageIndex,
         truncated: s.history.truncated, totalMessages: s.history.totalMessages } : undefined };
     if (s.execution && typeof s.execution === 'object') slim.execution = { ...s.execution, fileChanges: undefined };
     return JSON.stringify([slim, latestUser, runningTools, messages.flatMap((m, i) => m?.role === 'user'
@@ -367,7 +370,7 @@
     // attachments. Still run the delivery decorator so that URL-only output
     // is visible and clickable in the conversation.
     if (files.length) linkify(root,files,(ref || '') + '\u0000' + filesSig,snapshot.localReplica === true);
-    if (files.length || historyMedia) inlineImages(root,files,ref,snapshot.localReplica === true);
+    if (files.length || historyMedia) inlineImages(root, files, ref, snapshot.localReplica === true, snapshot.historyImagesLoading);
     if (files.length) {
       inlineVideos(root,files,ref);
       pluginDrafts(root,files,ref,snapshot);
@@ -545,7 +548,7 @@
     }
     return { type: value.type, paths };
   }
-  function inlineImages(root, files, ref, historyMedia) {
+  function inlineImages(root, files, ref, historyMedia, historyImagesLoading = false) {
     files = asFiles(files);
     const doc = root.ownerDocument, shown = new Set([...root.querySelectorAll('[data-output-image],[data-delivery-preview]')]
       .map(node => node.dataset.outputImage || node.dataset.deliveryPreview));
@@ -569,24 +572,35 @@
           if (!declaration) return;
           // A basename is not proof that a screenshot belongs to this gallery.
           const entries = declaration.paths.map(relative => {
-            const matches = available.filter(file => file.artifactId && !file.deleted && isImage(file) && file.relative === relative);
-            return matches.length === 1 ? matches[0] : null;
+            const images = available.filter(file => file.artifactId && !file.deleted && isImage(file));
+            const originals = images.filter(file => !file.previewOf && file.relative === relative);
+            const captured = originals.filter(file => file.versionId && file.turnId === message.dataset.deliveryTurn);
+            if (captured.length) return captured.length === 1 ? captured[0] : null;
+            const previews = images.filter(file => file.versionId && file.turnId === message.dataset.deliveryTurn && file.previewOf === relative);
+            if (previews.length) return previews.length === 1 ? previews[0] : null;
+            return originals.length === 1 ? originals[0] : null;
           });
           if (!historyMedia && entries.every(file => !file)) return;
           const group = doc.createElement('div');
           group.className = 'noutput-gallery nmedia-group';
           if (declaration.type === 'gallery' && entries.length > 1) group.classList.add('nmedia-grid');
           group.dataset.chatMedia = JSON.stringify([ref, global.SoduWorkAPI?.taskStorageKey?.('ops'), declaration.paths,
-            entries.map(file => file && [key(file), file.at, file.size])]);
+            entries.map(file => file ? [key(file), file.at, file.size] : historyImagesLoading ? 'loading' : null)]);
           entries.forEach((file, i) => {
             if (file) {
               const preview = declaration.type === 'image' && shown.has(key(file)) ? button(doc, file, file.name) : imageCard(doc, file, ref);
               shown.add(key(file));
               group.append(preview);
+              if (file.previewOf) {
+                const caption = doc.createElement('small');
+                caption.textContent = (global.SoduWorkI18n?.translateText?.('执行时预览') || '执行时预览') + ' · ' + file.name;
+                group.append(caption);
+              }
             } else {
               const missing = doc.createElement('span');
               missing.className = 'noutput-image-missing'; missing.setAttribute('role', 'status');
-              missing.textContent = (global.SoduWorkI18n?.translateText?.('图片暂时无法预览') || '图片暂时无法预览') + ' · ' + declaration.paths[i];
+              const label = historyImagesLoading ? '正在读取图片…' : '图片暂时无法预览';
+              missing.textContent = (global.SoduWorkI18n?.translateText?.(label) || label) + ' · ' + declaration.paths[i];
               group.append(missing);
             }
           });

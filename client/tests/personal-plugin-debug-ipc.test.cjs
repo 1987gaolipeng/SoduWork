@@ -48,6 +48,17 @@ test('IPC is scoped to the owning conversation window, even for read requests', 
   assert.equal(result.ok, false); assert.match(result.reason, /当前打开的对话/);
   assert.equal(f.guard.guard(f.handle), '');
 });
+
+test('the plugin debug IPC cannot dispatch the first turn of a pending history recovery', async t => {
+  const f = setup(t);
+  f.handle.verifyRecoverySend = async () => {};
+  assert.equal((await f.call({ command: 'get' })).ok, true);
+  for (const command of ['start', 'resume']) {
+    const result = await f.call({ ...request(f.plugin), command });
+    assert.equal(result.ok, false); assert.match(result.reason, /桌面普通会话/);
+  }
+  assert.equal(f.submissions.length, 0);
+});
 test('debug creation is idempotent and creates no backend task or second conversation', async t => {
   const f = setup(t);
   const first = await f.call(request(f.plugin));

@@ -6,9 +6,11 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const MAX_BYTES = 128 * 1024 * 1024;
+const EMPTY_JOURNAL = crypto.createHash('sha256').digest('hex');
 const failure = (code, message) => Object.assign(Error(message), { code });
 const stamp = stat => [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(':');
 const { unresolvedTools } = require('./tool-terminal-receipts.cjs');
+const runnerHistory = require('../agent-runtime/runner-dispatch-absence.cjs');
 function distinguishPiCalls(entries) {
   const used = new Set(), declarations = new Set(), current = new Map(), original = new Map();
   let reused = false;
@@ -195,6 +197,7 @@ function matchesLegacyRunner(id, adapterId, snapshot, messages, tools, candidate
 }
 async function runner(runtime, id, adapterId, guard, previousToolReceipts, previousSource, previousSnapshot) {
   const messages = [], tools = [], streams = new Map(), pendingCalls = new Map();
+  const planRows = [], messageCounts = [];
   const candidates = new Map(), localToolReceipts = [];
   const qwen = adapterId === 'qwen';
   const journal = (adapterId === 'codex-harness' || qwen) ? crypto.createHash('sha256') : null;
@@ -207,9 +210,14 @@ async function runner(runtime, id, adapterId, guard, previousToolReceipts, previ
   }
   let after = 0, size = 0, target, localWorkspace;
   while (true) {
-    const reply = await runtime.rpc('job.session', { ref: id, since: after, limit: 200, historyRead: true }, 15000); guard();
-    if (after === 0 && reply?.ok === true && reply.data?.ok === false && reply.data.ref === id &&
-        reply.data.code === 'NATIVE_HISTORY_MISSING' && Array.isArray(reply.data.items) && !reply.data.items.length)
+    let reply;
+    try { reply = await runnerHistory.historyPage(runtime, { ref: id, since: after, limit: 200 }, 15000); }
+    catch (error) {
+      if (error.code === 'RUNNER_HISTORY_BUSY') throw error;
+      throw failure('NATIVE_HISTORY_UNAVAILABLE', '执行底座暂时无法读取完整历史');
+    }
+    guard();
+    if (after === 0 && runnerHistory.missingArchive(reply, id))
       throw failure('NATIVE_HISTORY_MISSING', '本机执行底座已确认原始历史不存在');
     if (!reply?.ok || reply.data?.ok === false || !Array.isArray(reply.data?.items))
       throw failure('NATIVE_HISTORY_UNAVAILABLE', '执行底座暂时无法读取完整历史');
@@ -245,6 +253,13 @@ async function runner(runtime, id, adapterId, guard, previousToolReceipts, previ
       const text = String(item.full ?? item.text ?? '');
       const callId = typeof item.callId === 'string' ? item.callId : '';
       const callKey = callId && JSON.stringify([item.round || item._round || 1, item.seg || 1, callId]);
+      if (item.kind === 'do' && item.tool === 'Plan') {
+        const args = item.arguments;
+        const legacy = item.callId === '' && item.toolKind === '' && !item._sourceId && !item.sourceId &&
+          typeof args?.command === 'string' && args.command === text && Object.keys(args).length === 1;
+        planRows.push({ segment: item.seg, offset: item._stream === 'out' ? item._streamEnd : null,
+          toolIndex: tools.length, command: legacy ? args.command : '' });
+      }
       const archivedPlan = adapterId === 'codex' && item.kind === 'do' && item.tool === 'todo_list' && callId &&
         (item._sourceId || item.sourceId) === 'item.completed:' + callId + ':0';
       if (journal && callId && ['do', 'out'].includes(item.kind)) {
@@ -275,13 +290,17 @@ async function runner(runtime, id, adapterId, guard, previousToolReceipts, previ
         if (callKey && pendingCalls.get(callKey)?.name === name) continue;
         const tool = { id: id + ':' + item.seq, callId, name, args: item.arguments || { command: text },
           state: 'running', result: '', after: Math.max(0, messages.length - 1) };
+        messageCounts.push(messages.length);
         tools.push(tool);
         if (callKey) pendingCalls.set(callKey, tool);
       } else if (item.kind === 'out') {
         // Diagnostics have no call identity. Native IDs can restart in the next process or turn.
         let tool = pendingCalls.get(callKey);
         pendingCalls.delete(callKey);
-        if (!tool) { tool = { id: id + ':' + item.seq, callId, name: item.tool || 'output', args: {}, after: Math.max(0, messages.length - 1) }; tools.push(tool); }
+        if (!tool) {
+          tool = { id: id + ':' + item.seq, callId, name: item.tool || 'output', args: {}, after: Math.max(0, messages.length - 1) };
+          messageCounts.push(messages.length); tools.push(tool);
+        }
         Object.assign(tool, { result: text, state: item.state === 'cancelled' ? 'cancelled' : item.isError ? 'error' : 'done', isError: !!item.isError });
         if (item.state === 'cancelled' && !item.isError && ['access-change', 'output-limit'].includes(item.cancelReason))
           tool.cancelReason = item.cancelReason;
@@ -322,32 +341,135 @@ async function runner(runtime, id, adapterId, guard, previousToolReceipts, previ
       }
     }
   }
-  return { snapshot: require('./native-agent-source.cjs').snapshot({ messages, tools }, adapterId),
+  // Compare any cursor-only legacy checkpoint above with its original projection
+  // before reclassifying verified plan notifications.
+  const projected = await require('./legacy-acp-plans.cjs').project(runtime, id, adapterId, after, guard,
+    planRows, messages, tools, messageCounts);
+  return { snapshot: require('./native-agent-source.cjs').snapshot(projected, adapterId),
     source: { id, adapterId, revision: String(after), journalDigest: evidence.digest('hex') },
     localToolReceipts, localWorkspace };
 }
+// Older switches omitted "started" on the retired descriptor. An empty
+// usage badge alone cannot distinguish an unused selection from a lost turn.
+function matchesRetiredPrefix(prefix, snapshot) {
+  if (!Array.isArray(prefix?.messages) || !prefix.messages.length || !Array.isArray(prefix.tools) ||
+      prefix.messages.length !== snapshot.messages.length || prefix.tools.length !== snapshot.tools.length) return false;
+  return prefix.messages.every((old, index) => {
+    const current = snapshot.messages[index];
+    if (old.role !== current.role) return false;
+    if (old.role === 'user') return old.text === current.text && Number.isFinite(old.sentAt) &&
+      old.sentAt === current.sentAt && canonicalJson(old.attachments || []) === canonicalJson(current.attachments || []);
+    if (old.role !== 'assistant' || !old.sourceAgent?.agentId || old.sourceAgent.agentId !== current.sourceAgent?.agentId ||
+        !Array.isArray(old.blocks) || old.blocks.length !== current.blocks?.length) return false;
+    return old.blocks.every((block, i) => {
+      const native = current.blocks[i];
+      if (block.kind !== native.kind || typeof block.text !== 'string' || typeof native.text !== 'string') return false;
+      // runner-messages kept only the last 50,000 characters of streamed blocks.
+      return ['text', 'thinking'].includes(block.kind) &&
+        (block.text === native.text || block.text === native.text.slice(-50000));
+    });
+  }) && prefix.tools.every((old, index) => {
+    const current = snapshot.tools[index], segment = String(current.id).split(':')[0];
+    return typeof old.id === 'string' && old.id.startsWith(segment + ':') && !!old.callId &&
+      old.callId === current.callId && old.name === current.name && old.state === current.state;
+  });
+}
+async function emptyRunnerSegment(app, runtime, part, source, legacyRetired = false) {
+  if ((!legacyRetired && part.started !== false) || !part.nativeDispatchId || part.adapterId === 'pi' ||
+      (source && !(source.dormant === true && source.revision === '0' && source.journalDigest === EMPTY_JOURNAL)) ||
+      require('../agent-runtime/runner-adapter').runnerRefForDispatch(part.nativeDispatchId) !== part.sessionId) return false;
+  if (!await runnerHistory.confirmedAbsent(runtime, part.sessionId, undefined, { reportBusy: true })) return false;
+  try { return !await require('./task-output-journal').hasRecordedOutput(app, part.sessionId); }
+  catch { return false; }
+}
+// A recovery can allocate a new segment, then close before its first send.
+// The frozen prefix does not certify those retired allocations on a later retry.
+async function retiredTailAbsent(app, runtime, parts, firstId, guard) {
+  const first = parts.findIndex(part => part.sessionId === firstId);
+  if (first < 0) return false;
+  runtime ||= require('../runner-runtime');
+  for (const part of parts.slice(first)) {
+    if (part.adapterId === 'pi' || part.started !== false) return false;
+    let reply;
+    try { reply = await runnerHistory.historyPage(runtime, { ref: part.sessionId, since: 0, limit: 1 }, 15000); }
+    catch { guard(); return false; }
+    guard();
+    if (!runnerHistory.missingArchive(reply, part.sessionId) ||
+        !await emptyRunnerSegment(app, runtime, part)) { guard(); return false; }
+    guard();
+  }
+  return true;
+}
 async function read({ app, session, row, guard, previousToolReceipts = [], previousSources = [], previousSnapshot,
-  runtime = require('../runner-runtime') }) {
+  mayVerifyLegacyRetired = () => false, runtime = require('../runner-runtime') }) {
   const record = require('./runtime-segments').read(app, row.id);
   const parts = record ? [...record.segments, record.active] : [{ sessionId: row.id, adapterId: row.adapterId || 'pi' }];
   const snapshot = { messages: [], tools: [] }, sources = [], localToolReceipts = [];
   let localWorkspace;
   const previous = new Set(previousToolReceipts);
+  function verifyManifest() {
+    if (record && require('./runtime-segments').read(app, row.id) !== record)
+      throw failure('NATIVE_HISTORY_CHANGED', '会话的执行段已变化，请重新读取');
+    guard();
+  }
   if (record?.deviceHistoryComplete) {
     Object.assign(snapshot, publicSnapshot(record.prefix));
     parts.splice(0, parts.length - 1);
   }
   const prior = new Map(previousSources.map(source => [source.id, source]));
   const nativeParts = [...new Map(parts.map(value => [value.sessionId, value])).values()];
+  let firstLegacyEmpty;
+  async function unavailable(index, part, cause) {
+    await probe({ app, session, row, guard });
+    verifyManifest();
+    const ordinal = record?.deviceHistoryComplete ? record.segments.length + 1 : index + 1;
+    const partial = cause?.code === 'RUNNER_HISTORY_BUSY' ? cause :
+      failure('NATIVE_SEGMENT_UNAVAILABLE', '无法核验第 ' + ordinal + ' 个执行段（' +
+        part.adapterId + '），已显示可读取的历史。请恢复原档后继续');
+    partial.history = { snapshot, coverage: { complete: false, sources, unresolvedTools: unresolvedTools(snapshot) } };
+    throw partial;
+  }
   // Recovered transcripts freeze retired segments in the trusted prefix. An
   // ordinary manifest must still reference all saved sources in their order.
   if (!record?.deviceHistoryComplete && previousSources.some((source, index) => nativeParts[index]?.sessionId !== source.id))
     throw failure('NATIVE_HISTORY_DIVERGED', '原生会话缺少已保存的执行段，已保留本机副本。请恢复原档后继续');
-  for (const part of nativeParts) {
+  for (const [index, part] of nativeParts.entries()) {
+    if (part === record?.active && firstLegacyEmpty !== undefined && !matchesRetiredPrefix(record.prefix, snapshot))
+      await unavailable(firstLegacyEmpty, nativeParts[firstLegacyEmpty]);
     const source = prior.get(part.sessionId);
     if (source && source.adapterId !== part.adapterId) throw runnerConflict();
-    const saved = part.adapterId === 'pi' ? await pi(app, session, part.sessionId, guard, source)
-      : await runner(runtime, part.sessionId, part.adapterId, guard, previous, source, previousSnapshot);
+    let saved;
+    try {
+      saved = part.adapterId === 'pi' ? await pi(app, session, part.sessionId, guard, source)
+        : await runner(runtime, part.sessionId, part.adapterId, guard, previous, source, previousSnapshot);
+    } catch (error) {
+      if (error.code === 'RUNNER_HISTORY_BUSY') return unavailable(index, part, error);
+      if (error.historyAccessFailure || !['NATIVE_HISTORY_MISSING', 'NATIVE_HISTORY_UNAVAILABLE'].includes(error.code)) throw error;
+      const legacyRetired = record && !record.deviceShared && !record.deviceHistoryComplete && !record.deviceTransferId &&
+        !row.deviceTransferId && nativeParts.length === parts.length && part !== record.active && !Object.hasOwn(part, 'started') &&
+        Array.isArray(part.usedHarnesses) && !part.usedHarnesses.length && mayVerifyLegacyRetired();
+      let empty = false;
+      if (error.code === 'NATIVE_HISTORY_MISSING') {
+        try { empty = await emptyRunnerSegment(app, runtime, part, source, legacyRetired); }
+        catch (cause) {
+          if (cause.code === 'RUNNER_HISTORY_BUSY') return unavailable(index, part, cause);
+          throw cause;
+        }
+      }
+      if (empty) {
+        guard();
+        if (legacyRetired) firstLegacyEmpty ??= index;
+        sources.push({ id: part.sessionId, adapterId: part.adapterId, revision: '0',
+          journalDigest: EMPTY_JOURNAL, dormant: true });
+        continue;
+      }
+      // An independently saved, complete copy of every native source keeps
+      // its existing recovery rules. A previously empty segment has no such copy.
+      if (previousSources.length === nativeParts.length && previousSources.every((item, i) =>
+        !item.dormant && item.id === nativeParts[i].sessionId && item.adapterId === nativeParts[i].adapterId)) throw error;
+      if (!snapshot.messages.length && !snapshot.tools.length) throw error;
+      await unavailable(index, part);
+    }
     for (const proof of saved.localToolReceipts || []) localToolReceipts.push(proof);
     const offset = snapshot.messages.length;
     snapshot.messages.push(...saved.snapshot.messages);
@@ -355,6 +477,7 @@ async function read({ app, session, row, guard, previousToolReceipts = [], previ
     sources.push(saved.source);
     if (saved.localWorkspace && saved.source.id === row.id) localWorkspace = saved.localWorkspace;
   }
+  verifyManifest();
   return { snapshot, ...(localWorkspace ? { localWorkspace } : {}), coverage: { complete: true, sources, unresolvedTools: unresolvedTools(snapshot) },
     ...(localToolReceipts.length ? { localToolReceipts } : {}) };
 }
@@ -370,4 +493,4 @@ async function probe({ app, session, row, guard }) {
     guard(found.entry);
   }
 }
-module.exports = { read, probe, publicSnapshot, unresolvedTools, MAX_BYTES };
+module.exports = { read, probe, publicSnapshot, unresolvedTools, retiredTailAbsent, MAX_BYTES };

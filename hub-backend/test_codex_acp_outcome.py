@@ -239,6 +239,27 @@ class CodexImageHistoryTests(unittest.TestCase):
                       {"calls": self.request["calls"] * 1025}):
             self.assertFalse(self.read(self.header, self.call, self.output, request={**self.request, **delta}))
 
+    def test_windows_handle_change_time_preserves_evidence_checks_for_historical_image_reads(self):
+        # Windows can return creation time from lstat and change time from
+        # fstat even when both describe the same unchanged file.
+        def handle_stat(fd):
+            info = os.fstat(fd)
+            return SimpleNamespace(st_dev=info.st_dev, st_ino=info.st_ino, st_size=info.st_size,
+                                   st_mtime_ns=info.st_mtime_ns, st_ctime_ns=info.st_ctime_ns + 1_000_000)
+
+        windows = SimpleNamespace(**{**vars(os), "name": "nt", "fstat": handle_stat})
+        with patch.object(codex_image_history.archive, "os", windows):
+            self.assertEqual(self.read(self.header, self.call, self.output).get("callIds"), ["image-1"])
+            self.assertEqual(self.read(self.header, self.call).get("callIds"), [])
+            stamps = iter([1, 2])
+            def changed_handle(fd):
+                info = handle_stat(fd)
+                info.st_ctime_ns += next(stamps)
+                return info
+
+            with patch.object(windows, "fstat", changed_handle):
+                self.assertEqual(self.read(self.header, self.call, self.output), {})
+
     def test_refuses_oversize_duplicate_or_linked_rollout_without_repairing_files(self):
         self.read(self.header, self.call, self.output)
         def read():

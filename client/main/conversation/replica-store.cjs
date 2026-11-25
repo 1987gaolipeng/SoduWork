@@ -12,7 +12,7 @@ const { needsBackup } = require('./device-artifact-archive.cjs');
 
 const METHODS = ['register', 'join', 'importChunk', 'importPlan', 'importPage', 'sealImport', 'discardImport', 'get', 'sourceCopies', 'nativeRows', 'list', 'catalog', 'page', 'directory', 'lifecycleRows', 'remoteLifecycleRows', 'lifecycle', 'cache', 'messages', 'changes', 'ack', 'workspace', 'close'];
 const REMOTE_LIFECYCLE = "deleted=0 AND revision>0 AND json_extract(data,'$.cached')=1 AND coalesce(json_extract(data,'$.taskId'),'')<>''";
-METHODS.push('archiveUpgradePage', 'markArchiveReviewed', 'saveDeviceHistory', 'deviceHistory', 'deviceHistoryVersion', 'saveConversationTranscript', 'conversationTranscript');
+METHODS.push('archiveUpgradePage', 'markArchiveReviewed', 'saveDeviceHistory', 'deviceHistory', 'deviceHistoryVersion', 'saveConversationTranscript', 'conversationTranscript', 'conversationTranscriptDigest');
 function key(value) {
   if (typeof value !== 'string' || !value.trim() || value.length > 512 || /[\x00-\x1f]/.test(value))
     throw Error('Invalid local conversation identity');
@@ -181,6 +181,8 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
       return { ...page, staged: !!prior && prior.digest === page.sha256 && prior.size === page.size && prior.count === page.count };
     }) };
   }
+  const { saveConversationTranscript, conversationTranscript, conversationTranscriptDigest, reconcileNativeTail } =
+    require('./conversation-transcript.cjs').create(db, exact, transaction);
   return {
     register,
     importPlan,
@@ -317,7 +319,7 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
         return { ok: true };
       });
     },
-    ...require('./conversation-transcript.cjs').create(db, exact, transaction),
+    saveConversationTranscript, conversationTranscript, conversationTranscriptDigest,
     get: id => project(resolve(id)),
     sourceCopies(ids) {
       if (!Array.isArray(ids) || ids.length > 200) throw Error('Invalid source history batch');
@@ -489,7 +491,7 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
       db.prepare(`INSERT INTO artifact_archive_review(replica,digest) SELECT replica,digest FROM device_history
         WHERE replica=? AND digest=? ON CONFLICT(replica) DO UPDATE SET digest=excluded.digest`).run(key(id), digest);
     },
-    saveDeviceHistory(id, value, { expectedRevision, expectedTransferId, expectedHistoryDigest } = {}) {
+    saveDeviceHistory(id, value, { expectedRevision, expectedTransferId, expectedHistoryDigest, expectedCatalogRevision, transcriptTail } = {}) {
       const data = JSON.stringify(value);
       if (!value || !Array.isArray(value.snapshot?.messages) || !Array.isArray(value.snapshot?.tools) ||
           Buffer.byteLength(data) > 128 * 1024 * 1024) throw Error('Invalid device history snapshot');
@@ -501,6 +503,10 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
         if (expectedHistoryDigest !== undefined &&
             (db.prepare('SELECT digest FROM device_history WHERE replica=?').get(row.id)?.digest ?? null) !== expectedHistoryDigest)
           return { ok: false, stale: true };
+        if (transcriptTail && expectedTransferId === '' && id === row.id && expectedCatalogRevision === row.catalog_revision &&
+            value.coverage?.complete && !value.nativeConflict && !value.historyProtection && !value.imported &&
+            !value.coverage.unresolvedTools?.length)
+          reconcileNativeTail(id, transcriptTail, value.snapshot.messages);
         const digest = crypto.createHash('sha256').update(data).digest('hex');
         db.prepare(`INSERT INTO device_history VALUES(?,?,?,?) ON CONFLICT(replica)
           DO UPDATE SET data=excluded.data,digest=excluded.digest,updated=excluded.updated

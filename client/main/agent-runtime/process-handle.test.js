@@ -39,6 +39,15 @@ function fixture(options = {}) {
     publish(event = { kind: 'snapshot' }, raw = {}) { return publisher.publish(event, raw); } };
 }
 
+test('the Pi host sends only intersecting turn receipts to the renderer', () => {
+  const f = fixture();
+  f.state.turnMetrics = [{ fromMessage: 0, toMessage: 99, tokens: 10 }, { fromMessage: 100, toMessage: 139, tokens: 30 }];
+  f.publish();
+  assert.deepEqual(f.handle.uiSnapshot({ messageLimit: 20 }).turnMetrics, [f.state.turnMetrics[1]]);
+  assert.deepEqual(f.handle.uiSnapshot({ messageLimit: 20, messageEnd: 20 }).turnMetrics, [f.state.turnMetrics[0]]);
+  assert.deepEqual(f.handle.snapshot().turnMetrics, f.state.turnMetrics);
+});
+
 test('synchronous platform reads retain full conversation and session metadata without RPC', () => {
   const f = fixture(); f.publish();
   const snapshot = f.handle.snapshot();

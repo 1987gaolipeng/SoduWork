@@ -28,7 +28,7 @@ function _awaitBounded(promise, timeoutMs, label) {
     });
   }
 
-async function _ensure(chatId, previewRef = '') {
+async function _ensure(chatId, previewRef = '', firstIntentId = '', firstAttemptId = firstIntentId) {
     // Form-only conversations have persistent archives; the first ordinary message continues that session.
     chatId = chatId || ctx._sessionId || undefined;
     if (previewRef) {
@@ -71,7 +71,7 @@ async function _ensure(chatId, previewRef = '') {
         }
         if (!await ctx._workCards.ensureDraftSelectionSaved() || !current() || draftId !== ctx._sessionId) return false;
       }
-      return _ensureOnce(chatId, epoch, owner, current, previewRef);
+      return _ensureOnce(chatId, epoch, owner, current, previewRef, firstIntentId, firstAttemptId);
     })();
     task.archiveTarget = chatId || ''; task.ownerScope = owner;
     ctx._openingTask = task;
@@ -102,7 +102,18 @@ async function _ensure(chatId, previewRef = '') {
     }
   }
 
-async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() || '', isCurrent, previewRef = '') {
+function retirePendingHistory(ref, api, reason) {
+    // Release the stale handle, keeping the historical identity and the editable
+    // draft for the normal reopen action. The caller has checked its view and owner.
+    ctx._off?.(); ctx._off = null; ctx._ref = '';
+    void Promise.resolve().then(() => api?.release?.(ref)).catch(() => {});
+    const code = 'HISTORY_PENDING_USER_TAIL_CHANGED';
+    ctx._snap = { ...ctx._snap, openBlocked: true, sessionOpenCode: code,
+      historyRecovery: { mode: 'device-history', reasonCode: code, reason },
+      execution: { ...ctx._snap?.execution, canContinueOnDevice: false } };
+  }
+
+async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() || '', isCurrent, previewRef = '', firstIntentId = '', firstAttemptId = firstIntentId) {
     const current = () => epoch === ctx._viewEpoch && ownerScope === (ctx._draftOwnerScope?.() || '') && (!isCurrent || isCurrent());
     const previewSnapshot = previewRef && ctx._snap, previousListener = ctx._off;
     let attachedRef = '';
@@ -114,6 +125,7 @@ async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() 
       if (previewRef) {
         if (ctx._off !== previousListener) ctx._off?.();
         ctx._ref = previewRef; ctx._off = previousListener; ctx._snap = previewSnapshot;
+        if (failure?.code === 'HISTORY_PENDING_USER_TAIL_CHANGED') retirePendingHistory(previewRef, api, reason);
       } else if (chatId) {
         const previousSnapshot = ctx._snap || {};
         ctx._ref = ''; ctx._sessionId = String(chatId);
@@ -133,8 +145,13 @@ async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() 
       // repeats CLI discovery; use the authoritative open result instead.
       const resumeAsOrdinary = ctx._sessionOptions.resumeAsOrdinary === true;
       const selected = ctx._sessionOptions;
+      const pendingTail = previewSnapshot?.historyRecovery?.reasonCode === 'HISTORY_UNDISPATCHED_USER_TAIL';
+      const expectedPendingUserDigest = pendingTail && previewSnapshot.historyRecovery.pendingUserDigest;
+      if (pendingTail && !expectedPendingUserDigest) return failOpen('无法继续会话', '最后一条消息的发送状态已变化，请重新打开会话后确认。', {
+        code: 'HISTORY_PENDING_USER_TAIL_CHANGED' });
       const openOptions = previewRef
         ? { chatId, historyIntent: 'continue', adapterId: selected.adapterId, modelName: selected.modelName,
+          ...(expectedPendingUserDigest ? { expectedPendingUserDigest } : {}),
           ...(selected.reasoningEffort ? { reasoningEffort: selected.reasoningEffort } : {}),
           ...(selected.thinkingLevel ? { thinkingLevel: selected.thinkingLevel } : {}),
           accessMode: selected.accessMode === 'readonly' ? 'readonly' : 'standard' }
@@ -143,7 +160,7 @@ async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() 
           requireTaskBinding: !resumeAsOrdinary && Boolean(selected.taskRef) }
         : { ...ctx._sessionOptions };
       let openTimedOut = false;
-      const openPromise = Promise.resolve().then(() => api.open(openOptions));
+      const openPromise = Promise.resolve().then(() => firstIntentId ? api.attachFirstSend(firstIntentId, firstAttemptId) : api.open(openOptions));
       // If the main process eventually finishes after the renderer has shown a
       // timeout, release the late handle instead of leaking a detached runtime.
       openPromise.then((late) => {
@@ -207,7 +224,7 @@ async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() 
         }
       }
       /* Associate project-created conversations immediately with that project. */
-      if (!chatId && ctx._sessionOptions.sidebarProjectId && global.WorkspaceShell?.fileChatInProject) {
+      if (!firstIntentId && !chatId && ctx._sessionOptions.sidebarProjectId && global.WorkspaceShell?.fileChatInProject) {
         try {
           WorkspaceShell.fileChatInProject(openedSessionId, String(ctx._sessionOptions.sidebarProjectId),
             { id: openedSessionId });
@@ -304,7 +321,7 @@ async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() 
       const activeRef = ctx._ref;
       if (global.ChatChrome) {
         if (got.title) ChatChrome.resume(got.title);
-        else if (ctx._pending) ChatChrome.begin(ctx._pending);
+        else if (ctx._pending && !firstIntentId) ChatChrome.begin(ctx._pending);
       }
       if (global.ChatChrome) ChatChrome.identify(got.sessionId);
       if (global.WorkIntent) WorkIntent.showGoal(ctx._mount(), got.goal || ctx._sessionOptions, 'nchat');
@@ -370,6 +387,9 @@ async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() 
           if (retryDraft?.requirement) {
             retryDraft.requirement.deliveryState = 'failed';
             ctx._retainFailedConversationDraft(ctx._draftKeyForCurrentSession(), retryDraft, p.reason || '需求执行失败');
+          } else if (retryDraft?.firstSendRetry && (p.notSent === true || p.retrySafe === true &&
+              ['plugin-validation', 'plugin-grant', 'skill-selection'].includes(p.failureKind))) {
+            ctx._retainFailedConversationDraft(ctx._draftKeyForCurrentSession(), retryDraft, p.reason);
           }
           if (p.submissionId) ctx._submissionDrafts.delete(p.submissionId);
           ctx._fail('这一轮没跑成', p.reason || '执行底座返回错误', retryDraft, p);
@@ -491,9 +511,12 @@ async function _sendCore(textOverride, sendOptions) {
     if (ctx._snap?.openBlocked || ctx._snap?.localReplica && ctx._snap.execution?.canContinueOnDevice !== true) return false;
     const el = ctx._mount();
     if (!el) return false;
+    const input = el.querySelector('#nchatInput');
+    const entryInput = input?.value, entryRevision = input?.dataset?.editRevision;
     const accessEpoch = ctx._viewEpoch, sendScopeEpoch = ctx._draftScopeEpoch, sendOwnerScope = ctx._draftOwnerScope();
     const previousPreflight = ctx._sendPreflight;
-    const composerPreflight = textOverride == null ? { view: accessEpoch, scope: sendScopeEpoch, owner: sendOwnerScope } : null;
+    const ordinaryFirst = global.ChatSessionController?.ordinaryFirstSend?.(ctx, sendOptions);
+    const composerPreflight = textOverride == null || ordinaryFirst ? { view: accessEpoch, scope: sendScopeEpoch, owner: sendOwnerScope } : null;
     if (composerPreflight && previousPreflight?.view === accessEpoch &&
         previousPreflight.scope === sendScopeEpoch && previousPreflight.owner === sendOwnerScope) return false;
     if (composerPreflight) ctx._sendPreflight = composerPreflight;
@@ -524,12 +547,12 @@ async function _sendCore(textOverride, sendOptions) {
       ctx._fail('原本地模型已删除或不可用，请主动选择可用模型后继续发送');
       return false;
     }
-    const input = el.querySelector('#nchatInput');
     const useComposer = textOverride == null || sendOptions?.useComposer === true;
+    const homeDraft = sendOptions?.homeDraft;
     const pendingTask = ctx._collabTasks?.get(ctx._activeCollabTaskId);
     const pendingBrief = pendingTask && !pendingTask.queueRemoved && (!pendingTask.nativeTurn || pendingTask.queueState === 'failed') &&
       pendingTask.task?.status === 'todo' ? pendingTask.task.note || pendingTask.task.description || pendingTask.task.title : '';
-    const composerInput = String(input?.value || '');
+    const composerInput = String(input?.value || ''), composerRevision = input?.dataset?.editRevision;
     const originalText = useComposer
       ? ctx._messageAttachments?.submissionText?.(composerInput) ?? composerInput : '';
     let typed = String(useComposer ? originalText || textOverride || pendingBrief || '' : textOverride || '');
@@ -599,9 +622,10 @@ async function _sendCore(textOverride, sendOptions) {
     const text = typed.trim() ? typed : '请查看并处理我附上的文件。';
     const sentAt = Date.now();
     const draftText = annotations.length || composerText.trim() ? composerText : text;
+    const retrySource = useComposer && !sendTaskId && ctx._conversationDrafts?.get(sendDraftKey)?.firstSendRetry;
     const sentFiles = fromComposer ? ctx._messageAttachments.files() : []; const attachmentRefsPromise = fromComposer ? ctx._messageAttachments.refs(retainedApi || ctx._api()) : Promise.resolve(appAttachments);
     const pluginDraft = fromComposer ? (ctx._pluginMention?.draft?.() || selectedPlugins) : [];
-    const failedDraft = { text: draftText, files: sentFiles.slice(), skills: skillSubmission.skills.slice(), plugins: resolvedPlugins.map(item =>
+    const failedDraft = { text: homeDraft?.text ?? draftText, files: (homeDraft?.files || sentFiles).slice(), skills: skillSubmission.skills.slice(), plugins: resolvedPlugins.map(item =>
       ({ ...item, ...pluginDraft.find(draft => draft.pluginId === item.pluginId) })) };
     if (sendOptions?.taskId || (sendTaskId && pendingBrief)) failedDraft.requirement = {
       taskId: String(sendTaskId), taskExecution: JSON.parse(JSON.stringify(sendTaskExecution || {})),
@@ -612,6 +636,118 @@ async function _sendCore(textOverride, sendOptions) {
     const currentSendScope = () => sendScopeEpoch === ctx._draftScopeEpoch && sendOwnerScope === ctx._draftOwnerScope();
     const retainFailure = reason => { if (currentSendScope()) ctx._retainFailedConversationDraft(sendDraftKey, failedDraft, reason); };
     const currentSendView = () => currentSendScope() && sendEpoch === ctx._viewEpoch && (!retainedRef || retainedRef === ctx._ref);
+    if (ordinaryFirst && !retainedRef && !ctx._sessionId && !sendTaskId) {
+      const api = ctx._api(), attemptId = 'first-' + global.crypto.randomUUID();
+      const intentId = retrySource?.intentId || attemptId;
+      const open = { ...ctx._sessionOptions };
+      delete open.attachments;
+      const turn = { inputPreparation: sendOptions?.inputPreparation || (!retrySource && open.inputPreparation) || {
+        userText: composerText, ...(!composerText.trim() && attachmentNames.length ? { fallback: true } : {}) },
+        plugins: resolvedPlugins, skills: skillSubmission.skills, sentAt, projectId: sendProjectId };
+      const token = ctx._beginSendState?.();
+      const submittedInput = useComposer ? composerInput : homeDraft?.text;
+      const inputRevision = useComposer ? composerRevision : entryRevision;
+      const recoveryKey = 'first-send-draft:' + intentId;
+      let saved = false, refusedBeforeOpen = false;
+      // The native ID is assigned later. Give next-turn edits their own key before
+      // invoking IPC so navigation during admission cannot move them into a new chat.
+      ctx._draftKey = intentId;
+      const releaseStarterDraft = () => {
+        if (ctx._draftKey === intentId && sendDraftKey !== intentId) {
+          ctx._clearConversationDraft(sendDraftKey, { preserveRequirement: true });
+        }
+      };
+      composerPreflight.releaseStarterDraft = releaseStarterDraft;
+      // The original draft stays in its starter slot until saved or the user explicitly
+      // leaves. The visible controls now own the next turn, including edits made in flight.
+      if (input && (useComposer || entryInput === submittedInput) &&
+          input.value === submittedInput && input.dataset?.editRevision === inputRevision) {
+        input.value = ''; input.style.height = 'auto';
+      }
+      if (fromComposer) {
+        ctx._messageAttachments.clear();
+        ctx._pluginMention?.consume?.(resolvedPlugins); ctx._skillPicker?.consume?.(selectedSkills);
+      }
+      // Edits for the next turn may already be waiting under the intent ID.
+      if (retrySource && sendDraftKey === recoveryKey) ctx._restoreConversationDraft(intentId);
+      else ctx._rememberConversationDraft();
+      try {
+        const files = await attachmentRefsPromise;
+        if (!currentSendScope()) return false;
+        const admission = await api.startFirstSend({ intentId, open, turn, text, attachments: files,
+          sidebarProjectId: open.sidebarProjectId, ...(retrySource ? { retryAttempt: { expected: retrySource.attemptId, next: attemptId } } : {}) });
+        if (admission?.ok || admission?.row?.attemptId === attemptId) failedDraft.firstSendRetry = { intentId, attemptId };
+        else if (retrySource) failedDraft.firstSendRetry = retrySource;
+        refusedBeforeOpen = admission?.row?.status === 'failed' && !admission.row.sessionId && admission.row.attemptId === attemptId;
+        if (!admission?.ok) throw Error(admission?.reason || '首条消息未保存');
+        saved = true;
+        if (currentSendView()) {
+          if (admission.attachmentWarnings?.length) global.petSay?.(admission.attachmentWarnings[0]);
+          releaseStarterDraft();
+          ctx._pending = text; ctx._pendingSentAt = sentAt;
+          ctx._pendingAttachmentNames = admission.attachmentWarnings?.length ? admission.row.attachmentNames : attachmentNames;
+          ctx._pendingPlugins = resolvedPlugins; ctx._pendingBaseline = { messageCount: 0, submissionId: attemptId };
+          ctx._rememberSubmission(attemptId, failedDraft);
+          if (!ctx._snap) ctx._snap = { status: 'idle', messages: [], tools: [] };
+          global.ChatChrome?.resume?.(admission.row.title); ctx._render();
+        }
+        const result = await api.waitFirstSend(intentId);
+        refusedBeforeOpen = result?.row?.status === 'failed' && !result.row.sessionId && result.row.attemptId === attemptId;
+        if (!result?.ok || (result.row.attemptId && result.row.attemptId !== attemptId) ||
+            (result.row.status !== 'accepted' && !result.row.canAttachFailed))
+          throw Error(result?.row?.reason || result?.reason || '请在侧栏查看首条消息的状态');
+        if (!currentSendScope()) return false;
+        if (result.row.sessionId) {
+          ctx._moveConversationDraft(intentId, result.row.sessionId);
+          if (currentSendView() && ctx._draftKey === intentId) {
+            ctx._draftKey = result.row.sessionId;
+            if (el.dataset.firstSendDraftId === intentId) delete el.dataset.firstSendDraftId;
+          }
+          if (result.row.status === 'failed' && result.row.canAttachFailed && failedDraft.firstSendRetry)
+            ctx._retainFailedConversationDraft(result.row.sessionId, failedDraft, result.row.reason);
+        }
+        // The workspace files the session in its sidebar project after the native receipt.
+        // Queue admission can still end in a pre-dispatch refusal.
+        if (!currentSendView()) {
+          if (result.row.canAttachFailed) void ctx.refreshHistory();
+          return true;
+        }
+        if (!await _ensure(undefined, '', intentId, attemptId)) return true;
+        // Completion may have arrived before this renderer subscribed to the handle.
+        if (currentSendView() && ctx._submissionDrafts?.has(attemptId)) {
+          const latest = await api.waitFirstSend(intentId);
+          if (currentSendView() && latest?.row?.status === 'failed' && latest.row.attemptId === attemptId &&
+              ctx._submissionDrafts.delete(attemptId)) {
+            if (latest.row.canAttachFailed) ctx._retainFailedConversationDraft(result.row.sessionId, failedDraft, latest.row.reason);
+            ctx._fail('这一轮没跑成', latest.row.reason, failedDraft);
+          }
+        }
+        if (currentSendView() && result.workflowRun && global.PluginDebugCard) void PluginDebugCard.open({ ref: ctx._ref, mode: 'conversation' });
+        if (currentSendView()) void ctx.refreshHistory();
+        return true;
+      } catch (error) {
+        const retained = refusedBeforeOpen && failedDraft.firstSendRetry && currentSendScope();
+        if (retained) {
+          if (currentSendView()) releaseStarterDraft();
+          ctx._retainFailedConversationDraft(recoveryKey, failedDraft, String(error.message || error));
+          if (currentSendView() && !ctx._hasConversationDraft(intentId)) ctx._draftKey = recoveryKey;
+          if (!currentSendView()) void ctx.refreshHistory();
+        }
+        if (currentSendView()) {
+          if (!retained && !saved && ctx._draftKey === intentId && sendDraftKey !== intentId) {
+            releaseStarterDraft();
+            ctx._moveConversationDraft(intentId, sendDraftKey);
+            ctx._draftKey = sendDraftKey;
+          }
+          if (saved) { ctx._pending = ''; ctx._pendingBaseline = null; }
+          // Unconfirmed delivery stays with its own sidebar record.
+          const keepNewInput = retained && ctx._draftKey !== recoveryKey;
+          ctx._fail(saved && !refusedBeforeOpen ? '请在侧栏查看这条首发请求' : '这一轮没发出去',
+            String(error.message || error), !keepNewInput && (refusedBeforeOpen || !saved) ? failedDraft : null);
+        }
+        return false;
+      } finally { ctx._finishSendState?.(token); }
+    }
     const waitForPrior = ctx._submitTail; let releaseSubmit;
     // A failed preparation releases its own slot without bypassing earlier admissions.
     ctx._submitTail = Promise.all([waitForPrior,
@@ -664,7 +800,7 @@ async function _sendCore(textOverride, sendOptions) {
         if (!ready && ctx._snap?.sessionNotFound === true) sendOptions?.onAdmission?.({ notSent: true, code: 'SESSION_NOT_FOUND' });
         if (!ready) { retainFailure('会话尚未打开，这一轮未发送'); if (currentSendView()) ctx._restoreFailedDraft(failedDraft);
           // Remove the optimistic bubble when no send occurred.
-          ctx._pending = ''; ctx._pendingAttachmentNames = []; ctx._pendingPlugins = []; ctx._pendingBaseline = null;
+          if (currentSendView()) { ctx._pending = ''; ctx._pendingAttachmentNames = []; ctx._pendingPlugins = []; ctx._pendingBaseline = null; }
         }
         if (currentSendView() && localQueue && localQueue.cancelled && fromComposer && sentFiles.length) ctx._messageAttachments?.add(sentFiles, 'retry');
         return false;
@@ -673,7 +809,8 @@ async function _sendCore(textOverride, sendOptions) {
       if (!currentSendScope() || (!retainedRef && sendEpoch !== ctx._viewEpoch) || (localQueue && localQueue.cancelled)) return false;
       const api = retainedApi || ctx._api();
       const submissionId = sendOptions?.taskId && /^[a-zA-Z0-9_-]{1,64}$/.test(sendOptions.submissionId || '')
-        ? sendOptions.submissionId : 'ui-' + Date.now().toString(36) + '-' + (++ctx._submissionSeq).toString(36);
+        ? sendOptions.submissionId : retrySource ? 'ui-' + global.crypto.randomUUID()
+          : 'ui-' + Date.now().toString(36) + '-' + (++ctx._submissionSeq).toString(36);
       if (!wasRunning && ctx._pendingBaseline) ctx._pendingBaseline.submissionId = submissionId;
       if (failedDraft.requirement) {
         failedDraft.requirement.submissionId = submissionId;
@@ -681,8 +818,9 @@ async function _sendCore(textOverride, sendOptions) {
           failedDraft.requirement.conversationId = String(ctx._sessionId || retainedRef || '');
       }
       if (localQueue) localQueue.submissionId = submissionId;
+      if (retrySource) failedDraft.firstSendRetry = { intentId: retrySource.intentId, attemptId: submissionId };
       if (currentSendView()) ctx._retryDraft = null;
-      if (currentSendView()) ctx._rememberSubmission(submissionId, {
+      if (currentSendView()) ctx._rememberSubmission(submissionId, retrySource ? failedDraft : {
         ...failedDraft,
         files: sentFiles.slice(),
         plugins: (selectedPlugins.length ? selectedPlugins : resolvedPlugins).map((item) => ({
@@ -692,11 +830,11 @@ async function _sendCore(textOverride, sendOptions) {
       const submissionRef = retainedRef || ctx._ref; if (!api || !submissionRef) return false;
       const submissionSnapshot = ctx._snap;
       if (failedDraft.requirement) failedDraft.requirement.deliveryState = 'uncertain';
-      const r = await api.send(submissionRef, text, attachmentRefs, {
+      const turnOptions = {
         plugins: resolvedPlugins,
         sentAt,
         projectId: sendProjectId,
-        inputPreparation: sendOptions?.inputPreparation || ctx._sessionOptions?.inputPreparation || {
+        inputPreparation: sendOptions?.inputPreparation || (!retrySource && ctx._sessionOptions?.inputPreparation) || {
           userText: composerText,
           ...( !composerText.trim() && attachmentRefs.length ? { fallback: true } : {}),
         },
@@ -707,7 +845,10 @@ async function _sendCore(textOverride, sendOptions) {
         taskExecution: sendTaskExecution,
         retry: Boolean(sendOptions && sendOptions.retry),
         skills: skillSubmission.skills.slice(),
-      });
+      };
+      const r = retrySource
+        ? await api.retryFirstSendInPlace(retrySource.intentId, retrySource.attemptId, submissionRef, text, attachmentRefs, turnOptions)
+        : await api.send(submissionRef, text, attachmentRefs, turnOptions);
       if (r?.ok === false && r.notSent === true && r.code === 'SESSION_NOT_FOUND' && !r.uncertain)
         sendOptions?.onAdmission?.({ notSent: true, code: r.code });
       // Do not show an optimistic queue row while a normal send is still
@@ -733,6 +874,7 @@ async function _sendCore(textOverride, sendOptions) {
         if (!currentSendView()) return false;
       }
       if (r?.ok && r.workflowRun && global.PluginDebugCard) void PluginDebugCard.open({ ref: submissionRef, mode: 'conversation' });
+      if (retrySource && r?.attachmentWarnings?.length) global.petSay?.(r.attachmentWarnings[0]);
       if (r && r.snapshot && ctx._snap === submissionSnapshot) ctx._snap = r.snapshot;
       /*
        * The main process rewrites task messages with requirements or rework feedback, so
@@ -756,7 +898,11 @@ async function _sendCore(textOverride, sendOptions) {
       if (!r || !r.ok) {
         retainFailure(r && r.reason || '发送未能确认，请重试');
         ctx._submissionDrafts.delete(submissionId);
-        if (!wasRunning) ctx._fail('这一轮没发出去', r && r.reason, failedDraft, r);
+        if (r?.notSent === true && r.accepted === false && r.code === 'HISTORY_PENDING_USER_TAIL_CHANGED') {
+          ctx._localQueue = ctx._localQueue.filter(row => row !== localQueue);
+          retirePendingHistory(submissionRef, api, r.reason);
+          ctx._fail('这一轮没发出去', r.reason, failedDraft, r);
+        } else if (!wasRunning) ctx._fail('这一轮没发出去', r && r.reason, failedDraft, r);
         else if (!global.SoduWorkQuotaNotice?.show(r) && typeof petSay === 'function') petSay((r && r.reason) || '排队消息没有发出去');
       } else {
         // A late receipt must preserve new text/skills typed after this send.
@@ -800,5 +946,14 @@ function _paintOpening() {
   }
   return { _ensureOnce, _ensure, _retryOpenChat, _awaitBounded, _send, _sendCore, _paintOpening, _syncRunnerTaskGoal };
   }
-  global.ChatSessionController = { create };
+  function ordinaryFirstSend(ctx, turn = {}) {
+    const options = ctx._sessionOptions || {};
+    return !ctx._ref && !ctx._sessionId && !ctx._openingTask && (!options.intent || options.intent === 'chat') &&
+      options.mode !== 'goal' && !options.pluginEditId &&
+      !ctx._pendingLibraryIds?.length && !ctx._messageAttachments?.libraryItems?.()?.length &&
+      !ctx._activeCollabTaskId && !turn.taskId && !options.taskRef &&
+      !options.taskSession && !options.acceptanceSession && !options.automationId && !options.appRequestId &&
+      !options.nativeRelay && global.__deskPanel !== 'chatbar' && Boolean(ctx._api()?.startFirstSend);
+  }
+  global.ChatSessionController = { create, ordinaryFirstSend };
 })(window);

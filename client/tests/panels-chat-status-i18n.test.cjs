@@ -46,6 +46,17 @@ function mergedCatalog(locale) {
     require(path.join(LOCALES, locale + '-gap-pages.js')));
 }
 
+test('historical conversations localize delivery status and continuation notices', () => {
+  const keys = ['发送未确认',
+    '已保留最后一条用户消息，暂时无法确认执行底座是否收到。为避免重复执行，当前只能查看。', '最后一条消息的发送状态已变化，请重新打开会话后确认。',
+    '请在打开这条历史的桌面普通会话中发送。', '正在核对上一条消息的发送状态，请稍后再试。',
+    '本机执行机暂忙，未能核验历史。请稍后重新打开会话'];
+  for (const locale of ['en-US', 'ja-JP', 'ko-KR']) {
+    const i18n = loadI18n(locale);
+    for (const key of keys) assert.notEqual(i18n.translateText(key), key, locale + ': ' + key);
+  }
+});
+
 test('Runner admission positions and long startup diagnostics translate without model-work claims', () => {
   const status = require('../components/panels/panels-chat-status');
   for (const [locale, expected] of [['en-US','Queued · Position 2'],['ja-JP','待機中 · 順番 2'],['ko-KR','대기 중 · 순서 2']]) {

@@ -119,4 +119,12 @@ async function create(app, ref) {
   }
   return { append, appendMany, restore, context, close, get nativeHistoryObserved() { return nativeHistoryObserved; } };
 }
-module.exports = { create, usedHarnesses };
+// Even a pre-dispatch controlled message needs its own projection. Do not
+// certify a segment as empty when its local journal contains such output.
+async function hasRecordedOutput(app, ref) {
+  const file = journalPath(app, ref);
+  if (!file) return false;
+  try { return (await fs.promises.stat(file)).size > 0; }
+  catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+}
+module.exports = { create, usedHarnesses, hasRecordedOutput };

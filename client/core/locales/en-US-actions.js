@@ -24,6 +24,7 @@
     '提议了一张任务卡': "Proposed an issue", '建了一条任务': "Created an issue", '查了我名下的任务': "Looked up my issues", '看了那条任务的详情': "Viewed issue details", '改了那条任务': "Updated the issue",
     '图片生成未完成': 'Image generation incomplete', '图片已生成': 'Image generated', '正在执行…': 'Running…', '（没有输出）': '(No output)', '质量': 'Quality', '这一步没有完成': 'This step did not complete',
     '已用': 'Used', '（不到 1%）': '(Less than 1%)', '上下文': 'Context', '暂无用量数据': 'No usage data', '不到 1%': 'Less than 1%', '（估算上限）': '(Estimated limit)', '上限': 'Limit',
+    '执行时预览': 'Preview captured during execution',
     '视频地址无效': 'Invalid video URL', '图片暂时无法预览': 'Image preview unavailable', '点击重试预览': 'Click to retry preview', '视频暂时无法预览': 'Video preview unavailable',
     '成果索引暂时不可用': 'Output index unavailable', '成果地址无效': 'Invalid output URL', '无法打开成果': 'Cannot open output', '任务会话绑定失败': "Could not link the issue to this chat",
     '选择执行 Agent': 'Choose an agent', '开始执行': 'Start', '开始执行这个任务？': "Start this issue?", '当前任务': "Current issue", '选择要开始的任务': "Choose an issue to start",

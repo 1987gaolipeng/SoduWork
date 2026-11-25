@@ -80,6 +80,27 @@ test('an account change during preview activation releases only the late writabl
   assert.equal(f.sends.length, 0);
 });
 
+test('continuing a recovered draft rechecks its receipt and keeps edits when the preview is stale', async () => {
+  const reason = '最后一条消息的发送状态已变化，请重新打开会话后确认。';
+  const f = fixture(async options => options.historyIntent === 'continue'
+    ? { ok: false, code: 'HISTORY_PENDING_USER_TAIL_CHANGED', reason } : opened('original'));
+  f.ctx._ref = 'preview-a'; f.ctx._sessionId = 'original';
+  f.ctx._snap = { localReplica: true, messages: [], historyRecovery: { reasonCode: 'HISTORY_UNDISPATCHED_USER_TAIL',
+    pendingUserDigest: 'receipt-a', pendingUserText: 'original text' }, execution: { canContinueOnDevice: true } };
+  f.input.value = 'user edits';
+  assert.equal(await f.controller._ensure('original', 'preview-a'), false);
+  await tick();
+  assert.equal(f.opens[0].expectedPendingUserDigest, 'receipt-a');
+  assert.equal(f.input.value, 'user edits'); assert.equal(f.sends.length, 0);
+  assert.equal(f.ctx._snap.sessionOpenCode, 'HISTORY_PENDING_USER_TAIL_CHANGED');
+  assert.equal(f.ctx._snap.execution.canContinueOnDevice, false);
+  assert.equal(f.ctx._snap.historyRecovery.pendingUserText, undefined);
+  assert.equal(f.ctx._ref, ''); assert.deepEqual(f.released, ['preview-a']);
+  assert.equal(await f.controller._retryOpenChat(), true);
+  assert.equal(f.opens[1].historyIntent, 'view'); assert.equal(f.opens[1].expectedPendingUserDigest, undefined);
+  assert.equal(f.input.value, 'user edits'); assert.equal(f.sends.length, 0);
+});
+
 test('a view-only history rejects typed and programmatic sends before composer or runtime work', async () => {
   const f = fixture(() => { throw Error('must not execute'); });
   f.ctx._ref = 'preview-original';

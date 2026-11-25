@@ -14,7 +14,7 @@ def stamp(info):
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
-def records(root, path, limit):
+def lines(root, path, limit):
     # Reject links, junctions, devices, replacement and concurrent writes. No
     # archive path is taken from the desktop, a model response or a tool event.
     if not path.is_relative_to(root) or path.resolve(strict=True) != path:
@@ -24,16 +24,25 @@ def records(root, path, limit):
         raise ValueError("Invalid native archive")
     with os.fdopen(os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) |
                            getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)), "rb") as stream:
-        if stamp(os.fstat(stream.fileno())) != stamp(before):
+        opened = stamp(os.fstat(stream.fileno()))
+        path_stamp = stamp(before)
+        # On Windows lstat may report creation time while fstat reports change
+        # time. Compare their file IDs, sizes and mtimes, then recheck each full
+        # stamp through the same API at the end of the read.
+        if (opened[:4] != path_stamp[:4] if os.name == "nt" else opened != path_stamp):
             raise ValueError("Archive replaced")
         remaining = limit
         while line := stream.readline(remaining + 1):
             remaining -= len(line)
             if remaining < 0:
                 raise ValueError("Archive exceeds its read boundary")
-            yield json.loads(line)
-        if stamp(os.fstat(stream.fileno())) != stamp(before) or stamp(path.lstat()) != stamp(before):
+            yield line
+        if stamp(os.fstat(stream.fileno())) != opened or stamp(path.lstat()) != path_stamp:
             raise ValueError("Archive changed")
+
+
+def records(root, path, limit):
+    return (json.loads(line) for line in lines(root, path, limit))
 
 
 def generation(store, ref, revision, cli):

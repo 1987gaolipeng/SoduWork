@@ -34,6 +34,17 @@ test('bounded metrics retain absolute owners when history begins inside a turn',
   assert.equal(stream.snapshot(state, { messageLimit: 20 }).turnMetrics.length, 3);
 });
 
+test('a historical page cut through a long turn retains its actual completion and excludes later turns', () => {
+  const state = stateOf([user(1000), assistant(2, 2000), assistant(3, 3000), assistant(7, 6000),
+    user(7000), assistant(11, 11000)]);
+  const page = stream.snapshot(state, { messageLimit: 1, messageEnd: 3 });
+  assert.deepEqual(page.history.messageIndices, [2]);
+  assert.deepEqual(page.turnMetrics, [{ fromMessage: 0, toMessage: 3, elapsedMs: 5000, tokens: 12 }]);
+  const tail = stream.snapshot(state, { messageLimit: 1 });
+  assert.deepEqual(tail.turnMetrics, [{ fromMessage: 4, toMessage: 5, elapsedMs: 4000, tokens: 11 }]);
+  assert.deepEqual(stream.snapshot(state, { messageLimit: 1, messageEnd: 0 }).turnMetrics, []);
+});
+
 test('full snapshots project receipt owners onto visible messages before runtime handoff', () => {
   const state = stateOf([user(1000), assistant(3, 2000),
     assistant(5, 3000, { scope: stream.SCOPES.GOAL_REVIEW }),

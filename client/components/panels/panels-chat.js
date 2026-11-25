@@ -20,12 +20,15 @@
     get _collabStatus() { return _collabStatus; },
     get _collabTerminal() { return _collabTerminal; },
     get _retainFailedConversationDraft() { return _retainFailedConversationDraft; },
+    get _hasConversationDraft() { return _hasConversationDraft; },
+    get _restoreConversationDraft() { return _restoreConversationDraft; },
     get _draftKeyForCurrentSession() { return _draftKeyForCurrentSession; },
     get _draftOwnerScope() { return _draftOwnerScope; },
     get _pluginResolveBusy() { return _pluginResolveBusy; }, set _pluginResolveBusy(value) { _pluginResolveBusy = value; },
     get _pluginResolveSeq() { return _pluginResolveSeq; }, set _pluginResolveSeq(value) { _pluginResolveSeq = value; },
     get _submitTail() { return _submitTail; }, set _submitTail(value) { _submitTail = value; },
     get _clearConversationDraft() { return _clearConversationDraft; },
+    get _moveConversationDraft() { return _moveConversationDraft; },
     get _startTaskCommand() { return _startTaskCommand; },
     get _openWorkAction() { return _openWorkAction; },
     get _workCards() { return _workCards; },
@@ -56,6 +59,8 @@
     get _proposalAction() { return _proposalAction; },
     get _sendCore() { return _sendCore; },
     get _loadingOlder() { return _loadingOlder; }, set _loadingOlder(value) { _loadingOlder = value; },
+    get _openEarlierPage() { return _readingPosition?.openEarlier; },
+    get _finalReplyIndexes() { return _finalReplyIndexes; },
     get _restoreRetryDraft() { return _restoreRetryDraft; },
     get _speech() { return _speech; }, set _speech(value) { _speech = value; },
     get _draftKey() { return _draftKey; }, set _draftKey(value) { _draftKey = value; },
@@ -161,10 +166,10 @@
   const { _ensureOnce, _ensure, _retryOpenChat, _awaitBounded, _send, _sendCore, _paintOpening } = global.ChatSessionController.create(context);
   const { _bind, _mount, _loadChatSkills, _openPluginBuilder, _toggleChatMic } = global.ChatComposerBindings.create(context);
   const { _collabState, _ensureCollabView, _collabAction, _openTaskPicker, _selectCollabTask, _loadCollabTask, _clearFinishedAcceptanceContext, _loadCollabRun, _scheduleCollabPoll, _taskSnapshotIsStale, _isEmptyStalledSnapshot, _collabTerminal, _collabRunning, _collabStatus, _collabEntryStatus, _collabEntries, _collabQueueMode, _collabProjectId, _setCollabEntryStatus, _nextCollabEntry, _persistTaskBinding, _bindCollaborationTask, _restoreCollaboration, _openTask, _renderTaskStartPrompt, _startTask, _startTaskCommand, enqueueTask } = global.ChatTaskController.create(context);
-  const { reset: _resetMessageRenderer, rich, _richPlain, CARET, _ensureHlCss, _inject, _blockHtml, _MCP_SAY, _friendlyTool, _toolHtml, _render, _ctxText, _tokenText, _ctxHtml, _uiHtml } = global.ChatMessageRenderer.create(context);
+  const { reset: _resetMessageRenderer, _finalReplyIndexes, rich, _richPlain, CARET, _ensureHlCss, _inject, _blockHtml, _MCP_SAY, _friendlyTool, _toolHtml, _render, _ctxText, _tokenText, _ctxHtml, _uiHtml } = global.ChatMessageRenderer.create(context);
   const { _queueRows, _renderQueue, _queueAction, _updateQueueOrder, _cancelQueued } = global.ChatSendQueue.create(context);
   const { _chatDraftBridge, _workModel, _workConversationContext, _openPluginDebug, _openWorkAction, _pickProposal, _maybeProposal, _renderProposal, _dismissProposal, _proposalAction } = global.ChatWorkIntent.create(context);
-  const { _withConversationDraftRestore, _draftKeyForCurrentSession, _draftOwnerScope, _clearConversationDraftScope, _flushConversationDrafts, _rememberConversationText, _rememberConversationDraft, _conversationDraftText, _conversationDraftSkills, _clearConversationDraft, _restoreConversationDraft, _retainFailedConversationDraft, _restoreRetainedConversationFailure, _restoreRetryDraft, _openPluginAuthRecovery, _restoreFailedDraft } = global.ChatDraftRecovery.create(context);
+  const { firstSendEditState, restoreFirstSendForEdit, _hasConversationDraft, _withConversationDraftRestore, _draftKeyForCurrentSession, _draftOwnerScope, _clearConversationDraftScope, _flushConversationDrafts, _rememberConversationText, _rememberConversationDraft, _conversationDraftText, _conversationDraftSkills, _clearConversationDraft, _moveConversationDraft, _restoreConversationDraft, _retainFailedConversationDraft, _restoreRetainedConversationFailure, _restoreRetryDraft, _openPluginAuthRecovery, _restoreFailedDraft } = global.ChatDraftRecovery.create(context);
   let _ref = '';            // Current conversation reference.
   let _sessionId = '';      // Persistent Pi session ID for resuming the same live session.
   let _off = null;          // Event unsubscribe function.
@@ -361,7 +366,7 @@
       // workspace twice more whenever a conversation is opened or settles.
       shouldRetry = taskIds.length > 0 || Boolean(_snap?.cloudHandoff?.taskId ||
         _snap?.snapshot?.cloudHandoff?.taskId || _snap?.execution?.cloud) ||
-        localOutputMayBeLate;
+        (localOutputMayBeLate && (!_snap?.localReplica || _snap.artifactBackupIncomplete));
       let files = global.ChatOutputLinks
         ? await ChatOutputLinks.load(api, ref, taskIds, _outs, global.SoduWorkAPI)
         : await api.outputs(ref).then(r => {
@@ -389,7 +394,16 @@
       if (request !== _outRequest || ref !== _ref || epoch !== _viewEpoch) return;
       const key = JSON.stringify(files);
       if (key !== _outAt) { _outAt = key; _outs = files.slice(); _render(); }
-    } catch (_) { shouldRetry = true; /* Keep the last trusted index during a transient failure. */ }
+    } catch (_) {
+      shouldRetry = true;
+      // The first history read may fail transiently. Finish its loading state
+      // after the last retry, without changing an index that already succeeded.
+      if (retry === 2 && _snap?.localReplica && _outAt === '' &&
+          request === _outRequest && ref === _ref && epoch === _viewEpoch) {
+        _outAt = JSON.stringify(_outs);
+        _render();
+      }
+    }
     finally {
       if (shouldRetry && retry < 2 && request === _outRequest && ref === _ref && epoch === _viewEpoch)
         _outRetryTimer = setTimeout(() => {
@@ -506,7 +520,7 @@
   }
   function _stopCapable() {
     const execution = _snap?.execution || {}, phase = execution.quality?.phase || '';
-    return ['streaming', 'queued'].includes(_snap?.status) || execution.running === true ||
+    return ['streaming', 'queued'].includes(_snap?.status) || execution.running === true || execution.waitingForStart === true ||
       ['executing', 'implementing', 'reviewing', 'repairing'].includes(phase);
   }
   function _paintActionState() {
@@ -552,7 +566,10 @@
     _paintStopState();
   }
   function _reconcileStopState() {
-    if (_stopState !== 'requested' || !_stopReceiptAcknowledged || _runtimeBusy()) return;
+    // A Runner can acknowledge cancellation asynchronously, after the IPC
+    // returned. Its optimistic 'aborted' state alone is not a stop receipt.
+    const runnerSettled = _snap?.status === 'aborted' && _snap.execution?.manualStopPending === false;
+    if (_stopState !== 'requested' || !(_stopReceiptAcknowledged || runnerSettled) || _runtimeBusy()) return;
     _clearStopTimer();
     _stopState = 'idle';
     _stopReceiptAcknowledged = false;
@@ -599,6 +616,7 @@
     const api = _api();
     if (!api || !_ref || _stopState === 'requested') return;
     const ref = _ref;
+    const beforeStop = _snap;
     const token = ++_stopRequestToken;
     _clearStopTimer();
     _setStopState('requested');
@@ -621,10 +639,15 @@
         _setStopState('timeout');
         return;
       }
+      // A host-side cancellation has no native user echo. Retire only the
+      // optimistic bubble owned by the cancelled submission.
+      if (receipt.cancelledBeforeDispatch && receipt.cancelledBeforeDispatch === _pendingBaseline?.submissionId) {
+        _pending = ''; _pendingBaseline = null; _pendingAttachmentNames = []; _pendingPlugins = [];
+      }
       // Apply the authoritative post-request snapshot before repainting. A
       // stale streaming frame must not make the stop button look clickable
       // while a controlled turn is still winding down.
-      if (receipt.snapshot && typeof receipt.snapshot === 'object') {
+      if (_snap === beforeStop && receipt.snapshot && typeof receipt.snapshot === 'object') {
         _snap = receipt.snapshot;
         _lastStatus = _snap.status || _lastStatus;
       }
@@ -706,7 +729,7 @@
     const input = document.getElementById('nchatInput');
     if (input) input.focus();
   }
-  async function enter(first, chatId, options) {
+  async function enter(first, chatId, options, homeDraft) {
     const entryRequest = ++_entryRequest;
     _rememberConversationDraft();
     if (!first && !chatId && !_ref && _sessionId) chatId = _sessionId;
@@ -771,8 +794,9 @@
     }
     _pendingAttachmentNames = _sessionInputs.map((item) => item && (item.name || item.filename)).filter(Boolean);
     if (cachedSnapshot && !_ref) _snap = cachedSnapshot;
-    if (first) _clearConversationDraft(_draftKey);
-    _mount();
+    if (first && !global.ChatSessionController?.ordinaryFirstSend?.(context)) _clearConversationDraft(_draftKey);
+    const chatRoot = _mount();
+    if (chatRoot?.dataset?.firstSendDraftId) delete chatRoot.dataset.firstSendDraftId;
     if (!first) _restoreConversationDraft(_draftKey);
     if (inputFiles.length) _messageAttachments?.addReferences(inputFiles);
     if (global.WorkIntent) WorkIntent.showGoal(_mount(), _sessionOptions, 'nchat');
@@ -793,6 +817,7 @@
       // first mount, so relying on it drops files when switching to a Runner
       // runtime (Qwen/DeepSeek/Codex) before sending.
       const accepted = await _send(first, {
+        homeDraft,
         plugins: initialPlugins,
         skills: initialSkills,
         attachments: Array.isArray(_sessionOptions.attachments) ? _sessionOptions.attachments : [],
@@ -847,11 +872,13 @@
     return true;
   }
   function reset() {
+    _readingPosition?.closeEarlier();
     global.SoduWorkQuotaNotice?.modelChanged?.();
     _workCards?.detach();
     _resetMessageRenderer();
     global.AccessControls?.destroy(document.querySelector('#cpChat .nchat'));
     _rememberConversationDraft();
+    _sendPreflight?.releaseStarterDraft?.();
     _flushConversationDrafts();
     // Control teardown must not overwrite the saved draft with an empty attachment tray.
     _withConversationDraftRestore(() => {
@@ -967,6 +994,24 @@
     };
   }
   function hasSession() { return !!(_ref || _sessionId); }
+  function openFirstSendDraft(row) {
+    if (firstSendEditState(row, false) !== 'starter') return false;
+    reset();
+    if (!restoreFirstSendForEdit(row, false)) return false;
+    _draftKey = 'first-send-draft:' + row.intentId;
+    _sessionOptions = { ...row.draftOptions };
+    _wd = { dir: _sessionOptions.cwd || '', name: _sessionOptions.workspaceLabel || '临时工作区' };
+    _mode = _sessionOptions.mode || 'full';
+    _sessionCaps = _sessionOptions.capabilities || [];
+    prepare(_sessionOptions);
+    _mount().dataset.firstSendDraftId = row.intentId;
+    _restoreConversationDraft(_draftKey);
+    _restoreRetainedConversationFailure();
+    global.ChatChrome?.resume?.(row.title || '');
+    _render();
+    document.getElementById('nchatInput')?.focus();
+    return true;
+  }
   function prepare(options) {
     // Work forms reserve an archive without opening an Agent. Transfer the
     // selected model here so their composer and first normal send agree.
@@ -1055,6 +1100,7 @@
     rememberComposerDraft: _rememberConversationDraft,
     restoreComposerDraft: _restoreConversationDraft,
     withDraftRestore: _withConversationDraftRestore,
+    firstSendEditState, restoreFirstSendForEdit, openFirstSendDraft,
     getDraft: (key) => _conversationDraftText(key),
     getDraftSkills: (key) => _conversationDraftSkills(key),
     clearDraft: (key) => _clearConversationDraft(key),

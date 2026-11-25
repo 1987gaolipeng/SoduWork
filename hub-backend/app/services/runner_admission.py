@@ -502,6 +502,7 @@ def queued_session(item: AdmissionItem, position: int, since: int = 0) -> dict:
         "ctxWindowSource": "safe-default", "error": item.error, "usage": {},
         "firstStarted": item.started_at or 0, "canStop": item.state in ACTIVE_STATES,
         "executionStartedAt": 0,
+        "queueAcceptedAt": item.accepted_at, "startupWaitSince": item.started_at,
         "queued": item.state == "queued",
         "queuePosition": position if item.state == "queued" else 0,
         "queueClass": item.category,
@@ -523,7 +524,7 @@ def with_native_history(queued: dict, native: dict) -> dict:
         return dict(native)
     result = dict(native)
     for key in ("status", "state", "error", "canStop", "queued", "queuePosition", "queueClass",
-                "admissionKey", "turnCorrelationVersion"):
+                "admissionKey", "turnCorrelationVersion", "queueAcceptedAt", "startupWaitSince"):
         result[key] = queued[key]
     # The transcript belongs to previous turns; this admission never launched.
     result["executionStartedAt"] = 0

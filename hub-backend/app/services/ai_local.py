@@ -780,6 +780,7 @@ def _dispatch_sync_once(cfg: dict, t, files: list | None = None,
                               goalTurnOwned=True, conversationMode="goal")
             prompt = local_task_goal.work_prompt(_RUNS[sid], prompt)
     from .runtime_messages import epoch_ms
+    from . import turn_correlation
     conversation_text = str(ctx.get("conversationUserText") or "").strip()
     if conversation_text:
         try:
@@ -787,6 +788,7 @@ def _dispatch_sync_once(cfg: dict, t, files: list | None = None,
                 "kind": "user", "tool": "", "text": conversation_text[:20000],
                 "full": conversation_text[:50000],
                 "sentAt": epoch_ms(ctx.get("conversationSentAt")) or int(time.time() * 1000),
+                **turn_correlation.desktop_submission(cfg, ctx),
                 "plugins": conversation_plugins.badges(ctx.get("conversationPlugins")),
                 "attachments": [{"name": str(item.get("name") or ""),
                                  "path": str(item.get("path") or "")}

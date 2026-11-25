@@ -353,7 +353,7 @@ async function open(opts) {
   );
   const acc = stream.create();
   const seeded = opts.resumePath
-    ? _seed(acc, piSession, { goal, internalGoal: internalGoalHistory, maxMessages: 240, nativeAgentId: 'pi' }) : 0;
+    ? _seed(acc, piSession, { goal, internalGoal: internalGoalHistory, maxMessages: 240, archivePages: true, nativeAgentId: 'pi' }) : 0;
   const lastStoredScope = [...sessionEntries].reverse().find((item) => item &&
     item.type === 'custom' && item.customType === SCOPE_ENTRY_TYPE);
   let persistedScope = String(lastStoredScope && lastStoredScope.data &&
@@ -694,9 +694,12 @@ async function open(opts) {
     const next = turnQueue.take();
     if (!next) return;
     modelRecovery.clear();
+    if (!goalVisible && !taskBinding.taskId && !next.options.controlled && !next.options.taskId && !next.options.internal)
+      next.preparingAt = Date.now();
     const completion = turnQueue.run(next, async () => {
       if (next.options.controlled) return next.options.controlled.execute(handle, next.text, next.attachments);
       await modelSelection.applyForTurn(next.options.modelName);
+      next.preparingAt = 0;
       if (next.stopRequested) return { ok: true, cancelled: true, manualStop: true };
       const result = await handle.send(next.text, next.attachments, { ...next.options, fromQueue: true });
       return runControl.finishRecovery(run, result);

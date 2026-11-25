@@ -714,13 +714,19 @@
         if (row?.id === id) remember(next, [row]);
       }); },
       /* Assign new conversations to projects before they appear in the list, preserving existing pins. */
-      fileChat(id, projectId, row) {
+      fileChat(id, projectId, row, { ifUnassigned = false } = {}) {
         id = String(id || '');
         if (!id) return false;
         let filed = false;
-        const same = references([id], row ? [row] : []);
         commit(next => {
+          const same = references([id], row ? [row] : []);
           const p = next.projects.find(item => item.id === projectId);
+          if (ifUnassigned) {
+            // Explicit moves to Recent or Pinned and archived memberships outrank a late receipt.
+            const assigned = [...next.pins, ...next.recent, ...next.projects.flatMap(q => q.chatIds),
+              ...next.archivedProjects.flatMap(q => q.chatIds)].some(value => same.has(value));
+            if (!p || assigned) { filed = true; return; }
+          }
           if (!p) throw Error('项目已被移除，请刷新后重试');
           if (p.chatIds.some(value => same.has(value))) { filed = true; return; }
           next.recent = next.recent.filter(value => !same.has(value));

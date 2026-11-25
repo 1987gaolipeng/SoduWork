@@ -522,6 +522,121 @@ test('a verified prefix enriches the displayed dialogue without discarding a new
   assert.deepEqual(restored.prefix.messages.map(m => m.text), live.map(m => m.text));
 });
 
+async function pendingTailFixture(t) {
+  const f = setup(t), segments = require('../main/conversation/runtime-segments');
+  const key = 'chat:recovery:qwen', ref = require('../main/agent-runtime/runner-adapter').runnerRefForDispatch(key);
+  const original = [{ role: 'user', text: 'saved by Alice' }, { role: 'assistant', text: 'local answer' }];
+  const pending = { role: 'user', text: 'a request to review before sending' };
+  const admitted = new Set(), delivered = new Set(), awaitingAdmission = new Set();
+  t.mock.method(require('../main/runner-runtime'), 'rpc', async (method, args) => {
+    if (method === 'job.session') {
+      if (delivered.has(args.ref)) return { ok: true, data: { ref: args.ref, seq: 2, items: [
+        { seq: 1, kind: 'user', text: pending.text }, { seq: 2, kind: 'say', text: 'received once' }] } };
+      return { ok: true, data: { ok: false, ref: args.ref, code: 'NATIVE_HISTORY_MISSING', items: [] } };
+    }
+    assert.equal(method, 'job.has');
+    assert.equal(args.checkPendingWork, true);
+    const persisted = Boolean(admitted.has(args.ref) && args.admissionKey);
+    return { ok: true, data: { has: persisted, persisted, inflight: false, admissionDurable: true,
+      localWorkPending: awaitingAdmission.has(args.ref),
+      bootId: 'one-boot', admissionKey: args.admissionKey || '' } };
+  });
+  f.row.workOwner = segments.scope(f.identityOf());
+  await segments.save(f.app, { version: 1, id: f.row.id, owner: f.row.workOwner, originAdapter: 'pi', cwd: f.row.cwd,
+    segments: [{ sessionId: f.row.id, adapterId: 'pi' }], active: { adapterId: 'qwen', sessionId: ref, nativeDispatchId: key, started: false } });
+  await f.history.register([f.row]);
+  const capture = messages => f.history.capture({ historyRow: () => f.row, snapshot: () => ({ messages }) }, f.identityOf());
+  await capture([...original, pending]);
+  const preview = async () => {
+    const view = await f.history.open(f.row.id, { historyPreview: true, allowContinuation: true });
+    try { return view.snapshot(); } finally { await view.close(); }
+  };
+  const strict = expectedPendingUserDigest => f.history.prepareContinuation(f.row.id,
+    { refresh: true, allowUndispatchedTail: true, expectedPendingUserDigest });
+  return { f, segments, ref, pending, original, admitted, delivered, awaitingAdmission, capture, preview, strict };
+}
+
+test('a captured history tail remains read-only while its local dispatch is waiting for admission', async t => {
+  const { ref, awaitingAdmission, preview, strict } = await pendingTailFixture(t);
+  const initial = await preview();
+  assert.equal(initial.execution.canContinueOnDevice, true);
+  awaitingAdmission.add(ref);
+  assert.equal((await preview()).execution.canContinueOnDevice, false);
+  await assert.rejects(strict(initial.historyRecovery.pendingUserDigest));
+});
+
+test('only the owner can recover a single unadmitted user message outside native execution history', async t => {
+  const { f, ref, pending, original, admitted, delivered, capture, preview, strict } = await pendingTailFixture(t);
+  const owner = await preview();
+  assert.equal(owner.execution.canContinueOnDevice, true);
+  assert.equal(owner.historyRecovery.reasonCode, 'HISTORY_UNDISPATCHED_USER_TAIL');
+  assert.equal(owner.historyRecovery.pendingUserText, pending.text);
+  assert.deepEqual(owner.messages.map(m => m.text), original.map(m => m.text));
+  const digest = owner.historyRecovery.pendingUserDigest;
+  const changed = { code: 'HISTORY_PENDING_USER_TAIL_CHANGED' };
+  await assert.rejects(strict('stale'), changed);
+  await assert.rejects(strict(null), changed);
+  const verified = await strict(digest);
+  assert.equal(verified.historyRecovery.transcriptTail.digest, owner.historyRecovery.pendingUserDigest);
+  assert.equal(verified.historyRecovery.pendingUserText, undefined);
+  assert.deepEqual(verified.prefix.messages.map(m => m.text), original.map(m => m.text));
+  await assert.rejects(f.history.prepareContinuation(f.row.id, { refresh: true }), { code: 'HISTORY_INCOMPLETE' });
+  await assert.rejects(f.history.exportPortable(f.row.id), /尚未完整/);
+  assert.deepEqual(f.store.conversationTranscript(f.row.id).at(-1), pending, 'a preview or strict check must not consume the draft');
+
+  admitted.add(ref);
+  const late = await preview();
+  assert.equal(late.execution.canContinueOnDevice, false);
+  assert.equal(late.historyRecovery.reasonCode, 'HISTORY_UNCONFIRMED_USER_TAIL');
+  assert.equal(late.historyRecovery.pendingUserText, undefined);
+  assert.equal(late.messages.at(-1).text, pending.text);
+  await assert.rejects(strict(), { code: 'HISTORY_INCOMPLETE' });
+  await assert.rejects(strict(digest), changed);
+  admitted.delete(ref);
+  f.switch(identity('two'));
+  assert.equal((await preview()).execution.canContinueOnDevice, false);
+  await assert.rejects(strict());
+  f.switch(identity());
+  await capture([...original, pending, { role: 'assistant', text: 'received once' }]);
+  assert.equal((await preview()).historyRecovery.pendingUserText, undefined);
+  await assert.rejects(strict(), { code: 'HISTORY_INCOMPLETE' });
+  delivered.add(ref);
+  await assert.rejects(strict(digest), changed);
+  assert.equal((await strict(null)).prefix.messages.at(-1).text, 'received once');
+});
+
+test('reopening after allocating a new empty recovery segment rechecks all earlier unadmitted allocations', async t => {
+  const { f, segments, ref, pending, admitted, delivered, preview, strict } = await pendingTailFixture(t);
+  const digest = (await preview()).historyRecovery.pendingUserDigest;
+  const verified = await strict(digest);
+  const before = segments.read(f.app, f.row.id);
+  const key = 'chat:recovery:next', next = require('../main/agent-runtime/runner-adapter').runnerRefForDispatch(key);
+  await segments.save(f.app, { ...before, prefix: verified.prefix, deviceHistoryComplete: true,
+    historyRecovery: verified.historyRecovery, segments: [...before.segments, before.active],
+    active: { adapterId: 'qwen', sessionId: next, nativeDispatchId: key, started: false } });
+  assert.equal((await strict(digest)).historyRecovery.transcriptTail.sourceId, ref);
+  const verifySend = () => f.history.verifyRecoverySend(f.row.id, next, verified.historyRecovery.transcriptTail);
+  await verifySend();
+  for (const receipt of [ref, next]) {
+    admitted.add(receipt);
+    assert.equal((await preview()).execution.canContinueOnDevice, false);
+    await assert.rejects(strict(digest), { code: 'HISTORY_PENDING_USER_TAIL_CHANGED' });
+    await assert.rejects(verifySend(), { code: 'HISTORY_PENDING_USER_TAIL_CHANGED' });
+    assert.deepEqual(f.store.conversationTranscript(f.row.id).at(-1), pending);
+    admitted.delete(receipt);
+  }
+  delivered.add(ref);
+  await assert.rejects(strict(digest), { code: 'HISTORY_PENDING_USER_TAIL_CHANGED' });
+  delivered.delete(ref);
+  const nativeEntry = f.session.historyEntry;
+  f.session.historyEntry = (app, id) => id === f.row.id ? nativeEntry(app, id) : { ok: false, notFound: true };
+  await segments.save(f.app, { ...segments.read(f.app, f.row.id),
+    active: { adapterId: 'pi', sessionId: 'new-pi-without-archive', started: false } });
+  assert.equal((await preview()).execution.canContinueOnDevice, false);
+  await assert.rejects(strict(digest), { code: 'HISTORY_PENDING_USER_TAIL_CHANGED' });
+  assert.deepEqual(f.store.conversationTranscript(f.row.id).at(-1), pending);
+});
+
 test('an accepted turn checkpoints its dialogue while native replay is still blocked', async t => {
   const f = setup(t);
   let begin, finish;

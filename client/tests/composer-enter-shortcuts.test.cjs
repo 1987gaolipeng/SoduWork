@@ -25,7 +25,7 @@ function harness(kind) {
   const calls = [];
   let warmups = 0;
   const ctx = {
-    _send: () => calls.push('send'), makeDraft: () => calls.push('draft'),
+    _send: () => calls.push('send'), _cancel: () => calls.push('cancel'), makeDraft: () => calls.push('draft'),
     _paintBar() {}, _rememberComposeDraft() {}, _loadModels() {},
     _loadCapabilities() {}, _loadSetup() {}, _bindSetup() {},
     _canStop: () => false,
@@ -48,8 +48,19 @@ function harness(kind) {
   const api = kind === 'chat' ? runtime.ChatComposerBindings : runtime.ComposeSurface;
   api.create(ctx)._bind(node('root'));
   assert.equal(warmups, kind === 'compose' ? 1 : 0, 'compose binding warms the menu without submitting');
-  return { calls, input: node(kind === 'chat' ? '#nchatInput' : '#cpInput') };
+  return { calls, ctx, sendButton: node('#nchatSend'), input: node(kind === 'chat' ? '#nchatInput' : '#cpInput') };
 }
+
+test('stop button cancels a host-preparing turn while its send has yet to return', () => {
+  const { ctx, calls, sendButton } = harness('chat');
+  ctx._sendState = 'sending';
+  ctx._snap = { status: 'idle', execution: { waitingForStart: true, running: false } };
+  sendButton.dispatch({ type: 'click' });
+  assert.deepEqual(calls, ['cancel']);
+  ctx._snap.execution.waitingForStart = false;
+  sendButton.dispatch({ type: 'click' });
+  assert.deepEqual(calls, ['cancel']);
+});
 
 function enter(overrides = {}) {
   return { type: 'keydown', key: 'Enter', ctrlKey: false, metaKey: false, altKey: false,

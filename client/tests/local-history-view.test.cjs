@@ -63,6 +63,27 @@ test('expanded windows use indexed pages rather than rescanning all prior messag
   assert.equal(view.snapshot().messages.length, 600);
   assert.equal(view.snapshot().history.messageStart, 9400);
   assert.equal(f.reads(), 56);
+  const before = view.snapshot();
+  const page = await view.loadHistory({ messageLimit: 80, messageEnd: 80 });
+  assert.equal(page.history.messageStart, 0);
+  assert.equal(page.history.messageEnd, 80);
+  assert.equal(page.messages[0].text, 'message-0');
+  assert.equal(page.messages.at(-1).text, 'message-79');
+  assert.equal(f.reads(), 57);
+  assert.equal(view.snapshot(), before, 'Reading an older page preserves the current composer snapshot');
+  await view.close();
+});
+
+test('a partial archived turn keeps its own saved send time in the first window', async () => {
+  const summary = require('../components/panels/chat-turn-summary');
+  const items = [{ role: 'user', sentAt: 1000 }, ...Array.from({ length: 120 }, () => ({
+    role: 'assistant', text: 'Progress', completedAt: 3000 })), { role: 'user' },
+    { role: 'assistant', text: 'Another turn', completedAt: 7000 }];
+  const view = await create({ row: { id: 'clock' }, read: source(items).read });
+  const snap = view.snapshot(), last = snap.messages.length - 1;
+  assert.equal(snap.messages[0].role, 'assistant');
+  assert.equal(snap.history.leadingUserMessageIndex, 0);
+  assert.deepEqual(summary.project(snap, new Set([last - 2, last])).map(turn => turn.elapsedMs), [2000, null]);
   await view.close();
 });
 test('byte-bound eviction never resurrects a message without its original delta prefix', async () => {

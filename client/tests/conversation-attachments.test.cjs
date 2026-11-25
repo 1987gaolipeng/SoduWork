@@ -224,7 +224,8 @@ test('initial and follow-up composers accept clipboard files and forward attachm
   assert.match(chat, /const submissionRef = retainedRef \|\| (?:ctx\.)?_ref/);
   assert.match(chat, /ConversationAttachments\.openMessageImage/);
   assert.match(chat, /ConversationAttachments\.hydrateMessageImages/);
-  assert.match(chat, /api\.send\(submissionRef, text, attachmentRefs, \{\s*plugins: resolvedPlugins,\s*sentAt,\s*projectId:/);
+  assert.match(chat, /const turnOptions = \{\s*plugins: resolvedPlugins,\s*sentAt,\s*projectId:/);
+  assert.match(chat, /api\.send\(submissionRef, text, attachmentRefs, turnOptions\)/);
   assert.match(preload, /pi-session-send', ref, text, attachments/);
   assert.match(preload, /pi-session-attachment-image/);
   assert.match(preload, /pi-session-copy-attachment-image/);

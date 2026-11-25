@@ -14,6 +14,21 @@ function fixture() {
 }
 const ids = rows => Array.from(rows, row => row.id);
 
+test('a delayed first-send receipt respects manual organization and removed projects after restart', () => {
+  const f = fixture(), initial = f.create();
+  const original = initial.saveProject({ name: 'Original' }), moved = initial.saveProject({ name: 'Moved' });
+  const row = id => ({ id, title: id });
+  for (const [id, target] of [['moved', moved], ['recent', 'recent'], ['pinned', 'pinned']])
+    initial.move(row(id), target, '', [row(id)]);
+  const s = f.create(), claim = (id, project = original) => s.fileChat(id, project, row(id), { ifUnassigned: true });
+  for (const id of ['fresh','fresh','moved','recent','pinned']) assert.equal(claim(id), true);
+  assert.deepEqual(Array.from(s.get().projects[0].chatIds), ['fresh']);
+  assert.deepEqual(Array.from(s.get().projects[1].chatIds), ['moved']);
+  assert.ok(s.get().recent.includes('recent')); assert.ok(s.get().pins.includes('pinned'));
+  s.archiveProject(moved); claim('moved'); assert.ok(s.get().archivedProjects[0].chatIds.includes('moved'));
+  s.removeProject(original); assert.equal(claim('removed'), true); assert.equal(s.get().projects.length, 0);
+});
+
 test('mobile task memberships display existing PC projections once without rewriting saved IDs', () => {
   const f = fixture(), s = f.create();
   s.applyRemoteProject({id:'project-mobile', name:'Mobile', chatIds:['cloud-task:task-one', 'native', 'task:task-two', 'cloud-sync-one']});

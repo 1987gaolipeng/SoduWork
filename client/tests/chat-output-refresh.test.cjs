@@ -45,6 +45,24 @@ test('a successful local retry stops retrying', async () => {
   await f.ctx._pullOuts(); await f.tick(); await f.tick();
   assert.equal(count, 2); assert.equal(f.timers.size, 0); assert.equal(f.ctx._outs[0].name, 'new.txt');
 });
+test('a history preview finishes loading even when its first index read exhausts retries', async () => {
+  const f = fixture(() => ({ ok: false }));
+  f.ctx._snap.localReplica = true;
+  await f.ctx._pullOuts(); await f.tick();
+  assert.equal(f.paints(), 0);
+  await f.tick();
+  assert.equal(f.paints(), 1);
+  assert.equal(f.ctx._outAt, '[]');
+  assert.equal(f.timers.size, 0);
+});
+test('completed history file tools do not trigger repeat scans of a verified archive', async () => {
+  const f = fixture(() => ({ ok: true, files: [{ name: 'shot.png' }] }));
+  f.ctx._snap.localReplica = true;
+  f.ctx._snap.tools = [{ name: 'write_file', state: 'done' }];
+  await f.ctx._pullOuts(); await f.tick();
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.paints(), 1);
+});
 test('cloud sessions and task attachments retain the delayed refresh window', async () => {
   for (const context of ['cloud', 'handoff', 'task']) {
     const f = fixture(() => ({ ok: true, files: [] }));

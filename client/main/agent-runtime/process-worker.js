@@ -130,6 +130,11 @@ const peer = createRpcPeer({
       return result;
     },
     async session(ref, method, args) {
+      if (method === 'readHistoryPage') {
+        if (require('../pi-session/snapshot-window').requestedEnd(args[0]) === null)
+          throw Error('Invalid history page cursor');
+        return session(ref).uiSnapshot(args[0]);
+      }
       if (!METHODS.has(method)) throw Error('Session operation is unavailable');
       const handle = session(ref);
       const result = method === 'appendTaskBatch'

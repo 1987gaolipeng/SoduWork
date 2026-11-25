@@ -129,6 +129,7 @@ async function create({ app, ref, record, saved, recordOf = () => record,
     },
     uiSnapshot(options) {
       const snapshot = handle.snapshot();
+      if (windowed.requestedEnd(options) !== null) return windowed.limitSnapshot(snapshot, options);
       const { messageLimit, toolLimit } = windowed.limits(options);
       const key = messageLimit + ':' + toolLimit;
       if (!cachedUi || cachedUi.key !== key) cachedUi = { key, value: windowed.limitSnapshot(snapshot, options) };

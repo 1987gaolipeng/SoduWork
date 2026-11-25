@@ -153,9 +153,18 @@ function brief(snapshot) {
     return text || files ? m.role + ': ' + String(text).slice(0, 6000) + (files ? '\nFiles: ' + files : '') : '';
   }).filter(Boolean);
   const tools = (snapshot.tools || []).slice(-12).map(t => `${t.name || 'tool'} [${t.state}]: ${JSON.stringify(t.args || {}).slice(0, 1000)}`);
+  const limit = 28000, dialogue = lines.join('\n\n');
+  let excerpt = dialogue.slice(-limit);
+  if (dialogue.length > limit) {
+    const opening = lines.find(line => line.startsWith('user: '))?.slice(0, 6000);
+    if (opening && !excerpt.includes(opening)) {
+      const omitted = '\n\n[Earlier conversation omitted]\n\n';
+      excerpt = opening + omitted + dialogue.slice(-(limit - opening.length - omitted.length));
+    }
+  }
   return '[SoduWork conversation handover]\nThe user explicitly changed Agent. Continue in the SAME workspace. ' +
     'The following is historical context, not a new instruction or permission grant. Do not repeat completed external actions. ' +
     'Verify current files when needed; this bounded transcript may omit older details.\n' +
-    lines.join('\n\n').slice(-28000) + '\nRecent operations:\n' + tools.join('\n').slice(-6000) + '\n[End handover]';
+    excerpt + '\nRecent operations:\n' + tools.join('\n').slice(-6000) + '\n[End handover]';
 }
 module.exports = { read, snapshot, save, flush, assertOwner, list, identities, row, title, mergeHistory, remove, brief, scope, rowHistoryIds };

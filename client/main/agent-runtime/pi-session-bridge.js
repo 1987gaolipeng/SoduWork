@@ -414,6 +414,8 @@ function createPiSessionBridge(options) {
         ref, sessionId, raw, record, supervisor, closed: false, view: null, runtimeView: null, switchable: true,
       };
       entry.raw = raw = switchable.create({ raw, options: legacyOptions, restored, openNative,
+        verifyRecoveredTurn: id => replicaHistory?.prepareContinuation(id, { refresh: true }),
+        checkpointRetiringRunner: (id, nativeId) => replicaHistory?.checkpointRetiringRunner(id, nativeId),
         disposeNative: part => registry.disposeSession(part.adapterId, part.sessionId), probe, catalog: runtimeCatalog,
         changed(next) {
           entry.supervisor?.dispose(); entry.supervisor = null; entry.record = next.record;
@@ -1181,6 +1183,14 @@ function createPiSessionBridge(options) {
     get,
     list,
     findBySessionId,
+    historyExecutionsIdle(ids) {
+      return ids.every(id => {
+        if (openingHistoryIds.has(id) || workOpenings.has(id)) return false;
+        const handles = [bySessionId.get(id)?.raw, sessionModule.findBySessionId?.(id)];
+        return handles.every(handle => !handle || handle.localReplica || (typeof handle.snapshot === 'function' &&
+          !switchable.busy(handle) && !switchable.goalSwitchBlocked(handle.snapshot())));
+      });
+    },
     findRunnerRow,
     probeMissingHistory,
     removeMissingHistory,

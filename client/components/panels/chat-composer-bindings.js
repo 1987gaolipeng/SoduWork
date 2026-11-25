@@ -311,7 +311,7 @@ function _loadChatSkills(force) {
 
 function _canStop() {
     const snap = ctx._snap || {}, execution = snap.execution || {}, phase = execution.quality?.phase || '';
-    return ['streaming', 'queued'].includes(snap.status) || execution.running === true ||
+    return ['streaming', 'queued'].includes(snap.status) || execution.running === true || execution.waitingForStart === true ||
       ['executing', 'implementing', 'reviewing', 'repairing'].includes(phase);
   }
 
@@ -427,6 +427,7 @@ function _bind(el) {
     });
     input.addEventListener('input', () => {
       ctx._rememberConversationDraft();
+      input.dataset.editRevision = String(Number(input.dataset.editRevision || 0) + 1);
       // CSS caps growth to the viewport and scrolls internally, including restored drafts.
       input.style.height = 'auto';
       ChatTools.paintSendButton(el, ctx._runtimeBusy(), ctx._messageAttachments, ctx._stopState, _canStop(), ctx._sendState);
@@ -679,17 +680,43 @@ function _bind(el) {
         const api = ctx._api(); if (!api || typeof api.snapshot !== 'function') return;
         const scroll = el.querySelector('#nchatScroll'); const height = scroll ? scroll.scrollHeight : 0;
         const top = scroll ? scroll.scrollTop : 0; const requestedRef = ctx._ref;
-        // Explicit history reads keep the backend's existing 2000-message limit.
+        const epoch = ctx._viewEpoch, owner = ctx._draftScopeEpoch;
+        const current = () => requestedRef === ctx._ref && epoch === ctx._viewEpoch && owner === ctx._draftScopeEpoch;
+        const history = ctx._snap?.history || {};
+        const pageEarlier = Number.isSafeInteger(history.messageEnd) && history.messageStart > 0 && ctx._openEarlierPage;
         const nextSize = nextMessageWindowSize(ctx._messageWindowSize);
         if (nextSize <= Number(ctx._messageWindowSize)) {
+          if (pageEarlier) { void pageEarlier(history.messageStart); return; }
           older.disabled = true; older.textContent = '已显示最近 2000 条消息'; return;
         }
+        const previousText = older.textContent;
         ctx._loadingOlder = true; older.disabled = true; older.textContent = '\u6b63\u5728\u52a0\u8f7d\u66f4\u65e9\u8bb0\u5f55\u2026';
-        Promise.resolve(api.snapshot(requestedRef, { messageLimit: nextSize, toolLimit: nextSize * 2 })).then((got) => {
-          if (requestedRef !== ctx._ref || !got || !got.ok || !got.snapshot) return;
-          ctx._messageWindowSize = nextSize; ctx._snap = got.snapshot; ctx._render();
-          if (scroll) requestAnimationFrame(() => { scroll.scrollTop = top + scroll.scrollHeight - height; });
-        }).catch(() => { if (typeof petSay === 'function') petSay('\u66f4\u65e9\u7684\u5bf9\u8bdd\u6682\u65f6\u52a0\u8f7d\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5'); }).finally(() => { ctx._loadingOlder = false; });
+        async function readOlder() {
+          let snapshot;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const before = ctx._snap;
+            const got = await api.snapshot(requestedRef, { messageLimit: nextSize, toolLimit: nextSize * 2 });
+            if (!current()) return;
+            if (!got?.ok || !got.snapshot) throw Error(got?.reason);
+            if (ctx._snap === before) { snapshot = got.snapshot; break; }
+            // A newer live publication owns the current reply and execution state.
+            if (ctx._snap?.history?.messageLimit >= nextSize) { snapshot = ctx._snap; break; }
+          }
+          if (!snapshot) throw Error('更早的对话暂时加载失败，请稍后重试');
+          // A byte-bounded device preview can reach its limit before 2000.
+          if (pageEarlier && snapshot.history?.messageStart === history.messageStart &&
+              ctx._messageWindowSize >= ctx._snap.messages.length) {
+            return pageEarlier(history.messageStart);
+          }
+          ctx._messageWindowSize = nextSize; ctx._snap = snapshot; ctx._render();
+          if (scroll) requestAnimationFrame(() => { if (current()) scroll.scrollTop = top + scroll.scrollHeight - height; });
+        }
+        readOlder().catch(() => { if (current() && typeof petSay === 'function') petSay('更早的对话暂时加载失败，请稍后重试'); })
+          .finally(() => {
+            if (!current()) return;
+            ctx._loadingOlder = false;
+            if (older.disabled) { older.disabled = false; older.textContent = previousText; }
+          });
         return;
       }
       const appCard = e.target.closest('[data-chat-app]');

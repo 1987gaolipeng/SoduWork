@@ -10,7 +10,7 @@ const { identity } = require('./helpers/platform-session-fixture.cjs');
 const auth = require('../main/device-auth');
 const { scope } = require('../main/platform-connections/runtime.cjs');
 
-async function fixture(t, { native = true, synced = true, sidecar = true, missingRunner = false } = {}) {
+async function fixture(t, { native = true, synced = true, sidecar = true, missingRunner = false, retireFirstSends } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'conversation-lifecycle-'));
   const app = { getPath: () => root }, actor = identity(), saved = {};
   let current = actor;
@@ -65,7 +65,7 @@ async function fixture(t, { native = true, synced = true, sidecar = true, missin
   const accountHistory = { resolveLifecycle: (...args) => sync.resolveLifecycle(...args),
     setLifecycle: (...args) => sync.setLifecycle(...args) };
   const handlers = new Map();
-  require('../main/pi-session/history-ipc').install({ app, session: bridge, accountHistory,
+  require('../main/pi-session/history-ipc').install({ app, session: bridge, accountHistory, retireFirstSends,
     ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
     BrowserWindow: { getAllWindows: () => [{ isDestroyed: () => false, webContents: { send: (_name, event) => events.push(event) } }] },
     shell: {}, trash: async (_shell, file) => {
@@ -86,6 +86,18 @@ async function fixture(t, { native = true, synced = true, sidecar = true, missin
     restart: async () => { await sync.close(); sync = startSync(); },
   };
 }
+
+test('native history cleans first sends only after the authorized permanent deletion succeeds', async t => {
+  const retired = [];
+  const f = await fixture(t, { retireFirstSends: (captured, id) => retired.push([scope(captured.identity), id]) });
+  assert.equal((await f.invoke('archive', 'native')).ok, true);
+  assert.equal((await f.invoke('restore', 'native')).ok, true);
+  assert.equal((await f.invoke('permanent-delete', 'native')).ok, false);
+  assert.deepEqual(retired, []);
+  assert.equal((await f.invoke('archive', 'native')).ok, true);
+  assert.equal((await f.invoke('permanent-delete', 'native')).ok, true);
+  assert.deepEqual(retired, [[scope(f.actor), 'native']]);
+});
 
 test('reinstalled account-only chats archive, restore and delete through the authenticated lifecycle IPC', async t => {
   const f = await fixture(t, { native: false });

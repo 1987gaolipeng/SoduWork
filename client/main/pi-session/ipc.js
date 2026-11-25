@@ -356,6 +356,16 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   require('../access-control/preferences').install({ app, ipcMain, BrowserWindow, confirmFullAccess });
   require('../workspace/recent-workspace').install({ app, ipcMain });
   const newChatAccess = require('../access-control/new-chat-consent').create({ BrowserWindow, confirmFullAccess });
+  const retireFirstSends = require('../conversation/first-send-ipc.cjs').install({ app, session, ipcMain, BrowserWindow,
+    identityOf: sendIdentityOf || identityOf, openConversation, sendConversation,
+    attach(event, id) {
+      const handle = session.findBySessionId(id);
+      if (!handle || handle.localReplica || session.deviceTransfer?.()?.blocked(id))
+        return { ok: false, reason: '会话执行位置已变化，请从历史打开' };
+      _attach(handle, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender));
+      return _openReply(handle, { attached: true });
+    },
+    detach: ref => { const handle = session.get(ref); if (handle) _detach(handle); } });
   newChatAccess.install(ipcMain);
   const memories = require('../conversation/session-memory').install({ app, ipcMain, dialog, BrowserWindow, identityOf });
   const startReceipts = require('./start-receipts.cjs').create({
@@ -398,7 +408,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     app, ipcMain, session, identityOf, capabilityGrantsOf, _skillDirs, workDir, _saveConf, _conf,
   });
   const historyActions = require('./history-ipc').install({ app, ipcMain, session, BrowserWindow, dialog, shell,
-    cloudHistory: _cloudHandoff, accountHistory: _accountSync, sharedHistory: _sharedHistory });
+    cloudHistory: _cloudHandoff, accountHistory: _accountSync, sharedHistory: _sharedHistory, retireFirstSends });
   require('../conversation/work-conversation-cards').install({ app, ipcMain, session, BrowserWindow,
     identityOf: sendIdentityOf || identityOf, accountHistory: _accountSync, sharedHistory: _sharedHistory,
     newCwd: options => _newSessionCwd(app, 'chat-' + require('node:crypto').randomUUID(), options) });
@@ -590,13 +600,28 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       };
       let verifiedArtifacts;
       const verifiedDeviceHistory = async () => {
-        const verified = await _sharedHistory.prepareContinuation(local.id, { refresh: true });
+        const verified = await _sharedHistory.prepareContinuation(local.id, { refresh: true,
+          ...(startDeviceSegment ? { allowUndispatchedTail: !continuationGrant, allowRetiredTools: !continuationGrant,
+            expectedPendingUserDigest: opts.expectedPendingUserDigest ?? null } : {}) });
         await assertHistoryCurrent();
         if (!historyAccess.usesDeviceChatContext(app, { chatId: local.id }, local, verified.row))
           throw Error('这条历史的归属已变化，请重新打开会话');
         if (verified.artifactHistory?.archive) verifiedArtifacts = { row: verified.row, artifactHistory: verified.artifactHistory };
         return verified;
       };
+      function bindRecoverySend(handle, verified) {
+        const marker = verified?.historyRecovery?.transcriptTail;
+        const retired = verified?.historyRecovery?.retiredRunnerSources;
+        if ((!marker && !retired) || handle.verifyRecoverySend) return;
+        handle.verifyRecoverySend = async () => {
+          const nativeId = handle.nativeSessionId;
+          if (retired) await _sharedHistory.verifyRetiredToolSend(local.id, nativeId, retired);
+          else await _sharedHistory.verifyRecoverySend(local.id, nativeId, marker);
+          await assertHistoryCurrent();
+          if (session.get(handle.ref) !== handle || handle.nativeSessionId !== nativeId)
+            throw Object.assign(Error('最后一条消息的发送状态已变化，请重新打开会话后确认。'), { code: 'HISTORY_PENDING_USER_TAIL_CHANGED' });
+        };
+      }
       if (automationContext) automationAccess.assertCurrent(automationContext, identity);
       if (expectedIdentity && (!openingConnection || openingConnection !== connectionOf(expectedIdentity))) {
         return { ok: false, reason: '连接环境已切换，本次自动化未启动' };
@@ -675,17 +700,26 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           await assertHistoryCurrent();
         }
         let live = session.findBySessionId(opts.chatId);
+        if (live?.verifyRecoverySend && (!desktopContinuation || historyAccess.requestsAccountContext(opts)))
+          return { ok: false, code: 'HISTORY_RECOVERY_DESKTOP_ONLY', reason: '请在打开这条历史的桌面普通会话中发送。' };
         if (startDeviceSegment && live) {
           const switching = require('../agent-runtime/switchable-conversation');
           if (switching.busy(live) || switching.goalSwitchBlocked(live.snapshot()))
             return { ok: false, reason: '会话仍在执行或等待处理，请完成后再继续' };
-          if (deviceContinuation.matchesLiveSelection(live, opts, identity, historyActor.owner)) {
-            await verifiedDeviceHistory();
+          let reusable = deviceContinuation.matchesLiveSelection(live, opts, identity, historyActor.owner);
+          if (reusable || opts.expectedPendingUserDigest || live.verifyRecoverySend) {
+            const verified = await verifiedDeviceHistory();
             if (session.findBySessionId(opts.chatId) !== live || switching.busy(live) ||
                 switching.goalSwitchBlocked(live.snapshot()) ||
-                !deviceContinuation.matchesLiveSelection(live, opts, identity, historyActor.owner))
+                deviceContinuation.matchesLiveSelection(live, opts, identity, historyActor.owner) !== reusable)
               throw Error('会话或模型选择已变化，请重新打开历史');
-          } else {
+            if (reusable && verified.historyRecovery?.transcriptTail) {
+              reusable = live.snapshot().historyRecovery?.transcriptTail?.digest === verified.historyRecovery.transcriptTail.digest;
+              if (reusable) bindRecoverySend(live, verified);
+            } else if (reusable && verified.historyRecovery?.retiredRunnerSources) bindRecoverySend(live, verified);
+            else if (live.verifyRecoverySend) reusable = false;
+          }
+          if (!reusable) {
             if (!await closeFailedOpen(live)) throw Error('原会话尚未完成关闭，请稍后重试');
             await assertHistoryCurrent();
             live = null;
@@ -1094,6 +1128,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         _cloudHandoff.observe(opened.session);
         appRequest?.assertActive();
         const reply = _openReply(opened.session, { resumed: !!resume, seeded: opened.seeded || 0 });
+        bindRecoverySend(opened.session, deviceHistoryRecovery);
         accessConsent?.commit();
         if (!resume && !opts.sessionTitle && !spec.taskRef && !automationContext && !appRequest &&
             !appPluginId && !opts.nativeRelay && !opened.seeded) firstTurnTitle.enroll(opened.session);
@@ -1103,6 +1138,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         throw error;
       }
     } catch (e) {
+      if (e?.code === 'HISTORY_PENDING_USER_TAIL_CHANGED') return { ok: false, code: e.code, reason: e.message };
       return { ok: false, reason: '起会话失败：' + String((e && e.message) || e) };
     } finally {
       accessConsent?.finish();
@@ -1145,6 +1181,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     if (typeof s.bindTask !== 'function') {
       return { ok: false, reason: "当前客户端不支持需求会话绑定" };
     }
+    if (s.verifyRecoverySend) return { ok: false, code: 'HISTORY_RECOVERY_DESKTOP_ONLY',
+      reason: '请在打开这条历史的桌面普通会话中发送。' };
     try {
       const identity = await (sendIdentityOf || identityOf)(app);
       if (!identity) return { ok: false, reason: '请先连接 SoduWork 服务并登录' };
@@ -1165,14 +1203,36 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     }
   });
 
-  async function sendConversation(ref, text, rawAttachments, rawOptions, observe, appRequest) {
+  async function sendConversation(ref, text, rawAttachments, rawOptions, observe, appRequest, guardFirstSend, desktopEvent) {
     let release;
-    try { release = session.deviceTransfer?.()?.admit(session.get(ref)?.sessionId); }
+    const handle = session.get(ref), recovery = handle?.verifyRecoverySend;
+    let verifyRecovery;
+    if (recovery) {
+      const allowed = () => desktopEvent && !appRequest && !guardFirstSend && rawOptions?.source !== 'automation' &&
+        require('../access-control/preferences').isTrusted(desktopEvent) &&
+        handle.attachedWindow?.webContents === desktopEvent.sender && !handle.detached &&
+        !require('../work-preview').isAppComposer(desktopEvent.sender) &&
+        !require('../work-preview').appContextFor(desktopEvent.sender) &&
+        !require('../conversation/history-access').requestsAccountContext(rawOptions || {});
+      const denied = { ok: false, accepted: false, notSent: true, code: 'HISTORY_RECOVERY_DESKTOP_ONLY',
+        reason: '请在打开这条历史的桌面普通会话中发送。' };
+      if (!allowed()) return denied;
+      verifyRecovery = async () => {
+        await recovery();
+        if (!allowed()) throw Object.assign(Error(denied.reason), { code: denied.code });
+      };
+    }
+    if (recovery?.busy) return { ok: false, accepted: false, notSent: true, reason: '正在核对上一条消息的发送状态，请稍后再试。' };
+    try { release = session.deviceTransfer?.()?.admit(handle?.sessionId); }
     catch (error) { return { ok: false, accepted: false, notSent: true, reason: error.message }; }
-    try { return await submitConversation(ref, text, rawAttachments, rawOptions, observe, appRequest); }
-    finally { release?.(); }
+    if (recovery) recovery.busy = true;
+    try {
+      const result = await submitConversation(ref, text, rawAttachments, rawOptions, observe, appRequest, guardFirstSend, verifyRecovery);
+      if (recovery && result?.accepted && handle.verifyRecoverySend === recovery) handle.verifyRecoverySend = null;
+      return result;
+    } finally { if (recovery) recovery.busy = false; release?.(); }
   }
-  async function submitConversation(ref, text, rawAttachments, rawOptions, observe, appRequest) {
+  async function submitConversation(ref, text, rawAttachments, rawOptions, observe, appRequest, guardFirstSend, recovery) {
     appRequest?.assertActive();
     const skillTurn = require('./skill-turn');
     const maintenance = updateWorkloads.guard();
@@ -1230,7 +1290,11 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     } catch (error) { return { ok: false, reason: String(error.message || error) }; }
     try {
       if (session.get(ref) !== s) throw Error('账号已切换，请重新打开会话');
-      if (_cloudHandoff.guard(s)) return await _cloudHandoff.send(s, text, rawAttachments, rawOptions || {});
+      if (_cloudHandoff.guard(s)) {
+        if (recovery) return { ok: false, accepted: false, notSent: true, code: 'HISTORY_PENDING_USER_TAIL_CHANGED',
+          reason: '最后一条消息的发送状态已变化，请重新打开会话后确认。' };
+        return await _cloudHandoff.send(s, text, rawAttachments, rawOptions || {});
+      }
     } catch (error) { return { ok: false, reason: String(error.message || error) }; }
     // Scheduled automation is an ordinary one-turn conversation even when the
     // selected personal plugin happens to be a workflow package.  The debug
@@ -1355,11 +1419,15 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     catch (error) { return { ok: false, reason: error.message }; }
     try {
       if (typeof rawOptions?.nativeRelayGuard === 'function') await rawOptions.nativeRelayGuard();
+      if (guardFirstSend) await guardFirstSend();
+      if (recovery) await recovery();
       workflowTurn = automationTurn ? null :
-        await pluginDebug.submitConversation?.(s, text, staged.files, sendOptions, rawPluginObjects);
+        await pluginDebug.submitConversation?.(s, text, staged.files, sendOptions, rawPluginObjects, guardFirstSend?.beforeDispatch);
     }
     catch (error) {
       if (taskTurn) await taskTurn.afterTurn('stopped').catch(() => {});
+      if (['HISTORY_PENDING_USER_TAIL_CHANGED', 'HISTORY_RECOVERY_DESKTOP_ONLY'].includes(error.code)) return { ok: false, accepted: false, notSent: true,
+        code: error.code, reason: error.message };
       return { ok: false, reason: String(error.message || error) };
     }
     if (session.get(ref) !== s) {
@@ -1372,12 +1440,14 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     }
     const titleRequest = !workflowTurn && !taskId && !automationTurn && !appRequest && !rawOptions?.nativeRelayGuard
       ? firstTurnTitle.prepare(s, text) : null;
+    if (guardFirstSend && !workflowTurn) { await guardFirstSend(); guardFirstSend.beforeDispatch(); }
     const submitted = workflowTurn || (typeof s.submit === 'function'
       ? await s.submit(text, staged.files, sendOptions)
       : { accepted: true, queued: false, completion: s.send(text, staged.files, sendOptions) });
     if (!submitted.accepted) {
       if (taskTurn?.afterTurn) await taskTurn.afterTurn('stopped').catch(() => {});
-      return submitted.result || { ok: false, reason: '这条消息没有被接收' };
+      return { ...(!submitted.result?.uncertain && guardFirstSend ? { notSent: true } : {}),
+        ...(submitted.result || { ok: false, reason: '这条消息没有被接收' }) };
     }
     if (!submitted.queued) void firstTurnTitle.accepted(s, titleRequest);
     if (observe) observe(Promise.resolve(submitted.completion));
@@ -1409,7 +1479,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     const request = options?.appRequestId ? require('../work-preview').appRequestContext(event, options.appRequestId) : null;
     if (request && require('./app-mcp-grant.cjs').nativePluginId(session.get(ref)) !== request.pluginId)
       throw Error('Application conversation does not belong to this page');
-    return sendConversation(ref, text, files, options, undefined, request);
+    return sendConversation(ref, text, files, options, undefined, request, undefined, event);
   });
 
   ipcMain.handle('pi-session-queue-cancel', (event, ref, queueId) => {
@@ -1435,6 +1505,10 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     const s = session.get(ref);
     if (!s) return { ok: false, reason: '\u4f1a\u8bdd\u4e0d\u5728\u4e86' };
     const win = BrowserWindow.fromWebContents(event.sender);
+    const pageRequested = require('./snapshot-window').requestedEnd(options) !== null;
+    const ownsPage = () => win && !win.isDestroyed() && !s.detached && s.attachedWindow === win &&
+      (!event.senderFrame || event.senderFrame === event.sender.mainFrame);
+    if (pageRequested && !ownsPage()) return { ok: false, reason: '会话已变化，请重新打开' };
     if (s.localReplica) {
       const historyAccess = require('../conversation/history-access');
       const captured = historyAccess.actor(app);
@@ -1442,12 +1516,22 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         require('../access-control/preferences').isTrusted(event)
         ? historyAccess.assertDeviceReadable : historyAccess.assertReadable;
       assertReadable(app, s.sessionId, captured, s.historyRow());
-      return Promise.resolve(s.loadHistory?.(options || {})).then(() => {
+      return Promise.resolve(s.loadHistory?.(options || {})).then(page => {
         const current = historyAccess.actor(app);
         historyAccess.assertCurrent(app, captured, current.identity);
-        if (session.get(ref) !== s) throw Error('账号或会话已变化，请重新打开');
+        if (session.get(ref) !== s || (pageRequested && !ownsPage())) throw Error('账号或会话已变化，请重新打开');
         assertReadable(app, s.sessionId, current, s.historyRow());
-        return { ok: true, snapshot: _contextSnapshot(s, s.snapshot()) };
+        return { ok: true, snapshot: _contextSnapshot(s, page || s.snapshot()) };
+      });
+    }
+    if (pageRequested && s.readHistoryPage) {
+      const historyAccess = require('../conversation/history-access');
+      const captured = historyAccess.actor(app);
+      return Promise.resolve(s.readHistoryPage(options)).then(page => {
+        historyAccess.assertCurrent(app, captured, historyAccess.actor(app).identity);
+        if (session.get(ref) !== s || !ownsPage()) throw Error('会话已变化，请重新打开');
+        const snapshot = _contextSnapshot(s, page);
+        return { ok: true, snapshot: _cloudHandoff ? _cloudHandoff.view(s, snapshot) : snapshot };
       });
     }
     const attached = _uiWindow.request(s, win, options);

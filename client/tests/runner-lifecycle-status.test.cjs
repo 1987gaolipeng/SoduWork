@@ -81,7 +81,7 @@ async function fixture(t, options = {}) {
   await Promise.resolve();
   const configure = () => handlers.get('runner-configure')(null, { hub: 'https://fixture.invalid', clientId: 'fixture-device' });
   if (!options.existingConfig) await configure();
-  return { configure, children, timers, python, client,
+  return { configure, children, timers, python, client, root,
     activate: () => { session = 'fixture-session'; },
     setSecret: secret => { secureIdentity.secret = secret; },
     configText: () => fs.readFileSync(path.join(root, 'runner', 'config.json'), 'utf8'),
@@ -89,6 +89,63 @@ async function fixture(t, options = {}) {
     mobile: context.module.exports.setMobileCapabilities,
     report: data => children.at(-1).stdout.emit('data', '@@SODUWORK_RUNNER_STATUS@@' + JSON.stringify(data) + '\n') };
 }
+
+test('a dispatch timeout can only verify absence through its original local pipe', async t => {
+  const f = await fixture(t), original = f.children[0];
+  const pending = f.rpc('job.dispatch', { dispatchId: 'synthetic' });
+  assert.match(original.writes.at(-1), /job\.dispatch/);
+  f.timers.at(-1)();
+  const error = await pending.then(() => assert.fail('expected timeout'), value => value);
+  assert.match(error.message, /timed out/);
+  assert.equal(error.sameDispatchConnection(), true);
+  original.emit('exit', 0);
+  await f.configure();
+  assert.notEqual(f.children.at(-1), original);
+  assert.equal(error.sameDispatchConnection(), false);
+});
+
+test('the desktop session bridge observes the original Runner pipe after a Qwen dispatch timeout', async t => {
+  const f = await fixture(t), child = f.children[0], calls = [];
+  const bridge = require('../main/agent-runtime/pi-session-bridge');
+  t.mock.method(require('../main/runner-runtime'), 'rpc', f.rpc);
+  t.mock.method(require('../main/pi-session/model-config'), 'fetchModel', async () => ({
+    ok: true, model: { id: 'synthetic', key: 'synthetic', baseUrl: 'http://synthetic.invalid' },
+  }));
+  const prefix = '@@SODUWORK_LOCAL_RPC@@';
+  let dispatchTimeout;
+  let received;
+  const dispatch = new Promise(resolve => { received = resolve; });
+  t.mock.method(child.stdin, 'write', line => {
+    const { id, message } = JSON.parse(line.slice(prefix.length));
+    calls.push(message);
+    if (message.op === 'job.dispatch') {
+      dispatchTimeout = f.timers.at(-1);
+      received(); return true;
+    }
+    const data = message.op === 'job.session'
+      ? { ok: false, code: 'NATIVE_HISTORY_MISSING', ref: message.ref, items: [] }
+      : message.op === 'job.has' ? { has: false, inflight: false, persisted: false, localWorkPending: false,
+        admissionDurable: true, admissionKey: message.admissionKey, bootId: 'fixture' } : {};
+    queueMicrotask(() => child.stdout.emit('data', prefix + JSON.stringify({ id, ok: true, result: { ok: true, data } }) + '\n'));
+    return true;
+  });
+  const opened = await bridge.open({ ref: 'timeout-in-desktop-bridge', adapterId: 'qwen', cwd: f.root,
+    identity: {}, modelName: 'synthetic' });
+  assert.equal(opened.ok, true, opened.reason);
+  const handle = opened.session;
+  t.after(() => bridge.closeAll());
+  const turn = handle.submit('Synthetic test', []);
+  await dispatch;
+  handle.cancel(); await turn.completion;
+  dispatchTimeout(); await new Promise(setImmediate);
+  assert.equal(handle.updateQueue('', 'resume').recovering, true);
+  await new Promise(setImmediate);
+  assert.equal(handle.snapshot().execution.recoveryRequired, false);
+  const probes = calls.filter(message => message.op === 'job.has');
+  assert.equal(probes.length, 2);
+  assert.ok(probes.every(message => message.checkPendingWork === true));
+  assert.equal(calls.filter(message => message.op === 'job.dispatch').length, 1);
+});
 
 test('the private Runner pipe receives only the current trusted desktop account fingerprint', async t => {
   const f = await fixture(t, { localOwnerOf: () => 'a'.repeat(32) });

@@ -3,20 +3,22 @@ const electron = require('electron');
 if (typeof electron === 'string') {
   const env = { ...process.env };
   for (const key of ['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'CHROME_CRASHPAD_PIPE_NAME', 'CHROME_CRASHPAD_PIPE_HANDLE', 'ELECTRON_NO_ATTACH_CONSOLE', 'CHROME_DEVEL_SANDBOX']) delete env[key];
-  const result = require('node:child_process').spawnSync(electron, [__filename], { env, windowsHide: true, stdio: 'inherit', timeout: 180000 });
+  const result = require('node:child_process').spawnSync(electron, [__filename, ...process.argv.slice(2)], { env, windowsHide: true, stdio: 'inherit', timeout: 180000 });
   process.exit(result.status ?? 1);
 }
 const { app, BrowserWindow, ipcMain, protocol, net } = electron;
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), vm = require('node:vm');
 const assert = require('node:assert/strict'), { pathToFileURL } = require('node:url');
 const client = path.resolve(__dirname, '..'), profile = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-new-consent-'));
-const out = path.resolve(client, '../outputs/new-chat-consent'); fs.mkdirSync(out, { recursive: true });
+const out = path.resolve(process.argv[2] || path.join(client, '../outputs/new-chat-consent')); fs.mkdirSync(out, { recursive: true });
 app.setPath('userData', path.join(profile, 'profile')); app.on('window-all-closed', () => {});
 const read = file => fs.readFileSync(path.join(client, file), 'utf8');
 const ownerPage = path.join(client, 'desk.html'), ownerURL = pathToFileURL(ownerPage).href;
-const report = { ok: false, cases: [], screenshots: [], errors: [], boundary: 'Actual production composer, runtime picker, NativeChat, preload, native consent, ephemeral credential service and openConversation. Trusted desktop URL serves an isolated shell; identity, discovery and runtime execution are local fixtures. Hidden windows, blocked network, no business data or model calls.' };
+const report = { ok: false, cases: [], screenshots: [], errors: [], boundary: 'Production composer, runtime picker, NativeChat, preload, native consent, first-send journal and openConversation. Trusted desktop URL serves an isolated shell; identity, discovery and runtime execution are local fixtures. Hidden windows, blocked network, no business data or model calls.' };
 const calls = [], sends = [], sessions = new Map(); let win, dialogs = 0, failNextOpen = false, failNextSend = false;
 const catalog = require('../main/agent-runtime/runtime-catalog');
+const identity = require('../tests/helpers/platform-session-fixture.cjs').identity();
+const identityOf = async () => identity;
 const locale = require('../main/native-locale.cjs');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const js = code => win.webContents.executeJavaScript(code, true).catch(error => { throw Error(error.message + '\nRenderer code: ' + code.slice(0, 400)); });
@@ -57,9 +59,9 @@ function installOpening(confirmFullAccess, newChatAccess) {
   const code = source.slice(source.indexOf('  async function openConversation('), source.indexOf("  ipcMain.handle('pi-session-open',"));
   const context = vm.createContext({ app, path, BrowserWindow, confirmFullAccess, newChatAccess,
     // This local-only fixture never transfers its isolated sessions to cloud.
-    _cloudHandoff: { observe() {} },
+    _cloudHandoff: { observe() {} }, firstTurnTitle: { enroll() {} }, _sessionOwners: null,
     skillTurn: require('../main/pi-session/skill-turn'), sendIdentityOf: null,
-    identityOf: async () => ({ hub: 'isolated', clientId: 'isolated' }), updateWorkloads: { guard: () => ({ ok: true }) },
+    identityOf, updateWorkloads: { guard: () => ({ ok: true }) },
     memories: { context: async () => ({}), attach: async () => {} }, capabilityGrantsOf: null, _skillDirs: () => [],
     workDir: () => profile, _newSessionCwd: () => profile, _conf: () => ({}),
     capabilities: { resolve: async () => ({ catalog: {}, selectedSkills: [], capabilityIds: [] }) },
@@ -73,13 +75,26 @@ function installOpening(confirmFullAccess, newChatAccess) {
     } },
     _entryContextPrompts: () => [], _awaitBounded: value => value, OPEN_TIMEOUT_MS: 45000,
     _bindUsage() {}, _attach() {}, _detach() {}, _wire() {},
-    _openReply: handle => ({ ok: true, ref: handle.ref, sessionId: handle.sessionId, adapterId: handle.adapterId,
-      cwd: profile, mode: 'full', model: { label: 'Isolated test model' }, accessControl: catalog.runtime(handle.adapterId).accessControl,
-      snapshot: handle.snapshot() }),
-    require: name => require(path.resolve(client, 'main/pi-session', name)),
+    _openReply: openReply,
+    require: name => name.startsWith('node:') ? require(name) : require(path.resolve(client, 'main/pi-session', name)),
   });
   vm.runInContext(code, context);
   ipcMain.handle('pi-session-open', (event, options) => context.openConversation(event, options));
+  return context.openConversation;
+}
+function openReply(handle) {
+  return { ok: true, ref: handle.ref, sessionId: handle.sessionId, adapterId: handle.adapterId,
+    cwd: profile, mode: 'full', model: { id: 'isolated', label: 'Isolated test model' },
+    accessControl: catalog.runtime(handle.adapterId).accessControl, snapshot: handle.snapshot() };
+}
+async function sendConversation(ref, text, _files, options, _observe, _request, guard) {
+  await guard?.();
+  const handle = sessions.get(ref);
+  assert.ok(handle);
+  sends.push({ ref, text, submissionId: options?.submissionId });
+  if (failNextSend) { failNextSend = false; return { ok: false, reason: 'Isolated send failure', accepted: false }; }
+  guard?.beforeDispatch();
+  return { ok: true, snapshot: handle.snapshot() };
 }
 app.whenReady().then(async () => {
   const css = ['theme/variables.css', 'components/panels/panels-base.css', 'components/panels/agent-brand.css',
@@ -98,31 +113,35 @@ app.whenReady().then(async () => {
   const themeSource = require('../main/native-theme.cjs').create(electron);
   const confirmFullAccess = require('../main/access-control/full-access-consent').create({ ...electron, BrowserWindow: HiddenConsent, themeSource });
   const newChatAccess = require('../main/access-control/new-chat-consent').create({ BrowserWindow, confirmFullAccess });
-  newChatAccess.install(ipcMain); installOpening(confirmFullAccess, newChatAccess);
+  require('../main/conversation/requirement-context').cachedIdentity = () => identity;
+  newChatAccess.install(ipcMain);
+  const openConversation = installOpening(confirmFullAccess, newChatAccess);
+  require('../main/conversation/first-send-ipc.cjs').install({ app, ipcMain, BrowserWindow, session: sessions,
+    identityOf, openConversation, sendConversation, detach() {}, attach: (_event, id) => openReply(sessions.get(id)) });
   require('../main/access-control/preferences').install({ app, ipcMain, BrowserWindow, confirmFullAccess });
   ipcMain.on('client-locale', (_event, value) => locale.setLocale(value));
   ipcMain.handle('pi-session-probe', (_event, id) => ({ ok: true, accessControl: catalog.runtime(id || 'pi').accessControl }));
-  ipcMain.handle('pi-session-runtimes', () => ({ ok: true, runtimes: catalog.runtimes().filter(item => item.accessControl.supported) }));
+  const runtimes = catalog.runtimes().filter(item => item.accessControl.supported);
+  ipcMain.handle('pi-session-runtimes', () => ({ ok: true, runtimes, availableRuntimes: runtimes, missing: [] }));
   ipcMain.handle('pi-session-snapshot', (_event, ref) => ({ ok: true, snapshot: sessions.get(ref).snapshot() }));
-  ipcMain.handle('pi-session-send', (_event, ref, text) => {
-    sends.push({ ref, text });
-    if (failNextSend) { failNextSend = false; return { ok: false, reason: 'Isolated send failure' }; }
-    return { ok: true, snapshot: sessions.get(ref).snapshot() };
-  });
+  ipcMain.handle('pi-session-send', (_event, ...args) => sendConversation(...args));
   for (const [channel, value] of Object.entries({ 'pi-session-workdir': { ok: true, dir: profile }, 'conversation-capabilities': { ok: true, items: [] },
     'pi-session-mode': { ok: true, mode: 'full' }, 'pi-session-history': { ok: true, chats: [] }, 'pi-session-outputs': { ok: true, items: [] },
-    'pi-session-release': { ok: true }, 'pi-session-runtime-models': { ok: true, items: [] }, 'work-preview-hide': { ok: true }, 'work-preview-destroy': { ok: true } })) ipcMain.handle(channel, () => value);
+    'pi-session-release': { ok: true }, 'recent-workspace-get': { ok: true, dir: '' },
+    'pi-session-runtime-models': { ok: true, models: [{ id: 'isolated', label: 'Isolated test model' }] },
+    'work-preview-hide': { ok: true }, 'work-preview-destroy': { ok: true }, 'work-preview-reset-embedded': { ok: true } })) ipcMain.handle(channel, () => value);
   win = new BrowserWindow({ show: false, width: 1100, height: 850, webPreferences: {
     preload: path.join(client, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false, offscreen: true } });
   win.webContents.on('console-message', event => { if (event.level === 'error') report.errors.push(event.message); });
   win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_request, callback) => callback({ cancel: true }));
   await win.loadFile(ownerPage);
-  await js("window.errors=[];window.notices=[];window.petSay=x=>notices.push(x);window.SoduWorkAPI={online:true,myModels:async()=>({usable:[]}),listTeammates:async()=>[],pluginCatalog:async()=>({items:[]})};addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));void 0;");
+  await js("window.errors=[];window.notices=[];window.petSay=x=>notices.push(x);window.SoduWorkAPI={online:true,taskStorageKey:()=>'isolated-consent',myModels:async()=>({usable:[{name:'isolated',label:'Isolated test model'}],defaultModel:'isolated'}),listTeammates:async()=>[],pluginCatalog:async()=>({items:[]})};addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));void 0;");
   for (const file of JSON.parse(read('core/locales/manifest.json'))) await js(read('core/locales/' + file));
   for (const file of ['core/i18n-dom.js', 'core/i18n.js', 'components/settings/access-preferences.js']) await js(read(file));
   const loaded = new Set();
   const load = async file => { if (loaded.has(file)) return; loaded.add(file); await js(read(file) + '\nvoid 0;'); };
-  for (const file of ['agent-brand.js', 'work-composer.js', 'panels-compose-runtime.js', 'panels-compose-capabilities.js',
+  for (const file of ['agent-brand.js', 'work-composer.js', 'compose-candidate-navigation.js', 'chat-plugin-mention-model.js',
+    'chat-plugin-mention.js', 'panels-compose-runtime.js', 'panels-compose-capabilities.js',
     'panels-compose-work-actions.js', 'compose-surface.js', 'panels-compose.js']) await load('components/panels/' + file);
   // Reuse the established production NativeChat dependency order, not its fake shell.
   for (const match of read('e2e/fixtures/workbench-annotations.html').matchAll(/<script src="\.\.\/\.\.\/([^"]+)"/g)) await load(match[1]);
@@ -162,19 +181,84 @@ app.whenReady().then(async () => {
   await pick('full'); child = await dialog(); await click('#consentAcknowledged', child); await click('#consentAllow', child);
   await until('document.querySelector("#cpPermissionName").textContent==="完全访问"'); failNextOpen = true;
   const beforeFailure = calls.length, beforeDialog = dialogs; await click('#cpGo'); await until(() => calls.length === beforeFailure + 1);
-  await until('document.querySelector(".nchat-error,.nchat-fail")||notices.length>0||document.querySelector("#nchatList").textContent.includes("Isolated initialization failure")');
+  await until('document.querySelector(".nbad-copy")?.textContent.includes("Isolated initialization failure") && !NativeChat.isBusy()', 'failed native initialization');
+  const failedOpen = await js('soduWorkAPI.piSession.firstSends().then(r=>r.rows.find(row=>row.status==="failed" && !row.sessionId && row.text==="Fresh draft"))');
+  assert.ok(failedOpen);
+  assert.equal(await js('document.querySelector("#nchatInput").value'), 'Fresh draft');
   await js("document.querySelector('#nchatInput').value='Retry same draft';document.querySelector('#nchatInput').dispatchEvent(new Event('input',{bubbles:true}));void 0;");
   await click('#nchatSend'); await until(() => calls.length === beforeFailure + 2);
   await until(() => sends.at(-1)?.text === 'Retry same draft'); assert.equal(dialogs, beforeDialog);
+  const resumed = await js(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(failedOpen.intentId)})`);
+  assert.equal(resumed.row.status, 'accepted');
+  assert.equal(resumed.row.sessionId, sends.at(-1).ref);
+  assert.equal(resumed.row.text, 'Retry same draft');
   report.cases.push('Failed native initialization safely retries the retained draft credential in production NativeChat without a second confirmation.');
   await draft('Open then retry sending'); await pick('full'); child = await dialog(); await click('#consentAcknowledged', child); await click('#consentAllow', child);
   await until('document.querySelector("#cpPermissionName").textContent==="完全访问"'); failNextSend = true;
   const beforeOpen = calls.length, beforeSend = sends.length, beforeFinalDialog = dialogs; await click('#cpGo'); await until(() => sends.length === beforeSend + 1);
+  const refused = sends.at(-1);
+  assert.match(refused.submissionId, /^first-/);
+  await until('document.querySelector(".nbad-copy")?.textContent.includes("Isolated send failure") && !NativeChat.isBusy()', 'refused first send');
+  assert.equal(await js('NativeChat.sessionInfo().ref'), refused.ref);
+  assert.equal(await js('document.querySelector("#nchatInput").value'), refused.text);
   await js("document.querySelector('#nchatInput').value='Retry existing session';document.querySelector('#nchatInput').dispatchEvent(new Event('input',{bubbles:true}));void 0;");
   await click('#nchatSend'); await until(() => sends.length === beforeSend + 2);
   assert.equal(calls.length, beforeOpen + 1); assert.equal(dialogs, beforeFinalDialog);
-  assert.equal(sends.at(-1).ref, sends.at(-2).ref);
+  assert.equal(sends.at(-1).ref, refused.ref);
+  assert.equal(sends.at(-1).text, 'Retry existing session');
+  const recorded = await js(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(refused.submissionId)})`);
+  assert.equal(recorded.row.status, 'accepted');
+  assert.equal(recorded.row.attemptId, sends.at(-1).submissionId);
   report.cases.push('If first send fails after open succeeded, retry reuses the existing session and never reuses the consumed grant to open another runtime.');
+  report.stage = 'explicitly new draft after a refused open';
+  await draft('Two separate conversations'); await pick('readonly');
+  failNextOpen = true;
+  await click('#cpGo');
+  await until('document.querySelector(".nbad-copy")?.textContent.includes("Isolated initialization failure") && !NativeChat.isBusy()', 'independent failed draft');
+  const original = await js('soduWorkAPI.piSession.firstSends().then(r=>r.rows.find(row=>row.status==="failed" && !row.sessionId && row.text==="Two separate conversations"))');
+  assert.equal(original.text, 'Two separate conversations');
+  const beforeIndependent = sends.length;
+  await draft('Two separate conversations'); await click('#cpGo');
+  await until(() => sends.length === beforeIndependent + 1, 'separate successful draft');
+  const independent = sends.at(-1).submissionId;
+  assert.notEqual(independent, original.intentId);
+  assert.equal((await js(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(independent)})`)).row.status, 'accepted');
+  assert.equal((await js(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(original.intentId)})`)).row.status, 'failed');
+  report.cases.push('A new composer with identical text starts an independent conversation and preserves the old failed request for recovery.');
+  report.stage = 'sidebar first-send recovery';
+  await draft('Keep this independent draft');
+  for (const file of ['workspace-chat-history', 'workspace-first-sends', 'workspace-chat-list', 'workspace-shell'])
+    await load('components/workspace/' + file + '.js');
+  await win.webContents.insertCSS(read('components/workspace/workspace-navigation.css'));
+  await js(`document.documentElement.dataset.deskPanel='workspace';
+    window.WorkspaceHost={open(view, payload) { const opened=openComposePanel(payload);
+    WorkspaceShell.setActive(view); return opened; }};
+    WorkspaceShell.setActive('create'); WorkspaceShell.refreshConversationHistory(); void 0;`);
+  const recordButton = '.ws-chat[data-first-send="' + original.intentId + '"]';
+  await until(`Boolean(document.querySelector(${JSON.stringify(recordButton)}))`, 'visible sidebar recovery row');
+  const beforeInspect = { opens: calls.length, sends: sends.length, dialogs };
+  await click(recordButton);
+  await until('document.querySelector("#nchatInput")?.value==="Two separate conversations"', 'original draft opens directly in a normal composer');
+  assert.equal(await js('Boolean(document.querySelector("[data-send-action],[data-send-dismiss]"))'), false);
+  assert.equal(await js('Boolean(document.querySelector("dialog[open]"))'), false);
+  assert.equal(await js(`document.querySelector(${JSON.stringify(recordButton)}).getAttribute('aria-current')`), 'page');
+  await click('#nchatInput'); await js('document.getElementById("nchatInput").select()');
+  await win.webContents.insertText('Edited in the original sidebar draft');
+  await js('WorkspaceHost.open("create",{newSession:true});void 0;');
+  assert.equal(await js('document.querySelector("#cpInput").value'), 'Keep this independent draft');
+  assert.equal(await js('Boolean(document.querySelector("[data-first-send-record]"))'), false);
+  assert.deepEqual({ opens: calls.length, sends: sends.length, dialogs }, beforeInspect);
+  await click(recordButton);
+  await until('document.querySelector("#nchatInput")?.value==="Edited in the original sidebar draft"', 'the edited first-send draft survives navigation');
+  await click('#nchatSend');
+  await until(() => sends.length === beforeInspect.sends + 1, 'the user explicitly sends the edited request');
+  const settledDraft = (await js(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(original.intentId)})`)).row;
+  assert.equal(settledDraft.status, 'accepted'); assert.equal(settledDraft.sessionId, sends.at(-1).ref);
+  assert.equal(sends.at(-1).text, 'Edited in the original sidebar draft');
+  assert.equal(calls.length, beforeInspect.opens + 1); assert.equal(dialogs, beforeInspect.dialogs);
+  assert.equal(calls.at(-1).accessPolicy.mode, 'readonly');
+  assert.equal(calls.at(-1).adapterId, original.adapterId);
+  report.cases.push('Mouse selection of a retained failed first send opens its editable draft directly. Returning to a new chat restores the independent draft without allocating a runtime or resending.');
   assert.deepEqual(await js('errors'), []); assert.deepEqual(report.errors, []);
   report.runtimeOpens = calls; report.nativeDialogs = dialogs; report.sentMessages = sends.length; report.ok = true;
 }).catch(async error => { report.error = error.stack || String(error); try { if (win) { report.rendererErrors = await js('errors'); await shot('failure'); } } catch {} }).finally(() => {

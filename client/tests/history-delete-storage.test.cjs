@@ -37,6 +37,35 @@ test('single deletion stays admitted while real SQLite receives a large native d
   assert.ok(singleGets<20,'native discovery must use bounded batch lookups instead of filling the 256-request worker queue');
   assert.equal((await f.store.get('native-10')).deleted,true);
 });
+test('local archive, restore and failed deletion preserve a private first send until permanent deletion succeeds', async t => {
+  const f = await fixture(t), owner = require('../main/platform-connections/runtime.cjs').connectionScope(f.who);
+  const journal = require('../main/conversation/first-send.cjs').create({ root: path.join(f.root, 'first-send-requests'),
+    actor: async () => ({ owner }), assertCurrent() {}, notify() {}, received: async () => false,
+    open: async (_actor, options) => ({ ok: true, sessionId: options.sessionTitle, ref: 'ref-' + options.sessionTitle }),
+    send: async () => ({ ok: false, notSent: true, reason: 'offline' }) });
+  const ids = ['chosen', 'other'];
+  await f.history.register(ids.map(id => ({ ...f.row(id), adapterId: 'opencode' })));
+  for (const id of ids) {
+    const intentId = 'first-' + require('node:crypto').randomUUID();
+    await journal.start(null, { intentId, open: { sessionTitle: id }, text: 'Saved private draft', attachments: [] });
+    await journal.act(null, intentId, 'wait');
+  }
+  let canForget = false;
+  f.session.forgetRunner = async () => canForget ? { ok: true } : { ok: false, reason: 'blocked' };
+  const action = require('../main/pi-session/local-history-actions.cjs').create({ ...f, identityOf: () => f.who,
+    retireFirstSends(captured, id) {
+      const signed = require('../main/platform-connections/runtime.cjs').connectionScope(captured.identity);
+      journal.forgetSession({ owner: signed }, id);
+    } });
+  assert.equal((await action('archive', 'chosen')).ok, true);
+  assert.equal((await action('restore', 'chosen')).ok, true);
+  assert.equal((await action('delete', 'chosen')).needsConfirm, true);
+  await assert.rejects(action('delete', 'chosen', { confirmed: true }), /blocked/);
+  assert.equal((await journal.list(null)).rows.length, 2);
+  canForget = true;
+  assert.equal((await action('delete', 'chosen', { confirmed: true })).ok, true);
+  assert.deepEqual((await journal.list(null)).rows.map(row => row.sessionId), ['other']);
+});
 test('deleting a native source uses indexed recovery-copy lookups and preserves unrelated histories',t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'soduwork-delete-query-'));
   const file=path.join(root,'history.sqlite'),store=replica.create(file);

@@ -34,7 +34,7 @@
     get _empty() { return _empty; },
     get chatsLoading() { return chatsLoading; }, set chatsLoading(value) { chatsLoading = value; },
   };
-  const { setChats, upsertChat, removeChat, setActiveChat, pinStorageKey, legacyPinnedIds, pinnedIds, togglePinned, forgetPinned, deleteHistoryChat, archiveHistoryChat, rememberChatName, updateChatState, renameChat, closeChatMenu, openChatRename, chatMenuItem, _newChatRow, _paintChatLocale, _paintChatRow, _syncChatList, renderChats, subscribeConversationPresence, refreshConversationHistory } = global.WorkspaceChatList.create(chatContext);
+  const { mountFirstSend, setChats, upsertChat, removeChat, setActiveChat, pinStorageKey, legacyPinnedIds, pinnedIds, togglePinned, forgetPinned, deleteHistoryChat, archiveHistoryChat, rememberChatName, updateChatState, renameChat, closeChatMenu, openChatRename, chatMenuItem, _newChatRow, _paintChatLocale, _paintChatRow, _syncChatList, renderChats, subscribeConversationPresence, refreshConversationHistory } = global.WorkspaceChatList.create(chatContext);
 
   /* One 24-unit optical grid for the rail and its menus. Both states reuse
      the same outlines: selection adds ink without shrinking or changing the
@@ -783,7 +783,7 @@
     if (btn) global.ClientUpdateView?.present(status, btn);
   }
 
-  global.WorkspaceShell = { mount, setActive, setTasks, setChats, upsertChat, removeChat, setActiveChat, renameChat,
+  global.WorkspaceShell = { mount, mountFirstSend, setActive, setTasks, setChats, upsertChat, removeChat, setActiveChat, renameChat,
                             searchChats: () => chatItems.filter(row => !row.pending).map(row => ({ ...row })),
                             searchProjects: () => sidebarProjects?.searchProjects() || [],
                             openSearchProject: id => sidebarProjects?.openSearchProject(id),

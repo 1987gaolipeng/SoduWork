@@ -85,7 +85,9 @@ async outputSnapshotAsync() {
 fileChanges: null,
 model: ctx.prep.model,
 on(fn) { ctx.listeners.add(fn); return () => ctx.listeners.delete(fn); },
-snapshot() { return ctx._snapshot(); },
+snapshot(options) {
+  return ctx._snapshot(undefined, options?.completeHistory === true ? ctx.acc.completeArchiveSnapshot?.() : undefined);
+},
 toolDetail(id) { return require('./tool-detail').find(ctx.acc.state.tools, id); },
 uiSnapshot(options) { const opts = options || { messageLimit: 80, toolLimit: 160 }; return typeof ctx.acc.uiSnapshot === 'function' ? ctx._snapshot(opts) : snapshotWindow.limitSnapshot(ctx._snapshot(), opts); },
 appendTaskMessage(role, text, files, taskId, taskOutputKey, sourceModel, sourceAgent, plugins) {
@@ -365,7 +367,8 @@ cancel(options = {}) {
         // Handle abort() rejection so it cannot escape into the hosting process.
         if (typeof ctx.piSession.abort === 'function') Promise.resolve(require('./interrupt').interrupt(ctx.piSession, active?.completion)).catch(() => {});
       } catch (e) { /* Ignore an already-stopped session. */ }
-      const receipt = { ok: true, accepted: true, stopping: false, stopped: true };
+      const receipt = { ok: true, accepted: true, stopping: false, stopped: true,
+        ...(active?.preparingAt && active.options.submissionId ? { cancelledBeforeDispatch: active.options.submissionId } : {}) };
       // Do not resolve the IPC request while the active turn is still settling.
       // The renderer uses this receipt to leave the spinner state, so resolving
       // here made a slow abort look complete and invited another click.

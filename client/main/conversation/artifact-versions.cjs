@@ -141,7 +141,7 @@ function record(archive, prior, history) {
 }
 
 function list(archive) {
-  return (archive?.versions || []).filter(row => !row.resource).map(row => ({
+  return (archive?.versions || []).filter(row => !row.resource && !row.metadata?.previewOf).map(row => ({
     turnId: row.turnId, versionId: row.versionId, relative: row.relative,
     size: row.metadata.size, sha256: row.sha256 }));
 }
@@ -207,7 +207,7 @@ async function readers(profile, id, archive, guard, authorize = guard) {
     turn.groups.set(root, group);
     group[version.resource ? 'resources' : 'items'].push({ metadata: version.metadata, source: version.source, stamp: checked.stamp });
     group.ids.set(path.resolve(root, version.relative), version.versionId);
-    group.proofs.push({ relative: version.relative, aliases: version.aliases,
+    if (!version.metadata.previewOf) group.proofs.push({ relative: version.relative, aliases: version.aliases,
       root, sha256: version.sha256, stamp: checked.stamp });
   }
   await authorize();
@@ -247,7 +247,7 @@ async function existingCopies(workspace, destination, versions, guard) {
 }
 
 async function exportTurn({ profile, id, archive, turnId, workspace, workspaceKey, guard }) {
-  const versions = (archive?.versions || []).filter(row => row.turnId === turnId);
+  const versions = (archive?.versions || []).filter(row => row.turnId === turnId && !row.metadata?.previewOf);
   if (!versions.length) return [];
   if (!require('./delivery-workspace.cjs').validKey(workspaceKey) || !path.isAbsolute(workspace) ||
       !fs.lstatSync(workspace).isDirectory()) throw Error('工作副本目录无效');
@@ -354,7 +354,7 @@ async function exportTurn({ profile, id, archive, turnId, workspace, workspaceKe
 
 async function exportCopy(options) {
   const version = options.archive?.versions?.find(row => row.versionId === options.versionId);
-  if (!version) throw Error('找不到指定的成果版本');
+  if (!version || version.metadata?.previewOf) throw Error('找不到指定的成果版本');
   const copies = await exportTurn({ ...options, turnId: version.turnId });
   return copies.find(copy => copy.versionId === version.versionId);
 }

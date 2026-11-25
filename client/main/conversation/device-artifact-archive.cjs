@@ -127,7 +127,7 @@ async function syncDirectories(profile, paths) {
 
 // Only host-verified file receipts can enter the archive. The SQLite history
 // publishes a generation after its files and directory entries are durable.
-async function preserve(profile, id, history, previous, guard, { readWorkspace = true } = {}) {
+async function preserve(profile, id, history, previous, guard, { readWorkspace = true, originals } = {}) {
   history = retain(previous, history);
   const rows = entries(history);
   if (!rows.length) return history;
@@ -164,12 +164,13 @@ async function preserve(profile, id, history, previous, guard, { readWorkspace =
   for (const entry of desired.values()) {
     guard();
     const name = entry.metadata.relative, key = keyOf(name), existing = selected.get(key);
-    if (!readWorkspace || !validSize(entry) || entry.archiveOnly || existing && (existing.entry.metadata.relative !== name ||
+    const original = originals?.get(entry);
+    if ((!readWorkspace && !original) || !validSize(entry) || entry.archiveOnly || existing && (existing.entry.metadata.relative !== name ||
         same(existing.entry.stamp, entry.stamp))) continue;
     const growth = Math.max(0, entry.metadata.size - (reserved.get(key) || 0));
     if ((!reserved.has(key) && reserved.size >= MAX_FILES) || size + growth > MAX_BYTES) continue;
-    if (await verified(history.root, name, entry.stamp)) {
-      selected.set(key, { ...existing, entry });
+    if (original || await verified(history.root, name, entry.stamp)) {
+      selected.set(key, { ...existing, entry, original });
       reserved.set(key, (reserved.get(key) || 0) + growth);
       size += growth;
     }
@@ -219,8 +220,8 @@ async function preserve(profile, id, history, previous, guard, { readWorkspace =
       guard();
       let { entry } = choice;
       const { old, fallback } = choice, relative = entry.metadata.relative;
-      let bytes;
-      if (!old || !same(old.sourceStamp, entry.stamp)) bytes = await availableBytes(history.root, relative, entry.stamp);
+      let bytes = choice.original;
+      if (!bytes && (!old || !same(old.sourceStamp, entry.stamp))) bytes = await availableBytes(history.root, relative, entry.stamp);
       if (!bytes && old) {
         const sourceRoot = location(profile, id, { version: 1, generation: old.generation });
         bytes = await availableBytes(sourceRoot, relative, old.stamp);
@@ -272,14 +273,14 @@ async function preserve(profile, id, history, previous, guard, { readWorkspace =
   return { ...history, archivePending: true, ...(prior ? { archive: prior } : {}) };
 }
 
-async function retire(profile, id, before, after, accepted) {
+async function retire(profile, id, before, after, accepted, createdOriginals = []) {
   if (before === after) return;
   // A pending file names the physical generation to retry if its media returns.
-  // A failed CAS owns only its newly created generation.
+  // A failed CAS owns only new generations, including recovered turn originals.
   const origins = archive => new Set([archive?.generation, ...(archive?.pendingFiles || []).map(file => file.generation),
     ...(archive?.versions || []).map(file => file.generation)].filter(Boolean));
   const retained = origins(accepted ? after : before);
-  const obsolete = accepted ? origins(before) : [after?.generation];
+  const obsolete = accepted ? origins(before) : [after?.generation, ...createdOriginals];
   for (const generation of obsolete)
     if (generation && !retained.has(generation)) await discard(profile, id, generation);
 

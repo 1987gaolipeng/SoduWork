@@ -5,6 +5,11 @@
     ((Number(snap.history?.messageStart) || 0) + index);
   const epoch = value => typeof value === 'number' ? value : Date.parse(value || '');
   const tx = value => global.SoduWorkI18n?.translateText?.(value) || value;
+  function formatDuration(value) {
+    if (!Number.isFinite(value)) return tx('未记录');
+    const seconds = Math.floor(Math.max(0, value) / 1000);
+    return seconds < 60 ? seconds + 's' : Math.floor(seconds / 60) + 'm ' + String(seconds % 60).padStart(2, '0') + 's';
+  }
   function stoppedText(elapsedMs) {
     if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return tx('你已停止');
     const total = Math.floor(elapsedMs / 1000);
@@ -46,11 +51,12 @@
       const absolute = owner(snap, index);
       const metric = (snap.turnMetrics || []).find(row => row.fromMessage <= absolute && row.toMessage >= absolute);
       if (metric?.outcome) return;
-      const start = messages[from]?.role === 'user' ? epoch(messages[from].sentAt) : NaN;
+      const start = epoch(messages[from]?.role === 'user' ? messages[from].sentAt : snap.history?.leadingUserSentAt);
       const end = epoch(message.completedAt);
       const wallTime = Number.isFinite(start) && start > 0 && Number.isFinite(end) && end >= start ? end - start : null;
       // The latest cloud receipt belongs to the remote turn, not replay arrival times.
-      const latestCloud = snap.execution?.cloud && to === messages.length - 1;
+      const latestCloud = snap.execution?.cloud && to === messages.length - 1 &&
+        !(snap.history?.messageEnd < snap.history?.totalMessages);
       const cloudElapsed = !snap.execution?.running && snap.execution?.completedAt > 0 &&
         Number.isFinite(snap.execution.elapsedMs) ? snap.execution.elapsedMs : null;
       turns.push({ key: 'reply:' + absolute, from, to, finalIndex: index,
@@ -76,11 +82,7 @@
   function create(ctx) {
     const expanded = new Set();
     let scope = '', turns = [], byIndex = new Map(), boundList = null;
-    const duration = value => {
-      if (value === null) return ctx.esc(tx('未记录'));
-      const seconds = Math.floor(Math.max(0, value) / 1000);
-      return seconds < 60 ? seconds + 's' : Math.floor(seconds / 60) + 'm ' + String(seconds % 60).padStart(2, '0') + 's';
-    };
+    const duration = value => ctx.esc(formatDuration(value));
     function reset() { expanded.clear(); turns = []; byIndex.clear(); scope = ''; }
     function prepare(snap, finals) {
       const nextScope = JSON.stringify([ctx._ref || '', global.SoduWorkAPI?.taskStorageKey?.('ops') || '']);
@@ -189,7 +191,7 @@
     }
     return { prepare, html, apply, reset };
   }
-  const api = { project, create };
+  const api = { project, create, formatDuration, stoppedText };
   global.ChatTurnSummary = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

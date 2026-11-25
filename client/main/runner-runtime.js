@@ -402,7 +402,11 @@ function rpc(op, payload = {}, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       _rpcPending.delete(id);
-      reject(new Error('Runner request timed out'));
+      const error = new Error('Runner request timed out');
+      // A later absence check orders after this write only on the original pipe.
+      if (op === 'job.dispatch')
+        error.sameDispatchConnection = () => _proc === child && !child.killed && child.stdin?.writable === true;
+      reject(error);
     }, Math.max(1000, Number(timeoutMs) || 30000));
     _rpcPending.set(id, { resolve, reject, timer });
     const line = LOCAL_RPC_PREFIX + JSON.stringify({ id, message }) + '\n';

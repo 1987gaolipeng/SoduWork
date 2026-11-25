@@ -436,23 +436,26 @@
     p.dataset.tab = 'one';
     setTimeout(() => {
       const input = p.dataset.stage === 'chat'
-        ? p.querySelector('#nchatInput') || p.querySelector('#cpInput')
+        ? p.querySelector('#nchatInput') || p.querySelector('[data-first-send-record] .nchat-scroll') || p.querySelector('#cpInput')
         : p.querySelector('#cpInput') || p.querySelector('#nchatInput');
       if (input) input.focus();
     }, 40);
   }
-  async function _enterChat(text, chatId, intentOptions) {
+  function _leaveStarterForHistory() {
+    global.ComposeDirectoryPreferences?.stop();
+    _accessConsent?.reset();
+    if (global.SessionMemoryEntry) SessionMemoryEntry.clear();
+    _composeViewSeq += 1;
+    _pluginResolveSeq += 1;
+    _pluginSelectSeq += 1;
+    _pluginResolveBusy = false;
+    _pluginSelectError = '';
+    _pluginSelectTask = Promise.resolve();
+  }
+  async function _enterChat(text, chatId, intentOptions, homeDraft) {
     const p = _panel();
     if (chatId) {
-      global.ComposeDirectoryPreferences?.stop();
-      _accessConsent?.reset();
-      if (global.SessionMemoryEntry) SessionMemoryEntry.clear();
-      _composeViewSeq += 1;
-      _pluginResolveSeq += 1;
-      _pluginSelectSeq += 1;
-      _pluginResolveBusy = false;
-      _pluginSelectError = '';
-      _pluginSelectTask = Promise.resolve();
+      _leaveStarterForHistory();
       p.dataset.stage = 'chat';
       return global.NativeChat
         ? NativeChat.enter('', String(chatId), { ...(intentOptions || {}),
@@ -544,7 +547,16 @@
     }
     if (resolveSeq !== _pluginResolveSeq) return false;
     if (!current()) return false;
-    const attachmentRefs = _attachments ? await _attachments.refs(_setupApi()) : [];
+    const unreadable = homeDraft?.files?.length && !intentOptions?.intent ? [] : undefined;
+    const attachmentRefs = _attachments ? await _attachments.refs(_setupApi(), { unreadable }) : [];
+    if (!current() || homeDraft && !homeDraft.isCurrent()) return false;
+    if (unreadable?.length || unreadable && !attachmentRefs.length) {
+      const files = (unreadable.length ? unreadable : homeDraft.files.map(file => file.name)).join('、');
+      const key = attachmentRefs.length ? 'workspace.firstSend.skippedFiles' : 'workspace.firstSend.checkFiles';
+      const template = attachmentRefs.length ? '已跳过无法读取的附件「{files}」。' : '无法读取附件「{files}」，请重新选择。';
+      global.petSay?.(global.SoduWorkI18n?.t?.(key, template, { files }) || template.replace('{files}', () => files));
+      if (!attachmentRefs.length) return false;
+    }
     const libraryItemIds = _attachments ? _attachments.libraryItems() : [];
     await global.ComposeRuntime?.ready?.();
     if (await global.ComposeModelPicker?.ready?.() === false) {
@@ -558,6 +570,7 @@
       if (typeof petSay === 'function') petSay('当前 Agent 暂不支持目标模式，请选择其他 Agent 或取消目标后发送');
       return false;
     }
+    if (homeDraft && !homeDraft.isCurrent()) return false;
     p.dataset.stage = 'chat';
     const modelSelection = global.ComposeModelPicker
       ? ComposeModelPicker.value() : { modelName: _pickedModel, reasoningEffort: '', thinkingLevel: '' };
@@ -582,7 +595,7 @@
       sidebarProjectName: _workspace.sidebarProjectName || '',
       projectId: _workspace.projectId || '',
       ...(global.SessionMemoryEntry ? SessionMemoryEntry.options() : {}),
-    }, intentOptions || {})) : false;
+    }, intentOptions || {}), homeDraft) : false;
     if (!accepted) return false;
     global.ComposeDirectoryPreferences?.remember(directoryPreference);
     if (!current()) return false;
@@ -679,13 +692,17 @@
     const submittedFiles = _attachments?.files?.().slice() || [];
     const fileIdentity = file => global.ConversationAttachments?.fileIdentity?.(file) ?? file;
     const submittedIdentities = submittedFiles.map(fileIdentity);
+    const submittedSkills = _skillPicker?.selected() || [];
+    const sameHomeDraft = () => {
+      const files = _attachments?.files?.() || [];
+      return input?.value === submittedInput &&
+        files.length === submittedIdentities.length && files.every((file, i) => fileIdentity(file) === submittedIdentities[i]) &&
+        JSON.stringify(_skillPicker?.selected() || []) === JSON.stringify(submittedSkills);
+    };
     const typed = global.ComposeSkills?.submission?.(originalText, _skillPicker?.selected())?.text || originalText;
     const hasAttachments = Boolean(_attachments && _attachments.has());
     if (!typed.trim() && !hasAttachments) return;
-    if (!await _readyDirectoryPreferences() || input?.value !== submittedInput || (_attachments?.files && (() => {
-      const current = _attachments.files();
-      return current.length !== submittedIdentities.length || current.some((file, index) => fileIdentity(file) !== submittedIdentities[index]);
-    })())) return;
+    if (!await _readyDirectoryPreferences() || !sameHomeDraft()) return;
     _menuSelectionSeq++;
     const text = typed.trim() ? typed : '请查看并处理我附上的文件。';
     const inputPreparation = {
@@ -768,7 +785,7 @@
         ...(intent.mode === 'goal' ? {
         intent: 'goal', goal: intent.goal, acceptance: intent.acceptance,
         } : {}),
-      });
+      }, { text: originalText, files: submittedFiles, isCurrent: sameHomeDraft });
       if (accepted && _intent) _intent.reset();
     }
     if (!accepted || !currentWorkEntry()) return;
@@ -815,6 +832,25 @@
       return true;
     }
     const chatOpenSeq = ++_chatOpenSeq;
+    if (q.firstSendDraft) {
+      _rememberComposeDraft();
+      _leaveStarterForHistory();
+      p.dataset.stage = 'chat'; setTab();
+      global.WorkspaceShell?.setActiveChat?.('');
+      return global.NativeChat?.openFirstSendDraft(q.firstSendDraft) === true;
+    }
+    if (q.firstSendIntentId && global.WorkspaceShell?.mountFirstSend) {
+      _rememberComposeDraft();
+      _leaveStarterForHistory();
+      global.NativeChat?.reset();
+      p.dataset.stage = 'chat';
+      global.WorkspaceShell.setActiveChat('');
+      const host = p.querySelector('#cpChat');
+      const opened = global.WorkspaceShell.mountFirstSend(q.firstSendIntentId, host);
+      host.querySelector('.nchat-scroll')?.focus();
+      return opened;
+    }
+    p.querySelector('[data-first-send-record]')?.remove?.();
     const taskSession = q.taskSession === true || q.taskSession === 1 || q.taskSession === '1';
     if (q.newSession && !q.chatId) {
       global.ComposeDirectoryPreferences?.stop();

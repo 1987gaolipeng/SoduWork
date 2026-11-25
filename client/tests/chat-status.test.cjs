@@ -19,6 +19,9 @@ test('passive history reports the reason a new turn is blocked while eligible hi
     historyRecovery: { reason: 'A tool result has not been confirmed' }, execution: { readOnly: true, canContinueOnDevice: false } } };
   const view = status.createThinking(() => current);
   assert.match(view.statusHtml(false), /A tool result has not been confirmed/);
+  current.snap.historyRecovery = { reasonCode: 'HISTORY_UNCONFIRMED_USER_TAIL',
+    reason: 'The runtime has not confirmed receipt of your last message.' };
+  assert.match(view.statusHtml(false), /nstatus-history-reason[^>]*>The runtime has not confirmed receipt/);
   current.snap.historyRecovery = undefined;
   assert.match(view.statusHtml(false), /当前仅可查看/);
   current.snap.execution.canContinueOnDevice = true;

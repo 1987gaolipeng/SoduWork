@@ -492,7 +492,8 @@
       if (!busy && (current.snap?.artifactCaptureWarning || current.snap?.artifactBackupIncomplete))
         notices.push(current.snap.artifactCaptureWarning || '部分成果尚未保存到会话档案，请保留原工作目录');
       if (notices.length)
-        return '<div data-chat-node="runtime-status" class="nstatus show"><span class="nstatus-copy">' +
+        return '<div data-chat-node="runtime-status" class="nstatus show"><span class="nstatus-copy' +
+          (current.snap.historyRecovery?.reasonCode === 'HISTORY_UNCONFIRMED_USER_TAIL' ? ' nstatus-history-reason' : '') + '">' +
           notices.map(note => escape(tx(note))).join('<br>') + '</span></div>';
       if (!current.pending && waiting(current.snap)) return '<div data-chat-node="runtime-status" class="nstatus show">' +
         '<span class="nstatus-copy">' + escape(work(current.snap, '', current.ref)) + '</span></div>';

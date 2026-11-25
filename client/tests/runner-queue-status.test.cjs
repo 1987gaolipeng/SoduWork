@@ -111,3 +111,34 @@ for (const unit of ['seconds','milliseconds']) test(unit+': restoring prelaunch 
   assert.ok(session.snapshot().execution.elapsedMs<10000);
   assert.equal(session.snapshot().execution.queueWaitMs,null);
 });
+
+test('opening a waiting Runner turn twice keeps the timestamps of the original queue and startup', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-reopen-wait-'));
+  const acceptedAt = Date.now() - 104000, preparingAt = acceptedAt + 12000;
+  const sessions = [];
+  t.after(async () => {
+    try { await Promise.all(sessions.map(session => session.dispose())); }
+    finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  });
+  let nativeStatus = 'queued';
+  const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime('qwen'),
+    modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'synthetic', key: 'synthetic' } }) },
+    runnerRuntime: { async rpc(op) {
+      if (op === 'job.session') return { ok: true, data: { ok: true, status: nativeStatus, executionStartedAt: 0,
+        queueAcceptedAt: acceptedAt / 1000, startupWaitSince: nativeStatus === 'queued' ? 0 : preparingAt / 1000,
+        firstStarted: (acceptedAt - 86400000) / 1000, items: [] } };
+      return { ok: true, data: {} };
+    } } });
+  const status = require('../components/panels/panels-chat-status');
+  for (const phase of ['queued', 'running', 'running']) {
+    nativeStatus = phase;
+    const session = await adapter.resumeSession({ native: { runner: { openOptions: { cwd: directory, resumePath: 'waiting-run' } } } });
+    sessions.push(session);
+    await until(() => session.snapshot().execution.submittedAt === acceptedAt);
+    const snap = session.snapshot();
+    assert.equal(snap.execution.startupWaitSince, phase === 'queued' ? null : preparingAt);
+    assert.equal(snap.execution.running, false);
+    const clock = status.createThinking(() => ({ ref: 'reopened', snap }));
+    assert.match(clock.metricsHtml(true), phase === 'queued' ? /排队中.*1m/ : /等待启动.*1m/);
+  }
+});

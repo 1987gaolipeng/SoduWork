@@ -252,6 +252,10 @@ test('passive cloud replay preserves local token owners and refreshes a late nat
   assert.deepEqual(snap.turnMetrics.map(row => [row.fromMessage, row.toMessage, row.tokens]), [[0, 1, 17], [2, 3, 29]]);
   assert.deepEqual(prefixMetric, { fromMessage: 0, toMessage: 1, tokens: 17, elapsedMs: 2000 });
   assert.deepEqual(view.uiSnapshot({ messageLimit: 1 }).turnMetrics, snap.turnMetrics);
+  const earlier = view.uiSnapshot({ messageLimit: 1, messageEnd: 2 });
+  assert.deepEqual(earlier.history.messageIndices, [1]);
+  assert.deepEqual(earlier.turnMetrics, [prefixMetric]);
+  assert.deepEqual(view.uiSnapshot({ messageLimit: 1 }).history.messageIndices, [3]);
   view.close();
   const reopened = await require('../main/conversation/cloud-conversation-view').create({ app: { getPath: () => f.root },
     ref: 'passive-usage-reopened', record: { transferId: 'token-owner-fixture', sessionId: 'token-owner', taskId: 'task' }, saved });
