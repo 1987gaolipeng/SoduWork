@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import Insert, event, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import models
@@ -19,12 +19,12 @@ class AdminNameTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        engine = create_async_engine(f"sqlite+aiosqlite:///{Path(temp.name).as_posix()}/names.db")
-        self.addAsyncCleanup(engine.dispose)
-        self.sessions = async_sessionmaker(engine, expire_on_commit=False)
-        async with engine.begin() as conn:
+        self.engine = create_async_engine(f"sqlite+aiosqlite:///{Path(temp.name).as_posix()}/names.db")
+        self.addAsyncCleanup(self.engine.dispose)
+        self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        async with self.engine.begin() as conn:
             tables = [model.__table__ for model in
-                      (models.User, models.OrgUnit, models.Role, models.Integration, models.AuditLog)]
+                      (models.User, models.OrgUnit, models.Role, models.Integration, models.Domain, models.AuditLog)]
             await conn.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
         async with self.sessions() as session:
             session.add(models.User(id="admin", username="admin", is_super=True))
@@ -38,7 +38,8 @@ class AdminNameTests(unittest.IsolatedAsyncioTestCase):
         app.include_router(admin.router)
         app.include_router(business_records.router)
         app.dependency_overrides[get_session] = session_for_request
-        self.http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test/api/v1/admin/",
+        self.http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                      base_url="http://test/api/v1/admin/",
                                       headers={"Authorization": "Bearer " + sign_token("admin")})
         self.addAsyncCleanup(self.http.aclose)
 
@@ -46,6 +47,52 @@ class AdminNameTests(unittest.IsolatedAsyncioTestCase):
         response = await self.http.post("orgs", json={"name": name, "parentId": parent})
         self.assertEqual(response.status_code, 200)
         return response.json()["id"]
+
+    async def test_org_and_domain_creation_each_persist_one_audit_entry(self):
+        async with self.sessions.begin() as session:
+            session.add(models.OrgUnit(id="parent", name="Parent"))
+
+        for path, model, target_type, body in (
+            ("orgs", models.OrgUnit, "org", {"name": "New team", "parentId": "parent", "dataSource": "test"}),
+            ("domains", models.Domain, "domain", {"name": "New domain"}),
+        ):
+            with self.subTest(path=path):
+                response = await self.http.post(path, json=body)
+                self.assertEqual(response.status_code, 200, response.text)
+                target_id = response.json()["id"]
+                async with self.sessions() as session:
+                    stored = await session.get(model, target_id)
+                    self.assertIsNotNone(stored)
+                    self.assertEqual(stored.name, body["name"])
+                    audit = (await session.scalars(select(models.AuditLog).where(
+                        models.AuditLog.target_id == target_id))).one()
+                    self.assertEqual((audit.actor_id, audit.action, audit.target_type, audit.target_label),
+                                     ("admin", f"{target_type}.create", target_type, stored.name))
+                    if target_type == "org":
+                        self.assertEqual((audit.detail["parentId"], audit.detail["dataSource"]), ("parent", "test"))
+        async with self.sessions() as session:
+            self.assertEqual(await session.scalar(select(func.count(models.AuditLog.id))), 2)
+
+    async def test_org_and_domain_creation_roll_back_when_audit_insert_fails(self):
+        attempts = 0
+
+        def reject_audit_insert(conn, clauseelement, multiparams, params, execution_options):
+            nonlocal attempts
+            if isinstance(clauseelement, Insert) and clauseelement.table.name == models.AuditLog.__tablename__:
+                attempts += 1
+                raise OSError("Synthetic audit storage failure")
+
+        event.listen(self.engine.sync_engine, "before_execute", reject_audit_insert)
+        self.addCleanup(event.remove, self.engine.sync_engine, "before_execute", reject_audit_insert)
+
+        for path, model in (("orgs", models.OrgUnit), ("domains", models.Domain)):
+            with self.subTest(path=path):
+                response = await self.http.post(path, json={"name": "Uncommitted"})
+                self.assertTrue(500 <= response.status_code < 600, response.text)
+                async with self.sessions() as session:
+                    self.assertIsNone(await session.scalar(select(model.id)))
+                    self.assertIsNone(await session.scalar(select(models.AuditLog.id)))
+        self.assertEqual(attempts, 2)
 
     async def test_names_are_trimmed_and_bounded_on_create_and_rename(self):
         maximum = "组" * 64

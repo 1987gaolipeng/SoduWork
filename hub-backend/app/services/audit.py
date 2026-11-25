@@ -5,7 +5,9 @@ best-effort standalone behavior. Super administrators see all entries and
 other administrators see actors in their department subtree.
 """
 import json
+import logging
 from datetime import datetime, timezone
+from itertools import count
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +18,9 @@ from ..pagination import Page, select_rows
 from ..schemas import _ms
 from ..timestamps import iso_utc
 from . import rbac
+
+logger = logging.getLogger(__name__)
+_write_failures = count(1)
 
 
 def add(session: AsyncSession, actor, action: str, target_type: str = "",
@@ -35,10 +40,17 @@ def add(session: AsyncSession, actor, action: str, target_type: str = "",
 
 async def log(session: AsyncSession, actor, action: str, target_type: str = "",
               target_id: str | None = None, target_label: str = "", detail: dict | None = None) -> None:
+    actor_id = None
     try:
+        # A failed flush can expire the actor before the error handler runs.
+        actor_id = getattr(actor, "id", None)
         add(session, actor, action, target_type, target_id, target_label, detail)
         await session.commit()
-    except Exception:
+    except Exception as exc:
+        # Database exception messages can contain the full set of bound parameters.
+        logger.error("Audit write failed: action=%r target_type=%r target_id=%r actor_id=%r "
+                     "error=%s process_failures=%d", action, target_type, target_id, actor_id,
+                     type(exc).__name__, next(_write_failures))
         await session.rollback()
 
 
