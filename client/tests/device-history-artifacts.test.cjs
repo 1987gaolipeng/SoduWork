@@ -313,6 +313,29 @@ for (const change of ['final timestamp', 'replaced file', 'modified bytes']) {
   });
 }
 
+test('archived history uses the canonical profile path and rejects links inside the generation', async t => {
+  const f = archiveSetup(t), source = f.row('result.txt', 'archived');
+  const profile = path.join(f.workRoot, 'profile');
+  fs.mkdirSync(profile);
+  const saved = await f.storage.preserve(profile, 'one',
+    { version: 1, root: f.cwd, items: [{ ...source, metadata: { ...source.metadata,
+      artifactId: 'output', kind: 'document' } }], resources: [] }, null, () => {});
+  fs.rmSync(f.cwd, { recursive: true });
+  // TEMP on Windows can use an 8.3 spelling. A trusted ancestor alias exercises
+  // the same distinction between a profile's spelling and its native realpath.
+  const aliasRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-profile-alias-'));
+  t.after(() => fs.rmSync(aliasRoot, { recursive: true, force: true }));
+  const alias = path.join(aliasRoot, 'ancestor');
+  fs.symlinkSync(f.workRoot, alias, 'junction');
+  const throughAlias = path.join(alias, 'profile');
+  const archived = project.archivedView(throughAlias, 'one', f.cwd, saved, () => {}, () => {});
+  assert.deepEqual(archived.snapshot().items.map(item => fs.readFileSync(item.path, 'utf8')), ['archived']);
+  const generation = f.storage.projection(profile, 'one', saved).root;
+  fs.renameSync(generation, generation + '-outside');
+  fs.symlinkSync(generation + '-outside', generation, 'junction');
+  assert.equal(f.storage.projection(throughAlias, 'one', saved), null);
+});
+
 test('archive repairs missing and changed files from their exact workspace receipts', async t => {
   const f = archiveSetup(t), rows = [f.row('shots/menu.png', 'pixels'), f.row('index.html', 'site')];
   const first = await f.save(rows);

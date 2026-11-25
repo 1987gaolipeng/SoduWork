@@ -1,7 +1,7 @@
 'use strict';
 
 const fs = require('node:fs/promises');
-const { constants } = require('node:fs');
+const { constants, lstatSync, realpathSync } = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { assertNoLinks } = require('../plugin-resources');
@@ -60,7 +60,12 @@ function projection(profile, id, history) {
   const archive = history?.archive;
   if (!Array.isArray(archive?.files)) return null;
   let root;
-  try { root = location(profile, id, archive); } catch (_) { return null; }
+  try {
+    // An OS-supplied profile may use an 8.3 alias. Resolve only that trusted
+    // base; location still rejects any link along the private generation path.
+    if (!path.isAbsolute(profile) || !lstatSync(profile).isDirectory()) return null;
+    root = location(realpathSync.native(profile), id, archive);
+  } catch (_) { return null; }
   if (!root) return null;
   const byName = new Map(archive.files.map(record => [record.relative, record]));
   function archived(rows) {

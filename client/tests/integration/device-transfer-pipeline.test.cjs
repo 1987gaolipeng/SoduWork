@@ -14,7 +14,17 @@ function identity(device) {
     typ: 'device', cid: device, uid: 'peer-owner', iat: now, exp: now + 1800, jti: device,
   })).toString('base64url') + '.' + 'a'.repeat(64) };
 }
-function endpoint(t, root, name, source, expectedSources = [source ? 'peer-target' : 'peer-source']) {
+function devices(t, prefix) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix)), closers = [];
+  t.after(async () => {
+    const results = await Promise.allSettled(closers.map(close => close()));
+    const failed = results.find(result => result.status === 'rejected');
+    if (failed) throw failed.reason;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  return { root, endpoint: (...args) => createEndpoint(root, closers, ...args) };
+}
+function createEndpoint(root, closers, name, source, expectedSources = [source ? 'peer-target' : 'peer-source']) {
   const profile = path.join(root, name), workspace = path.join(root, name + '-work');
   fs.mkdirSync(profile, { recursive: true }); fs.mkdirSync(workspace, { recursive: true });
   const app = { getPath: () => profile }, id = identity(name), archive = path.join(profile, 'pi-agent', 'sessions', SID + '.jsonl');
@@ -46,16 +56,18 @@ function endpoint(t, root, name, source, expectedSources = [source ? 'peer-targe
   const makeTransfer = () => transferFactory.create({ app, identityOf: () => id, history, session, peer,
     confirmReceive: async input => { accepted++; assert.ok(expectedSources.includes(input.sourceDeviceId)); return true; } });
   transfer = makeTransfer();
-  t.after(async () => { await peer.dispose(); transfer.close(); await history.close(); });
+  closers.push(async () => {
+    try { await peer.dispose(); }
+    finally { try { transfer.close(); } finally { await history.close(); } }
+  });
   return { app, row, id, archive, workspace, history, session, peer, get transfer() { return transfer; }, handle: () => live,
     restartTransfer() { transfer.close(); transfer = makeTransfer(); },
     setHandle: handle => { live = handle; }, nativeRows, accepts: () => accepted };
 }
 
 test('real TLS transfers production Pi history and selected files into a durable isolated device workspace', async t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-transfer-pipeline-'));
-  const source = endpoint(t, root, 'peer-source', true), target = endpoint(t, root, 'peer-target', false);
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { endpoint } = devices(t, 'soduwork-transfer-pipeline-');
+  const source = endpoint('peer-source', true), target = endpoint('peer-target', false);
   fs.mkdirSync(path.dirname(source.archive), { recursive: true });
   const entries = [
     { type: 'session', id: SID, timestamp: '2024-03-09T16:00:00Z', cwd: source.workspace },
@@ -177,11 +189,10 @@ async function continueOnDevice(device, label) {
 }
 
 test('three real TLS desktops return A to B to C to A while B is offline, anchored to A durable lost-ack release',async t=>{
-  const root = fs.mkdtempSync(path.join(os.tmpdir(),'soduwork-transfer-cycle-'));
-  const A = endpoint(t,root,'peer-source',true,['peer-third']);
-  const B = endpoint(t,root,'peer-target',false,['peer-source']);
-  const C = endpoint(t,root,'peer-third',false,['peer-target']);
-  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const { endpoint } = devices(t, 'soduwork-transfer-cycle-');
+  const A = endpoint('peer-source',true,['peer-third']);
+  const B = endpoint('peer-target',false,['peer-source']);
+  const C = endpoint('peer-third',false,['peer-target']);
   fs.mkdirSync(path.dirname(A.archive),{recursive:true});
   const native = [
     {type:'session',id:SID,timestamp:'2024-03-09T16:00:00Z',cwd:A.workspace},
@@ -285,9 +296,8 @@ test('three real TLS desktops return A to B to C to A while B is offline, anchor
 
 
 test('direct migration restores only selected archived output and rebuilds its grant on the receiver', async t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'device-artifact-handoff-'));
-  const source = endpoint(t, root, 'peer-source', true), target = endpoint(t, root, 'peer-target', false);
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { root, endpoint } = devices(t, 'device-artifact-handoff-');
+  const source = endpoint('peer-source', true), target = endpoint('peer-target', false);
   for (const field of ['taskId', 'taskIds', 'activeTaskId']) delete source.row[field];
   const attachment = require('../../main/pi-session/attachment-contract');
   const stage = path.join(root, 'temp', source.handle().ref, '.soduwork-inputs');
@@ -336,9 +346,10 @@ test('direct migration restores only selected archived output and rebuilds its g
   const restored = await target.history.open(SID, { historyPreview: true });
   const result = await restored.historyArtifacts.snapshotAsync();
   assert.deepEqual(result.items.map(file => file.relative), ['chosen.md']);
-  assert.ok(result.items[0].path.startsWith(target.app.getPath('userData') + path.sep));
+  const relative = path.relative(fs.realpathSync.native(target.app.getPath('userData')), fs.realpathSync.native(result.items[0].path));
+  assert.equal(relative.split(path.sep)[0], 'conversation-artifacts');
   assert.equal(fs.readFileSync(result.items[0].path, 'utf8'), 'Archived chosen.md');
-  const third = endpoint(t, root, 'peer-third', false, ['peer-target']);
+  const third = endpoint('peer-third', false, ['peer-target']);
   await continueOnDevice(target, 'artifact-receiver');
   await connectDevices(target, third);
   const next = await target.transfer.preview({ sessionId: SID, targetDeviceId: third.id.clientId });
@@ -349,8 +360,8 @@ test('direct migration restores only selected archived output and rebuilds its g
   assert.equal(fs.readFileSync(path.join(thirdCwd, 'chosen.md'), 'utf8'), 'Archived chosen.md');
 });
 
-async function ordinarySource(t, root) {
-  const peer = endpoint(t, root, 'peer-source', true);
+async function ordinarySource(endpoint) {
+  const peer = endpoint('peer-source', true);
   for (const field of ['taskId', 'taskIds', 'activeTaskId']) delete peer.row[field];
   fs.mkdirSync(path.dirname(peer.archive), { recursive: true });
   fs.writeFileSync(peer.archive, [
@@ -374,10 +385,9 @@ async function recordOutputs(device, cwd, values) {
 }
 
 test('a text-only handoff preserves new receiver outputs for the next handoff after its workspace moves', async t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'receiver-artifact-turn-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const A = await ordinarySource(t, root), B = endpoint(t, root, 'peer-target', false);
-  const C = endpoint(t, root, 'peer-third', false, ['peer-target']);
+  const { endpoint } = devices(t, 'receiver-artifact-turn-');
+  const A = await ordinarySource(endpoint), B = endpoint('peer-target', false);
+  const C = endpoint('peer-third', false, ['peer-target']);
   await connectDevices(A, B);
   const first = await A.transfer.preview({sessionId: SID, targetDeviceId: B.id.clientId});
   assert.equal((await A.transfer.start({...first, selectedPaths: []})).state, 'done');
@@ -405,9 +415,8 @@ test('a text-only handoff preserves new receiver outputs for the next handoff af
 });
 
 test('a changed website and its archived original can migrate together with a single selection per shared resource', async t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'historical-tree-choice-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const A = await ordinarySource(t, root), B = endpoint(t, root, 'peer-target', false);
+  const { endpoint } = devices(t, 'historical-tree-choice-');
+  const A = await ordinarySource(endpoint), B = endpoint('peer-target', false);
   const original = '<link rel="stylesheet" href="assets/style.css">OLD';
   const edited = original.replace('OLD', 'NEW');
   await recordOutputs(A, A.workspace, { 'index.html': original, 'assets/style.css': 'html{}' });
