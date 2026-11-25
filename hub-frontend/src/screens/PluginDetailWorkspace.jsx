@@ -100,7 +100,9 @@ export default function PluginDetailWorkspace({
         {issues.length < issueCount && <p>{tx("当前预览显示 {0} 项待处理事项。", [issues.length])}</p>}
         <div className="plugin-contract-disclosure-body plugin-issue-list">{issues.map((item, index) =>
           <button key={item.id || index} type="button" onClick={() => actions.openIssue(item)}><Icon name="alert" />
-            <span>{[item.title, item.reason, item.label].find((value) => typeof value === 'string' && value) || tx("查看待处理事项")}</span><Icon name="chevron" /></button>)}</div>
+            <span>{[item.title, item.reason, item.label].find((value) => typeof value === 'string' && value) || tx("查看待处理事项")}
+              {item.kind === 'review' && typeof item.detail === 'string' && item.detail.trim() && <small>{item.detail}</small>}
+            </span><Icon name="chevron" /></button>)}</div>
       </details>}
       <details className="plugin-contract-disclosure"><summary>{tx("技能、连接与权限清单")}</summary>
         <div className="plugin-contract-disclosure-body"><CapabilitySummary version={version} hasWorkflow={hasWorkflow} /></div>

@@ -369,7 +369,8 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["task"]["requirementStage"], "reviewing")
         ensure_output.assert_awaited_once()
         ensure_request.assert_awaited_once_with(
-            ensure_output.await_args.args[0], ensure_output.await_args.args[1], artifact, "review")
+            ensure_output.await_args.args[0], ensure_output.await_args.args[1], artifact, "review",
+            submission_note="已完成自检")
 
     async def test_submit_review_rejects_non_running_requirement(self):
         response = await self.call("POST", "tasks/shared/submit-review", json={})

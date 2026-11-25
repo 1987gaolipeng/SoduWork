@@ -2145,7 +2145,7 @@ async def submit_task_for_review(
             session, task, who=who,
             source_ref=("conversation:" + str(turn["conversationId"])) if turn.get("conversationId") else "",
             allow_empty=True)
-        request = await release_control.ensure_request(session, task, artifact, "review")
+        request = await release_control.ensure_request(session, task, artifact, "review", submission_note=note)
         if request.status != "pending":
             raise ValueError("本轮交付已验收或退回，请修改交付内容后重新提交")
     except ValueError as error:

@@ -91,6 +91,46 @@ class ManualReviewSource(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("reworkPending", task.work_routing)
             self.assertNotEqual(submitted_again["request"]["id"], submitted["request"]["id"])
 
+    async def test_inbox_uses_the_submission_note_and_reads_old_file_gates_without_rewriting_them(self):
+        from app.api import approvals, tasks
+        async with self.sessions() as session:
+            task = await self.fixture(session)
+            worker = await session.get(models.Client, "worker-device")
+            reviewer = await session.get(models.Client, "review-device")
+            submitted = await tasks.submit_task_for_review(task.id, {
+                "note": 'Updated VAT\n <draft> & totals https://example.invalid/private?ticket=private-value',
+            }, worker, session)
+            summary = 'Updated VAT <draft> & totals [链接]'
+            self.assertEqual(submitted["request"]["context"]["summary"], summary)
+            retry = await tasks.submit_task_for_review(task.id, {"note": "overwrite"}, worker, session)
+            self.assertTrue(retry["already"])
+            inbox = await approvals.inbox(client=reviewer, session=session)
+            self.assertEqual(inbox["items"][0]["context"]["summary"], summary)
+            request = await session.get(am.ApprovalRequest, submitted["request"]["id"])
+            request.context = {**request.context, "summary": "产出待审阅"}
+            await session.commit()
+            inbox = await approvals.inbox(client=reviewer, session=session)
+            self.assertEqual(inbox["items"][0]["context"]["summary"], "交付文件：report.md")
+            self.assertEqual(request.context["summary"], "产出待审阅")
+            request.context = {**request.context, "workflowRunId": "workflow", "summary": "自定义审查说明"}
+            await session.commit()
+            inbox = await approvals.inbox(client=reviewer, session=session)
+            self.assertEqual(inbox["items"][0]["context"]["summary"], "自定义审查说明")
+
+    def test_generated_summary_uses_public_requirement_content_and_bounded_artifact_text(self):
+        from app.services import approval_summaries
+        task = models.Task(title="Old title", note="private migrated note",
+                           requirement_content={"title": "Shared title", "note": "Published scope"})
+        version = am.ArtifactVersion(kind="url", seq=2, url="https://example.invalid/?ticket=private",
+                                     manifest={"files": []})
+        self.assertEqual(approval_summaries.for_artifact(task, version), "链接交付 v2 · Published scope")
+        version.kind, version.manifest = "code", {"commits": [{"subject": "Repair tax rounding"}]}
+        self.assertEqual(approval_summaries.for_artifact(task, version), "Repair tax rounding")
+        version.kind, version.manifest = "requirement", {"acceptanceCriteria": ["Pass the VAT audit"]}
+        self.assertEqual(approval_summaries.for_artifact(task, version), "Pass the VAT audit")
+        version.kind, version.manifest = "text", {"text": "Result: " + "x" * 500}
+        self.assertEqual(len(approval_summaries.for_artifact(task, version)), 240)
+
     async def test_empty_delivery_can_be_explicitly_submitted_but_not_automatically(self):
         from app.api import approvals, tasks
         from app.realtime import hub
