@@ -230,7 +230,7 @@ async def create_org(
     session: AsyncSession, name: str, parent_id: str | None, sort: int = 0,
     *, actor: models.User, data_source: str | None = None,
 ) -> dict:
-    """Create below an authorized parent; only super users may create a root."""
+    """Stage a department below an authorized parent; only super users may create a root."""
     name = _validate_org_name(name) if name else "未命名部门"
     pid = str(parent_id or "").strip() or None
     await lock_org_tree(session)
@@ -245,7 +245,7 @@ async def create_org(
     o = models.OrgUnit(name=await _available_org_name(session, name, pid), parent_id=pid, sort=sort,
                        data_source=creation_source(actor, data_source, parent))
     session.add(o)
-    await session.commit()
+    await session.flush()
     await session.refresh(o)
     return org_to_api(o)
 
@@ -576,12 +576,13 @@ async def list_domains(session: AsyncSession, *, page: Page | None = None):
 
 
 async def create_domain(session: AsyncSession, name: str, sort: int = 0) -> dict:
+    """Stage a domain for the caller to commit with its audit entry."""
     from uuid import uuid4
     name = _admin_name.validate_python(name)
     await catalog_names.require_available(session, models.Domain, name, "领域名已存在")
     d = models.Domain(id="dom_" + uuid4().hex[:10], name=name, sort=sort)
     session.add(d)
-    await session.commit()
+    await session.flush()
     await session.refresh(d)
     return domain_to_api(d)
 

@@ -230,8 +230,9 @@ async def create_org(
             session, body.name, body.parentId, body.sort, actor=user, data_source=body.dataSource)
     except rbac.OrgMutationError as exc:
         raise _org_mutation_error(exc) from exc
-    await audit.log(session, user, "org.create", "org", created["id"],
-                    created["name"], {"parentId": created.get("parentId"), "dataSource": created["dataSource"]})
+    audit.add(session, user, "org.create", "org", created["id"],
+              created["name"], {"parentId": created.get("parentId"), "dataSource": created["dataSource"]})
+    await session.commit()
     return created
 
 
@@ -686,7 +687,8 @@ async def create_domain(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="领域名称必须为 1 到 64 个字符") from exc
-    await audit.log(session, user, "domain.create", "domain", r["id"], r["name"], {})
+    audit.add(session, user, "domain.create", "domain", r["id"], r["name"], {})
+    await session.commit()
     return r
 
 
