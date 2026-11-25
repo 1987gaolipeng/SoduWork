@@ -89,6 +89,7 @@ RELEASE_SMOKES = tuple(sorted((
     "test_task_text_migration.py",
     "test_requirement_maintenance.py",
     "test_requirement_maintenance_policy.py",
+    "test_handoff_commit_datetimes.py",
     "test_handoff_maintenance_boundary.py",
     "test_notice_audience_regression.py",
     "smoke/smoke_video_plugin.py",

@@ -4,6 +4,7 @@ No business DB, daily Runner, desktop SDK or commercial model is used. Reuses
 the existing subprocess transport fixture; only the vendor is synthetic.
 """
 import asyncio
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import tempfile
@@ -443,6 +444,42 @@ class CloudConversationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(again.json()["phase"], "committed", again.text)
             self.assertEqual(peer.calls.count("job.dispatch"), before + 1)
             await self.fixture.complete(again.json()["ref"])
+
+    async def _commit_sqlite_fence(self, name, age, expected_phase):
+        from app.services import task_dispatch
+
+        prepared = await self.fixture.prepare(name)
+        self.assertEqual(prepared.status_code, 200, prepared.text)
+        receipt = prepared.json()
+        async with db.SessionLocal() as session:
+            row = await session.get(ConversationHandoff, handoffs.identity(self.fixture.client.id, name))
+            row.phase = 'committing'
+            row.commit_started_at = datetime.now(timezone.utc) - age if age is not None else None
+            row.receipt = {'state': 'starting'}
+            await session.commit()
+            await session.refresh(row)
+            if age is not None:
+                self.assertIsNone(row.commit_started_at.tzinfo, 'SQLite round-trip strips the timezone')
+            client = await session.get(models.Client, self.fixture.client.id)
+            with patch.object(task_dispatch, 'dispatch', new=AsyncMock(
+                    return_value={'ref': 'synthetic-resumed-ref', 'state': 'running'})) as dispatch:
+                reply = await handoffs.commit(session, client, name, receipt['sha256'])
+                if expected_phase == 'committed':
+                    replay = await handoffs.commit(session, client, name, receipt['sha256'])
+                    self.assertEqual(replay, reply)
+            self.assertEqual(reply['phase'], expected_phase)
+            self.assertEqual(dispatch.await_count, int(expected_phase == 'committed'))
+            if expected_phase == 'committing':
+                self.assertEqual(row.receipt, {'state': 'starting'})
+
+    async def test_recent_sqlite_commit_fence_preserves_retry_without_redispatch(self):
+        await self._commit_sqlite_fence('recent-sqlite-fence', timedelta(), 'committing')
+
+    async def test_stale_sqlite_commit_fence_can_resume_once(self):
+        await self._commit_sqlite_fence('stale-sqlite-fence', timedelta(minutes=3), 'committed')
+
+    async def test_legacy_unknown_commit_time_retains_the_fence(self):
+        await self._commit_sqlite_fence('legacy-unknown-fence', None, 'committing')
 
 if __name__ == "__main__":
     unittest.main()

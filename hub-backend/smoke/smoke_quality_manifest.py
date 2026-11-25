@@ -91,6 +91,14 @@ for profile in ("release", "extended"):
 check("tier entries stay sorted for reviewability",
       all(tuple(sorted(group)) == group
           for group in (RELEASE_SMOKES, EXTENDED_SMOKES, LIVE_SMOKES)))
+for profile in ("release", "extended"):
+    check("handoff datetime retry regressions run exactly once in " + profile,
+          scripts_for(profile).count("test_handoff_commit_datetimes.py") == 1)
+discovery = subprocess.run([sys.executable, "-c",
+    "import unittest; s=unittest.defaultTestLoader.loadTestsFromName('test_handoff_commit_datetimes'); "
+    "print(s.countTestCases())"], cwd=BACKEND, capture_output=True, text=True, timeout=20)
+check("handoff datetime entry discovers exactly its three registered regressions",
+      discovery.returncode == 0 and discovery.stdout.strip() == "3", discovery.stderr[-500:])
 from quality_gate import _isolated_env, _python_check_command, LIVE_ENV_KEYS
 with tempfile.TemporaryDirectory(prefix="soduwork-gate-contract-") as temporary:
     base = os.environ.copy()

@@ -726,8 +726,11 @@ async def commit(session, client, transfer_id, sha256):
         conditions = [(Handoff.phase == "committing") &
                       (Handoff.commit_started_at < now - timedelta(minutes=2))]
     from sqlalchemy import or_
+    # SQLite reloads timestamps without tzinfo; evaluate the retry fence in SQL,
+    # then synchronize affected rows without a mixed Python datetime comparison.
     changed = await session.execute(update(Handoff).where(
-        Handoff.id == row.id, or_(*conditions)).values(phase="committing", commit_started_at=now, error="",
+        Handoff.id == row.id, or_(*conditions)).execution_options(synchronize_session="fetch").values(
+        phase="committing", commit_started_at=now, error="",
         submitted_at=row.submitted_at or now,
         receipt={"runnerBootId": picked.get("runnerBootId", ""), "runnerId": picked["runnerId"]}))
     if changed.rowcount:
