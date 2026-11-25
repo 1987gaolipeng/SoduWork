@@ -248,6 +248,22 @@ test('a timed-out catalog releases its pending slot and a late result cannot rep
   assert.equal(f.runtime.catalog().length, 6); assert.ok(!f.runtime.catalog().some(row => row.id === 'obsolete'));
 });
 
+for (const failure of ['disconnect', 'unknown-auth']) test('Codex retries ' + failure + ' but accepts a definitive missing result', async () => {
+  const { createRunnerRuntimeAdapter } = require('../main/agent-runtime/runner-adapter');
+  const runtimeSpec = require('../main/agent-runtime/runtime-catalog').runtime('codex');
+  let calls = 0;
+  const adapter = createRunnerRuntimeAdapter({ runtimeSpec, runnerRuntime: { async rpc() {
+    if (++calls === 1) {
+      if (failure === 'disconnect') throw Error('Runner is not running');
+      return { ok: true, data: { installed: true, state: 'unauthed', authStatus: 'unknown' } };
+    }
+    return { ok: true, data: { installed: calls === 2, state: calls === 2 ? 'ready' : 'missing' } };
+  } } });
+  assert.equal((await adapter.detect()).ok, true);
+  assert.equal((await adapter.detect()).state, 'missing');
+  assert.equal(calls, 3);
+});
+
 test('a slow last ACP runtime cannot discard the ready OpenCode projection after the composer deadline', async () => {
   const { createRuntimeCatalog } = require('../main/agent-runtime/runtime-catalog');
   const { createRunnerRuntimeAdapter } = require('../main/agent-runtime/runner-adapter');

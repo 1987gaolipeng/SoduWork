@@ -2,7 +2,7 @@
 
 // Only the Runner knows which account home an existing native session uses.
 const REASONING_EFFORTS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
-async function list(adapterId, runtime, ref, ensureCompatible = false) {
+async function readCatalog(adapterId, runtime, ref, ensureCompatible) {
   if (adapterId !== 'codex') return { ok: true, adapterId, models: [] };
   try {
     const runner = runtime || require('../runner-runtime');
@@ -33,5 +33,14 @@ async function list(adapterId, runtime, ref, ensureCompatible = false) {
     }
   } catch (_) { /* A disconnected Runner has no authoritative catalog. */ }
   return { ok: false, adapterId, models: [], catalogAvailable: false, retryable: true, reason: '本机 Codex 模型目录暂时无法读取，请刷新重试。' };
+}
+async function list(adapterId, runtime, ref, ensureCompatible = false) {
+  const reply = await readCatalog(adapterId, runtime, ref, ensureCompatible);
+  if (adapterId === 'codex' && ensureCompatible && !ref && reply.retryable &&
+      !reply.catalogAvailable && !reply.nativeDefaultAvailable && !reply.upgradeState) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return readCatalog(adapterId, runtime, ref, ensureCompatible);
+  }
+  return reply;
 }
 module.exports = { list, REASONING_EFFORTS };
