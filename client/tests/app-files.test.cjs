@@ -241,3 +241,103 @@ test('failed upload starts release admission capacity',async t=>{
     }finally{await Promise.allSettled(active.map(row=>f.call('files.cancel',{id:row.id})));}
   });
 });
+
+function stagingPath(f,id) {return path.join(f.root,'jiyong-files',store.scope(f.binding),'uploads',id+'.part');}
+function ageStaging(file) {const old=new Date(Date.now()-11*60*1000);fs.utimesSync(file,old,old);}
+
+test('expired staging from an exited process is removed when subsequent SDK imports start',async t=>{
+  const f=fixture(t);await f.open();
+  const child=require('node:child_process').spawnSync(process.execPath,
+    [path.join(__dirname,'fixtures/app-file-restart.cjs'),f.root,JSON.stringify(f.binding)],
+    {encoding:'utf8',timeout:15000});
+  assert.equal(child.status,0,child.stderr);
+  const previous=JSON.parse(child.stdout),expired=stagingPath(f,previous.abandoned.id),recent=stagingPath(f,previous.recent.id);
+  ageStaging(expired);
+  const {sdk}=nativeFileSdk(f);
+  const saved=await sdk.files.importFile(new Blob(['first'],{type:'image/png'}),{projectId:'restarted'});
+  assert.equal(fs.existsSync(expired),false,'expired unclaimed staging is reclaimed after restart');
+  assert.equal(fs.existsSync(recent),true,'recent unclaimed staging retains the existing idle grace period');
+  assert.equal(await (await f.request({url:saved.file.url,method:'GET'})).text(),'first');
+  assert.equal(await (await f.request({url:previous.file.url,method:'GET'})).text(),'kept','committed files survive cleanup');
+  await assert.rejects(()=>f.call('files.cancel',{id:previous.abandoned.id}),/不存在|取消/);
+  ageStaging(recent);
+  const later=await sdk.files.importFile(new Blob(['later'],{type:'image/png'}),{projectId:'restarted'});
+  assert.equal(fs.existsSync(recent),false,'staging that expires later is reclaimed by a later import');
+  assert.equal(await (await f.request({url:later.file.url,method:'GET'})).text(),'later');
+});
+
+test('staging expiry preserves active uploads, unrelated entries and committed bytes',async t=>{
+  const f=fixture(t);await f.open();
+  const active=await f.call('files.begin',{projectId:'live',name:'active.bin',type:'application/octet-stream',size:3});
+  try{
+    await f.call('files.append',{id:active.id,offset:0,data:Buffer.from('abc')});
+    const live=stagingPath(f,active.id),directory=path.dirname(live);ageStaging(live);
+    const unrelated=path.join(directory,'notes.part'),nested=path.join(directory,'upload_'+'d'.repeat(32)+'.part');
+    fs.writeFileSync(unrelated,'notes');ageStaging(unrelated);fs.mkdirSync(nested);
+    const original=path.join(f.root,'user-original.txt');fs.writeFileSync(original,'original');
+    const link=path.join(directory,'upload_'+'e'.repeat(32)+'.part');
+    if(process.platform!=='win32')fs.symlinkSync(original,link);
+    const saved=await upload(f,'kept');
+    assert.equal(fs.readFileSync(live,'utf8'),'abc');assert.equal(fs.readFileSync(unrelated,'utf8'),'notes');
+    assert.equal(fs.statSync(nested).isDirectory(),true);assert.equal(fs.readFileSync(original,'utf8'),'original');
+    if(process.platform!=='win32')assert.equal(fs.lstatSync(link).isSymbolicLink(),true);
+    assert.deepEqual(Buffer.from(await (await f.request({url:saved.file.url,method:'GET'})).arrayBuffer()),saved.bytes);
+    const finished=await f.call('files.finish',{id:active.id});
+    assert.equal(await (await f.request({url:finished.file.url,method:'GET'})).text(),'abc');
+  }finally{await f.call('files.cancel',{id:active.id}).catch(()=>{});}
+});
+
+test('staging expiry preserves a file while its native upload handle is still opening',async t=>{
+  const f=fixture(t);await f.open();const open=fs.promises.open.bind(fs.promises);
+  let entered,release,held,armed=true;
+  const reached=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
+  t.mock.method(fs.promises,'open',async(file,...args)=>{
+    const handle=await open(file,...args);
+    if(armed&&String(file).includes(path.sep+'uploads'+path.sep)&&String(file).endsWith('.part')){
+      armed=false;held=file;ageStaging(file);entered();await gate;
+    }
+    return handle;
+  });
+  const input={projectId:'opening',name:'active.bin',type:'application/octet-stream',size:3};
+  const pending=f.call('files.begin',input);let first,second;
+  try{
+    await reached;second=await f.call('files.begin',input);
+    assert.equal(fs.existsSync(held),true,'an in-flight native open is not abandoned staging');
+    release();first=await pending;
+    await f.call('files.append',{id:first.id,offset:0,data:Buffer.from('abc')});
+    const saved=await f.call('files.finish',{id:first.id});
+    assert.equal(await (await f.request({url:saved.file.url,method:'GET'})).text(),'abc');
+  }finally{
+    release();first ||= await pending.catch(()=>null);
+    await Promise.allSettled([first,second].filter(Boolean).map(row=>f.call('files.cancel',{id:row.id})));
+  }
+});
+
+test('an abandoned-staging cleanup failure does not block a healthy SDK import',async t=>{
+  const f=fixture(t);await f.open();
+  const begin=await f.call('files.begin',{projectId:'setup',name:'empty.bin',type:'application/octet-stream',size:0});
+  const directory=path.dirname(stagingPath(f,begin.id));await f.call('files.cancel',{id:begin.id});
+  const stale=path.join(directory,'upload_'+'f'.repeat(32)+'.part');fs.writeFileSync(stale,'old');ageStaging(stale);
+  const remove=fs.promises.rm.bind(fs.promises);let attempted=false;
+  t.mock.method(fs.promises,'rm',async(file,...args)=>{
+    if(file===stale){attempted=true;throw Object.assign(Error('Synthetic stale file is busy'),{code:'EACCES'});}
+    return remove(file,...args);
+  });
+  const {sdk}=nativeFileSdk(f),saved=await sdk.files.importFile(new Blob(['healthy'],{type:'image/png'}),{projectId:'healthy'});
+  assert.equal(attempted,true,'the fixture reached real stale-file cleanup');assert.equal(fs.readFileSync(stale,'utf8'),'old');
+  assert.equal(await (await f.request({url:saved.file.url,method:'GET'})).text(),'healthy');
+});
+
+test('staging expiry preserves abandoned uploads belonging to another account',async t=>{
+  const f=fixture(t);await f.open();
+  const child=require('node:child_process').spawnSync(process.execPath,
+    [path.join(__dirname,'fixtures/app-file-restart.cjs'),f.root,JSON.stringify(f.binding),'account-b'],
+    {encoding:'utf8',timeout:15000});
+  assert.equal(child.status,0,child.stderr);
+  const previous=JSON.parse(child.stdout);
+  assert.notEqual(previous.scope,store.scope(f.binding));
+  const other=path.join(f.root,'jiyong-files',previous.scope,'uploads',previous.abandoned.id+'.part');ageStaging(other);
+  const {sdk}=nativeFileSdk(f),saved=await sdk.files.importFile(new Blob(['owned'],{type:'image/png'}),{projectId:'owned'});
+  assert.equal(fs.readFileSync(other,'utf8'),'old','cleanup stays in the requesting account/app scope');
+  assert.equal(await (await f.request({url:saved.file.url,method:'GET'})).text(),'owned');
+});
