@@ -17,6 +17,10 @@ const artifactTitle = require('./artifact-title');
 const selection = require('./delivery-selection');
 
 const { root: deliveryRoot } = require('./delivery-workspace.cjs');
+// The bridge registers only its actual facade. Cloud/projected objects may
+// inherit native properties but never inherit this desktop file authority.
+const facadeSources = new WeakMap();
+const archiveSource = handle => facadeSources.get(handle) || handle;
 const turnArchives = new WeakMap();
 const continuationArchives = new WeakMap();
 const archiveReaders = new WeakMap();
@@ -118,14 +122,20 @@ async function snapshotAsync(session) {
 // Only the interactive output index and its read actions consult archived bytes.
 async function viewSnapshotAsync(session) {
   const current = await appendArchivedItems(session, await snapshotAsync(session));
-  if (!turnArchives.has(session) || !current) return current;
-  return { ...current, items: [...current.items, ...await turnArtifacts(session)] };
+  if (!turnArchives.has(archiveSource(session)) || !current) return current;
+  const archived = await turnArtifacts(session);
+  const provisional = file => file.turnId.startsWith('pi-archive:');
+  const revision = file => JSON.stringify([file.relative, file.at, file.versionHash]);
+  // A later native replay can identify the turn that produced a previously
+  // unassigned backup. Keep issued IDs readable, but show that revision once.
+  const located = new Set(archived.filter(file => !provisional(file)).map(revision));
+  return { ...current, items: [...current.items, ...archived.filter(file => !provisional(file) || !located.has(revision(file)))] };
 }
 
 async function turnArtifacts(session, requestedId) {
-  if (!turnArchives.has(session)) return [];
+  if (!turnArchives.has(archiveSource(session))) return [];
   const versions = [], checked = new Set();
-  for (const { reader, turnId, userMessageIndex } of await turnArchives.get(session)()) {
+  for (const { reader, turnId, userMessageIndex } of await turnArchives.get(archiveSource(session))()) {
     if (!checked.has(reader.authorize)) { await reader.authorize(); checked.add(reader.authorize); }
     for (const file of reader.snapshot().items) {
       if (!/^[a-f0-9]{64}$/.test(file.versionId) || !turnId || requestedId && requestedId !== 'version:' + file.versionId) continue;
@@ -137,8 +147,20 @@ async function turnArtifacts(session, requestedId) {
   }
   return versions;
 }
+// A historical package must be backed by one turn's verified file set.
+async function resolveVersionGroup(session, ids) {
+  if (!Array.isArray(ids) || !ids.length || ids.length > 500 || new Set(ids).size !== ids.length ||
+      !ids.every(id => typeof id === 'string' && /^version:[a-f0-9]{64}$/.test(id))) throw Error('请选择同一轮的成果版本');
+  const indexed = new Map((await turnArtifacts(session, ids.length === 1 ? ids[0] : undefined))
+    .map(item => [item.artifactId, item]));
+  const items = ids.map(id => indexed.get(id));
+  const reader = archiveReaders.get(items[0]);
+  if (!reader || !items.every(item => archiveReaders.get(item) === reader && reader.verify(item.path)))
+    throw Error('该轮成果原件不可用');
+  return { items, reader, root: reader.rootFor?.(items[0]) || reader.root };
+}
 async function appendArchivedItems(session, current) {
-  const getArchive = continuationArchives.get(session);
+  const getArchive = continuationArchives.get(archiveSource(session));
   if (!current || !getArchive) return current;
   const reader = await getArchive();
   if (!reader) return current;
@@ -733,8 +755,15 @@ if (typeof sweep.unref === 'function') sweep.unref();
 module.exports = {
   snapshot: sessionSnapshot,
   viewSnapshotAsync,
-  bindTurnArchives(handle, readers) { turnArchives.set(handle, readers); },
-  bindContinuationArchive(handle, reader) { continuationArchives.set(handle, reader); },
+  bindSessionFacade(facade, source) { facadeSources.set(facade, source); },
+  releaseSessionFacade(facade) {
+    const source = facadeSources.get(facade);
+    facadeSources.delete(facade);
+    turnArchives.delete(source);
+    continuationArchives.delete(source);
+  },
+  bindTurnArchives(handle, readers) { turnArchives.set(archiveSource(handle), readers); },
+  bindContinuationArchive(handle, reader) { continuationArchives.set(archiveSource(handle), reader); },
   snapshotAsync,
   decorate,
   decorateForSharing,
@@ -742,6 +771,7 @@ module.exports = {
   resolveSnapshot,
   resolveAsync,
   resolveView,
+  resolveVersionGroup,
   preview,
   previewInput,
   previewLocation,

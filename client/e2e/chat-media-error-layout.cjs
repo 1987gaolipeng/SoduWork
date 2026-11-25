@@ -166,7 +166,7 @@ if (typeof electron === 'string') {
         list.innerHTML = ChatOutputLinks.decorate(html, ${JSON.stringify(files)}, 'delivery-groups', snapshot);
         return { groups: [...list.querySelectorAll('.ndelivery')].map(card => ({
           owner: card.closest('.nmsg')?.dataset.chatNode || 'session',
-          ids: [...card.querySelectorAll('[data-open-app]')].map(link => link.dataset.openApp).sort(),
+          ids: [...new Set([...card.querySelectorAll('[data-open-app]')].map(link => link.dataset.openApp))].sort(),
         })), installOwners: [...list.querySelectorAll('[data-install-plugin-draft]')].map(button => button.closest('.nmsg')?.dataset.chatNode) };
       })()`);
     }
@@ -191,6 +191,102 @@ if (typeof electron === 'string') {
     assert.deepEqual(await deliveryGroups([user, { ...oneTurn[1], installCard: true }], pair, page),
       { groups: [group('session', 'named', 'extra')], installOwners: ['message:1'] });
     report.cases.push({ historyDeliveries: 'single turn, bounded turns, undated turns, incomplete archive, paginated history and legacy installation card' });
+    const switching = await run(`(async () => {
+      const messages = [{ role: 'user', submissionId: 'first' }, { role: 'assistant', done: true }];
+      const ref = 'pi-history-card';
+      const live = { artifactId: 'original', primary: true, changedInTurn: true, name: 'index.html',
+        relative: 'index.html', kind: 'website', title: '我的简易网页', size: 128 };
+      const frozen = { ...live, artifactId: 'version:frozen', versionId: 'frozen', originalArtifactId: 'original',
+        userMessageIndex: 0, turnId: 'first', changedInTurn: false };
+      function render(files, snapshot, activeRef = ref) {
+        const html = snapshot.messages.map((message, i) => message.role === 'user'
+          ? '<div class="nmsg user" data-chat-node="message:' + i + '"></div>'
+          : '<div class="nmsg ai" data-output-task="" data-delivery-final="true" data-chat-node="message:' + i +
+            '" data-delivery-current="' + (i === snapshot.messages.length - 1) + '"><div class="ntext">' +
+            (i === 1 ? '<code>index.html</code>' : 'Done') + '</div></div>').join('');
+        list.innerHTML = ChatOutputLinks.decorate(html, files, activeRef, { status: 'idle', ...snapshot });
+        return [...list.querySelectorAll('.ndelivery')].map(card => ({
+          owner: card.closest('.nmsg')?.dataset.chatNode, title: card.querySelector('[data-delivery-title]')?.textContent,
+          icon: !!card.querySelector('.ndelivery-icon'), preview: card.querySelector('header [data-open-app]')?.dataset.openApp,
+          actions: [...card.querySelectorAll('.ndelivery-actions button:not([hidden])')].map(b => b.title),
+          exports: [...card.querySelectorAll('[data-delivery-export-version]')].map(b => b.dataset.deliveryExportVersion),
+        }));
+      }
+      const passive = { messages, localReplica: true, execution: { readOnly: true } };
+      const active = render([live, frozen], { messages });
+      const away = render([], { messages: [] }, 'other-chat');
+      const reopened = render([live, frozen], passive);
+      const calls = [];
+      const result = { ok: true, manifest: { revision: 'frozen-rev', files: [{ path: 'index.html' }] } };
+      const api = {
+        inspectDelivery: async (ref, ids) => { calls.push(['inspect', ref, ids]); return result; },
+        openLocalDelivery: async (ref, ids, options) => { calls.push(['reveal', ref, ids, options]); return { ok: true }; },
+        saveDelivery: async (ref, ids) => { calls.push(['export', ref, ids]); return { ok: true }; },
+        prepareDelivery: async (ref, ids) => { calls.push(['prepare', ref, ids]); return result; },
+      };
+      const resumed = render([frozen, { ...live, changedInTurn: false }], {
+        messages: [...messages, { role: 'user', submissionId: 'second' }, { role: 'assistant', done: true }] });
+      render([live, frozen], passive);
+      window.SoduWorkAPI = { saveLibraryDelivery: async payload => {
+        calls.push(['save', payload.manifest.revision]); return { ok: true, delivery: { id: 'saved', files: payload.manifest.files } };
+      } };
+      for (const selector of ['[data-delivery-reveal]', '[data-delivery-export-version]', '[data-delivery-retry]']) {
+        await ChatDeliveries.handle(list.querySelector(selector), api, ref);
+      }
+      delete window.SoduWorkAPI;
+      const legacy = render([live], passive);
+      return { active, away, reopened, resumed, legacy, calls };
+    })()`);
+    const card = { owner: 'message:1', title: '我的简易网页', icon: true, preview: 'version:frozen',
+      actions: ['打开所在位置', '保存到资料库'], exports: ['version:frozen'] };
+    assert.deepEqual(switching.active, [card]);
+    assert.deepEqual(switching.away, []);
+    assert.deepEqual(switching.reopened, [card]);
+    assert.deepEqual(switching.resumed, [card]);
+    assert.deepEqual(switching.legacy, [{ ...card, preview: 'original', actions: [], exports: [] }]);
+    assert.deepEqual(switching.calls, [
+      ['inspect', 'pi-history-card', ['version:frozen']],
+      ['reveal', 'pi-history-card', ['version:frozen'], { bundle: false, revision: 'frozen-rev' }],
+      ['export', 'pi-history-card', ['version:frozen']], ['prepare', 'pi-history-card', ['version:frozen']],
+      ['save', 'frozen-rev'],
+    ]);
+    report.cases.push({ switchedChatDelivery: 'same titled card and frozen actions when live, reopened, and continued; legacy preview retained' });
+    const recovered = await run(`(() => {
+      const ordinary = { artifactId: 'current-index', name: 'index.html', relative: 'index.html', size: 99,
+        kind: 'website', title: 'New website', primary: true };
+      const old = { ...ordinary, artifactId: 'version:old', originalArtifactId: ordinary.artifactId, versionId: 'old',
+        title: 'Original website', changedInTurn: false, archivedReadOnly: true };
+      function render(files, prefixMessageCount, extraOld = false) {
+        const turn = id => [{ role: 'user', submissionId: id }, { role: 'assistant', done: true }];
+        const messages = [...turn('old'), ...(extraOld ? turn('another-old') : []), ...turn('new')];
+        const html = messages.map((m, i) => m.role === 'user' ? '<div class="nmsg user"></div>' :
+          '<div class="nmsg ai" data-output-task="" data-chat-node="message:' + i + '" data-delivery-final="true" data-delivery-current="' +
+          (i === messages.length - 1) + '"><div class="ntext nmd"><a href="index.html">Open page</a> <code>index.html</code></div></div>').join('');
+        const snap = { status: 'idle', messages, historyRecovery: { mode: 'device-history', prefixMessageCount } };
+        list.innerHTML = ChatOutputLinks.decorate(html, files, 'restored', snap);
+        ChatOutputLinks.linkify(list, files, 'second pass', false, snap);
+        return { replies: [...list.querySelectorAll('.nmsg.ai')].map(m => ({
+          title: m.querySelector('.ndelivery-heading [data-open-app]')?.dataset.openApp || null,
+          link: m.querySelector('.nmd button')?.dataset.openApp || null,
+          scoped: ChatOutputLinks.scoped(m, files).map(f => f.artifactId),
+        })), session: list.querySelector(':scope > .ndelivery [data-open-app]')?.dataset.openApp || null };
+      }
+      const inferred = { ...old, turnId: 'pi-archive:legacy' };
+      const known = { ...old, turnId: 'pi-history:legacy', userMessageIndex: 0 };
+      return { known: render([known, ordinary], 2), inferred: render([inferred, ordinary], 2),
+        emptyWorkspace: render([inferred], 2), noOriginal: render([ordinary], 2), ambiguous: render([inferred, ordinary], 4, true) };
+    })()`);
+    const oldReply = { title: 'version:old', link: 'version:old', scoped: ['version:old'] };
+    const unavailable = { title: null, link: null, scoped: [] };
+    assert.deepEqual(recovered.known.replies[0], oldReply);
+    assert.deepEqual(recovered.inferred.replies[0], oldReply);
+    assert.deepEqual(recovered.emptyWorkspace.replies[0], oldReply);
+    assert.deepEqual(recovered.noOriginal.replies[0], unavailable);
+    assert.deepEqual(recovered.ambiguous.replies.slice(0, 2), [unavailable, unavailable]);
+    assert.equal(recovered.ambiguous.session, 'version:old');
+    for (const result of [recovered.known, recovered.inferred, recovered.noOriginal, recovered.ambiguous])
+      assert.equal(result.replies.at(-1).link, 'current-index');
+    report.cases.push({ restoredWorkspace: 'card and Markdown resolve to the original in an empty or same-name workspace; ambiguous files stay at session scope' });
     report.ok = true;
   }).catch(error => { report.error = error.stack || String(error); }).finally(() => {
     fs.mkdirSync(output, { recursive: true });

@@ -472,6 +472,12 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
       !row.cached && !content?.historyProtection && !nativeUnavailable &&
       access.usesDeviceChatContext(app, { chatId: row.id }, row);
     const choice = historyPreview && canContinue ? await previewChoice(row, actor, shared) : null;
+    if (choice && !shared) {
+      // Failure to validate native permission metadata must not prevent browsing.
+      const policy = await require('./device-local-continuation.cjs')
+        .nativeAccessPolicy(app, row, actor, session, choice.adapterId, row.cwd).catch(() => null);
+      if (policy) choice.accessMode = policy.mode;
+    }
     const view = await require('./local-history-view.cjs').create({ historyPreview, allowContinuation: canContinue, choice,
       pendingUserTail: canContinue && !shared ? content?.pendingUserTail : null, retiredTools: Boolean(retired),
       unconfirmedUserTail: content?.unconfirmedUserTail === true,

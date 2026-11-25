@@ -1,7 +1,7 @@
 'use strict';
 
 // Resolve local actions against the authenticated workspace. Bundle actions
-// share one verified archive; individual file actions only reveal their source.
+// share one verified archive. Historical actions reveal a verified copy.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const artifacts = require('./artifact-runtime');
@@ -12,6 +12,21 @@ function within(root, target, allowRoot = false) {
   const relative = path.relative(root, target);
   return (!relative && allowRoot) || Boolean(relative && relative !== '..' &&
     !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
+}
+async function openPackage({ app, shell, handle, ids, options, action, owner, guard, revealFile = false }) {
+  const result = await require('./delivery-package-worker').prepare(handle, ids);
+  if (options.revision && options.revision !== result.manifest.revision) {
+    throw fail('DELIVERY_REVISION_CHANGED', '本地成果已更新，请查看当前成果或此前保存的版本');
+  }
+  if (!revealFile && (result.contentType !== 'application/zip' || !/\.zip$/i.test(result.filename))) {
+    throw fail('DELIVERY_INVALID_SELECTION', '这份成果不是 ZIP 压缩包');
+  }
+  const archive = await require('./local-delivery-archive').create({ app, owner, result, guard, revealFile });
+  if (action === 'open-archive') {
+    const error = await shell.openPath(archive);
+    if (error) throw fail('DELIVERY_OPEN_FAILED', '无法打开压缩包，请使用打开所在位置查看文件');
+  } else shell.showItemInFolder(archive);
+  return { ok: true };
 }
 function install({ app, ipcMain, session, shell,
   ownerOf = app => require('../device-auth').localOwner(app),
@@ -32,6 +47,20 @@ function install({ app, ipcMain, session, shell,
       const original = session.get(ref);
       if (!original) throw fail('DELIVERY_LOCAL_UNAVAILABLE', '会话已关闭，请重新打开');
       const handle = await resolveSession(original);
+      if (ids.some(id => id.startsWith('version:'))) {
+        if (action === 'continue-local') throw fail('DELIVERY_INVALID_SELECTION', '请在当前本地会话继续操作');
+        const owner = await ownerOf(app);
+        const guard = async () => {
+          const current = await resolveSession(original);
+          await artifacts.resolveVersionGroup(current, ids);
+          if (!owner || owner !== await ownerOf(app) || session.get(ref) !== original || !isTrusted(event)) {
+            throw fail('DELIVERY_FORBIDDEN', '账号或会话已变化，请重新打开成果');
+          }
+        };
+        await guard();
+        return await openPackage({ app, shell, handle, ids, options, action, owner, guard,
+          revealFile: action === 'open-local' && options.bundle !== true });
+      }
       const sourceDirectory = original.cwd;
       const cloudCache = handle !== original && handle.cloudArtifactCache === true;
       const directory = String(handle.cwd || '');
@@ -101,19 +130,7 @@ function install({ app, ipcMain, session, shell,
         return await require('./cloud-result-local').create({ app, directory, owner, items: indexed, ids, guard });
       }
       if (action === 'open-archive' || options.bundle === true) {
-        const result = await require('./delivery-package-worker').prepare(handle, ids);
-        if (options.revision && options.revision !== result.manifest.revision) {
-          throw fail('DELIVERY_REVISION_CHANGED', '本地成果已更新，请查看当前成果或此前保存的版本');
-        }
-        if (result.contentType !== 'application/zip' || !/\.zip$/i.test(result.filename)) {
-          throw fail('DELIVERY_INVALID_SELECTION', '这份成果不是 ZIP 压缩包');
-        }
-        const archive = await require('./local-delivery-archive').create({ app, owner, result, guard });
-        if (action === 'open-archive') {
-          const error = await shell.openPath(archive);
-          if (error) throw fail('DELIVERY_OPEN_FAILED', '无法打开压缩包，请使用打开所在位置查看文件');
-        } else shell.showItemInFolder(archive);
-        return { ok: true };
+        return await openPackage({ app, shell, handle, ids, options, action, owner, guard });
       }
       if (targets.length === 1) shell.showItemInFolder(targets[0]);
       else {

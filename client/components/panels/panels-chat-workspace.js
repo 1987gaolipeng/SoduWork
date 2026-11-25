@@ -63,7 +63,7 @@
   const ICONS = global.ChatWorkbenchIcons || info.ICONS || {};
   const WB = {
     root: null, context: null, open: false, maximized: false, manualClosed: false, autoOpened: false,
-    autoPreviewed: false, autoPreviewKey: '',
+    autoPreviewed: false, autoPreviewKey: '', settledTurn: '',
     active: '', files: [], summaryFiles: [], changes: [], services: [], tabs: [], states: Object.create(null),
     signature: '', seq: 0, epoch: 0, previewKey: '', previewText: '', previewError: '', previewLoading: false,
     fileChanges: null, editor: null, editorDrafts: Object.create(null), editorDirty: false,
@@ -195,10 +195,14 @@
     const kind = previewKind(file);
     return kind === 'web' || kind === 'pdf';
   }
+  function currentTurnOriginal(file) {
+    return WB.settledTurn && file.versionId && file.turnId === WB.settledTurn &&
+      file.primary === true && !file.deleted && !file.processEvidence;
+  }
   function canAutoPreview(file) {
     // Automatic output handling stays inside the right pane. Other results
     // remain conversation cards until the user chooses an explicit file action.
-    return !WB.historyPreview && !file.archivedReadOnly && !requiresExternalOpen(file, previewKind(file));
+    return !WB.historyPreview && (!file.archivedReadOnly || currentTurnOriginal(file)) && !requiresExternalOpen(file, previewKind(file));
   }
   function requiresExternalOpen(file, kind) {
     return kind === 'external' || (kind === 'pdf' && !((WB.historyPreview || file.archivedReadOnly) ? file.artifactId : file.path));
@@ -297,9 +301,10 @@
       // directly in CodeMirror. Existing edits still open in Diff by default.
       view: editorFile ? (change && change.action !== 'created' ? 'diff' : 'code') : 'preview' }, activate);
   }
-  function openOutput(target) {
+  function openOutput(target, { source } = {}) {
     const value = String(target || '');
-    const file = WB.files.find((item) => fileKey(item) === value || item.path === value);
+    const files = source && !value.startsWith('version:') ? links.scoped(source, WB.files) : WB.files;
+    const file = files.find((item) => fileKey(item) === value || item.path === value);
     if (!file) return false;
     if (openPendingCloud(file, true)) return true;
     if (isTaskPreview(file)) { openTaskPreview(file, true); return true; }
@@ -334,7 +339,7 @@
     return url ? { kind: 'url', url } : null;
   }
   function outputMentions(value, files) { return links ? links.mentions(String(value || ''), files) : []; }
-  function linkifyOutputs(root, files, filesSig) { return links ? links.linkify(root, files, filesSig) : 0; }
+  function linkifyOutputs(root, files, filesSig, snapshot) { return links ? links.linkify(root, files, filesSig, snapshot?.localReplica === true, snapshot) : 0; }
   function openTaskOutput(file) {
     if (!file || !file.taskId || !file.attachmentId) return false;
     if (previewKind(file) !== 'external') return false;
@@ -348,7 +353,7 @@
     return true;
   }
   function openLink(value, options = {}) {
-    const target = linkTarget(value, WB.files);
+    const target = linkTarget(value, options.source ? links.scoped(options.source, WB.files) : WB.files);
     if (!target) return false;
     const mediaType = ['image', 'video'].includes(options.mediaType) ? options.mediaType : '';
     if (mediaType && target.kind === 'url') {
@@ -792,11 +797,15 @@
     const nextChanges = changes(turnTools);
     WB.fileChanges = info.currentWorkJournal(snapshot);
     const nextFiles = mergeFileChanges(files, WB.fileChanges);
-    const turn = snapshot?.messages?.findLast(message => message?.role === 'user')?.submissionId;
-    // The live workbench follows the working version. Historical cards select
-    // their immutable entry directly by ID, including after a new revision.
-    const currentFiles = WB.historyPreview && links?.filesForTurn ? links.filesForTurn(nextFiles, turn, true) :
-      nextFiles.filter(file => !file.versionId);
+    const settled = !global.ChatDeliveries || global.ChatDeliveries.isSettled(snapshot || {});
+    const hasVersions = nextFiles.some(file => file.versionId);
+    const turn = hasVersions ? links.deliveryTurns(snapshot || {}, nextFiles).at(-1) : '';
+    WB.settledTurn = !WB.historyPreview && settled ? turn : '';
+    const currentFiles = hasVersions ? links.filesForTurn(nextFiles, turn, true) : nextFiles;
+    // The completed turn's immutable IDs are delivery evidence even when the
+    // working copy has disappeared or the reply does not name its output.
+    const frozen = currentFiles.filter(currentTurnOriginal);
+    const deliveryFiles = settled ? [...frozen, ...info.currentDeliveryFiles(snapshot || {}, currentFiles.filter(file => !file.versionId))] : [];
     const selection = info.currentWorkSelection(snapshot || {}, currentFiles, context().cwd || context().intent?.cwd);
     const nextSummaryFiles = selection.files;
     // A remote Runner prints the same localhost URL as a local dev server, but
@@ -812,7 +821,8 @@
         title: tr(item.title), state: tr(item.state) }));
     const scope = workScope();
     const signature = scope + '::' + nextFiles.map((item) => artifactKey(item) + ':' + item.at + ':' + item.size + ':' + (item.title || '') + ':' + (item.change?.action || '')).join('|') + '::' +
-      nextSummaryFiles.map(artifactKey).join('|') + '::' +
+      [WB.historyPreview, settled, turn, deliveryFiles.map(artifactKey).join('|')].join(':') + '::' +
+      nextSummaryFiles.map(item => artifactKey(item) + ':' + Boolean(item.changedInTurn)).join('|') + '::' +
       selection.images.map(item => artifactKey(item) + ':' + Boolean(item.changedInTurn)).join('|') + '::' +
       nextChanges.map((item) => item.id + ':' + item.state).join('|') + '::' +
       (WB.fileChanges?.capturedAt || 0) + '::' +
@@ -868,9 +878,6 @@
      * deliverables may become the automatic candidate.  Historical,
      * supporting and process-evidence files remain manual-only.
      */
-    const settled = !global.ChatDeliveries || global.ChatDeliveries.isSettled(snapshot || {});
-    const deliveryFiles = settled && typeof info.currentDeliveryFiles === 'function'
-      ? info.currentDeliveryFiles(snapshot || {}, currentFiles) : [];
     const deliveryRank = file => {
       const kind = previewKind(file);
       if (kind === 'web') return 0;
@@ -884,7 +891,7 @@
       .filter(file => canAutoPreview(file) && deliveryRank(file) < 99)
       .sort((left, right) => deliveryRank(left) - deliveryRank(right) ||
         Number(right.at || 0) - Number(left.at || 0))[0];
-    const live = WB.services.find((item) => item.url && !/失败|停止|failed|stopped/i.test(item.stateSource || item.state || ''));
+    const live = (!WB.historyPreview || snapshot?.cloudHandoff?.taskId) && WB.services.find((item) => item.url && !/失败|停止|failed|stopped/i.test(item.stateSource || item.state || ''));
     // An explicitly presented new screenshot may replace an automatic page,
     // while the existing manual-focus/close guards below remain authoritative.
     const candidate = explicitImage ? { kind: 'file', item: explicitImage,
@@ -931,7 +938,7 @@
       visibilityObserver: null, unlisten: null, unlistenElement: null };
     Object.assign(WB, {
       open: false, maximized: false, manualClosed: false, autoOpened: false,
-      autoPreviewed: false, autoPreviewKey: '',
+      autoPreviewed: false, autoPreviewKey: '', settledTurn: '',
       active: '', files: [], summaryFiles: [], changes: [], services: [],
       tabs: [], states: Object.create(null), signature: '', previewKey: '', previewText: '', previewError: '',
       previewRequest: null, cloudOpenRequest: null, openingTaskFiles: new Set(),

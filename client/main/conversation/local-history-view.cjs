@@ -18,6 +18,7 @@ async function create({ row, read, historyPreview = false, allowContinuation = f
       ...(choice.unavailable ? { unavailable: true } : {}) } } : {},
     accessControl: { mode: 'readonly', capabilities: [] },
     execution: { readOnly: true, localReplica: true, ...(historyPreview ? {
+      ...(choice?.accessMode ? { continuationAccess: { adapterId, mode: choice.accessMode } } : {}),
       canContinueOnDevice: allowContinuation && row.historyContentState === 'available' } : {}) }, localReplica: true };
   if (value.execution.canContinueOnDevice && pendingUserTail) value.historyRecovery = {
     mode: 'device-history', reasonCode: 'HISTORY_UNDISPATCHED_USER_TAIL', pendingUserText: pendingUserTail.text,

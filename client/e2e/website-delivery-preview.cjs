@@ -83,13 +83,14 @@ if (typeof electron === 'string') {
     assert.equal(await js(`document.querySelectorAll('[data-output-image="${shot.artifactId}"]').length`), 1);
     await until(() => js('document.querySelector("[data-delivery-files-count]")?.textContent.startsWith("2 ")'), 'website dependency inspection');
     assert.equal(await js('document.querySelector("[data-delivery-title]")?.textContent'), 'Screenshot regression garden.zip');
-    assert.equal(await js('document.querySelector("[data-delivery-title]").parentElement.hasAttribute("data-delivery-archive")'), true);
+    assert.equal(await js('document.querySelector("[data-delivery-title]").parentElement.dataset.openApp'), web.artifactId);
+    assert.equal(await js('document.querySelector(".ndelivery-actions [data-delivery-archive]").hidden'), false);
     report.cases.push('The multi-file delivery exposes its ZIP, retaining the website title and CSS dependency while excluding screenshot evidence');
     assert.equal((await js('document.querySelector("[data-wb-file-location]")?.textContent'))?.replaceAll('\\','/'), path.join(evidence,'homepage.png').replaceAll('\\','/'));
     const bytes = await runtime.action(handle, 'preview-fixture', shot.artifactId, 'image-full', {});
     assert.deepEqual(Buffer.from(bytes.data, 'base64'), png);
     await screenshot('right-screenshot'); report.cases.push('A referenced screenshot shows a bounded inline thumbnail and full original pixels in the right panel');
-    await click('[data-open-app="' + web.artifactId + '"]');
+    await click('.ndelivery-heading [data-open-app="' + web.artifactId + '"]');
     await until(() => views.some(view => !view.webContents.isDestroyed() && view.webContents.getTitle() === 'Screenshot regression garden'), 'website preview');
     const address = await js('document.querySelector(".ncw-address input")?.value || document.querySelector("[data-wb-address]")?.value');
     assert.equal(address?.replaceAll('\\','/'), path.join(cwd,'index.html').replaceAll('\\','/'));

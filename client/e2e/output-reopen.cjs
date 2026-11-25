@@ -9,14 +9,14 @@ if (typeof electron === 'string') {
   const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), assert = require('node:assert/strict');
   const { pathToFileURL } = require('node:url');
   const client = path.resolve(__dirname, '..'), out = path.resolve(client, '../outputs/output-reopen');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-output-reopen-e2e-'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-output-reopen-e2e-')));
   app.setPath('userData', root); app.on('window-all-closed', () => {}); fs.mkdirSync(out, { recursive: true });
   const report = { ok: false, cases: [] }, sessions = new Map(), live = new Set();
   const artifacts = require('../main/conversation/artifact-runtime');
   const catalog = require('../main/agent-runtime/runtime-catalog');
   const { createRunnerRuntimeAdapter, getRunnerSessionDetails } = require('../main/agent-runtime/runner-adapter');
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-  let win, serial = 0, mode = 'mixed';
+  let win, legacyHistory, serial = 0, mode = 'mixed';
   const js = code => win.webContents.executeJavaScript(code, true).catch(error => { throw Error(code.slice(0, 180) + '\n' + error.message); });
   async function until(check) { for (let i = 0; i < 200; i++) { if (await check()) return; await delay(25); } throw Error('Timed out: ' + check); }
   const name = '示例企业官网.html', md = '成果说明.md';
@@ -32,7 +32,23 @@ if (typeof electron === 'string') {
     { seq: 2, kind: 'say', text: '报告已落盘（`2026-09-30-soduwork-2026-09-30.md`）。' },
   ];
   async function click(expression) {
-    const point = await js(`(()=>{const e=${expression};if(!e)throw Error('Missing click target');e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect(),x=Math.round(r.x+r.width/2),y=Math.round(r.y+r.height/2);if(!e.contains(document.elementFromPoint(x,y)))throw Error('Occluded click target');return {x,y}})()`);
+    let point, previous, geometry;
+    try {
+      await until(async () => {
+        geometry = await js(`(() => {
+          const e = ${expression};
+          if (!e) return null;
+          e.scrollIntoView({block:'center', behavior:'instant'});
+          const r = e.getBoundingClientRect(), x = Math.round(r.x+r.width/2), y = Math.round(r.y+r.height/2);
+          const hit = document.elementFromPoint(x,y);
+          return {x,y,visible:e.contains(hit), hit:hit?.className};
+        })()`);
+        if (geometry?.visible && previous?.visible && geometry.x === previous.x && geometry.y === previous.y)
+          point = { x: geometry.x, y: geometry.y };
+        previous = geometry;
+        return point;
+      });
+    } catch { throw Error('Click did not settle: ' + expression + ' ' + JSON.stringify(geometry)); }
     for (const type of ['mouseDown','mouseUp']) win.webContents.sendInputEvent({type,...point,button:'left',clickCount:1});
   }
   function makeFiles(work, runtime) {
@@ -81,28 +97,51 @@ if (typeof electron === 'string') {
   }
   app.whenReady().then(async () => {
     const bridge = require('../main/agent-runtime/pi-session-bridge'); bridge.get = ref => sessions.get(ref);
-    require('../main/pi-session/ipc').install({ app, ipcMain, BrowserWindow, identityOf: () => null, capabilityGrantsOf: () => [] });
+    require('../main/pi-session/artifact-ipc').install({ app, ipcMain, BrowserWindow, session: sessions, workDir: () => root });
+    ipcMain.handle('pi-session-snapshot', (_event, ref) => ({ ok: true, snapshot: sessions.get(ref)?.snapshot() }));
     require('../main/work-preview').install({ app, ipcMain, BrowserWindow, WebContentsView, shell: { openExternal: async () => { throw Error('No external navigation in fixture'); } } });
-    for (const channel of ['pi-session-open', 'pi-session-history', 'pi-session-release', 'pi-session-runtime-models']) ipcMain.removeHandler(channel);
-    ipcMain.handle('pi-session-open', (_event, options) => restore(options.adapterId || 'pi'));
+    legacyHistory = await require('./fixtures/legacy-pi-website.cjs').create(app, root, sessions);
+    const legacyId = legacyHistory.id;
+    let continuation;
+    ipcMain.handle('pi-session-open-application', () => ({ ok: true, handled: false }));
+    ipcMain.handle('access-preferences-get', () => ({ ok: true, mode: 'standard' }));
+    ipcMain.handle('pi-session-runtimes', () => ({ ok: true, runtimes: catalog.runtimes() }));
+    ipcMain.handle('pi-session-open', async (_event, options) => {
+      if (![legacyId, legacyHistory.retiredId].includes(options.chatId)) return restore(options.adapterId || 'pi');
+      const view = options.chatId === legacyId && continuation
+        ? await legacyHistory.continued(continuation === 'collision') : await legacyHistory.preview(options.chatId);
+      sessions.set(view.ref, view);
+      return { ok: true, ref: view.ref, cwd: view.cwd, sessionId: view.sessionId, adapterId: 'pi',
+        localReplica: Boolean(view.localReplica), snapshot: view.snapshot() };
+    });
     ipcMain.handle('pi-session-history', () => ({ ok: true, chats: [] }));
     ipcMain.handle('pi-session-runtime-models', () => ({ ok: true, items: [] }));
-    ipcMain.handle('pi-session-release', (_event, ref) => { artifacts.closeRef(ref); sessions.delete(ref); return { ok: true }; });
+    ipcMain.handle('pi-session-release', async (_event, ref) => {
+      artifacts.closeRef(ref);
+      const handle = sessions.get(ref);
+      if (handle?.historyPreview) await handle.close();
+      sessions.delete(ref); return { ok: true };
+    });
     const source = path.join(__dirname, 'fixtures/workbench-annotations.html'), scripts = [];
     const html = fs.readFileSync(source, 'utf8').replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (_, attrs, body) => {
       const src = attrs.match(/src=["']([^"']+)/); scripts.push(src ? fs.readFileSync(path.resolve(path.dirname(source), src[1]), 'utf8') : body); return '';
     });
-    const fixture = path.join(out, 'native-chat.html');
-    fs.writeFileSync(fixture, html.replace('<meta charset="utf-8">', '<meta charset="utf-8"><base href="' + pathToFileURL(path.dirname(source) + path.sep).href + '">'));
-    win = new BrowserWindow({ show: false, width: 1280, height: 860, webPreferences: { preload: path.join(client, 'preload.js'), contextIsolation: true, nodeIntegration: false, offscreen: true, backgroundThrottling: false } });
+    scripts.unshift(...['chat-plugin-mention-model', 'chat-plugin-mention'].map(file =>
+      fs.readFileSync(path.join(client, 'components/panels', file + '.js'), 'utf8')));
+    const page = html.replace('<meta charset="utf-8">', '<meta charset="utf-8"><base href="' + pathToFileURL(path.dirname(source) + path.sep).href + '">');
+    win = new BrowserWindow({ show: false, width: 1280, height: 860, webPreferences: { preload: path.join(client, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
     win.webContents.on('console-message', event => { if (event.level === 'error') report.console = [...(report.console || []), event.message]; });
+    const origin = pathToFileURL(path.join(client, 'desk.html')).href;
+    await win.webContents.session.protocol.handle('file', request => request.url === origin
+      ? new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+      : electron.net.fetch(request.url, { bypassCustomProtocolHandlers: true }));
     const destroyedListeners = win.webContents.listenerCount('destroyed');
     for (const spec of catalog.runtimes()) {
       mode = 'mixed';
       makeFiles(path.join(root, 'work-' + spec.id), spec.id);
       let firstId;
       for (let attempt = 0; attempt < 2; attempt++) {
-        await win.loadFile(fixture);
+        await win.loadURL(origin);
         for (const file of JSON.parse(fs.readFileSync(path.join(client, 'core/locales/manifest.json')))) await js(fs.readFileSync(path.join(client, 'core/locales', file), 'utf8'));
         for (const file of ['core/i18n-dom.js', 'core/i18n.js']) await js(fs.readFileSync(path.join(client, file), 'utf8') + '\nvoid 0;');
         for (const script of scripts) await js(script + '\nvoid 0;');
@@ -155,10 +194,97 @@ if (typeof electron === 'string') {
       await js('NativeChat.reset();void 0;');
       report.cases.push(spec.id + ': nested Markdown auto-opens; filename is marked clickable; actual mouse closes and reopens the right preview');
     }
+    await js(fs.readFileSync(path.join(client, 'components/panels/chat-deliveries.js'), 'utf8'));
+    win.showInactive();
+    await js('SoduWorkI18n.setLocale("zh-CN");void 0;');
+    async function website(heading) {
+      let visibleWebsite;
+      const check = async () => {
+        const slot = await js(`(() => {
+          const rect = document.querySelector('[data-wb-native]')?.getBoundingClientRect();
+          if (!rect || rect.x < innerWidth / 3 || rect.width < 240 || rect.height < 200 ||
+              rect.right > innerWidth + 1 || rect.bottom > innerHeight + 1) return null;
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+        })()`);
+        if (!slot) return false;
+        for (const view of win.contentView.children) {
+          if (!view.getVisible() || !view.webContents || view.webContents.isDestroyed()) continue;
+          const bounds = view.getBounds();
+          if (Object.keys(slot).some(key => Math.abs(slot[key] - bounds[key]) > 2)) continue;
+          if (await view.webContents.executeJavaScript('document.querySelector("h1")?.textContent') === heading) {
+            visibleWebsite = view; return true;
+          }
+        }
+        return false;
+      };
+      try { await until(check); }
+      catch {
+        const headings = await Promise.all(win.contentView.children.filter(view => view.getVisible() && !view.webContents.isDestroyed())
+          .map(view => view.webContents.executeJavaScript('document.body?.innerText.slice(0, 200)')));
+        const panel = await js('({open:ChatWorkbench.state().open, text:document.querySelector("[data-wb-native]")?.innerText, notices:window.notices.slice(-2)})');
+        throw Error('Expected visible website ' + heading + ', observed ' + JSON.stringify({ headings, panel }));
+      }
+      assert.equal(await js('ChatWorkbench.state().open'), true);
+      return visibleWebsite;
+    }
+    const reset = async () => {
+      await js('NativeChat.reset();void 0;');
+      await until(() => win.contentView.children.length === 0);
+    };
+    const enter = id => js('NativeChat.enter("",' + JSON.stringify(id) + ',{adapterId:"pi"});void 0');
+    for (let visit = 0; visit < 2; visit++) {
+      await enter(legacyId);
+      const link = visit ? 'document.querySelector(".ndelivery [data-open-app]")'
+        : 'Array.from(document.querySelectorAll(".nmsg.ai [data-open-app]")).find(e => e.textContent === "index.html")';
+      await until(() => js('Boolean(' + link + ')'));
+      await click('document.querySelector("#nchatMode")');
+      await until(() => js(`!document.querySelector('#nchatAccessPop').hidden &&
+        document.querySelector('[data-access-mode="full"]').matches('[aria-pressed="true"]:enabled')`));
+      await click('document.querySelector("#nchatMode")');
+      await click(link);
+      const visibleWebsite = await website(legacyHistory.oldHeading);
+      if (visit) {
+        const pixels = await visibleWebsite.webContents.capturePage();
+        assert.ok(!pixels.isEmpty());
+        fs.writeFileSync(path.join(out, 'legacy-pi-website-preview.png'), pixels.toPNG());
+      }
+      await reset();
+    }
+    report.cases.push('Pi 1.13.19 archive: full permission remains selected and available; click the historical HTML filename, reopen the chat, click its delivery card and verify the original heading in the right WebContentsView');
+    for (const scenario of ['empty', 'collision', 'retired']) {
+      continuation = scenario;
+      await enter(scenario === 'retired' ? legacyHistory.retiredId : legacyId);
+      async function checkResult(heading, selector) {
+        const reply = 'Array.from(document.querySelectorAll(".nmsg.ai")).find(e => e.querySelector(".ntext")?.textContent.includes(' +
+          JSON.stringify(heading) + '))';
+        const target = '(' + reply + ')?.querySelector(' + JSON.stringify(selector) + ')';
+        try { await until(() => js('Boolean(' + target + ')')); }
+        catch { throw Error(scenario + ': ' + heading + ' missing ' + selector); }
+        if (await js('ChatWorkbench.state().open')) {
+          await click('document.querySelector("[data-wb-close]")');
+          await until(() => !win.contentView.children.some(view => view.getVisible()));
+        }
+        await click(target);
+        return website(heading);
+      }
+      const oldPage = await checkResult(legacyHistory.oldHeading, '.ndelivery [data-open-app]');
+      if (scenario === 'collision') {
+        const image = await oldPage.webContents.capturePage();
+        assert.ok(!image.isEmpty());
+        fs.writeFileSync(path.join(out, 'continued-pi-website-preview.png'), image.toPNG());
+      }
+      await checkResult(legacyHistory.oldHeading, '.ntext [data-open-app]');
+      await reset();
+      report.cases.push({
+        empty: 'Pi continuation in an empty workspace: original card and filename open the original website',
+        collision: 'Pi continuation with a different same-named file: original card and filename open the original website',
+        retired: 'Upgraded multi-segment Pi history: retired turn card and filename open the original website',
+      }[scenario]);
+    }
     report.ok = true;
   }).catch(error => { report.error = error.stack || String(error); })
     .finally(async () => {
-      for (const session of live) await session.dispose(); artifacts.closeAll();
+      for (const session of live) await session.dispose(); artifacts.closeAll(); await legacyHistory?.close();
       win?.destroy(); fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report));
       try { fs.rmSync(root, { recursive: true, force: true }); } catch (_) {}
       app.exit(report.ok ? 0 : 1);

@@ -67,7 +67,7 @@
       global.WorkComposer.permissionAppearance(button, { selectedMode: mode, currentMode: state.accessPolicy?.mode, pending: !!state.nextAccessPolicy });
       const immediate = state.accessControl?.changeTakesEffect === 'current-turn';
       pendingMark.innerHTML = text(immediate ? '切换中' : '下一轮');
-      pop.querySelector('.nchat-access-note').innerHTML = text(state.draftOnly ? '首次发送时使用所选权限。' : immediate
+      pop.querySelector('.nchat-access-note').innerHTML = text(state.draftOnly && !state.devicePreview ? '首次发送时使用所选权限。' : !state.devicePreview && immediate
         ? '本轮完成后按新权限继续。'
         : '新权限将在下一轮生效。');
       pendingMark.hidden = !state.nextAccessPolicy;

@@ -47,6 +47,11 @@ test('Qwen offers its full-frame JPEG as a turn-scoped preview even without a wo
   const f = await fixture(t), h = await f.collect(), v = h.archive.versions[0];
   assert.equal(v.metadata.previewOf, f.relative); assert.equal(v.metadata.name, 'p.jpg');
   assert.deepEqual(h.items, []); assert.deepEqual(versions.list(h.archive), []);
+  const [turn] = await versions.readers(f.profile, f.row.id, h.archive, () => {});
+  const [preview] = (await turn.reader.snapshotAsync()).items;
+  assert.equal(preview.versionId, v.versionId);
+  assert.equal(preview.versionHash, crypto.createHash('sha256').update(f.image).digest('hex'));
+  assert.deepEqual(turn.reader.packageFiles(), []);
   fs.unlinkSync(f.nativeFile);
   assert.equal(await f.collect(h), h);
   const handle = { historyArtifacts: archive.archivedView(f.profile, f.row.id, f.row.cwd, h, () => {}, async () => {}) };

@@ -19,6 +19,10 @@ test('overlapping desktop chats retain separate turn originals, exported copies 
   await Promise.all([fs.mkdir(cwd), fs.mkdir(profile)]);
   const app = { getPath: () => profile };
   const account = identity(), rows = new Map();
+  const bridge = require('../main/agent-runtime/pi-session-bridge').createPiSessionBridge({
+    sessionModule: require('../main/agent-runtime/process-session'), runnerAdapters: [] });
+  const handoff = require('../main/conversation/cloud-handoff').create({ app, identityOf: () => account });
+  const workbench = require('../main/conversation/cloud-output-cache');
   const session = { historyEntry: async () => ({ ok: false, notFound: true }),
     archivedConversation: async (_app, id) => rows.get(id) };
   const openHistory = () => createHistory({ app, session, identityOf: () => account });
@@ -31,8 +35,9 @@ test('overlapping desktop chats retain separate turn originals, exported copies 
     const messages = [];
     const handle = { ref: 'ref-' + id, sessionId: id, cwd, deliveryWorkspace, snapshot: () => ({ messages, tools: [] }),
       historyRow: () => ({ ...row, count: messages.length }) };
-    history.observe(handle, account);
-    return { handle, messages, draft: workspaces.ensure(cwd, deliveryWorkspace) };
+    const facade = bridge.attachView(handle);
+    history.observe(facade, account);
+    return { handle: facade, messages, draft: workspaces.ensure(cwd, deliveryWorkspace) };
   }
   const a = chat('one'), b = chat('two');
   async function finish(c, before, turnId, text) {
@@ -57,6 +62,11 @@ test('overlapping desktop chats retain separate turn originals, exported copies 
     const copies = await Promise.all(directories.map(dir => fs.readFile(path.join(parent, dir, 'report.md'), 'utf8')));
     assert.deepEqual(copies.sort(), expected);
   }
+  // Live capture binds on the registered facade, while preparing the package
+  // consults the native handle. Both must reach the same verified turn.
+  const native = await handoff.artifactSession(a.handle);
+  const live = (await runtime.viewSnapshotAsync(a.handle)).items.find(item => item.turnId === 'a-first');
+  assert.equal((await packages.prepare(native, [live.artifactId])).bytes.toString(), 'A1');
   await history.close();
   await fs.rm(cwd, { recursive: true });
   history = openHistory();
@@ -67,12 +77,20 @@ test('overlapping desktop chats retain separate turn originals, exported copies 
     const entries = versions.list(body.localArtifactHistory.archive);
     const files = entries.filter(file => file.relative === 'report.md');
     assert.deepEqual(files.map(file => file.relative), outputs.map(() => 'report.md'));
-    const view = await history.open(id, { historyPreview: true });
+    const reader = await history.open(id, { historyPreview: true });
+    const view = bridge.attachView(reader, { historyPreview: true });
+    // The artifact IPC indexes the native source. The right workbench looks up
+    // the registered facade by ref, even when the writable chat is still open.
+    const listed = await runtime.viewSnapshotAsync(await handoff.artifactSession(bridge.get(view.ref)));
+    const canvas = await workbench.project(bridge.get(view.ref));
+    assert.notEqual(canvas, reader);
     for (const [index, expected] of outputs.entries()) {
       const artifactId = 'version:' + files[index].versionId;
-      const result = await runtime.resolveView(view, artifactId);
+      assert.ok(listed.items.some(item => item.artifactId === artifactId));
+      const result = await runtime.resolveView(canvas, artifactId);
       assert.equal(result.ok, true, result.reason);
       assert.equal(await fs.readFile(result.path, 'utf8'), expected);
+      assert.equal((await runtime.resolveView(Object.create(canvas), artifactId)).ok, false);
       const saved = await packages.prepare(view, [artifactId]);
       assert.equal(saved.bytes.toString(), expected);
     }
@@ -85,7 +103,10 @@ test('overlapping desktop chats retain separate turn originals, exported copies 
     }
     assert.ok(entries.every(file => file.relative === 'report.md' || file.relative === '.soduwork/evidence/result.png'));
     await view.close();
+    assert.equal(bridge.get(view.ref), null);
+    assert.equal((await runtime.resolveView(canvas, 'version:' + files[0].versionId)).ok, false);
   }
+  await bridge.dispose();
 });
 
 test('a text-only handoff can capture a new local artifact after target ownership is established', async t => {

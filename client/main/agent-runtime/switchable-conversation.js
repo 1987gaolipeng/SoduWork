@@ -110,7 +110,9 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
   function snapshot(value) {
     const s = nativeSource.snapshot(value || raw.snapshot(), raw.adapterId);
     if (!record) return { ...s, runtimeSwitching: switching };
-    return { ...s, runtimeSwitching: switching, ...(record.historyRecovery ? { historyRecovery: record.historyRecovery } : {}),
+    return { ...s, runtimeSwitching: switching, ...(record.historyRecovery ? {
+      historyRecovery: { ...record.historyRecovery, prefixMessageCount: prefix.messages.length },
+    } : {}),
       usageReceipts: [...(prefix.usageReceipts || []), ...(s.usageReceipts || [])],
       turnMetrics: [...(prefix.turnMetrics || []), ...(s.turnMetrics || []).map(metric => ({ ...metric,
         fromMessage: metric.fromMessage + prefix.messages.length, toMessage: metric.toMessage + prefix.messages.length }))],
@@ -292,6 +294,21 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
     const end = windowed.requestedEnd(value);
     return { ...windowed.limits(value), ...(end === null ? {} : { messageEnd: Math.max(0, end - prefix.messages.length) }) };
   }
+  function recoveryPage(page) {
+    if (!record.historyRecovery) return page;
+    const prefixMessageCount = prefix.messages.length;
+    const first = page.history.messageIndices[0];
+    // A page can begin at an old reply whose user message is on the preceding
+    // page. Use its original turn when resolving archived delivery links.
+    if (first < prefixMessageCount && page.messages[0]?.role === 'assistant') {
+      for (let i = first - 1; i >= 0; i--) {
+        if (prefix.messages[i]?.role !== 'user') continue;
+        page.history.leadingUserMessageIndex = i;
+        break;
+      }
+    }
+    return { ...page, historyRecovery: { ...record.historyRecovery, prefixMessageCount } };
+  }
   function combinedArchivePage(value, nativePage) {
     const page = nativeSource.snapshot(nativePage, raw.adapterId), nativeHistory = page.history;
     const { messageLimit, toolLimit } = windowed.limits(value), offset = prefix.messages.length;
@@ -310,13 +327,13 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
     const indices = [...(earlier?.history.messageIndices || []), ...nativeHistory.messageIndices.map(index => offset + index)];
     const start = earlier?.history.messageStart ?? Math.min(end, offset + nativeHistory.messageStart);
     const totalTools = prefix.tools.length + nativeHistory.totalTools;
-    return { ...page, runtimeSwitching: switching, ...(record.historyRecovery ? { historyRecovery: record.historyRecovery } : {}),
+    return recoveryPage({ ...page, runtimeSwitching: switching,
       messages, tools, turnMetrics: [...(earlier?.turnMetrics || []), ...(page.turnMetrics || []).map(turn => ({
         ...turn, fromMessage: offset + turn.fromMessage, toMessage: offset + turn.toMessage }))],
       toolPreparations: (page.toolPreparations || []).map(row => ({ ...row, after: leading + row.after })),
       history: { ...nativeHistory, ...(end < offset ? { nextIsUser: prefix.messages[end]?.role === 'user' } : {}),
         messageLimit, messageStart: start, messageEnd: end, messageIndices: indices, totalMessages: total, totalTools,
-        loadedMessages: messages.length, loadedTools: tools.length, truncated: start > 0 || end < total || tools.length < totalTools } };
+        loadedMessages: messages.length, loadedTools: tools.length, truncated: start > 0 || end < total || tools.length < totalTools } });
   }
   const own = {
     selectAgent: beginSwitch, snapshot,
@@ -331,7 +348,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       if (!record) return { ...nativeSource.snapshot(raw.uiSnapshot?.(value) || windowed.limitSnapshot(snapshot(), value), raw.adapterId), runtimeSwitching: switching };
       const state = raw.snapshot();
       if (raw.adapterId === 'pi' && state.archiveWindow && raw.uiSnapshot) return combinedArchivePage(value, raw.uiSnapshot(segmentWindow(value)));
-      return windowed.limitSnapshot(snapshot(state), value);
+      return recoveryPage(windowed.limitSnapshot(snapshot(state), value));
     },
     async readHistoryPage(value) {
       if (!raw.readHistoryPage || (record && (raw.adapterId !== 'pi' || !raw.snapshot().archiveWindow))) return own.uiSnapshot(value);

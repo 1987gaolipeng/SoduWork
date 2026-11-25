@@ -128,7 +128,8 @@ async function prepare(session, ids, options = {}) {
   const frozenFiles = options.frozen && require('./frozen-file-index.cjs').index(options.frozen.files);
   // Evidence images have a reserved storage directory. Only the individually
   // selected, receipt-backed image may be exported under a public filename.
-  const frozenName = options.frozen?.item.relative;
+  const frozenItems = options.frozen?.items;
+  const frozenName = frozenItems?.length === 1 ? frozenItems[0].relative : undefined;
   const evidenceImage = /^\.soduwork\/evidence\/([^/.][^/]*\.(?:png|jpe?g|gif|webp))$/i.exec(frozenName || '');
   const selectedName = evidenceImage ? evidenceImage[1] : frozenName;
   const statManifest = () => frozenFiles ? null : fs.stat(manifestPath).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
@@ -209,7 +210,7 @@ async function prepare(session, ids, options = {}) {
     }
   }
   const selected = frozenFiles
-    ? [{ item: options.frozen.item, path: path.join(root, safeRelative(selectedName)) }]
+    ? frozenItems.map(item => ({ item, path: path.join(root, safeRelative(selectedName || item.relative)) }))
     : ids.map(id => {
       const found = runtime.resolveSnapshot(session, id, indexed);
       if (!found.ok) throw Error(found.reason);

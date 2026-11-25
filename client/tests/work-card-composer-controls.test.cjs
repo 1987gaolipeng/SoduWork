@@ -45,6 +45,32 @@ test('a passive ordinary chat chooses available local execution options without 
   assert.equal(f.controls.active(), false);
   assert.equal(f.controls.selectModel('local:replacement').ok, false);
 });
+test('an owner preview shows the saved permission and changes it through the authorized session', async () => {
+  const f = fixture();
+  await f.controls.runtimes();
+  f.ctx._ref = 'preview';
+  const access = { adapterId: 'pi', mode: 'full' };
+  f.ctx._snap = { adapterId: 'pi', localReplica: true, execution: { canContinueOnDevice: true, continuationAccess: access } };
+  assert.equal(f.controls.state().accessPolicy.mode, 'full');
+  assert.ok(f.controls.state().accessControl.modes.includes('full'));
+  assert.equal(await f.controls.ready(), true);
+  assert.equal(f.ctx._sessionOptions.accessMode, 'full');
+  access.mode = 'standard'; f.ctx._sessionOptions = {};
+  f.ctx._ensure = async (id, ref) => {
+    assert.equal(id, 'work-a'); assert.equal(ref, 'preview');
+    assert.equal(f.ctx._sessionOptions.accessMode, 'standard');
+    f.ctx._ref = 'native'; f.ctx._snap = { accessPolicy: { mode: 'standard', revision: 7 } };
+    return true;
+  };
+  const anchor = { left: 20 };
+  f.api.setAccessMode = async (ref, mode, revision, options) => {
+    assert.equal(ref, 'native'); assert.equal(mode, 'full'); assert.equal(revision, 7); assert.equal(options.anchor, anchor);
+    return { ok: true, snapshot: { accessPolicy: { mode: 'full', revision: 8 } } };
+  };
+  assert.ok(await f.controls.chooseAccess('full', 'pi', anchor));
+  assert.equal(f.ctx._snap.accessPolicy.revision, 8);
+  assert.equal(f.calls.length, 0, 'Existing sessions use session-bound consent');
+});
 test('仅表单会话的控件继承系统权限，无需打开执行底座', async()=>{
   const f=fixture();assert.equal(f.controls.state().draftOnly,true);await tick();
   assert.equal(f.controls.state().accessPolicy.mode,'readonly');
