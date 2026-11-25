@@ -233,9 +233,15 @@ async function preserve(profile, id, history, previous, guard, { readWorkspace =
       try { await output.writeFile(bytes); await output.sync(); stat = await output.stat({ bigint: true }); }
       finally { await output.close(); }
       if (stat.size !== BigInt(bytes.length)) throw Error('Incomplete artifact archive write');
+      // Last-write times can finalize on close. Authenticate the closed file
+      // before publishing its receipt and reject a replaced directory entry.
+      const written = stamp(stat), sha256 = hash(bytes);
+      const closed = await restoredStamp(profile, root, { relative, sha256, stamp: written }, bytes.length);
+      if (!closed || closed[0] !== written[0] || closed[1] !== written[1])
+        throw Error('Artifact archive file changed after writing');
       for (let directory = path.dirname(target); !directories.has(directory); directory = path.dirname(directory))
         directories.add(directory);
-      files.push({ relative, sha256: hash(bytes), sourceStamp: entry.stamp, stamp: stamp(stat) });
+      files.push({ relative, sha256, sourceStamp: entry.stamp, stamp: closed });
     }
     guard();
     await owned();

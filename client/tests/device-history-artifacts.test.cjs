@@ -280,7 +280,37 @@ function archiveSetup(t) {
   const save = (items, previous, guard = () => {}) => storage.preserve(f.workRoot, f.row.id,
     { root: f.cwd, items, resources: [] }, previous, guard);
   const root = history => storage.projection(f.workRoot, f.row.id, history).root;
-  return { ...f, row, save, root };
+  return { ...f, row, save, root, storage };
+}
+
+for (const change of ['final timestamp', 'replaced file', 'modified bytes']) {
+  test('archive verifies the closed writer after ' + change, async t => {
+    const f = archiveSetup(t), row = f.row('result.txt', 'original');
+    const promises = require('node:fs/promises'), open = promises.open.bind(promises);
+    t.mock.method(promises, 'open', async (file, flags, ...args) => {
+      const handle = await open(file, flags, ...args);
+      if (flags !== 'wx' || path.basename(file) !== 'result.txt') return handle;
+      const close = handle.close.bind(handle);
+      handle.close = async () => {
+        await close();
+        if (change === 'replaced file') {
+          await promises.rename(file, file + '.old');
+          await promises.writeFile(file, 'original');
+        }
+        if (change === 'modified bytes') await promises.writeFile(file, 'tampered');
+        // Windows can finalize the last-write timestamp when the writer closes.
+        await promises.utimes(file, 1000, 1000);
+      };
+      return handle;
+    });
+    if (change !== 'final timestamp') {
+      await assert.rejects(f.save([row]), /Artifact archive file changed/);
+      return;
+    }
+    const history = await f.save([row]);
+    const archived = history.archive.files[0], root = f.root(history);
+    assert.equal((await f.storage.readVersion(root, archived.relative, archived.stamp))?.toString(), 'original');
+  });
 }
 
 test('archive repairs missing and changed files from their exact workspace receipts', async t => {
