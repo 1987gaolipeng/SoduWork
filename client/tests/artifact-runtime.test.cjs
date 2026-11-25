@@ -501,8 +501,77 @@ test('two chats in one project open their own turn revisions after the working c
   assert.equal((await request(preview.url)).body, html);
   assert.equal((await request(new URL('../theme.css', preview.url))).body, 'body{color:red}');
   assert.equal((await request(new URL('/file-from-another-turn.css', preview.url))).status, 404);
+  const originalStyle = 'body{background:url(icon.png)}', originalImage = 'original image';
+  const mixedHtml = '<link rel="stylesheet" href="/ASSETS/style.css">';
+  await a.write('site-assets', { 'web/Assets/Style.CSS': originalStyle, 'web/Assets/Icon.PNG': originalImage });
+  const aliasExists = fs.existsSync(path.join(a.cwd, 'web', 'ASSETS', 'style.css'));
+  await a.write('site-entry', { 'web/index.html': mixedHtml, 'ASSETS/style.css': 'unrelated root file' });
+  const mixedCard = (await cards(a)).find(file => file.turnId === 'site-entry' && file.relative === 'web/index.html');
+  assert.ok(mixedCard);
+  await a.write('site-modified', { 'web/Assets/Style.CSS': 'new style', 'web/Assets/Icon.PNG': 'new image' });
+  fs.rmSync(a.cwd, { recursive: true });
+  fs.rmSync(project, { recursive: true, force: true });
+  await t.test('frozen preview resolves source-volume spellings after removing the project', async () => {
+    const result = await runtime.preview(a.handle, a.handle.sessionId, mixedCard.artifactId);
+    assert.equal(result.ok, true, result.reason);
+    assert.equal((await request(result.url)).body, mixedHtml);
+    const css = await request(new URL('/ASSETS/style.css', result.url));
+    const image = await request(new URL('/ASSETS/icon.png', result.url));
+    if (aliasExists) {
+      assert.equal(css.body, originalStyle);
+      assert.equal(image.body, originalImage);
+    } else {
+      assert.equal(css.status, 404);
+      assert.equal(image.status, 404);
+    }
+    assert.equal((await request(new URL('ASSETS/private.png', result.url))).status, 404);
+  });
+  await t.test('frozen download packages original bytes at the referenced paths after removing the project', async () => {
+    const packages = require('../main/conversation/delivery-package-worker');
+    const job = packages.prepare(a.handle, [mixedCard.artifactId]);
+    if (!aliasExists) { await assert.rejects(job, /缺少已保存的依赖/); return; }
+    const result = await job;
+    const digest = value => require('node:crypto').createHash('sha256').update(value).digest('hex');
+    assert.deepEqual(new Map(result.manifest.files.map(row => [row.path, row.sha256])),
+      new Map([['web/index.html', digest(mixedHtml)], ['web/ASSETS/style.css', digest(originalStyle)],
+        ['web/ASSETS/icon.png', digest(originalImage)]]));
+  });
   b.revoke();
   assert.equal((await request(preview.url)).status, 404);
   a.revoke();
   await assert.rejects(read(a, ids[0]), /Inactive conversation/);
+});
+
+test('legacy frozen aliases require a matching regular file receipt on the archive volume', t => {
+  const { index } = require('../main/conversation/frozen-file-index.cjs');
+  const { stamp } = require('../main/conversation/runtime-artifacts.cjs');
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-frozen-index-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const first = path.join(root, 'first'), second = path.join(root, 'second');
+  fs.mkdirSync(first); fs.mkdirSync(second);
+  const relative = 'Assets/Style Sheet.css', alias = relative.toUpperCase();
+  function receipt(dir, body) {
+    const file = path.join(dir, relative);
+    fs.mkdirSync(path.dirname(file));
+    fs.writeFileSync(file, body);
+    return { root: dir, relative, stamp: stamp(fs.lstatSync(file, { bigint: true })) };
+  }
+  const old = receipt(first, 'old'), other = receipt(second, 'other');
+  const insensitive = fs.existsSync(path.join(first, alias));
+  const accepted = index([old]);
+  assert.equal(accepted.get(relative), old);
+  assert.equal(accepted.get(alias), insensitive ? old : undefined);
+  fs.symlinkSync(path.join(first, 'Assets'), path.join(first, 'Linked'), 'junction');
+  assert.equal(accepted.get('Linked/Style Sheet.css'), undefined);
+  assert.equal(accepted.get('../first/' + relative), undefined);
+  // An explicit empty list is a source-volume decision, even if the archive
+  // now resides on a volume where more spellings resolve to the same file.
+  assert.equal(index([{ ...old, aliases: [] }]).get(alias), undefined);
+  assert.equal(index([old, other]).get(alias), undefined);
+  fs.linkSync(path.join(first, relative), path.join(first, 'hard.css'));
+  assert.equal(accepted.get('hard.css'), undefined);
+  fs.unlinkSync(path.join(first, 'hard.css'));
+  fs.unlinkSync(path.join(first, relative));
+  fs.writeFileSync(path.join(first, relative), 'replaced asset');
+  assert.equal(accepted.get(alias), undefined);
 });

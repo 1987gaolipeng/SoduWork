@@ -376,7 +376,13 @@ function candidate(record, rawPath) {
   let decoded = '';
   try { decoded = decodeURIComponent(String(rawPath || '/')); } catch (_) { return null; }
   if (decoded.includes('\0')) return null;
-  const clean = decoded.replace(/\\/g, '/').replace(/^\/+/, '');
+  let clean = decoded.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (record.mount && clean) {
+    if (clean.split('/').includes('..')) return null;
+    // Relative links retain the entry's full archive hierarchy. URLs starting
+    // at the site's origin use its entry directory, as in the download bundle.
+    clean = clean.startsWith(record.mount) ? clean.slice(record.mount.length) : path.posix.join(record.siteRoot, clean);
+  }
   let target = clean ? path.resolve(record.root, clean) : record.entry;
   if (!within(record.root, target, true)) return null;
   let root = record.root;
@@ -512,9 +518,10 @@ async function startResolvedPreview(found, ref, artifactId) {
   const root = found.previewRoot || fs.realpathSync(path.dirname(found.path));
   const entry = fs.realpathSync(found.path);
   const entries = found.item.versionId && found.historyArtifacts?.packageFiles?.();
-  const versionFiles = entries && new Map(entries.map(file => [file.relative, file]));
+  const versionFiles = entries && require('./frozen-file-index.cjs').index(entries);
+  const mount = versionFiles && found.item.kind === 'website' ? '.soduwork-preview-' + crypto.randomBytes(12).toString('hex') + '/' : '';
   const record = {
-    versionFiles, key, ref: String(ref || ''), artifactId: String(artifactId || ''),
+    versionFiles, mount, siteRoot: mount && path.posix.dirname(found.item.relative), key, ref: String(ref || ''), artifactId: String(artifactId || ''),
     itemAt: Number(found.item.at || 0), version, root, entry, historyArtifacts: found.historyArtifacts,
     server: null, sockets: new Set(), url: '', lastUsed: Date.now(),
   };
@@ -538,7 +545,7 @@ async function startResolvedPreview(found, ref, artifactId) {
   if (record.closed) { stopRecord(record); return { ok: false, reason: '这条会话的预览已经关闭' }; }
   const address = record.server.address();
   const name = path.relative(root, entry).split(path.sep).map(encodeURIComponent).join('/');
-  record.url = 'http://127.0.0.1:' + Number(address && address.port || 0) + '/' + name;
+  record.url = 'http://127.0.0.1:' + Number(address && address.port || 0) + '/' + mount + name;
   if (!await probe(record.url) || record.closed) {
     stopRecord(record);
     return { ok: false, reason: found.item.kind === 'video' ? '视频已经生成，但播放器暂时无法读取' : '网页成果已经生成，但启动后的健康检查没有通过' };

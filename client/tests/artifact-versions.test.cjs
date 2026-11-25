@@ -216,3 +216,36 @@ test('archive and copy names reject reserved Windows devices even on a Unix sour
   }
   assert.equal(portablePath('site/com123.md'), 'site/com123.md');
 });
+
+test('a later turn freezes differently spelled dependencies only when the source volume confirms the receipt', async t => {
+  const f = fixture(t);
+  await f.deliver('first', { 'site/Assets/Style.CSS': 'body{background:url(../images/logo.png)} i{background:url(icon.png)}', 'site/Assets/Icon.PNG': 'icon',
+    'site/Images/Logo.PNG': 'image', 'site/Traps/Icon.PNG': 'moved image', 'site/Other.PNG': 'unrelated' });
+  const insensitive = fs.existsSync(path.join(f.cwd, 'site', 'ASSETS', 'style.css'));
+  // The target inode still has its original stamp. A directory link cannot
+  // authorize a new spelling even if the referenced bytes really are there.
+  const trap = path.join(f.cwd, 'site', 'Traps'), moved = path.join(f.root, 'outside');
+  fs.renameSync(trap, moved);
+  fs.symlinkSync(moved, trap, 'junction');
+  const second = await f.deliver('second', {
+    'site/index.html': '<link rel="stylesheet" href="/ASSETS/style.css"><link rel="stylesheet" href="/aSsEtS/style.css"><img src="traps/ICON.png">', });
+  const published = await versions.exportTurn({ ...f, archive: second, turnId: 'second' });
+  const names = published.map(row => row.relative.split(path.sep).slice(3).join('/')).sort();
+  assert.deepEqual(names, (insensitive ? ['site/Assets/Icon.PNG', 'site/Assets/Style.CSS', 'site/Images/Logo.PNG', 'site/index.html'] : ['site/index.html']).sort());
+  fs.rmSync(f.cwd, { recursive: true });
+  const backup = path.join(f.root, 'restored-alias-proof');
+  fs.cpSync(f.profile, backup, { recursive: true });
+  const [, { reader }] = await versions.readers(backup, f.id, JSON.parse(JSON.stringify(second)), f.guard);
+  const receipts = reader.packageFiles();
+  assert.deepEqual(receipts.map(row => row.relative).sort(), names);
+  assert.deepEqual(receipts.find(row => row.relative === 'site/index.html').aliases, []);
+  const old = JSON.parse(JSON.stringify(second));
+  for (const row of old.versions) delete row.aliases;
+  const legacy = await versions.readers(backup, f.id, old, f.guard);
+  assert.equal(legacy[1].reader.packageFiles()[0].aliases, undefined);
+  if (insensitive) {
+    assert.deepEqual(receipts.find(row => row.relative === 'site/Assets/Style.CSS').aliases.sort(), ['site/ASSETS/style.css', 'site/aSsEtS/style.css']);
+    assert.deepEqual(receipts.find(row => row.relative === 'site/Assets/Icon.PNG').aliases.sort(), ['site/ASSETS/icon.png', 'site/aSsEtS/icon.png']);
+    assert.deepEqual(receipts.find(row => row.relative === 'site/Images/Logo.PNG').aliases, ['site/images/logo.png']);
+  }
+});

@@ -125,13 +125,12 @@ async function prepare(session, ids, options = {}) {
   if (!options.frozen && !options.completedTurn && (session.inFlight?.() || ['running', 'streaming', 'queued'].includes(state?.status))) throw Error('文件仍在生成，请等本轮完成后下载');
   const root = await fs.realpath(require('./delivery-workspace.cjs').root(session.cwd, session.deliveryWorkspace)), entries = new Map(), caseNames = new Set();
   const manifestPath = path.join(root, '.soduwork/delivery.json');
-  const frozenFiles = options.frozen && new Map(options.frozen.files.map(file => [file.relative, file]));
+  const frozenFiles = options.frozen && require('./frozen-file-index.cjs').index(options.frozen.files);
   // Evidence images have a reserved storage directory. Only the individually
   // selected, receipt-backed image may be exported under a public filename.
   const frozenName = options.frozen?.item.relative;
   const evidenceImage = /^\.soduwork\/evidence\/([^/.][^/]*\.(?:png|jpe?g|gif|webp))$/i.exec(frozenName || '');
   const selectedName = evidenceImage ? evidenceImage[1] : frozenName;
-  if (evidenceImage && frozenFiles.has(frozenName)) frozenFiles.set(selectedName, frozenFiles.get(frozenName));
   const statManifest = () => frozenFiles ? null : fs.stat(manifestPath).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
   const manifestBefore = await statManifest();
   const declared = frozenFiles ? null : contract.readManifest(root);
@@ -153,7 +152,9 @@ async function prepare(session, ids, options = {}) {
     if (entries.has(name)) { if (role === 'primary') entries.get(name).role = role; return; }
     if (caseNames.has(lower)) throw Error('成果中有大小写或 Unicode 冲突的文件名，请先重命名');
     if (entries.size >= MAX_FILES) throw Error('一份交付最多包含 500 个文件，请精简交付目录');
-    const receipt = frozenFiles?.get(name);
+    const selectedEvidence = evidenceImage && name === selectedName;
+    const receipt = frozenFiles?.get(selectedEvidence ? frozenName : name);
+    if (receipt && !selectedEvidence) safeRelative(receipt.relative);
     if (frozenFiles && !receipt) throw Error('该轮成果缺少已保存的依赖：' + name);
     const fileRoot = receipt?.root || root;
     const filename = path.resolve(fileRoot, receipt?.relative || name), real = await fs.realpath(filename).catch(error => {

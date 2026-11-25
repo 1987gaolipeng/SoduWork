@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { assertNoLinks } = require('../plugin-resources');
-const { portablePath } = require('./portable-workspace');
+const { portablePath, MAX_FILES } = require('./portable-workspace');
 const { same, stamp } = require('./runtime-artifacts.cjs');
 const storage = () => require('./device-artifact-archive.cjs');
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -39,49 +39,105 @@ function dependencies(name, bytes) {
   return [...result];
 }
 
+// Filesystem case and Unicode rules depend on the source volume. A spelling
+// from a document can select an existing receipt only if the source filesystem
+// resolves it to that exact regular file without links in either path.
+function dependencyLookup(root, byName) {
+  const byStamp = new Map();
+  for (const row of byName.values()) {
+    const key = row.stamp.join(':');
+    if (!byStamp.has(key)) byStamp.set(key, []);
+    byStamp.get(key).push(row);
+  }
+  const resolved = new Map(byName);
+  return relative => {
+    if (resolved.has(relative)) return resolved.get(relative);
+    resolved.set(relative, undefined);
+    try {
+      const requested = path.join(root, portablePath(relative));
+      assertNoLinks(root, requested);
+      const stat = fs.lstatSync(requested, { bigint: true });
+      if (!stat.isFile() || stat.nlink !== 1n) return undefined;
+      for (const row of byStamp.get(stamp(stat).join(':')) || []) {
+        const original = path.join(root, portablePath(row.metadata.relative));
+        assertNoLinks(root, original);
+        const recorded = fs.lstatSync(original, { bigint: true });
+        if (!recorded.isFile() || recorded.nlink !== 1n || !same(stamp(recorded), row.stamp)) continue;
+        if (stat.ino === 0n && fs.realpathSync.native(requested) !== fs.realpathSync.native(original)) continue;
+        resolved.set(relative, row);
+        return row;
+      }
+    } catch (_) { /* A missing or changed source cannot authorize a new spelling. */ }
+    return undefined;
+  };
+}
+
 // The archive receipt, not a filename supplied by the model, identifies the bytes.
 // Keep each completed turn's first committed version when a later capture retries.
 function record(archive, prior, history) {
   const versions = [...(prior?.versions || [])];
-  const seen = new Set(versions.map(row => JSON.stringify([row.turnId, row.relative])));
+  const turnPath = (turnId, relative) => JSON.stringify([turnId, relative]);
+  const indices = new Map(versions.map((row, index) => [turnPath(row.turnId, row.relative), index]));
+  const aliasOwners = new Map(), aliasCounts = new Map();
+  for (const row of versions) {
+    for (const alias of row.aliases || []) aliasOwners.set(turnPath(row.turnId, alias), row.relative);
+    aliasCounts.set(row.turnId, (aliasCounts.get(row.turnId) || 0) + (row.aliases?.length || 0));
+  }
+  let aliasesChanged = false;
   const committed = new Map(archive.files.map(file => [file.relative, file]));
   const newDeliveries = [];
   const byName = new Map([...(history.items || []), ...(history.resources || [])]
-    .filter(row => row.source?.turnId && !row.archiveOnly).map(row => [row.metadata.relative, row]));
+    .filter(row => row.source?.turnId && !row.archiveOnly &&
+      same(row.stamp, committed.get(row.metadata.relative)?.sourceStamp)).map(row => [row.metadata.relative, row]));
   function add(rows, resource, owner) {
     for (const row of rows || []) {
       const source = owner || row.source, turnId = source?.turnId, relative = row.metadata.relative;
       if (!turnId || row.archiveOnly) continue;
-      const file = committed.get(relative), key = JSON.stringify([turnId, relative]);
-      if (!file || seen.has(key) || !same(file.sourceStamp, row.stamp)) continue;
-      seen.add(key);
+      const file = committed.get(relative), key = turnPath(turnId, relative);
+      if (!file || indices.has(key) || !same(file.sourceStamp, row.stamp)) continue;
+      indices.set(key, versions.length);
       if (!resource) newDeliveries.push({ relative, source });
       versions.push({ turnId, relative, versionId: versionId(turnId, relative, file.sha256),
         generation: archive.generation, sha256: file.sha256, stamp: file.stamp,
-        metadata: row.metadata, source, resource });
+        metadata: row.metadata, source, resource, aliases: [] });
     }
   }
   add(history.items, false);
   add(history.resources, true);
   // A changed website can still depend on previously committed assets. Use only
   // this session's verified resources and freeze them beside its new entry.
+  const lookup = newDeliveries.length && dependencyLookup(history.root, byName);
   for (const { relative, source } of newDeliveries) {
-    const webRoot = path.posix.dirname(relative), pending = [relative], visited = new Set();
+    const webRoot = path.posix.dirname(relative), pending = [{ canonical: relative, requested: relative }];
+    const queued = new Set([relative]);
     while (pending.length) {
-      const name = pending.pop();
-      if (visited.has(name)) continue;
-      visited.add(name);
-      for (const ref of committed.get(name)?.dependencies || []) {
-        const target = ref.startsWith('/') ? path.posix.join(webRoot, ref.slice(1)) : path.posix.join(path.posix.dirname(name), ref);
-        const row = byName.get(target);
-        if (!row) continue;
+      const node = pending.pop();
+      for (const ref of committed.get(node.canonical)?.dependencies || []) {
+        // Browsers resolve nested URLs relative to the requested spelling.
+        const target = ref.startsWith('/') ? path.posix.join(webRoot, ref.slice(1)) : path.posix.join(path.posix.dirname(node.requested), ref);
+        const row = lookup(target);
+        if (!row || row.source.sessionId !== source.sessionId) continue;
         add([row], true, source);
-        if (!visited.has(target)) pending.push(target);
+        const canonical = row.metadata.relative, turnId = source.turnId;
+        const alias = turnPath(turnId, target);
+        if (target !== canonical && !indices.has(alias) && !aliasOwners.has(alias)) {
+          const index = indices.get(turnPath(turnId, canonical)), version = versions[index];
+          const count = aliasCounts.get(turnId) || 0;
+          if (!version || version.sha256 !== committed.get(canonical)?.sha256 || count >= MAX_FILES) continue;
+          versions[index] = { ...version, aliases: [...(version.aliases || []), target] };
+          aliasOwners.set(alias, canonical);
+          aliasCounts.set(turnId, count + 1);
+          aliasesChanged = true;
+        }
+        if (!queued.has(target) && queued.size < MAX_FILES) {
+          queued.add(target);
+          pending.push({ canonical, requested: target });
+        }
       }
     }
   }
   if (versions.length) archive.versions = versions;
-  return versions.length !== (prior?.versions?.length || 0);
+  return aliasesChanged || versions.length !== (prior?.versions?.length || 0);
 }
 
 function list(archive) {
@@ -151,7 +207,8 @@ async function readers(profile, id, archive, guard, authorize = guard) {
     turn.groups.set(root, group);
     group[version.resource ? 'resources' : 'items'].push({ metadata: version.metadata, source: version.source, stamp: checked.stamp });
     group.ids.set(path.resolve(root, version.relative), version.versionId);
-    group.proofs.push({ relative: version.relative, root, sha256: version.sha256, stamp: checked.stamp });
+    group.proofs.push({ relative: version.relative, aliases: version.aliases,
+      root, sha256: version.sha256, stamp: checked.stamp });
   }
   await authorize();
   return [...byTurn].map(([turnId, turn]) => {
