@@ -37,7 +37,8 @@ def _secret_path(value, path="") -> str:
 async def save_binding(session: AsyncSession, plugin: am.Plugin, body: dict,
                        binding: am.PluginBinding | None = None, *,
                        commit: bool = True, flush: bool = True,
-                       verify_readiness: bool = True, readiness_check=None) -> am.PluginBinding:
+                       verify_readiness: bool = True, readiness_check=None,
+                       managed_org_id: str | None = None) -> am.PluginBinding:
     version_id = str(body.get("versionId") or (binding.version_id if binding else ""))
     version = await session.get(am.PluginVersion, version_id)
     if version is None or version.plugin_id != plugin.id:
@@ -85,31 +86,21 @@ async def save_binding(session: AsyncSession, plugin: am.Plugin, body: dict,
     project_id = str(project_raw or "")
     project = None
     if project_id:
-        from .. import models
-        project = await session.get(models.Project, project_id)
+        project = await session.get(models.Project, project_id,
+                                    with_for_update={"read": True} if managed_org_id is not None else None)
         if project is None:
             raise ValueError("绑定的项目不存在")
-    # Built-in plugins are global, but bindings to enterprise projects must belong to the project's organization.
-    # Otherwise ordinary organization projects cannot use those built-ins.
-    # Historical project bindings were created before org ownership became mandatory and therefore
-    # carry NULL.  On the first legitimate update, derive ownership from the bound project instead
-    # of either blocking the upgrade forever or trusting a caller-supplied cross-tenant org id.
-    requested_org = body.get("orgId") or plugin.org_id
-    same_persisted_project = (
-        binding is not None
-        and str(binding.project_id or "") == project_id
-    )
-    if same_persisted_project and project is not None and project.org_id is not None:
-        if body.get("orgId") is not None and body.get("orgId") != project.org_id:
-            raise ValueError("插件绑定不能迁移到其他组织")
-        # Repair historical NULL or stale organization data from the binding's persisted project.
-        binding_org = project.org_id
-    elif binding is not None and binding.org_id is not None:
+    # Scoped edits keep the owner established from the original binding and project,
+    # including when the request detaches the project or selects a different one.
+    binding_org = managed_org_id
+    if binding_org is None and binding is not None:
         binding_org = binding.org_id
-        if body.get("orgId") is not None and body.get("orgId") != binding_org:
-            raise ValueError("插件绑定不能迁移到其他组织")
-    else:
-        binding_org = requested_org
+        if (project is not None and project.id == binding.project_id and project.org_id is not None):
+            binding_org = project.org_id
+    if binding_org is None:
+        binding_org = body.get("orgId") or plugin.org_id
+    elif body.get("orgId") is not None and body["orgId"] != binding_org:
+        raise ValueError("插件绑定不能迁移到其他组织")
     if project is not None and project.org_id is not None and binding_org is None:
         raise ValueError("绑定企业项目时必须明确组织归属")
     if plugin.org_id is not None and plugin.org_id != binding_org:

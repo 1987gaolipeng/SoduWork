@@ -8,13 +8,13 @@ import json
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
 from ..db import get_session
 from ..deps import has_perm, require_any_perm, require_perm
-from ..models import Task, User
+from ..models import Project, Task, User
 from ..services import (
     audit,
     plugin_audience,
@@ -715,6 +715,21 @@ async def create_binding(
             "readiness": await _binding_readiness(session, row)}
 
 
+async def _scoped_binding_owner(session: AsyncSession, binding: am.PluginBinding,
+                                scope: set[str] | None) -> str | None:
+    if scope is None:
+        return None
+    owner = binding.org_id
+    if binding.project_id:
+        project = await session.get(Project, binding.project_id, with_for_update={"read": True})
+        if project is not None and project.org_id is not None:
+            owner = project.org_id
+    # Stale rows can name two organizations. Both must be in scope before repairing them.
+    if owner not in scope or (binding.org_id is not None and binding.org_id not in scope):
+        raise HTTPException(status_code=403, detail="这个绑定不在你的组织范围内")
+    return owner
+
+
 @router.patch("/bindings/{binding_id}")
 async def update_binding(
     binding_id: str,
@@ -722,17 +737,19 @@ async def update_binding(
     user: User = Depends(require_perm("plugin.manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    binding = await session.get(am.PluginBinding, binding_id)
+    if session.get_bind().dialect.name == "sqlite":
+        # SQLite ignores FOR UPDATE. Reserve the writer before reading ownership.
+        await session.execute(update(am.PluginBinding).where(False).values(org_id=am.PluginBinding.org_id))
+    binding = await session.get(am.PluginBinding, binding_id, with_for_update=True)
     if binding is None:
         raise HTTPException(status_code=404, detail="插件绑定不存在")
     plugin = await _plugin(session, user, binding.plugin_id)
     scope = await _scope(session, user)
-    if scope is not None and (binding.org_id is None or binding.org_id not in scope):
-        raise HTTPException(status_code=403, detail="这个绑定不在你的组织范围内")
+    owner = await _scoped_binding_owner(session, binding, scope)
     before = {"enabled": binding.enabled, "versionId": binding.version_id,
               "projectId": binding.project_id}
     try:
-        row = await plugin_service.save_binding(session, plugin, body, binding)
+        row = await plugin_service.save_binding(session, plugin, body, binding, managed_org_id=owner)
     except ValueError as e:
         raise _conflict(e) from e
     await audit.log(session, user, "plugin.binding_update", "plugin_binding", row.id,
