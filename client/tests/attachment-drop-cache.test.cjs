@@ -60,9 +60,9 @@ test('starter checks large path-backed files without buffering them and keeps un
     slice(start, end) {
       reads.push(end - start);
       return { async arrayBuffer() {
-        const handle = await fs.promises.open(original, 'r');
-        try { return (await handle.read(Buffer.alloc(end - start), 0, end - start, start)).buffer; }
-        finally { await handle.close(); }
+        const descriptor = fs.openSync(original, 'r'), bytes = Buffer.alloc(end - start);
+        try { fs.readSync(descriptor, bytes, 0, bytes.length, start); return bytes; }
+        finally { fs.closeSync(descriptor); }
       } };
     },
     arrayBuffer() { throw new Error('whole file read'); } };
@@ -101,6 +101,9 @@ test('draft identity survives hydration and native cloning but never merges dist
   assert.equal(api.fileIdentity(cloned), native);
   picker.clear(); picker.addReferences([cloned]);
   assert.equal(api.fileIdentity(picker.files()[0]), native);
+  const unreadable = [];
+  const refs = await picker.refs({}, { unreadable });
+  assert.equal(refs[0].path, native.path); assert.deepEqual(unreadable, []);
 });
 
 test('a dropped directory retains its original File and path without reading file bytes', async t => {
