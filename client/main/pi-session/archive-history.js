@@ -30,10 +30,10 @@ async function mapLimit(items, visit) {
 async function readSummary(file, stat, project, wanted = '') {
   let header, firstMessage = '', name, count = 0, activity, workOwner, initialized = false, movedCwd = '';
   const bindings = [];
-  // Pi appends branches to one file. Track only the choice inherited by each
-  // entry so a model selected on an abandoned branch cannot win on reopen.
-  const branchModels = new Map();
-  let model;
+  // Pi appends branches to one file. Track the model and permissions inherited
+  // by each entry so a choice from an abandoned branch cannot win on reopen.
+  const branchChoices = new Map();
+  let choice, lastAccessPolicy, lastPendingAccessPolicy;
   const turn = require('./history-state').archiveTurn();
   const usedHarnesses = new Set();
   const input = fs.createReadStream(file, { encoding: 'utf8', ...(wanted ? { highWaterMark: 8192 } : {}) });
@@ -50,15 +50,14 @@ async function readSummary(file, stat, project, wanted = '') {
         continue;
       }
       turn.observe(entry);
-      if (Object.hasOwn(entry, 'parentId')) model = branchModels.get(entry.parentId);
+      if (Object.hasOwn(entry, 'parentId')) choice = branchChoices.get(entry.parentId);
       if (entry.type === 'custom' && entry.customType === 'soduwork.model.selection')
-        model = { ...model, choice: typeof entry.data?.name === 'string' ? entry.data.name : '' };
+        choice = { ...choice, modelName: typeof entry.data?.name === 'string' ? entry.data.name : '' };
       if (entry.type === 'model_change' && typeof entry.modelId === 'string' && entry.modelId)
-        model = { ...model, observed: entry.localOnly && !entry.modelId.startsWith('local:') ? '' : entry.modelId };
+        choice = { ...choice, observed: entry.localOnly && !entry.modelId.startsWith('local:') ? '' : entry.modelId };
       if (entry.type === 'message' && entry.message?.role === 'assistant' &&
           typeof entry.message.model === 'string' && entry.message.model && entry.message.model !== 'task-executor')
-        model = { ...model, observed: entry.message.usageLocalOnly && !entry.message.model.startsWith('local:') ? '' : entry.message.model };
-      if (entry.id && model) branchModels.set(entry.id, model);
+        choice = { ...choice, observed: entry.message.usageLocalOnly && !entry.message.model.startsWith('local:') ? '' : entry.message.model };
       if (entry.type === 'session_info') name = typeof entry.name === 'string' ? entry.name.trim() : '';
       if (entry.type === 'custom' && entry.customType === 'soduwork.work-entry' && entry.data?.version === 1 &&
           typeof entry.data.owner === 'string') workOwner = entry.data.owner;
@@ -69,7 +68,15 @@ async function readSummary(file, stat, project, wanted = '') {
         movedCwd = entry.data.cwd;
       }
       // Permission metadata indicates an initialized runtime even if no message was sent before exit.
-      if (entry.type === 'custom' && entry.customType === 'soduwork.access.policy') initialized = true;
+      if (entry.type === 'custom' && entry.customType === 'soduwork.access.policy') {
+        initialized = true; lastAccessPolicy = entry.data;
+        choice = { ...choice, accessPolicy: entry.data };
+      }
+      if (entry.type === 'custom' && entry.customType === 'soduwork.access.pending') {
+        lastPendingAccessPolicy = entry.data;
+        choice = { ...choice, pendingAccessPolicy: entry.data };
+      }
+      if (entry.id && choice) branchChoices.set(entry.id, choice);
       if (entry.type === 'custom' && entry.customType === 'soduwork.task.binding') bindings.push(entry);
       if (entry.type === 'custom' && entry.customType === 'soduwork.task.tool') harnesses.add(usedHarnesses, entry.data?.event);
       if (entry.type !== 'message') continue;
@@ -93,10 +100,12 @@ async function readSummary(file, stat, project, wanted = '') {
   if (!header) return null;
   const headerTime = Date.parse(header.timestamp);
   return project({
-    id: header.id, path: file, modelName: model?.choice || model?.observed || '',
+    id: header.id, path: file, modelName: choice?.modelName || choice?.observed || '',
     cwd: movedCwd || (typeof header.cwd === 'string' ? header.cwd : ''),
     name, firstMessage: firstMessage || '(no messages)', messageCount: count, usedHarnesses: [...usedHarnesses],
     archivedTurnState: turn.state(),
+    accessPolicy: choice?.accessPolicy, pendingAccessPolicy: choice?.pendingAccessPolicy,
+    lastAccessPolicy, lastPendingAccessPolicy,
     ...(workOwner ? { workOwner, workOnly: count === 0 && !initialized } : {}),
     createdAt: Number.isFinite(headerTime) ? headerTime : stat.birthtimeMs,
     modified: activity > 0 ? activity : Number.isFinite(headerTime) ? headerTime : stat.mtimeMs,

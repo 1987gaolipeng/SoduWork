@@ -200,8 +200,9 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
       check();
       previous = await restoreArchiveReceipts(row, previous, check);
       expected.expectedHistoryDigest = previous?.digest ?? null;
-      const workspace = data.localWorkspace;
+      const workspace = data.localWorkspace, nativeJournal = data.localJournal;
       delete data.localWorkspace;
+      delete data.localJournal;
       const priorCursors = new Map((previous?.coverage?.sources || []).filter(source => source.adapterId !== 'pi')
         .map(source => [source.id, Number(source.revision)]));
       const lostBody = !data.snapshot.messages.length && (previous?.snapshot?.messages?.length ||
@@ -225,7 +226,8 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
         // local turn can contribute only its verified on-disk change receipts.
         // The terminal callback owns collection in a managed delivery directory.
         // A passive replay must not attribute unrelated project changes to it.
-        const collected = row.deliveryWorkspaceKey ? prior : await require('./device-history-artifacts.cjs').capture({ row, previous: prior, journal,
+        const collected = row.deliveryWorkspaceKey ? prior : await require('./device-history-artifacts.cjs').capture({ row, previous: prior,
+          journal: journal || (!receivingTurn && nativeJournal),
           ...(!receivingTurn ? { workspace, workRoot: workspace ? workRoot?.() : null, retained: manifest?.artifactHistory } : {}) });
         const artifacts = archive.retain(prior, collected);
         check();
@@ -295,7 +297,12 @@ function create({ app, session, store, resolve, guard, authorize, authorizeConti
     if (preferRecorded && !shared && !verify) await readDialogue();
     // An owner's passive desktop view can paint its committed dialogue without
     // waiting for a model or a Runner RPC. Execution and peer access revalidate.
-    const localDisplay = preferRecorded && !shared && !verify && dialogue.length > 0;
+    // A v1.13.20 replica can contain a complete native body and dialogue but
+    // no Pi file receipts. Migrate it on the first open so the preview handle
+    // is bound to the recovered archive in the same visit.
+    const legacyPi = !data?.imported && !data?.historyProtection && !row.deliveryWorkspaceKey &&
+      data?.coverage?.sources?.some(source => source.id === row.id && source.adapterId === 'pi' && !source.artifactEvidenceVersion);
+    const localDisplay = preferRecorded && !shared && !verify && dialogue.length > 0 && !legacyPi;
     if (!onlyUpgrade && !localDisplay && (update || !data || !data.coverage?.complete || transcriptError)) {
       try { data = await refresh(row.id, { verify }); }
       catch (error) {

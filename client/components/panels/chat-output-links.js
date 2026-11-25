@@ -187,7 +187,7 @@
     return files.filter(file => file.versionId ? file.turnId === turn :
       !captured.has(key(file)) && (current || !recorded.has(key(file))));
   }
-  function assignDeliveryTurns(root, snapshot, files) {
+  function deliveryTurns(snapshot, files) {
     const recorded = new Map();
     for (const file of files) {
       if (file.versionId && Number.isSafeInteger(file.userMessageIndex)) {
@@ -196,13 +196,16 @@
       }
     }
     let turn = '';
-    const turns = (snapshot.messages || []).map((message, index) => {
+    return (snapshot.messages || []).map((message, index) => {
       if (message?.role === 'user') {
         const absolute = snapshot.history?.messageIndices?.[index] ?? ((snapshot.history?.messageStart || 0) + index);
         turn = message.submissionId || recorded.get(absolute) || '';
       }
       return turn;
     });
+  }
+  function assignDeliveryTurns(root, snapshot, files) {
+    const turns = deliveryTurns(snapshot, files);
     root.querySelectorAll('.nmsg.ai').forEach(message => {
       const index = /^message:(\d+)$/.exec(message.dataset.chatNode || '');
       if (index) message.dataset.deliveryTurn = turns[Number(index[1])] || '';
@@ -1046,7 +1049,7 @@
   // keyed by (ref + files) signatures so they can never leak across sessions,
   // and the WeakMap drops entries for replaced nodes on its own.
   function resetDecorateCache() { decorateMemo = null; }
-  const api={filesForTurn,fileTarget,workspaceFileTarget,mergeFileChanges,mentions,linkify,decorate,sanitize,load,taskAttachment,openTaskFile,materialize,materializeTask,shouldRefresh,
+  const api={filesForTurn,deliveryTurns,fileTarget,workspaceFileTarget,mergeFileChanges,mentions,linkify,decorate,sanitize,load,taskAttachment,openTaskFile,materialize,materializeTask,shouldRefresh,
     isImage,isVideo,readPreview,imageUrl,videoUrl,hydrateImages,hydrateVideos,
     isPluginDraft,pluginDrafts,_supersededDraftCard:supersededDraftCard,_claimInlineMedia:claimInlineMedia,
     _buildLinkIndex:buildLinkIndex,_decorateStateSignature:decorateStateSignature,resetDecorateCache};

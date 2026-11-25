@@ -157,7 +157,7 @@
     const summaryOnly = snapshot.delivery?.presentation === 'summary' || snapshot.deliveryPresentation === 'summary' ||
       snapshot.deliveryMode === 'git' || snapshot.cloudHandoff?.deliveryMode === 'git';
     if (snapshot.localReplica === true && !snapshot.cloudHandoff?.taskId) {
-      if (!summaryOnly) decorateHistoryFiles(root, files, snapshot);
+      if (!summaryOnly) decorateHistoryFiles(root, files, ref, snapshot);
       return;
     }
     const versions = files.filter(file => file.versionId);
@@ -165,7 +165,7 @@
       const active = [...root.querySelectorAll('.nmsg.ai')].filter(message =>
         message.dataset.deliveryCurrent !== 'false' && message.dataset.deliveryFinal !== 'false').at(-1);
       const activeTurn = active?.dataset.deliveryTurn;
-      decorateHistoryFiles(root, versions.filter(file => file.turnId !== activeTurn), snapshot);
+      decorateHistoryFiles(root, versions.filter(file => file.turnId !== activeTurn), ref, snapshot);
     }
     files = files.filter(file => !file.versionId);
     const cloudTaskId = String(snapshot.cloudHandoff?.taskId || '');
@@ -219,37 +219,51 @@
       }
       available.forEach(f => used.add(key(f)));
       const matchesReceipt = (message === messages[0] || snapshot.deliverySync?.currentTurn === false) && available.every(captured);
-      const id = jobKey(ref, available) + (matchesReceipt && snapshot.deliverySync?.revision ? ':' + snapshot.deliverySync.revision : '');
-      const old = groups.get(id);
-      const rounds = [...new Set(available.map(file => Number(file.round) || 0))];
-      const executionRefs = [...new Set(available.map(file => file.sourceRef || ''))];
-      const selection = old?.selection || { round: rounds.length === 1 ? rounds[0] : 0,
-        executionRef: executionRefs.length === 1 ? executionRefs[0] : '' };
-      const group = { id, ref, files: available, selection, scope: scope(), taskId, snapshot, remote: Boolean(cloudTaskId), current: message === messages[0], ...(old?.delivery ? { delivery: old.delivery } : {}) };
-      groups.set(id, group);
-      available.sort((a, b) => Number(b.primary !== false && b.role !== 'supporting') - Number(a.primary !== false && a.role !== 'supporting'));
-      const first = available[0], count = available.length, amount = totalSize(available);
-      const card = root.ownerDocument.createElement('section');
-      card.className = 'ndelivery'; card.dataset.delivery = id; card.dataset.chatNode = 'delivery:' + id;
-      card.setAttribute('aria-label', text.title);
-      card.innerHTML = '<header><span class="ndelivery-icon">' + icon(count > 1 ? { name: '成果包.zip' } : first) + '</span>' +
-        '<div class="ndelivery-heading"><small>' + text.title + '</small>' +
-        '<button type="button" ' + (count > 1 || /\.zip$/i.test(first.name || '') ? 'data-delivery-archive' : 'data-open-app="' + esc(key(first)) + '"') + ' title="' + text.preview + '"><b data-delivery-title data-user-content>' + esc(first.title || first.name || text.file) + '</b></button>' +
-        '<div class="ndelivery-meta"><span data-delivery-format>' + (count > 1 ? 'ZIP 成果包' : esc(first.name || text.file)) + '</span><span data-delivery-files-count>' + count + ' ' + text.files + '</span>' + (amount ? '<span>' + esc(size(amount)) + '</span>' : '') + '</div></div>' +
-        '<div class="ndelivery-actions">' + action('data-delivery-reveal', '打开所在位置', folderIcon) +
-        action('data-delivery-archive', '打开压缩包', archiveIcon, count < 2 && !/\.zip$/i.test(first.name || '')) +
-        action('data-delivery-retry', text.save, saveIcon) + action('data-delivery-open', text.openSaved, previewIcon, true) +
-        action('data-delivery-local', '在本地继续', localIcon, !group.remote) +
-        '</div></header>' +
-        '<details class="ndelivery-files" open><summary data-delivery-count>' + count + ' ' + text.files + '</summary><div data-delivery-file-list></div></details>' +
-        '<footer><span data-delivery-status role="status">' + text.preparing + '</span></footer>';
-      card.querySelector('[data-delivery-file-list]').replaceWith(fileList(root.ownerDocument, available, file => file));
-      paint(card, group);
+      const revision = matchesReceipt && snapshot.deliverySync?.revision;
+      const card = deliveryCard(root.ownerDocument, available, ref, snapshot, { taskId, current: message === messages[0], revision });
       message.appendChild(card);
-      joinPreviews(message, card, group);
+      joinPreviews(message, card);
       if (existing?.classList.contains('ndelivery-preview-only')) existing.remove();
     }
+  }
+  function deliveryHeading(files, archive) {
+    const first = files[0], count = files.length, amount = totalSize(files);
+    const preview = archive ? 'data-delivery-archive' : 'data-open-app="' + esc(key(first)) + '"';
+    return '<span class="ndelivery-icon">' + icon(archive && count > 1 ? { name: '成果包.zip' } : first) + '</span>' +
+      '<div class="ndelivery-heading"><small>' + text.title + '</small>' +
+      '<button type="button" ' + preview + ' title="' + text.preview + '"><b data-delivery-title data-user-content>' + esc(first.title || first.name || text.file) + '</b></button>' +
+      '<div class="ndelivery-meta"><span data-delivery-format>' + (archive && count > 1 ? 'ZIP 成果包' : esc(first.name || text.file)) + '</span><span data-delivery-files-count>' + count + ' ' + text.files + '</span>' + (amount ? '<span>' + esc(size(amount)) + '</span>' : '') + '</div></div>';
+  }
+  function deliverySection(doc, content) {
+    const card = doc.createElement('section');
+    card.className = 'ndelivery'; card.setAttribute('aria-label', text.title);
+    card.innerHTML = content;
+    return card;
+  }
+  function deliveryCard(doc, available, ref, snapshot, { taskId = '', current = false, revision } = {}) {
+    const id = jobKey(ref, available) + (revision ? ':' + revision : '');
+    const old = groups.get(id);
+    const rounds = [...new Set(available.map(file => Number(file.round) || 0))];
+    const executionRefs = [...new Set(available.map(file => file.sourceRef || ''))];
+    const selection = old?.selection || { round: rounds.length === 1 ? rounds[0] : 0,
+      executionRef: executionRefs.length === 1 ? executionRefs[0] : '' };
+    const group = { id, ref, files: available, selection, scope: scope(), taskId, snapshot, remote: Boolean(taskId), current, ...(old?.delivery ? { delivery: old.delivery } : {}) };
+    groups.set(id, group);
     while (groups.size > 120) { const old = groups.keys().next().value; groups.delete(old); if (!jobs.get(old)?.busy) jobs.delete(old); }
+    available.sort((a, b) => Number(b.primary !== false && b.role !== 'supporting') - Number(a.primary !== false && a.role !== 'supporting'));
+    const first = available[0], count = available.length;
+    const card = deliverySection(doc, '<header>' + deliveryHeading(available, count > 1 || /\.zip$/i.test(first.name || '')) +
+      '<div class="ndelivery-actions">' + action('data-delivery-reveal', '打开所在位置', folderIcon) +
+      action('data-delivery-archive', '打开压缩包', archiveIcon, count < 2 && !/\.zip$/i.test(first.name || '')) +
+      action('data-delivery-retry', text.save, saveIcon) + action('data-delivery-open', text.openSaved, previewIcon, true) +
+      action('data-delivery-local', '在本地继续', localIcon, !group.remote) +
+      '</div></header>' +
+      '<details class="ndelivery-files" open><summary data-delivery-count>' + count + ' ' + text.files + '</summary><div data-delivery-file-list></div></details>' +
+      '<footer><span data-delivery-status role="status">' + text.preparing + '</span></footer>');
+    card.dataset.delivery = id; card.dataset.chatNode = 'delivery:' + id;
+    card.querySelector('[data-delivery-file-list]').replaceWith(fileList(doc, available, file => file));
+    paint(card, group);
+    return card;
   }
   function historyDeliveryTurns(snapshot, replies) {
     const history = snapshot.history || {}, messages = Array.isArray(snapshot.messages) ? snapshot.messages : [];
@@ -269,18 +283,33 @@
     }
     return turns;
   }
-  function decorateHistoryFiles(root, files, snapshot) {
+  function decorateHistoryFiles(root, files, ref, snapshot) {
     const recorded = new Set(files.filter(file => file.versionId).map(file => file.originalArtifactId));
     const remaining = new Map(groupFiles(files.filter(file => file.versionId || !recorded.has(key(file))), '').filter(file => file.artifactId && !file.deleted &&
       file.primary === true && file.role !== 'supporting').map(file => [key(file), file]));
     const append = (owner, rows) => {
       if (!rows.length) return;
-      const doc = root.ownerDocument, card = doc.createElement('section');
-      card.className = 'ndelivery';
+      const doc = root.ownerDocument;
+      if (owner !== root) {
+        // Bundle actions are scoped to a single frozen turn. Legacy files can
+        // still open through their individual artifact IDs.
+        const frozen = rows.filter(file => file.versionId && file.turnId === owner.dataset.deliveryTurn);
+        if (frozen.length) {
+          const card = deliveryCard(doc, frozen, ref, snapshot);
+          owner.appendChild(card);
+          joinPreviews(owner, card);
+          rows = rows.filter(file => !file.versionId);
+          if (!rows.length) return;
+        }
+      }
+      const card = deliverySection(doc, owner === root ? '' : '<header>' + deliveryHeading(rows, false) + '</header>');
       if (owner === root) card.dataset.chatNode = 'history-deliverables';
-      const details = doc.createElement('details'); details.open = true; details.className = 'ndelivery-files';
-      const summary = doc.createElement('summary'); summary.textContent = tx(owner === root ? '会话成果' : text.title);
-      details.append(summary, fileList(doc, rows, file => file)); card.append(details); owner.append(card);
+      if (owner === root || rows.length > 1) {
+        const details = doc.createElement('details'); details.open = true; details.className = 'ndelivery-files';
+        const summary = doc.createElement('summary'); summary.textContent = tx(owner === root ? '会话成果' : text.title);
+        details.append(summary, fileList(doc, rows, file => file)); card.append(details);
+      }
+      owner.append(card);
     };
     const replies = [...root.querySelectorAll('.nmsg.ai,[data-task-stream]')].filter(reply =>
       reply.dataset.deliveryFinal !== 'false' && !reply.querySelector('.nacceptance-result')).reverse();
@@ -374,14 +403,20 @@
     if (format) format.textContent = count > 1 ? 'ZIP 成果包' : (group.files[0]?.name || text.file);
     const title = card.querySelector('[data-delivery-title]');
     const primary = group.files.filter(file => file.primary !== false && file.role !== 'supporting');
-    const websiteTitle = primary.length === 1 && primary[0].kind === 'website'
-      ? String(primary[0].title || '').trim() : '';
+    const website = primary.length === 1 && primary[0].kind === 'website' ? primary[0] : null;
     // CSS/JS dependencies enlarge the package, not the number of website results.
     if (title && count > 1) {
-      title.textContent = (websiteTitle || result?.title || job?.manifest?.title || group.package?.title || '成果包').replace(/\.zip$/i, '') + '.zip';
-      title.parentElement?.removeAttribute('data-open-app');
-      title.parentElement?.setAttribute('data-delivery-archive', '');
-      title.parentElement?.setAttribute('title', '打开压缩包');
+      title.textContent = (String(website?.title || '').trim() || result?.title || job?.manifest?.title || group.package?.title || '成果包').replace(/\.zip$/i, '') + '.zip';
+      const button = title.parentElement;
+      if (website) {
+        button.removeAttribute('data-delivery-archive');
+        button.setAttribute('data-open-app', key(website));
+        button.title = text.openWeb;
+      } else {
+        button.removeAttribute('data-open-app');
+        button.setAttribute('data-delivery-archive', '');
+        button.title = '打开压缩包';
+      }
       const mark = card.querySelector('.ndelivery-icon');
       const nativeIcon = mark?.querySelector('[data-native-file-icon]');
       if (nativeIcon && nativeIcon.dataset.nativeFileIcon !== 'zip') {

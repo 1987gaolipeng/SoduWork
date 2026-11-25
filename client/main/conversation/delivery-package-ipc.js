@@ -10,17 +10,13 @@ function install({ ipcMain, session, BrowserWindow, dialog, resolveSession = asy
       const original = session.get(ref);
       if (!original) return { ok: false, code: 'DELIVERY_LOCAL_UNAVAILABLE', reason: '会话已关闭，请重新打开' };
       const handle = await resolveSession(original);
-      const frozenId = Array.isArray(ids) && ids.length === 1 && /^version:[a-f0-9]{64}$/.test(ids[0]) && ids[0];
-      const deliveryRoot = current => frozenId ? current.cwd : require('./delivery-workspace.cjs').root(current.cwd, current.deliveryWorkspace);
+      const frozen = Array.isArray(ids) && ids.some(id => typeof id === 'string' && id.startsWith('version:'));
+      const deliveryRoot = current => frozen ? current.cwd : require('./delivery-workspace.cjs').root(current.cwd, current.deliveryWorkspace);
       const directory = deliveryRoot(handle), owner = handle.deliveryOwner;
       const guard = async () => {
         if (!preferences.isTrusted(event) || session.get(ref) !== original) throw Error('会话已变化，请重新打开成果');
         const current = await resolveSession(original);
-        if (frozenId) {
-          const found = await require('./artifact-runtime').resolveView(current, frozenId);
-          if (!found.ok) throw Error('该轮成果已不可用');
-          await found.historyArtifacts.authorize();
-        }
+        if (frozen) await require('./artifact-runtime').resolveVersionGroup(current, ids);
         if (session.get(ref) !== original || deliveryRoot(current) !== directory || current.deliveryOwner !== owner) {
           throw Error('账号或会话已变化，请重新打开成果');
         }

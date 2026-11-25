@@ -247,6 +247,58 @@ test('sidebar previews restore the owner’s model from the selected Pi branch a
   assert.equal(f.calls.length, 0);
 });
 
+test('a Pi preview and its next turn retain only the original owner’s native workspace permission', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-preview-access-'));
+  const app = { getPath: () => root }, owner = automationIdentity();
+  let viewer = owner;
+  const id = 'permission-chat', file = path.join(root, 'pi-agent', 'sessions', 'fixture', id + '.jsonl');
+  const row = { id, path: file, adapterId: 'pi', count: 2, at: 123456, cwd: root,
+    workOwner: require('../main/platform-connections/runtime.cjs').scope(owner), creator: { account: 'owner', hub: owner.hub } };
+  const rules = require('../main/access-control/policy');
+  const policy = (id, parentId, mode) => ({ id, parentId, type: 'custom', customType: 'soduwork.access.policy',
+    data: rules.create(mode, root) });
+  const entries = [{ type: 'session', id, cwd: root }, policy('grant', null, 'full'),
+    { type: 'message', id: 'request', parentId: 'grant', message: { role: 'user', content: 'hello' } },
+    { type: 'message', id: 'answer', parentId: 'request', message: { role: 'assistant', model: 'available', content: 'hi' } }];
+  const write = () => fs.writeFileSync(file, entries.map(entry => JSON.stringify(entry)).join('\n'));
+  fs.mkdirSync(path.dirname(file), { recursive: true }); write();
+  const session = { findBySessionId: () => null, historyEntry: require('../main/pi-session/session').historyEntry };
+  const history = require('../main/conversation/shared-history.cjs').create({ app, session, identityOf: () => viewer });
+  t.after(async () => { await history.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  t.mock.method(require('../main/conversation/requirement-context'), 'cachedIdentity', () => viewer);
+  await history.register([row]);
+  const f = fixture({ app, session, sharedHistory: history, cachedIdentity: () => viewer, identityOf: async () => viewer,
+    openReply: handle => ({ ok: true, snapshot: handle.uiSnapshot?.() }) });
+  const view = async () => {
+    const reply = await f.open({ chatId: id, historyIntent: 'view' });
+    assert.equal(reply.ok, true, reply.reason);
+    assert.equal(reply.snapshot.execution.readOnly, true);
+    return reply.snapshot.execution.continuationAccess;
+  };
+  const send = () => f.open({ chatId: id, historyIntent: 'continue', adapterId: 'pi', modelName: 'available', accessMode: 'full' });
+  assert.deepEqual(await view(), { adapterId: 'pi', mode: 'full' });
+  const start = await send();
+  assert.equal(start.ok, true, start.reason);
+  assert.deepEqual(f.calls.at(-1).accessPolicy, rules.create('full', root));
+  viewer = automationIdentity('other');
+  assert.equal(await view(), undefined);
+  assert.equal((await send()).ok, false);
+  viewer = owner;
+  entries.push(policy('downgrade', 'answer', 'standard'), policy('side-branch', 'answer', 'full'),
+    { type: 'session_info', id: 'selected', parentId: 'downgrade', name: 'current' });
+  write();
+  assert.equal((await view()).mode, 'standard', 'A grant on an abandoned branch cannot carry over');
+  assert.equal((await send()).ok, false);
+  entries.push(policy('revoked', 'selected', 'readonly'), { type: 'session_info', id: 'back', parentId: 'side-branch', name: 'returned' });
+  write();
+  assert.equal((await view()).mode, 'readonly', 'Returning to an older branch cannot undo a newer revocation');
+  entries.push({ ...policy('relocated', 'back', 'full'), data: rules.create('full', path.join(root, 'other')) });
+  write();
+  assert.equal(await view(), undefined);
+  assert.equal((await send()).ok, false);
+  assert.equal(f.calls.length, 1);
+});
+
 test('a preview racing an account change is disposed before attachment and continuation cannot displace pending approval', async () => {
   const a = automationIdentity(), b = automationIdentity('next');
   const row = { id: 'switch-preview', adapterId: 'pi', localReplica: true,

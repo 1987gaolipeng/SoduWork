@@ -21,13 +21,9 @@ async function capture(session, ids, options = {}) {
   const runtime = require('./artifact-runtime');
   let frozenSource, cwd, indexed;
   if (Array.isArray(ids) && ids.some(id => typeof id === 'string' && id.startsWith('version:'))) {
-    if (ids.length !== 1 || !/^version:[a-f0-9]{64}$/.test(ids[0])) throw Error('请逐个导出历史版本');
-    const result = await runtime.resolveView(session, ids[0]);
-    if (!result.ok || !result.historyArtifacts) throw Error('该轮成果原件不可用');
-    await result.historyArtifacts.authorize();
-    cwd = result.previewRoot;
-    frozenSource = { item: { relative: result.item.relative, title: result.item.title },
-      files: result.historyArtifacts.packageFiles() };
+    const { items, reader, root } = await runtime.resolveVersionGroup(session, ids);
+    cwd = root;
+    frozenSource = { items: items.map(({ relative, title }) => ({ relative, title })), files: reader.packageFiles() };
   } else {
     cwd = require('./delivery-workspace.cjs').root(session.cwd, session.deliveryWorkspace);
     indexed = await runtime.snapshotAsync(session);

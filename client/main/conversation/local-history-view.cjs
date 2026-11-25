@@ -16,6 +16,7 @@ async function create({ row, read, historyPreview = false, allowContinuation = f
       ...(choice.unavailable ? { unavailable: true } : {}) } } : {},
     accessControl: { mode: 'readonly', capabilities: [] },
     execution: { readOnly: true, localReplica: true, ...(historyPreview ? {
+      ...(choice?.accessMode ? { continuationAccess: { adapterId, mode: choice.accessMode } } : {}),
       canContinueOnDevice: allowContinuation && row.historyContentState === 'available' } : {}) }, localReplica: true };
   if (['missing', 'partial', 'unresolved-tools'].includes(row.historyContentState)) value.historyRecovery = {
     mode: row.historyContentState === 'missing' ? 'metadata-only' : 'device-history',

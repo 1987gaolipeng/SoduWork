@@ -463,6 +463,12 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
       !row.cached && !content?.historyProtection && !nativeUnavailable &&
       access.usesDeviceChatContext(app, { chatId: row.id }, row);
     const choice = historyPreview && canContinue ? await previewChoice(row, actor, shared) : null;
+    if (choice && !shared) {
+      // Failure to validate native permission metadata must not prevent browsing.
+      const policy = await require('./device-local-continuation.cjs')
+        .nativeAccessPolicy(app, row, actor, session, choice.adapterId, row.cwd).catch(() => null);
+      if (policy) choice.accessMode = policy.mode;
+    }
     const view = await require('./local-history-view.cjs').create({ historyPreview, allowContinuation: canContinue, choice,
       previewReason: content?.nativeReadError?.code === 'TRANSCRIPT_CHECKSUM_MISMATCH' ? content.nativeReadError.reason :
         nativeUnavailable ? '可查看已有本机记录。原始档案暂时无法核验，请恢复后再继续' : previewReason,

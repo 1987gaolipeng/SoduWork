@@ -61,6 +61,50 @@ test('same-name originals from two turns survive later edits, restart and a copi
   assert.deepEqual(await versions.readers(restored, f.id, archive, f.guard), []);
 });
 
+test('reopened cards reveal and package their own turn after the workspace is removed', async t => {
+  const f = fixture(t);
+  await f.deliver('first', { 'one.md': 'original one', 'two.md': 'original two' });
+  const archive = await f.deliver('second', { 'one.md': 'later revision' });
+  fs.rmSync(f.cwd, { recursive: true });
+  const runtime = require('../main/conversation/artifact-runtime');
+  const view = { sessionId: f.id, localReplica: true };
+  let allowed = true;
+  const guard = () => { if (!allowed) throw Error('closed'); };
+  runtime.bindTurnArchives(view, () => versions.readers(f.profile, f.id, archive, guard));
+  const rows = versions.list(archive);
+  const idsFor = turn => rows.filter(row => row.turnId === turn).map(row => 'version:' + row.versionId);
+  const ids = idsFor('first');
+  assert.equal(ids.length, 2);
+  const packages = require('../main/conversation/delivery-package-worker');
+  const bundle = await packages.prepare(view, ids);
+  assert.equal(bundle.contentType, 'application/zip');
+  assert.deepEqual(bundle.manifest.files.map(row => [row.path, row.role]), [['one.md', 'primary'], ['two.md', 'primary']]);
+  const single = await packages.prepare(view, [ids[0]]);
+  assert.match(single.bytes.toString(), /^original /);
+  await assert.rejects(packages.prepare(view, [ids[0], ...idsFor('second')]), /该轮成果/);
+  await assert.rejects(packages.prepare(view, [ids[0], 'ordinary-file']), /同一轮/);
+  const handlers = new Map(), calls = [];
+  const frame = {}, event = { senderFrame: frame, sender: { mainFrame: frame, isDestroyed: () => false,
+    getURL: () => require('node:url').pathToFileURL(path.resolve(__dirname, '../desk.html')).href } };
+  require('../main/conversation/local-delivery-action').install({
+    app: { getPath: () => f.profile }, ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
+    session: { get: () => view }, ownerOf: () => 'viewer',
+    shell: { showItemInFolder: file => calls.push(['reveal', file]), openPath: file => { calls.push(['open', file]); return ''; } },
+  });
+  const click = (action, selection, options) => handlers.get('conversation-delivery-' + action)(event, 'view', selection, options);
+  assert.deepEqual(await click('open-local', [ids[0]]), { ok: true });
+  assert.equal(calls[0][0], 'reveal');
+  assert.ok(calls[0][1].startsWith(path.join(f.profile, 'delivery-archives') + path.sep));
+  assert.deepEqual(fs.readFileSync(calls[0][1]), single.bytes);
+  assert.deepEqual(await click('open-archive', ids, { revision: bundle.manifest.revision }), { ok: true });
+  assert.equal(calls[1][0], 'open');
+  assert.deepEqual(fs.readFileSync(calls[1][1]), bundle.bytes);
+  assert.equal((await click('open-archive', [ids[0]])).ok, false);
+  allowed = false;
+  assert.equal((await click('open-local', ids)).ok, false);
+  assert.equal(calls.length, 2);
+});
+
 test('working copies are independent per turn, preserve local edits and include owned resources', async t => {
   const f = fixture(t);
   await f.deliver('first', { 'web/index.html': '<title>A</title>', 'web/style.css': 'body{background:url(logo.png)}',

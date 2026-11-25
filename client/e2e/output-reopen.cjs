@@ -9,14 +9,14 @@ if (typeof electron === 'string') {
   const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), assert = require('node:assert/strict');
   const { pathToFileURL } = require('node:url');
   const client = path.resolve(__dirname, '..'), out = path.resolve(client, '../outputs/output-reopen');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-output-reopen-e2e-'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-output-reopen-e2e-')));
   app.setPath('userData', root); app.on('window-all-closed', () => {}); fs.mkdirSync(out, { recursive: true });
   const report = { ok: false, cases: [] }, sessions = new Map(), live = new Set();
   const artifacts = require('../main/conversation/artifact-runtime');
   const catalog = require('../main/agent-runtime/runtime-catalog');
   const { createRunnerRuntimeAdapter, getRunnerSessionDetails } = require('../main/agent-runtime/runner-adapter');
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-  let win, serial = 0, mode = 'mixed';
+  let win, legacyHistory, serial = 0, mode = 'mixed';
   const js = code => win.webContents.executeJavaScript(code, true).catch(error => { throw Error(code.slice(0, 180) + '\n' + error.message); });
   async function until(check) { for (let i = 0; i < 200; i++) { if (await check()) return; await delay(25); } throw Error('Timed out: ' + check); }
   const name = '示例企业官网.html', md = '成果说明.md';
@@ -79,30 +79,76 @@ if (typeof electron === 'string') {
     sessions.set(handle.ref, handle);
     return { ok: true, ref: handle.ref, cwd, sessionId: handle.sessionId, adapterId: id, displayName: handle.displayName, snapshot: handle.snapshot() };
   }
+  async function createLegacyHistory() {
+    const identity = require('../tests/helpers/platform-session-fixture.cjs').identity();
+    const id = 'legacy-pi-website', cwd = path.join(root, 'legacy-project'), file = path.join(root, 'pi-agent', 'sessions', 'legacy-project', id + '.jsonl');
+    const html = '<!doctype html><meta charset="utf-8"><h1>旧版 Pi 生成的网站</h1>';
+    fs.mkdirSync(cwd, { recursive: true }); fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(path.join(cwd, 'index.html'), html);
+    const entries = [{ type: 'session', id, cwd },
+      { type: 'custom', customType: 'soduwork.access.policy', data: require('../main/access-control/policy').create('full', cwd) }, ...[
+      { role: 'user', content: '创建一个网站' },
+      { role: 'assistant', stopReason: 'toolUse', content: [{ type: 'toolCall', id: 'write1', name: 'write', arguments: { path: 'index.html', content: html } }] },
+      { role: 'toolResult', toolCallId: 'write1', toolName: 'write', isError: false, content: [] },
+      { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: '已创建 `index.html`。' }] },
+    ].map(message => ({ type: 'message', message }))];
+    fs.writeFileSync(file, entries.map(entry => JSON.stringify(entry)).join('\n'));
+    const row = { id, cwd, adapterId: 'pi', path: file, count: entries.length - 1,
+      workOwner: require('../main/platform-connections/runtime.cjs').scope(identity), creator: { account: 'one', hub: identity.hub } };
+    const session = { historyEntry: require('../main/pi-session/session').historyEntry, findBySessionId: () => null };
+    const store = require('../main/conversation/replica-store.cjs').create(path.join(root, 'legacy.sqlite'));
+    legacyHistory = require('../main/conversation/shared-history.cjs').create({ app, session, store, identityOf: () => identity, workRoot: () => root });
+    const [registered] = await legacyHistory.register([row]);
+    const { snapshot, coverage } = await require('../main/conversation/device-history-native.cjs').read({ app, session, row, guard() {} });
+    delete coverage.sources[0].artifactEvidenceVersion;
+    const guard = { expectedRevision: registered.replicaRevision, expectedCatalogRevision: registered.revision };
+    await store.saveDeviceHistory(id, { snapshot, coverage }, guard);
+    await store.saveConversationTranscript(id, snapshot.messages, guard);
+    return id;
+  }
   app.whenReady().then(async () => {
     const bridge = require('../main/agent-runtime/pi-session-bridge'); bridge.get = ref => sessions.get(ref);
-    require('../main/pi-session/ipc').install({ app, ipcMain, BrowserWindow, identityOf: () => null, capabilityGrantsOf: () => [] });
+    require('../main/pi-session/artifact-ipc').install({ app, ipcMain, BrowserWindow, session: sessions, workDir: () => root });
+    ipcMain.handle('pi-session-snapshot', (_event, ref) => ({ ok: true, snapshot: sessions.get(ref)?.snapshot() }));
     require('../main/work-preview').install({ app, ipcMain, BrowserWindow, WebContentsView, shell: { openExternal: async () => { throw Error('No external navigation in fixture'); } } });
-    for (const channel of ['pi-session-open', 'pi-session-history', 'pi-session-release', 'pi-session-runtime-models']) ipcMain.removeHandler(channel);
-    ipcMain.handle('pi-session-open', (_event, options) => restore(options.adapterId || 'pi'));
+    const legacyId = await createLegacyHistory();
+    ipcMain.handle('pi-session-open-application', () => ({ ok: true, handled: false }));
+    ipcMain.handle('access-preferences-get', () => ({ ok: true, mode: 'standard' }));
+    ipcMain.handle('pi-session-runtimes', () => ({ ok: true, runtimes: catalog.runtimes() }));
+    ipcMain.handle('pi-session-open', async (_event, options) => {
+      if (options.chatId !== legacyId) return restore(options.adapterId || 'pi');
+      const view = await legacyHistory.open(legacyId, { historyPreview: true, allowContinuation: true });
+      sessions.set(view.ref, view);
+      return { ok: true, ref: view.ref, sessionId: legacyId, adapterId: 'pi', localReplica: true, snapshot: view.snapshot() };
+    });
     ipcMain.handle('pi-session-history', () => ({ ok: true, chats: [] }));
     ipcMain.handle('pi-session-runtime-models', () => ({ ok: true, items: [] }));
-    ipcMain.handle('pi-session-release', (_event, ref) => { artifacts.closeRef(ref); sessions.delete(ref); return { ok: true }; });
+    ipcMain.handle('pi-session-release', async (_event, ref) => {
+      artifacts.closeRef(ref);
+      const handle = sessions.get(ref);
+      if (handle?.historyPreview) await handle.close();
+      sessions.delete(ref); return { ok: true };
+    });
     const source = path.join(__dirname, 'fixtures/workbench-annotations.html'), scripts = [];
     const html = fs.readFileSync(source, 'utf8').replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (_, attrs, body) => {
       const src = attrs.match(/src=["']([^"']+)/); scripts.push(src ? fs.readFileSync(path.resolve(path.dirname(source), src[1]), 'utf8') : body); return '';
     });
-    const fixture = path.join(out, 'native-chat.html');
-    fs.writeFileSync(fixture, html.replace('<meta charset="utf-8">', '<meta charset="utf-8"><base href="' + pathToFileURL(path.dirname(source) + path.sep).href + '">'));
-    win = new BrowserWindow({ show: false, width: 1280, height: 860, webPreferences: { preload: path.join(client, 'preload.js'), contextIsolation: true, nodeIntegration: false, offscreen: true, backgroundThrottling: false } });
+    scripts.unshift(...['chat-plugin-mention-model', 'chat-plugin-mention'].map(file =>
+      fs.readFileSync(path.join(client, 'components/panels', file + '.js'), 'utf8')));
+    const page = html.replace('<meta charset="utf-8">', '<meta charset="utf-8"><base href="' + pathToFileURL(path.dirname(source) + path.sep).href + '">');
+    win = new BrowserWindow({ show: false, width: 1280, height: 860, webPreferences: { preload: path.join(client, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
     win.webContents.on('console-message', event => { if (event.level === 'error') report.console = [...(report.console || []), event.message]; });
+    const origin = pathToFileURL(path.join(client, 'desk.html')).href;
+    await win.webContents.session.protocol.handle('file', request => request.url === origin
+      ? new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+      : electron.net.fetch(request.url, { bypassCustomProtocolHandlers: true }));
     const destroyedListeners = win.webContents.listenerCount('destroyed');
     for (const spec of catalog.runtimes()) {
       mode = 'mixed';
       makeFiles(path.join(root, 'work-' + spec.id), spec.id);
       let firstId;
       for (let attempt = 0; attempt < 2; attempt++) {
-        await win.loadFile(fixture);
+        await win.loadURL(origin);
         for (const file of JSON.parse(fs.readFileSync(path.join(client, 'core/locales/manifest.json')))) await js(fs.readFileSync(path.join(client, 'core/locales', file), 'utf8'));
         for (const file of ['core/i18n-dom.js', 'core/i18n.js']) await js(fs.readFileSync(path.join(client, file), 'utf8') + '\nvoid 0;');
         for (const script of scripts) await js(script + '\nvoid 0;');
@@ -155,10 +201,51 @@ if (typeof electron === 'string') {
       await js('NativeChat.reset();void 0;');
       report.cases.push(spec.id + ': nested Markdown auto-opens; filename is marked clickable; actual mouse closes and reopens the right preview');
     }
+    await js(fs.readFileSync(path.join(client, 'components/panels/chat-deliveries.js'), 'utf8'));
+    win.showInactive();
+    await js('SoduWorkI18n.setLocale("zh-CN");void 0;');
+    for (let visit = 0; visit < 2; visit++) {
+      await js('NativeChat.enter("",' + JSON.stringify(legacyId) + ',{adapterId:"pi"});void 0');
+      const link = visit ? 'document.querySelector(".ndelivery [data-open-app]")'
+        : 'Array.from(document.querySelectorAll(".nmsg.ai [data-open-app]")).find(e => e.textContent === "index.html")';
+      await until(() => js('Boolean(' + link + ')'));
+      await click('document.querySelector("#nchatMode")');
+      await until(() => js(`!document.querySelector('#nchatAccessPop').hidden &&
+        document.querySelector('[data-access-mode="full"]').matches('[aria-pressed="true"]:enabled')`));
+      await click('document.querySelector("#nchatMode")');
+      await click(link);
+      let visibleWebsite;
+      await until(async () => {
+        const slot = await js(`(() => {
+          const rect = document.querySelector('[data-wb-native]')?.getBoundingClientRect();
+          if (!rect || rect.x < innerWidth / 3 || rect.width < 240 || rect.height < 200 ||
+              rect.right > innerWidth + 1 || rect.bottom > innerHeight + 1) return null;
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+        })()`);
+        if (!slot) return false;
+        for (const view of win.contentView.children) {
+          if (!view.getVisible() || !view.webContents || view.webContents.isDestroyed()) continue;
+          const bounds = view.getBounds();
+          if (Object.keys(slot).some(key => Math.abs(slot[key] - bounds[key]) > 2)) continue;
+          if (await view.webContents.executeJavaScript('document.querySelector("h1")?.textContent') === '旧版 Pi 生成的网站') {
+            visibleWebsite = view; return true;
+          }
+        }
+        return false;
+      });
+      assert.equal(await js('ChatWorkbench.state().open'), true);
+      if (visit) {
+        const pixels = await visibleWebsite.webContents.capturePage();
+        assert.ok(!pixels.isEmpty());
+        fs.writeFileSync(path.join(out, 'legacy-pi-website-preview.png'), pixels.toPNG());
+      }
+      await js('NativeChat.reset();void 0;'); await until(() => win.contentView.children.length === 0);
+    }
+    report.cases.push('Pi 1.13.19 archive: full permission remains selected and available; click the historical HTML filename, reopen the chat, click its delivery card and verify the original heading in the right WebContentsView');
     report.ok = true;
   }).catch(error => { report.error = error.stack || String(error); })
     .finally(async () => {
-      for (const session of live) await session.dispose(); artifacts.closeAll();
+      for (const session of live) await session.dispose(); artifacts.closeAll(); await legacyHistory?.close();
       win?.destroy(); fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report));
       try { fs.rmSync(root, { recursive: true, force: true }); } catch (_) {}
       app.exit(report.ok ? 0 : 1);

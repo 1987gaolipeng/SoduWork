@@ -232,7 +232,20 @@ const { createArchiveHistory } = require('./archive-history');
 const archiveState = require('./archive-state');
 const _historyIndexes = new Map();
 // Keep execution choices off sidebar rows shared with other local accounts.
-const _archiveModels = new WeakMap();
+const _archiveModels = new WeakMap(), _archivePolicies = new WeakMap();
+async function archivedAccessPolicy(app, id, cwd) {
+  const { entry } = await historyEntry(app, id, { strict: true });
+  const state = _archivePolicies.get(entry);
+  if (!state || !cwd) return null;
+  const rules = require('../access-control/policy');
+  const selected = rules.restoreState(state.current, state.pending, cwd);
+  const latest = rules.restoreState(state.last, state.lastPending, cwd);
+  const branch = selected.nextAccessPolicy || selected.accessPolicy, last = latest.nextAccessPolicy || latest.accessPolicy;
+  if (!branch || !last) return null;
+  // A branch-local grant cannot override a later revocation elsewhere in the session.
+  const modes = ['readonly', 'standard', 'full'];
+  return modes.indexOf(last.mode) < modes.indexOf(branch.mode) ? last : branch;
+}
 async function archivedModelName(app, id) {
   const { entry } = await historyEntry(app, id, { strict: true });
   return _archiveModels.get(entry) || '';
@@ -259,6 +272,8 @@ function _historyIndex(app) {
         ...(archivedState !== 'idle' ? { state: archivedState === 'interrupted' ? 'interrupted'
           : historyState.presenceState(archivedState) } : {}),
       };
+      if (s.accessPolicy) _archivePolicies.set(row, { current: s.accessPolicy, pending: s.pendingAccessPolicy,
+        last: s.lastAccessPolicy, lastPending: s.lastPendingAccessPolicy });
       if (s.modelName) _archiveModels.set(row, s.modelName);
       return row;
     } });
@@ -467,7 +482,7 @@ async function probe(app) {
 
 module.exports = {
   open, get, list, findBySessionId, closeAll, probe, loadSdk, prewarm, prewarmResources,
-  sessionResources, history, archivedHistory, historyEntry, archivedModelName, archiveHistory, restoreHistory,
+  sessionResources, history, archivedHistory, historyEntry, archivedModelName, archivedAccessPolicy, archiveHistory, restoreHistory,
   permanentlyDeleteHistory, archiveRoot, isArchived, setArchived, archiveState,
   SCOPE_ENTRY_TYPE, TASK_BINDING_ENTRY_TYPE,
   _taskBindingFromEntries,

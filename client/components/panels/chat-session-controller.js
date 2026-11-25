@@ -137,7 +137,7 @@ async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() 
         ? { chatId, historyIntent: 'continue', adapterId: selected.adapterId, modelName: selected.modelName,
           ...(selected.reasoningEffort ? { reasoningEffort: selected.reasoningEffort } : {}),
           ...(selected.thinkingLevel ? { thinkingLevel: selected.thinkingLevel } : {}),
-          accessMode: selected.accessMode === 'readonly' ? 'readonly' : 'standard' }
+          accessMode: selected.accessMode || 'standard' }
         : chatId
         ? { ...selected, chatId, ...(!ctx._snap?.workOnly ? { historyIntent: 'view' } : {}),
           requireTaskBinding: !resumeAsOrdinary && Boolean(selected.taskRef) }
@@ -270,7 +270,7 @@ async function _ensureOnce(chatId, epoch, ownerScope = ctx._draftOwnerScope?.() 
       ctx._sessionOptions = { ...ctx._sessionOptions, adapterId: got.adapterId || openedSnapshot.adapterId || ctx._sessionOptions.adapterId || 'pi',
         displayName: got.displayName || openedSnapshot.displayName || '', accessControl: got.accessControl || openedSnapshot.accessControl };
       if (openedSnapshot.execution?.canContinueOnDevice === true) {
-        // A preview restores the model choice. Continuation resolves its own permissions.
+        // Use only choices confirmed by this preview; discard options from the previous chat.
         ctx._sessionOptions = { adapterId: ctx._sessionOptions.adapterId,
           archivedModelName: openedSnapshot.modelSelection?.name || '',
           modelName: openedSnapshot.modelSelection?.name || '',

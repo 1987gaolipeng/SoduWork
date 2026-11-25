@@ -142,6 +142,7 @@ function createPiSessionBridge(options) {
     if (entry.closeCompletion) return entry.closeCompletion;
     if (entry.closed) return Promise.resolve(false);
     entry.closed = true;
+    require('../conversation/artifact-runtime').releaseSessionFacade(entry.view);
     forget(entry);
     const cleanup = entry.switchable ? Promise.resolve().then(() => entry.raw.close()).catch(() => {}) : Promise.resolve();
     try { if (entry.supervisor) entry.supervisor.dispose(); }
@@ -162,7 +163,7 @@ function createPiSessionBridge(options) {
 
   function facade(entry) {
     const bound = new Map();
-    return new Proxy(entry.raw, {
+    const view = new Proxy(entry.raw, {
       get(target, property, receiver) {
         if (property === RUNTIME_RECORD) return entry.record;
         // Main-process transport decorators need the native lifecycle, not the
@@ -189,6 +190,8 @@ function createPiSessionBridge(options) {
         return Reflect.set(target, property, value, target);
       },
     });
+    require('../conversation/artifact-runtime').bindSessionFacade(view, entry.raw);
+    return view;
   }
 
   function runtimeFacade(entry) {

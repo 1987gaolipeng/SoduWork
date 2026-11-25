@@ -120,7 +120,7 @@ function extendsPiArchive(bytes, revision, previous) {
   }
   return false;
 }
-async function pi(app, session, id, guard, previous) {
+async function pi(app, session, id, guard, previous, row) {
   const found = await session.historyEntry(app, id, { strict: true }); guard(found?.entry);
   if (!found?.ok || !found.entry?.path) throw failure(found?.notFound ? 'NATIVE_HISTORY_MISSING' : 'NATIVE_HISTORY_UNAVAILABLE',
     found?.reason || '原生会话暂时无法读取');
@@ -161,7 +161,8 @@ async function pi(app, session, id, guard, previous) {
       if (original.has(call?.toolCallId)) call.toolCallId = original.get(call.toolCallId);
     }
   }
-  return { snapshot, source: { id, adapterId: 'pi', revision, byteLength: bytes.length } };
+  return { snapshot, source: { id, adapterId: 'pi', revision, byteLength: bytes.length, artifactEvidenceVersion: 1 },
+    ...(id === row.id && !row.deliveryWorkspaceKey ? require('./pi-history-artifacts.cjs').evidence(entries, row, revision) : {}) };
 }
 function canonicalJson(value) {
   return JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
@@ -331,7 +332,7 @@ async function read({ app, session, row, guard, previousToolReceipts = [], previ
   const record = require('./runtime-segments').read(app, row.id);
   const parts = record ? [...record.segments, record.active] : [{ sessionId: row.id, adapterId: row.adapterId || 'pi' }];
   const snapshot = { messages: [], tools: [] }, sources = [], localToolReceipts = [];
-  let localWorkspace;
+  let localWorkspace, localJournal;
   const previous = new Set(previousToolReceipts);
   if (record?.deviceHistoryComplete) {
     Object.assign(snapshot, publicSnapshot(record.prefix));
@@ -346,16 +347,19 @@ async function read({ app, session, row, guard, previousToolReceipts = [], previ
   for (const part of nativeParts) {
     const source = prior.get(part.sessionId);
     if (source && source.adapterId !== part.adapterId) throw runnerConflict();
-    const saved = part.adapterId === 'pi' ? await pi(app, session, part.sessionId, guard, source)
+    const saved = part.adapterId === 'pi' ? await pi(app, session, part.sessionId, guard, source, row)
       : await runner(runtime, part.sessionId, part.adapterId, guard, previous, source, previousSnapshot);
     for (const proof of saved.localToolReceipts || []) localToolReceipts.push(proof);
     const offset = snapshot.messages.length;
     snapshot.messages.push(...saved.snapshot.messages);
     snapshot.tools.push(...saved.snapshot.tools.map(tool => ({ ...tool, id: part.sessionId + ':' + tool.id, after: Number(tool.after || 0) + offset })));
     sources.push(saved.source);
-    if (saved.localWorkspace && saved.source.id === row.id) localWorkspace = saved.localWorkspace;
+    if (saved.source.id === row.id) {
+      localWorkspace = saved.localWorkspace;
+      localJournal = saved.localJournal;
+    }
   }
-  return { snapshot, ...(localWorkspace ? { localWorkspace } : {}), coverage: { complete: true, sources, unresolvedTools: unresolvedTools(snapshot) },
+  return { snapshot, ...(localWorkspace ? { localWorkspace } : {}), ...(localJournal ? { localJournal } : {}), coverage: { complete: true, sources, unresolvedTools: unresolvedTools(snapshot) },
     ...(localToolReceipts.length ? { localToolReceipts } : {}) };
 }
 async function probe({ app, session, row, guard }) {
