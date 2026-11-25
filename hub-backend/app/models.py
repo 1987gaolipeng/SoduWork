@@ -26,6 +26,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base
 from .task_notification_models import TaskNotificationOutbox  # noqa: F401
 
+TASK_TITLE_MAX = 200
+REQUESTER_USER_ID_MAX = 36
+REQUESTER_NAME_MAX = 64
+REQUESTER_CONTACT_MAX = 200
+
 
 def _uuid() -> str:
     return str(uuid.uuid4())
@@ -158,7 +163,7 @@ class Task(Base):
     # New-entry limits belong to request validation, not lossy storage coercion.
     # SQLite does not enforce VARCHAR lengths; retain its historical declarations
     # so ORM metadata matches the migration without rebuilding referenced tables.
-    title: Mapped[str] = mapped_column(Text().with_variant(String(200), "sqlite"), default="未命名")
+    title: Mapped[str] = mapped_column(Text().with_variant(String(TASK_TITLE_MAX), "sqlite"), default="未命名")
     source: Mapped[str] = mapped_column(Text().with_variant(String(120), "sqlite"), default="")
     note: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(16), default="todo")  # todo|doing|done|cancel
@@ -192,9 +197,9 @@ class Task(Base):
     # Internal requesters use requester_user_id and receive direct client notifications.
     # External requesters use name/contact details; completion is relayed through the registrar.
     # When creator and assignee differ, default the requester to the creator unless explicitly specified.
-    requester_user_id: Mapped[str | None] = mapped_column(String(36), default=None)
-    requester_name: Mapped[str] = mapped_column(String(64), default="")             # Requester display name for internal or external requests.
-    requester_contact: Mapped[str] = mapped_column(String(200), default="")         # External email, phone, or ticket reference; empty for internal requesters.
+    requester_user_id: Mapped[str | None] = mapped_column(String(REQUESTER_USER_ID_MAX), default=None)
+    requester_name: Mapped[str] = mapped_column(String(REQUESTER_NAME_MAX), default="")  # Requester display name.
+    requester_contact: Mapped[str] = mapped_column(String(REQUESTER_CONTACT_MAX), default="")  # Email, phone, or ticket reference.
     recur: Mapped[str | None] = mapped_column(String(16), default=None)             # Recurrence: daily, weekly, monthly, or None.
     recur_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)  # Next recurrence deadline.
     remind_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)  # Time for a prominent desktop reminder.

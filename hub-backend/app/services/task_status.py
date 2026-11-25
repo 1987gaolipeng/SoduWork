@@ -81,6 +81,15 @@ async def mark(session: AsyncSession, task: models.Task, status: str, *,
         task_events.record(session, task.id, "status.reset_from_done",
                            {"from": "done", "to": status, "reason": why or "撤回验收"}, actor="SoduWork")
     if status == "done":
+        from . import receipts
+        # Direct post-commit dispatch and queued dispatch must identify the same
+        # transition even if the requirement is reopened before they run.
+        snapshot = receipts.completion_snapshot(task)
+        if snapshot:
+            identity, closed_at, marker = await receipts.completion_identity(session, task.id)
+            task._close_receipt = (identity, closed_at, marker, snapshot)
+        else:
+            task._close_receipt = None
         await _close_batch_members(session, task, engine=engine)
         from . import project_context
         await project_context.accept_task_capsules(session, task)
