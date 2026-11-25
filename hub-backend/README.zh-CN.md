@@ -29,7 +29,9 @@ UID/GID 10001。对应公钥须与 Hub 信任配置匹配，且已被已安装�
 配置缺失、不可读或不受信任时，发布返回 503；既有下载继续可用。
 
 桌面包解析需要 PATH 上受维护的 `7zz` 或 `7z`，也可通过 `CLIENT_UPDATE_ARCHIVE_TOOL`
-指定可执行文件路径；APK 解析需要 PATH 上的 `aapt`。自托管镜像已包含两者。
+指定可执行文件路径；APK 解析需要 PATH 上的 `aapt`。自托管镜像的 `deps` 阶段已包含两者。
+复用 `HUB_BASE_IMAGE` 时需重建包含这两个工具的依赖镜像，或使用 `HUB_BASE_IMAGE=deps`；
+运行镜像构建会拒绝缺少任一工具的基础镜像。
 EXE、DMG、ZIP、DEB、RPM、tar.gz 和 AppImage 解析不执行上传的代码；临时解包受时间、
 大小和嵌套层数限制。APK 从 Android manifest 读取元数据。请保留安装包原始文件名。
 可选 `bundle` 字段继续兼容离线签名上传，无需配置服务器签名；部署任务上传接口不变。

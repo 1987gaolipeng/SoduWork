@@ -31,7 +31,9 @@ signing configuration rejects publication with 503; existing downloads still wor
 
 Desktop inspection needs a maintained `7zz` or `7z` on PATH, or an executable path
 in `CLIENT_UPDATE_ARCHIVE_TOOL`; APK inspection needs `aapt` on PATH. The self-host
-image includes both. EXE, DMG, ZIP, DEB, RPM, tar.gz and AppImage inspection never
+image includes both in its `deps` stage. When reusing `HUB_BASE_IMAGE`, rebuild that
+dependency image to include these tools, or use `HUB_BASE_IMAGE=deps`; the runtime
+build rejects bases missing either tool. EXE, DMG, ZIP, DEB, RPM, tar.gz and AppImage inspection never
 executes uploaded code. Temporary extraction is bounded by time, size and nesting.
 APKs use Android manifest metadata. Preserve original package names. The optional
 `bundle` field still accepts offline-signed installers without server signing
