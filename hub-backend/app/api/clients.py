@@ -8,14 +8,14 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db import get_session
 from ..config import get_settings
+from ..db import get_session
 from ..deps import current_client, identity_only
 from ..models import Client, User
-from ..schemas import ClientRegister, client_to_api
+from ..schemas import AssignedTaskCreate, ClientRegister, TeamTaskCreate, client_to_api
+from ..services import client_access, device_auth, rbac
 from ..services import inbox as inbox_svc
 from ..services import team as team_svc
-from ..services import client_access, device_auth, rbac
 
 router = APIRouter(prefix="/api/v1", tags=["clients"])
 settings = get_settings()
@@ -185,7 +185,7 @@ async def team_tasks(
 
 @router.post("/team/tasks")
 async def create_team_task(
-    body: dict = Body(default_factory=dict),
+    body: TeamTaskCreate = Body(default_factory=dict),
     client: Client = Depends(current_client),
     session: AsyncSession = Depends(get_session),
 ):
@@ -288,7 +288,6 @@ async def assign_inbox_task_from_box(
     if not target.is_active:
         raise HTTPException(status_code=400, detail="该成员已停用，无法分配需求")
     # The target must belong to the caller's department subtree.
-    from ..services import rbac
     scope = await rbac.subtree_org_ids(session, me.org_id) if me.org_id else set()
     if target.org_id not in (scope or set()):
         raise HTTPException(status_code=403, detail="该成员不在你的团队内")
@@ -455,7 +454,7 @@ async def handoff_my_task(
 
 @router.post("/tasks/assigned")
 async def create_assigned_task(
-    body: dict = Body(default_factory=dict),
+    body: AssignedTaskCreate = Body(default_factory=dict),
     client: Client = Depends(current_client),
     session: AsyncSession = Depends(get_session),
 ):

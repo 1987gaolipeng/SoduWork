@@ -825,6 +825,11 @@ async def purge_task_children(
 
     out: dict[str, int] = {}
 
+    # A claimed completion must not copy its former requester's snapshot onto a
+    # subsequently recreated task with the same client-provided ID.
+    jobs = models.TaskNotificationOutbox
+    await session.execute(_del(jobs).where(jobs.task_id.in_(task_ids), jobs.payload["closed"].as_boolean().is_(True)))
+
     # Keep the external Issue identity as a tombstone: polling must not recreate
     # a requirement the user deliberately deleted. Stop unsent start writeback.
     from sqlalchemy import case

@@ -64,6 +64,7 @@ from ..services import (
     email_auth,
     poller,
     rbac,
+    receipts,
     repository_catalog,
     storage,
     work_catalog,
@@ -2609,13 +2610,14 @@ async def list_receipts(
     rows = await session.execute(query)
     out = []
     for e, title, status in rows:
-        d = e.detail or {}
+        d = receipts.bounded_detail(e.detail or {}, fallback_title=title)
         out.append({
             "id": e.id,
             "taskId": e.task_id,
-            "title": d.get("title") or title or "",
+            "title": d.get("title") or "",
             "requesterName": d.get("to") or "",
             "contact": d.get("contact") or "",
+            **({"fieldWarnings": d["fieldWarnings"]} if "fieldWarnings" in d else {}),
             "external": bool(d.get("external")),
             "via": d.get("via") or "",           # box: notify requester; self: self-completion; relay: notify registrar; recorded: retain only.
             "status": status or "",

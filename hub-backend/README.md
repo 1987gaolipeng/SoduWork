@@ -8,6 +8,12 @@ Hub provides identity, authorization, execution governance, plugins, shared mate
 
 The first-chat checklist combines the available model catalog with the signed-in administrator’s latest desktop report. The device sends two readiness flags for its runtime and model selection. After five minutes without a fresh report, the Hub shows those steps as awaiting the desktop.
 
+## Task completion receipts
+
+A completion with a requester produces one stored receipt. Retrying that completion reuses the receipt. Reopening the task and completing it again produces a separate receipt. Live notifications use at-least-once delivery. The admin receipts list defaults to 50 records per page and allows up to 200.
+
+Creating or editing a task through the tasks API accepts up to 200 characters for the title, 64 for the requester name, 200 for contact details and 36 for the requester ID. An over-limit field returns HTTP 422 with its name. When an existing task exceeds these limits, the receipt and notice show shortened titles and names with an ellipsis. They omit over-limit contacts and IDs to avoid directing a reply to the wrong recipient. The optional `fieldWarnings` object identifies each affected field with `truncated` or `omitted`. The completion response exposes the same warnings under `receiptFieldWarnings` and retains the original task values.
+
 ## Register client installers
 
 With `client.update`, send one `installer` multipart file to

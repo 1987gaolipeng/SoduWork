@@ -1,10 +1,16 @@
 """HTTP regressions for text validation and lossless legacy task replay."""
 import unittest
+from unittest.mock import patch
 
 from sqlalchemy import func, select
 
 import test_unified_requirements as fixture
 from app import models
+from app.services import task_notifications
+
+
+TASK_TEXT_LIMITS = (("title", 200), ("source", 120), ("requesterName", 64),
+                    ("requesterContact", 200), ("requesterUserId", 36))
 
 
 class TaskTextCompatibilityTests(unittest.IsolatedAsyncioTestCase):
@@ -40,7 +46,7 @@ class TaskTextCompatibilityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_length_boundaries_count_unicode_characters(self):
         for symbol in ("x", "\u9700", "\U0001f680"):
-            for field, limit in (("title", 200), ("source", 120)):
+            for field, limit in TASK_TEXT_LIMITS:
                 for size in (limit - 1, limit, limit + 1):
                     with self.subTest(symbol=symbol, field=field, size=size):
                         payload = {"title": "New task", "source": "Source", field: symbol * size}
@@ -58,7 +64,7 @@ class TaskTextCompatibilityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_patch_length_boundaries_do_not_truncate_or_partially_save(self):
         for symbol in ("x", "\u9700", "\U0001f680"):
-            for field, limit in (("title", 200), ("source", 120)):
+            for field, limit in TASK_TEXT_LIMITS:
                 for size in (limit - 1, limit, limit + 1):
                     with self.subTest(symbol=symbol, field=field, size=size):
                         before = (await self.call("GET", "tasks/private")).json()
@@ -114,6 +120,20 @@ class TaskTextCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 200, response.text)
             await self.assert_saved_text("offline-history", original)
 
+    async def test_legacy_requester_survives_replay_edit_and_undo(self):
+        original = {"title": "Offline request", "requesterName": "名" * 65,
+                    "requesterContact": "x" * 201, "requesterUserId": "u" * 37}
+        path = "tasks/offline-requester"
+        for method, payload in (("PUT", original), ("PUT", original), ("PATCH", {"note": "New note"})):
+            response = await self.call(method, path, json=payload)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual({key: response.json()[key] for key in original}, original)
+        self.assertEqual((await self.call("DELETE", path)).status_code, 200)
+        restored = await self.call("PUT", path, json=original)
+        self.assertEqual(restored.status_code, 200, restored.text)
+        saved = (await self.call("GET", path)).json()
+        self.assertEqual({key: saved[key] for key in original}, original)
+
     async def test_undo_after_confirmed_delete_recreates_complete_legacy_text(self):
         original = await self.seed_legacy()
         deleted = await self.call("DELETE", "tasks/long-history")
@@ -127,12 +147,42 @@ class TaskTextCompatibilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(read.json()["title"], original["title"])
         self.assertEqual(read.json()["source"], original["source"])
 
+    async def test_claimed_completion_cannot_restore_deleted_contact_after_id_reuse(self):
+        path = "tasks/private"
+        async def write(method, **fields):
+            response = await self.call(method, path, json=fields)
+            self.assertEqual(response.status_code, 200, response.text)
+            return response.json()
+
+        old = await write("PATCH", status="done", requesterContact="old@example.test")
+        self.assertEqual(old["status"], "done")
+        claimed = await task_notifications.claim(self.sessions)
+        self.assertTrue(claimed[4]["closed"])
+        await write("PATCH", status="todo")
+        await write("DELETE")
+        await write("PUT", title="Replacement", requesterContact="new@example.test")
+        # Resume the worker with its pre-delete claim, including normal acknowledgement.
+        with patch.object(task_notifications, "claim", return_value=claimed):
+            self.assertTrue(await task_notifications.run_once(self.sessions))
+
+        async def receipt_details():
+            timeline = await self.call("GET", path + "/events")
+            self.assertEqual(timeline.status_code, 200, timeline.text)
+            return [e["detail"] for e in timeline.json()["events"] if e["kind"] == "receipt"]
+
+        self.assertEqual(await receipt_details(), [])
+        self.assertEqual((await write("PATCH", status="done"))["status"], "done")
+        while await task_notifications.run_once(self.sessions):
+            pass
+        self.assertEqual([(d["title"], d["contact"]) for d in await receipt_details()],
+                         [("Replacement", "new@example.test")])
+
     async def test_invalid_batch_is_rejected_before_any_row_is_updated(self):
         original = await self.seed_legacy()
-        for field, size in (("title", 201), ("source", 121)):
+        for field, limit in TASK_TEXT_LIMITS:
             response = await self.call("POST", "tasks/batch-update", json={
                 "ids": ["private", "long-history"],
-                "patch": {field: "x" * size, "note": "Must not be partially saved"},
+                "patch": {field: "x" * (limit + 1), "note": "Must not be partially saved"},
             })
             self.assert_length_error(response, field)
             async with self.sessions() as session:

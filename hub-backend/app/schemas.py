@@ -12,11 +12,20 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    with_config,
 )
 from pydantic_core import PydanticCustomError
+from typing_extensions import TypedDict
 
 from .auth import ACCOUNT_PASSWORD_MAX, ACCOUNT_PASSWORD_MIN
-from .models import Client, Task
+from .models import (
+    REQUESTER_CONTACT_MAX,
+    REQUESTER_NAME_MAX,
+    REQUESTER_USER_ID_MAX,
+    TASK_TITLE_MAX,
+    Client,
+    Task,
+)
 
 
 def _ms(dt: datetime | None) -> int | None:
@@ -28,7 +37,11 @@ def _ms(dt: datetime | None) -> int | None:
 
 
 def task_to_api(t: Task) -> dict[str, Any]:
+    from .services.receipts import completion_snapshot
     from .services.task_requirements import fields as requirement_fields
+    receipt_warnings = None
+    if t.status == "done":
+        receipt_warnings = completion_snapshot(t).get("detail", {}).get("fieldWarnings")
     return {
         **requirement_fields(t),
         "id": t.id,
@@ -70,6 +83,7 @@ def task_to_api(t: Task) -> dict[str, Any]:
         "requesterUserId": getattr(t, "requester_user_id", None),
         "requesterName": getattr(t, "requester_name", None) or "",
         "requesterContact": getattr(t, "requester_contact", None) or "",
+        **({"receiptFieldWarnings": receipt_warnings} if receipt_warnings else {}),
         "recur": getattr(t, "recur", None),
         "recurAt": _ms(getattr(t, "recur_at", None)),
         "remindAt": _ms(getattr(t, "remind_at", None)),
@@ -117,6 +131,9 @@ def _reject_boolean_timestamp(value):
 
 
 DueTimestamp = Annotated[int, BeforeValidator(_reject_boolean_timestamp)]
+RequesterUserId = Annotated[str, Field(max_length=REQUESTER_USER_ID_MAX)]
+RequesterName = Annotated[str, Field(max_length=REQUESTER_NAME_MAX)]
+RequesterContact = Annotated[str, Field(max_length=REQUESTER_CONTACT_MAX)]
 
 
 class TaskCreate(BaseModel):
@@ -127,7 +144,7 @@ class TaskCreate(BaseModel):
     visibility: str = "related"
     workScenarioName: str = ""
     workRouting: dict[str, Any] = Field(default_factory=dict)
-    title: str = Field(default="未命名", min_length=1, max_length=200)
+    title: str = Field(default="未命名", min_length=1, max_length=TASK_TITLE_MAX)
     source: str = Field(default="", max_length=120)
     note: str = ""
     status: str = "todo"
@@ -148,9 +165,9 @@ class TaskCreate(BaseModel):
     remindAt: Optional[int] = None           # Reminder time in milliseconds.
     domainId: str = ""                       # Responsibility domain ID.
     workScenarioKey: str = ""                # Work type; the server captures other snapshot fields.
-    requesterUserId: Optional[str] = None    # Internal requester user ID for completion notifications.
-    requesterName: str = ""                  # External requester display name.
-    requesterContact: str = ""               # External contact details; empty for an internal requester.
+    requesterUserId: Optional[RequesterUserId] = None
+    requesterName: RequesterName = ""
+    requesterContact: RequesterContact = ""
     projectId: Optional[str] = None          # Associated project.
     repoId: str = ""                         # Target repository for workflows and Runner execution.
     progress: list[dict] = Field(default_factory=list)
@@ -166,6 +183,9 @@ class TaskSyncCreate(TaskCreate):
     """
     title: str = "未命名"
     source: str = ""
+    requesterUserId: Optional[str] = None
+    requesterName: str = ""
+    requesterContact: str = ""
 
 
 class ReviewRecipient(BaseModel):
@@ -183,7 +203,7 @@ class TaskUpdate(BaseModel):
     requirementVersion: Optional[int] = None
     workScenarioName: Optional[str] = None
     workRouting: Optional[dict[str, Any]] = None
-    title: Optional[str] = Field(default=None, max_length=200)
+    title: Optional[str] = Field(default=None, max_length=TASK_TITLE_MAX)
     source: Optional[str] = Field(default=None, max_length=120)
     note: Optional[str] = None
     status: Optional[str] = None
@@ -207,9 +227,9 @@ class TaskUpdate(BaseModel):
     progress: Optional[list] = None           # Replace the complete progress list.
     projectId: Optional[str] = None
     repoId: Optional[str] = None
-    requesterUserId: Optional[str] = None
-    requesterName: Optional[str] = None
-    requesterContact: Optional[str] = None
+    requesterUserId: Optional[RequesterUserId] = None
+    requesterName: Optional[RequesterName] = None
+    requesterContact: Optional[RequesterContact] = None
     deps: Optional[list[str]] = None
 
 
@@ -252,9 +272,20 @@ class DispatchCreate(BaseModel):
     projectId: Optional[str] = None
     deps: list[str] = []
     targets: list[str] = []
-    requesterUserId: Optional[str] = None
-    requesterName: str = ""
-    requesterContact: str = ""
+    requesterUserId: Optional[RequesterUserId] = None
+    requesterName: RequesterName = ""
+    requesterContact: RequesterContact = ""
+
+
+@with_config(ConfigDict(extra="allow"))
+class TeamTaskCreate(TypedDict, total=False):
+    """Preserve the team's dispatch and inbox options alongside its external requester fields."""
+    requesterName: Optional[RequesterName]
+    requesterContact: Optional[RequesterContact]
+
+
+class AssignedTaskCreate(TeamTaskCreate, total=False):
+    requesterUserId: Optional[RequesterUserId]
 
 
 # Shared aggregation contracts.
