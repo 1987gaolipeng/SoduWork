@@ -89,11 +89,24 @@ test('manual runtime switches carry the exact chosen model across managed Agents
   assert.equal(await f.picker.ready(), false, 'a name-only route must not use a different provider');
 });
 
-test('an incompatible account runtime, ambiguous provider, and stale switch preserve the original pair', async () => {
+test('switching to local Codex uses the account default for an incompatible model', async () => {
+  const f = fixture();
+  f.start(); f.reply(0, 'model'); await f.picker.ready(); f.choose('model');
+  const pending = f.picker.prepareRuntimeSwitch({ id: 'codex', modelMode: 'account' }, () => true);
+  f.requests.at(-1).resolve({ ok: true, models: [{ id: 'model' }] });
+  const model = await pending;
+  assert.equal(model.preservesModel, false);
+  f.agent('codex'); model.apply(); await f.picker.refresh();
+  assert.equal(await f.picker.ready(), true);
+  assert.equal(f.picker.value().modelName, '');
+  assert.equal(f.picker.label(), 'Codex 默认');
+});
+
+test('a failed catalog lookup, ambiguous provider, and stale switch preserve the original pair', async () => {
   const f = fixture(), row = { name: 'model', providerId: 'org' };
   f.start(); f.requests[0].resolve({ usable: [row] }); await f.picker.ready(); f.choose('model');
   for (const [target, reply, valid] of [
-    [{ id: 'codex', modelMode: 'account' }, { ok: true, models: [{ id: 'model' }] }, true],
+    [{ id: 'codex', modelMode: 'account' }, { ok: false }, true],
     [{ id: 'qwen', modelMode: 'managed' }, { usable: [row, { ...row, providerId: 'other' }] }, true],
     [{ id: 'qwen', modelMode: 'managed' }, { usable: [row] }, false],
   ]) {

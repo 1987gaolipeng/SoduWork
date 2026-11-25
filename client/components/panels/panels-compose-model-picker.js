@@ -592,6 +592,9 @@
     const { candidates } = catalog;
     let next = candidates.find(candidate => matchesChoice(choice, candidate));
     const preservesModel = Boolean(next);
+    if (!next && target.id === 'codex' && target.modelMode === 'account' && !cloud()) {
+      next = candidates.find(candidate => candidate.name === '');
+    }
     if (!next) {
       if (!candidates.length) { say(tx('目标底座没有可明确选择的可用模型')); return false; }
       next = await selectReplacement(target, currentLabel(source, selected), candidates);
