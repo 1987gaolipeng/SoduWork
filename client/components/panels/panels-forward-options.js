@@ -526,7 +526,7 @@ function _fwdSetBusy(on, label) {
   const button = document.getElementById('fwdConfirm');
   if (!button) return;
   const controls = document.getElementById('fwdPop')?.querySelectorAll(
-    '#fwdPluginSelect,#fwdAgentSelect,#fwdRepoSel,#fwdModel,#fwdSubmissionMode,#fwdNote,[data-fwp-model],[data-fwp-kind],.fwd-tab,[data-fwp-toggle],[data-fwd-recheck],[data-material-add],.rq-session-controls') || [];
+    '#fwdPluginSelect,#fwdAgentSelect,#fwdRepoSel,#fwdModel,#fwdSubmissionMode,#fwdNote,#fwdPreviewInputs,[data-fwp-model],[data-fwp-kind],.fwd-tab,[data-fwp-toggle],[data-fwd-recheck],[data-material-add],.rq-session-controls') || [];
   controls.forEach(control => {
     if (on) {
       if (control.dataset.fwdWasDisabled == null) control.dataset.fwdWasDisabled = control.disabled ? '1' : '0';
