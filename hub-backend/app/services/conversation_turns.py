@@ -4,8 +4,13 @@ This is not a second job scheduler. The task row lock prevents duplicate work,
 and the native conversation queue owns the order of sends.
 """
 import hashlib
+import logging
+
 from fastapi import HTTPException
-from . import task_status, task_events
+from starlette.datastructures import UploadFile
+
+from ..config import get_settings
+from . import task_events, task_status
 from .task_access import publish_owner
 
 ACTIVE = {"queued", "running", "waiting"}
@@ -156,6 +161,27 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
     requesting review. Deduplicate filenames within a turn and create new versions across rework
     turns, respecting the receipt state machine.
     """
+    from . import storage
+
+    written = []
+    try:
+        return await _ingest_artifacts(
+            session, task, conversation_id=conversation_id, turn_id=turn_id, provider=provider,
+            files=files, categories=categories, declared_paths=declared_paths,
+            replacements=replacements, outcome=outcome, written=written)
+    except BaseException:
+        if written:
+            try:
+                await session.rollback()
+                # A commit can have succeeded before a later notification failed.
+                await storage.delete_unreferenced_objects(session, written)
+            except Exception as error:
+                logging.getLogger("uvicorn.error").warning("交付存储清理失败：%s", type(error).__name__)
+        raise
+
+
+async def _ingest_artifacts(session, task, *, conversation_id, turn_id, provider, files,
+                            categories, declared_paths, replacements, outcome, written):
     from datetime import datetime, timezone
     import uuid as _uuid
 
@@ -220,10 +246,19 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
     evidence: set[str] = set()
     ignored: set[str] = set()
     invalid: list[dict] = []
-    for name, data, ctype in files:
+    for name, source, ctype in files:
         fn = delivery_manifest.normalize_name(name)
         if not fn or fn in received:
             continue
+        # HTTP uploads have passed the streaming limits and are backed by
+        # Starlette's spool. Materialize only the current file for validation.
+        if isinstance(source, UploadFile):
+            limit = get_settings().attach_max_mb * 1024 * 1024
+            data = await source.read(limit + 1)
+            if len(data) > limit:
+                raise HTTPException(413, "交付文件超过上传大小上限")
+        else:
+            data = source
         declared = (categories or {}).get(name)
         category = delivery_manifest.classify_name(fn, role="output", meta={"category": declared})
         verification = delivery_manifest.validate_bytes(fn, data, ctype, category=category)
@@ -258,9 +293,12 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
             ignored.add(fn)
             valid.add(fn)
         key = f"ai/{task.id}/{_uuid.uuid4().hex[:8]}-{fn}"
+        # The store may write the object before reporting an I/O error.
+        written.append((key, storage.backend_name()))
+        backend = storage.put(key, data, ctype)
         session.add(Attachment(
             task_id=task.id, filename=fn, content_type=ctype, size=len(data),
-            storage_key=key, backend=storage.put(key, data, ctype), uploaded_by=who,
+            storage_key=key, backend=backend, uploaded_by=who,
             role=role, source_ref=ref,
             evidence_meta={"provider": provider or "conversation",
                            "sha256": hashlib.sha256(data).hexdigest(),
@@ -272,6 +310,7 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
             created_at=datetime.now(timezone.utc)))
         got.append(fn)
         received.add(fn)
+        del data
     if not got:
         return {"ok": True, "already": True, "files": [],
                 "submissionMode": submission_mode,

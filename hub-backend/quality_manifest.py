@@ -33,6 +33,7 @@ RELEASE_SMOKES = tuple(sorted((
     "test_cloud_sync_notifications.py",
     "test_client_domain_events.py",
     "test_client_push_compat.py",
+    "test_remote_screen_protocol.py",
     "test_stability_review.py",
     "test_stability_followup.py",
     "test_cloud_durability_migration.py",
@@ -85,6 +86,7 @@ RELEASE_SMOKES = tuple(sorted((
     # one aggregate process that exceeds the same 300-second deadline.
     "test_requirement_review_access.py",
     "test_local_requirement_delivery.py",
+    "test_conversation_upload_limits.py",
     "test_requirement_creator_migration.py",
     "test_task_text_migration.py",
     "test_requirement_maintenance.py",
