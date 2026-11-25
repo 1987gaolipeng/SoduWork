@@ -65,18 +65,28 @@ def command_argv(exe: str, args: list, ws: str, cfg: dict) -> list:
     return acp_agents.command_argv("codex", adapter_bin(), args, ws, cfg)
 
 
-def prepare_env(env: dict, cfg: dict, native_bin: str) -> None:
+def prepare_env(env: dict, cfg: dict, native_bin: str, *, runtime_root: str = "") -> None:
     from . import codex_account_home, local_base
-    private_account = os.path.normcase(os.path.abspath(str(env.get("CODEX_HOME") or ""))) == \
-        os.path.normcase(codex_account_home.account_home(local_base._data_root()))
+    root = runtime_root or local_base._data_root()
+    home = str(env.get("CODEX_HOME") or "")
+    private_account = os.path.normcase(os.path.abspath(home)) in {
+        os.path.normcase(codex_account_home.account_home(root)),
+        os.path.normcase(codex_account_home.connected_home(root)),
+    }
+    for key in list(env):
+        if key != key.upper() and key.upper() in {"CODEX_HOME", "CODEX_SQLITE_HOME", "TMPDIR", "TEMP", "TMP"}:
+            del env[key]
+    if home:
+        env["CODEX_SQLITE_HOME"] = home
     if private_account:
         # Account ownership applies to native exec as well as ACP, after plugin
         # environment mappings have been resolved by the host.
-        for key in ("OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN",
-                    "DEFAULT_AUTH_REQUEST", "CODEX_CONFIG", "MODEL_PROVIDER",
-                    "OPENAI_BASE_URL", "OPENAI_MODEL", "SODUWORK_LLM_KEY"):
-            env.pop(key, None)
-        env["CODEX_SQLITE_HOME"] = env["CODEX_HOME"]
+        restricted = {"OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN",
+                      "DEFAULT_AUTH_REQUEST", "CODEX_CONFIG", "MODEL_PROVIDER",
+                      "OPENAI_BASE_URL", "OPENAI_MODEL", "SODUWORK_LLM_KEY"}
+        for key in list(env):
+            if key.upper() in restricted:
+                del env[key]
     if cfg.get(TRANSPORT_KEY) != TRANSPORT:
         return
     if not native_bin:

@@ -12,7 +12,7 @@ const MAX_BYTES = 96 * 1024 * 1024;
 const MAX_TRANSCRIPT = 2 * 1024 * 1024;
 const MAX_DEPTH = 32;
 const SKIP_DIRS = new Set(['.git', '.svn', '.hg', 'node_modules', '.venv', 'venv', '__pycache__',
-  '.ssh', '.aws', '.azure', '.config', '.soduwork', '.pi', '.codex', '.claude', '.opencode', 'soduworklibrary']);
+  '.ssh', '.aws', '.azure', '.config', '.soduwork', '.soduwork-inputs', '.pi', '.codex', '.claude', '.opencode', 'soduworklibrary']);
 const SECRET_FILE = /^(?:\.env(?:\..*)?|\.npmrc|\.pypirc|credentials(?:\..*)?|id_(?:rsa|dsa|ecdsa|ed25519)(?:\..*)?)$|\.(?:pem|p12|pfx|key)$/i;
 const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 

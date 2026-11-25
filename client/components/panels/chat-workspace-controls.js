@@ -61,6 +61,7 @@ function matchesInput(file, input) {
   }
 
 function fileChangeFor(file) {
+    if (file?.archivedReadOnly) return null;
     if (!file || file.readSnapshot) return null;
     if (file.change && typeof file.change === 'object') return file.change;
     const changes = ctx.WB.fileChanges && Array.isArray(ctx.WB.fileChanges.files) ? ctx.WB.fileChanges.files : [];
@@ -144,7 +145,7 @@ function restoreFileView(tab) {
   }
 
 function canEditFile(file) {
-    return Boolean(file && !ctx.WB?.historyPreview && !file.readSnapshot && !file.taskId && (file.path || file.relative));
+    return Boolean(file && !ctx.WB?.historyPreview && !file.archivedReadOnly && !file.readSnapshot && !file.taskId && (file.path || file.relative));
   }
 
 function isCodeFile(file) {

@@ -8,10 +8,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
+const { needsBackup } = require('./device-artifact-archive.cjs');
 
 const METHODS = ['register', 'join', 'importChunk', 'importPlan', 'importPage', 'sealImport', 'discardImport', 'get', 'sourceCopies', 'nativeRows', 'list', 'catalog', 'page', 'directory', 'lifecycleRows', 'remoteLifecycleRows', 'lifecycle', 'cache', 'messages', 'changes', 'ack', 'workspace', 'close'];
 const REMOTE_LIFECYCLE = "deleted=0 AND revision>0 AND json_extract(data,'$.cached')=1 AND coalesce(json_extract(data,'$.taskId'),'')<>''";
-METHODS.push('saveDeviceHistory', 'deviceHistory', 'deviceHistoryVersion', 'saveConversationTranscript', 'conversationTranscript');
+METHODS.push('archiveUpgradePage', 'markArchiveReviewed', 'saveDeviceHistory', 'deviceHistory', 'deviceHistoryVersion', 'saveConversationTranscript', 'conversationTranscript');
 function key(value) {
   if (typeof value !== 'string' || !value.trim() || value.length > 512 || /[\x00-\x1f]/.test(value))
     throw Error('Invalid local conversation identity');
@@ -55,6 +56,7 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
         data TEXT NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(replica,position));
       CREATE TABLE IF NOT EXISTS conversation_transcript(replica TEXT NOT NULL REFERENCES replicas(id),position INTEGER NOT NULL,
         data TEXT NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(replica,position));
+      CREATE TABLE IF NOT EXISTS artifact_archive_review(replica TEXT PRIMARY KEY REFERENCES replicas(id), digest TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS device_history(replica TEXT PRIMARY KEY REFERENCES replicas(id),
         data TEXT NOT NULL,digest TEXT NOT NULL,updated INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS import_chunks(replica TEXT NOT NULL,digest TEXT NOT NULL,offset INTEGER NOT NULL,
@@ -68,6 +70,18 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
       CREATE INDEX IF NOT EXISTS operations_pending ON operations(acked,revision);
       PRAGMA user_version=1;`);
     db.prepare("INSERT OR IGNORE INTO metadata VALUES('workspace',?)").run(crypto.randomUUID());
+    // A copied database keeps its digests, but its archived files may have new
+    // identities. Recheck them through the normal account-scoped history list.
+    if (file && file !== ':memory:') {
+      const stat = fs.statSync(file, { bigint: true });
+      const location = crypto.createHash('sha256').update(JSON.stringify([
+        fs.realpathSync(file), String(stat.dev), String(stat.ino),
+      ])).digest('hex');
+      if (!stat.ino || db.prepare("SELECT value FROM metadata WHERE key='archive_review_location'").get()?.value !== location) {
+        db.exec('DELETE FROM artifact_archive_review');
+        db.prepare("INSERT OR REPLACE INTO metadata VALUES('archive_review_location',?)").run(location);
+      }
+    }
   });
   // Joined segment rows retire under the public identity. Delete their text
   // with the public conversation without treating a segment as its full prefix.
@@ -439,6 +453,7 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
           .run(action === 'archive' ? 1 : 0, action === 'delete' ? 1 : 0, Number(receipt.lastInsertRowid), Number(receipt.lastInsertRowid), row.id);
         if (action === 'delete') {
           db.prepare('DELETE FROM messages WHERE replica=?').run(row.id);
+          db.prepare('DELETE FROM artifact_archive_review WHERE replica=?').run(row.id);
           db.prepare('DELETE FROM device_history WHERE replica=?').run(row.id);
           deleteTranscript.run(row.id, row.id);
         }
@@ -461,6 +476,19 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
         return { ok: true, conversation: project(resolve(row.id)) };
       });
     },
+    archiveUpgradePage(after = '') {
+      // Page metadata before opening any body. An older desktop can write
+      // back to this database: a new digest makes that replica eligible again.
+      const rows = db.prepare(`SELECT r.* FROM device_history AS h JOIN replicas AS r ON r.id=h.replica
+        LEFT JOIN artifact_archive_review AS v ON v.replica=h.replica
+        WHERE r.deleted=0 AND h.replica>? AND (v.digest IS NULL OR v.digest<>h.digest)
+        ORDER BY h.replica LIMIT 16`).all(after);
+      return projectPage(rows);
+    },
+    markArchiveReviewed(id, digest) {
+      db.prepare(`INSERT INTO artifact_archive_review(replica,digest) SELECT replica,digest FROM device_history
+        WHERE replica=? AND digest=? ON CONFLICT(replica) DO UPDATE SET digest=excluded.digest`).run(key(id), digest);
+    },
     saveDeviceHistory(id, value, { expectedRevision, expectedTransferId, expectedHistoryDigest } = {}) {
       const data = JSON.stringify(value);
       if (!value || !Array.isArray(value.snapshot?.messages) || !Array.isArray(value.snapshot?.tools) ||
@@ -477,6 +505,8 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
         db.prepare(`INSERT INTO device_history VALUES(?,?,?,?) ON CONFLICT(replica)
           DO UPDATE SET data=excluded.data,digest=excluded.digest,updated=excluded.updated
           WHERE device_history.digest<>excluded.digest`).run(row.id, data, digest, Date.now());
+        if (!needsBackup(value.localArtifactHistory))
+          this.markArchiveReviewed(row.id, digest);
         return { ok: true, digest };
       });
     },

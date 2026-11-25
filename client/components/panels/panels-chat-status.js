@@ -489,6 +489,9 @@
           current.snap?.localReplica && !current.snap.execution?.canContinueOnDevice)
         return '<div data-chat-node="runtime-status" class="nstatus show"><span class="nstatus-copy">' +
           escape(tx(current.snap.historyRecovery?.reason || '这条历史当前仅可查看')) + '</span></div>';
+      if (!busy && current.snap?.artifactBackupIncomplete)
+        return '<div data-chat-node="runtime-status" class="nstatus show"><span class="nstatus-copy">' +
+          escape(tx('部分成果尚未保存到会话档案，请保留原工作目录')) + '</span></div>';
       if (!current.pending && waiting(current.snap)) return '<div data-chat-node="runtime-status" class="nstatus show">' +
         '<span class="nstatus-copy">' + escape(work(current.snap, '', current.ref)) + '</span></div>';
       return '<div data-chat-node="runtime-status" class="nstatus' + (busy ? ' show' : '') + '">' +

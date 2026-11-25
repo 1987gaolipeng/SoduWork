@@ -136,9 +136,12 @@ class CodexLoginRouteTests(unittest.IsolatedAsyncioTestCase):
             rejected = await runner_main.Runner._agent(instance, {"op": "agent.install", "key": "codex-harness", "action": "login"})
             self.assertFalse(rejected["ok"])
             start.assert_not_called()
-            accepted = await runner_main.Runner._agent(instance, {"op": "agent.install", "key": "codex", "action": "login"})
-            self.assertTrue(accepted["ok"])
-            start.assert_called_once_with("codex", "login", owner_id="")
+            for action in ("login", "login-reuse", "login-isolated"):
+                start.reset_mock()
+                accepted = await runner_main.Runner._agent(instance, {"op": "agent.install", "key": "codex",
+                    "action": action, "ownerId": "fixture-device"})
+                self.assertTrue(accepted["ok"])
+                start.assert_called_once_with("codex", action, owner_id="fixture-device")
 
     async def test_local_polling_rejects_other_clients_login(self):
         with patch.dict(agent_setup._JOBS, {"secret-job": {"id": "secret-job", "key": "codex",

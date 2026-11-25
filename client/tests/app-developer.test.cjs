@@ -250,9 +250,8 @@ test('app discriminator rejects missing, external-only or credentialed pages and
 test('scaffolding never overwrites an existing directory, declares actual resources and never claims runtime testing', t => {
   const f = fixture(t), result = build(f);
   assert.equal(result.installed, false); assert.equal(result.runtimeTested, false);
-  const manifest = require('../main/conversation/delivery-contract').readManifest(f.out);
-  assert.equal(manifest.invalid, undefined);
-  assert.equal(manifest.deliverables[0].path, 'soduwork-plugin-draft.json');
+  assert.equal(result.draft, path.join(f.out, drafts.DRAFT_NAME));
+  assert.equal(fs.existsSync(path.join(f.out, '.soduwork')), false);
   assert.throws(() => build(f), /已经存在/);
   assert.equal(collected(f).body.resources.length, 3);
   fs.unlinkSync(path.join(f.out, 'ui/app.js'));

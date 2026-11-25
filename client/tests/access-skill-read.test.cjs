@@ -116,7 +116,7 @@ test('real Pi SDK reads a loaded external skill without a popup; unsafe calls an
   assert.doesNotMatch(JSON.stringify(runtime.session.messages), /PRIVATE_CREDENTIAL/);
   const bundle = require('../main/plugin-resources').materialize([
     { path: 'references/SKILL.md', kind: 'reference', encoding: 'utf8', content: 'CURRENT_PLUGIN_GUIDE' },
-  ], f.work, 'active-plugin');
+  ], f.root, 'active-plugin');
   extraScope = scopes.create([bundle.directory]);
   await runtime.send('read', { path: path.join(bundle.directory, 'references/SKILL.md') });
   assert.equal(requests.length, 4);

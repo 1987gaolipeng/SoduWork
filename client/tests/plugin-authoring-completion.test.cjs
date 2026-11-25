@@ -3,6 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const gate = require('../main/pi-session/plugin-generation-gate.cjs');
 const outputs = require('../main/pi-session/outputs');
+const delivery = require('../main/conversation/delivery-contract');
 const cache = require('../main/app-resource-cache.cjs');
 const body = { template: 'method', key: 'ideas', name: 'Ideas', version: '1.0.0',
   description: 'Collect ideas', instructions: 'Collect ideas and produce an HTML report.' };
@@ -11,10 +12,19 @@ function fixture(t) {
   t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
   const file = path.join(cwd, 'soduwork-plugin-draft.json');
   const manifest = path.join(cwd, '.soduwork/delivery.json');
+  let reply;
   const handle = { cwd, sessionId: 'synthetic', deliveryOwner: { account: 'fixture' },
-    outputSnapshot: () => outputs.scan(cwd, 0, 0) };
+    outputSnapshot() {
+      const observed = outputs.scan(cwd, 0, Date.now() - 5000);
+      return reply ? delivery.fromReply(cwd, reply, observed) : observed;
+    } };
   const report = (source = 'manifest', presentation = 'artifacts') => {
     fs.writeFileSync(path.join(cwd, 'report.html'), '<!doctype html><h1>Ideas</h1>');
+    if (source === 'conversation') {
+      reply = { messages: [{ role: 'user', text: 'Build a plugin' },
+        { role: 'assistant', text: '[Preview](report.html)' }] };
+      assert.equal(handle.outputSnapshot().delivery.source, 'conversation');
+    }
     if (source === 'manifest') {
       fs.mkdirSync(path.dirname(manifest), { recursive: true });
       fs.writeFileSync(manifest, JSON.stringify({ schemaVersion: 1, presentation,
@@ -25,7 +35,7 @@ function fixture(t) {
     begin: options => gate.begin({ handle, selectedPluginIds: ['local:plugin-builder'], ...options }) };
 }
 test.after(() => cache.close());
-for (const source of ['manifest', 'inferred']) test(source + ' HTML authoring completion creates and validates the missing package in the same turn', async t => {
+for (const source of ['manifest', 'inferred', 'conversation']) test(source + ' HTML authoring completion creates and validates the missing package in the same turn', async t => {
   const f = fixture(t); let calls = 0;
   const turn = await f.begin({ repair: async (prompt, options) => {
     calls++; assert.match(prompt, /Create soduwork-plugin-draft.json/);
@@ -70,7 +80,7 @@ test('inferred HTML in a source workspace cannot replace the final plugin packag
   assert.equal((await turn.finish({ ok: true })).ok, true);
   assert.equal(calls, 1);
 });
-for (const source of ['manifest', 'inferred']) test(source + ' missing package repair stays bounded when the model deletes its completion evidence', async t => {
+for (const source of ['manifest', 'inferred', 'conversation']) test(source + ' missing package repair stays bounded when the model deletes its completion evidence', async t => {
   const f = fixture(t); let calls = 0;
   const turn = await f.begin({ repair: async () => {
     calls++; fs.rmSync(source === 'manifest' ? f.manifest : path.join(f.cwd, 'report.html'), { force: true }); return { ok: true };
@@ -101,7 +111,7 @@ for (const scenario of ['ordinary', 'cleared-selection', 'inferred-non-html', 's
     assert.equal(calls, 0);
   });
 }
-for (const source of ['manifest', 'inferred']) for (const result of [{ ok: true, cancelled: true }, { ok: false, failureKind: 'model-request' }, { ok: true, paused: true }]) {
+for (const source of ['manifest', 'inferred', 'conversation']) for (const result of [{ ok: true, cancelled: true }, { ok: false, failureKind: 'model-request' }, { ok: true, paused: true }]) {
   test('non-completed model result does not repair a missing package: ' + JSON.stringify(result), async t => {
     const f = fixture(t); let calls = 0;
     const turn = await f.begin({ repair: async () => { calls++; } });

@@ -319,14 +319,14 @@ function verify(options) {
   ));
 
   if (requiresDelivery) {
-    const manifestPass = Boolean(manifest && !manifest.invalid &&
-      classified.source === 'manifest');
+    const manifestPass = classified.source === 'conversation' && classified.items.length > 0 ||
+      Boolean(manifest && !manifest.invalid && classified.source === 'manifest');
     checks.push(check(
       'delivery_manifest',
       '\u53ef\u6838\u9a8c\u4ea4\u4ed8\u6e05\u5355',
       manifestPass,
-      manifest && manifest.invalid ? manifest.reason : '\u7f3a\u5c11 .soduwork/delivery.json',
-      '\u521b\u5efa\u4ea4\u4ed8\u6e05\u5355\uff0c\u53ea\u767b\u8bb0\u53ef\u76f4\u63a5\u4f7f\u7528\u7684\u6700\u7ec8\u6210\u679c',
+      manifest && manifest.invalid ? manifest.reason : '缺少经工作区核验的交付链接',
+      '在最终答复中链接本轮生成且可直接使用的成品',
     ));
     checks.push(check(
       'deliverables',

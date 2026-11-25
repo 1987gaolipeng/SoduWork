@@ -36,10 +36,7 @@ function instructions() {
         outputs: [], config: { summary: '对照计划与交付文件验收本次结果' } },
       { key: 'complete', type: 'publish', name: '完成', dependsOn: ['accept'], inputs: [], outputs: [], config: {} },
     ] } }),
-    '交付清单示例（写入 .soduwork/delivery.json，与草稿分开；deliverables 是数组，primary 属于数组元素）：' + JSON.stringify({
-      schemaVersion: 1, summary: '插件草稿已生成，可检查并安装',
-      deliverables: [{ path: 'soduwork-plugin-draft.json', kind: 'file', title: '可安装插件草稿', primary: true }],
-    }),
+    '最终回复示例：[可安装插件草稿](soduwork-plugin-draft.json)。在子目录生成时，链接需包含实际子目录。',
     '安装个人工作流后，在普通对话中选择该插件并发送，会真实逐节点调度所选底座，人工节点等待用户确认；也可使用 /调试插件 或“逐节点调试”检查。不要把整段工作流交给一个 Agent 模拟，或把本机协作办结说成已通过企业审批、上架。',
   ].map(line => line.startsWith('安装个人工作流')
     ? '安装后在对话中选择插件，逐节点执行并等待人工确认；可用 /调试插件 检查。'

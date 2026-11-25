@@ -681,7 +681,7 @@ function _agBodyHtml(a, s, ak) {
 }
 
 function _agJobHtml(job) {
-  if (job.action === 'login' || job.action === 'login-isolated') return '<div class="ag-cfg"><b>Codex 账号</b><span>请在授权窗口中查看登录进度。</span></div>';
+  if (['login', 'login-reuse', 'login-isolated'].includes(job.action)) return '<div class="ag-cfg"><b>Codex 账号</b><span>请在授权窗口中查看登录进度。</span></div>';
   const running = job.state === 'running';
   const title = { install: '正在安装', repair: '正在修复安装', update: '正在安装', uninstall: '正在卸载',
                   check: '正在查版本', probe: '正在测', login: '等待官方登录授权' }[job.action] || '正在跑';

@@ -210,7 +210,8 @@ async send(text, turnAttachments, sendOptions) {
         : ctx.acc.state.tools.length;
       const profile = goalQuality.deliveryProfile(ctx.goal);
       const evidenceNow = async () => {
-        const outputSnapshot = await require('./outputs').scanAsync(ctx.effectiveCwd, ctx.run.startedAt, ctx.run.startedAt);
+        const scanned = await require('./outputs').scanAsync(ctx.effectiveCwd, ctx.run.startedAt, ctx.run.startedAt);
+        const outputSnapshot = require('../conversation/delivery-contract').fromReply(ctx.effectiveCwd, ctx.acc.state, scanned);
         // Scanning yields to stop/pause and goal-disable actions. Let the
         // existing catch path preserve their receipts before changing audit state.
         if (interrupted() || ctx.closed || ctx.goalCancelled || ctx.run.stopReason || ctx.acc.status() !== 'idle')

@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from .local_base import (_CTX_WINDOW_DEFAULT, _LOCK, _PROFILES, _RUNS, _STORE,  # noqa: F401
                          _cfg_profile, _data_root, _env_for, _workspace_root,
                          _opencode_bin)
-from .local_base import (_load_baseline, _read_events, _record_event, _save_baseline, _save_meta,  # noqa: F401
+from .local_base import (HistoryWriteError, _load_baseline, _read_events, _record_event, _save_baseline, _save_meta,  # noqa: F401
                          _pid_alive, _store_dir, raw_tail_sync, reclaim,
                          _friendly, ctx_pct)
 from .local_stream import _kill_tree, _spawn, _window_for  # noqa: F401
@@ -781,15 +781,24 @@ def _dispatch_sync_once(cfg: dict, t, files: list | None = None,
     from .runtime_messages import epoch_ms
     conversation_text = str(ctx.get("conversationUserText") or "").strip()
     if conversation_text:
-        _record_event(sid, {
-            "kind": "user", "tool": "", "text": conversation_text[:20000],
-            "full": conversation_text[:50000],
-            "sentAt": epoch_ms(ctx.get("conversationSentAt")) or int(time.time() * 1000),
-            "plugins": conversation_plugins.badges(ctx.get("conversationPlugins")),
-            "attachments": [{"name": str(item.get("name") or ""),
-                             "path": str(item.get("path") or "")}
-                            for item in staged],
-        })
+        try:
+            recorded = _record_event(sid, {
+                "kind": "user", "tool": "", "text": conversation_text[:20000],
+                "full": conversation_text[:50000],
+                "sentAt": epoch_ms(ctx.get("conversationSentAt")) or int(time.time() * 1000),
+                "plugins": conversation_plugins.badges(ctx.get("conversationPlugins")),
+                "attachments": [{"name": str(item.get("name") or ""),
+                                 "path": str(item.get("path") or "")}
+                                for item in staged],
+            })
+            if recorded is None:
+                return {"ok": False, "error": "会话已关闭，未保存本轮消息"}
+        except HistoryWriteError as exc:
+            # No executable was launched. Release the dispatch ID for a safe retry.
+            with _LOCK:
+                _RUNS.pop(sid, None)
+            return {"ok": False, "error": str(exc)}
+
 
     _save_baseline(sid, seen)
     _save_meta(sid)

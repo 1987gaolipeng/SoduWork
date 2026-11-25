@@ -126,17 +126,23 @@ def _no_links(root, target):
             raise ValueError('插件资源不能经过链接或联接点')
 
 
-def materialize(raw, work_root, key):
+def materialize(raw, work_root, key, *, cache_scope=None):
     items = normalize(raw)
     if not items:
         return {'items': [], 'directory': '', 'digest': '', 'rescued': [], 'backups': []}
     if not re.fullmatch(r'[a-z][a-z0-9-]{1,62}', key):
         raise ValueError('插件标识不合法')
-    root = Path(os.path.abspath(work_root))
-    if not root.is_dir():
+    workspace = Path(work_root).resolve()
+    if not workspace.is_dir():
         raise ValueError('当前会话工作目录不可用')
+    if cache_scope is None:
+        cache_scope = hashlib.sha256(os.fsencode(workspace)).hexdigest()
+    if not isinstance(cache_scope, str) or not re.fullmatch('[a-f0-9]{64}', cache_scope):
+        raise ValueError('插件资源缓存标识无效')
+    from .local_base import _data_root
+    root = Path(_data_root())
     fingerprint = digest(items)
-    directory = root / '.soduwork' / 'plugins' / key / fingerprint
+    directory = root / 'plugin-resource-cache' / cache_scope / key / fingerprint
     # Reject an unsafe path before any directory creation, backup, or restoration.
     for item in items:
         file = directory.joinpath(*item['path'].split('/'))

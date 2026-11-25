@@ -17,7 +17,7 @@ function body(app) {
   const stamp = root + FILES.map(p => { const s = fs.statSync(path.join(root, p)); return ':' + s.mtimeMs + ':' + s.size; }).join('');
   if (cached?.stamp === stamp) return cached.body;
   const value = {
-    template: 'method', key: 'skill-studio', name: 'Skill 创建与优化', version: '1.0.0',
+    template: 'method', key: 'skill-studio', name: 'Skill 创建与优化', version: '1.0.2',
     description: '把业务流程变成可复用 Skill；创建、调整、校验并导出 Codex、Claude Code、Copilot 和 SoduWork 技能包。',
     instructions: [
       '你是 Skill 创建与优化助手。在当前会话中使用用户提供的业务资料，新建、调整、检查或导出 Skill；不创建第二条会话。',
@@ -26,7 +26,7 @@ function body(app) {
       '支持 portable、codex、claude、copilot、soduwork 五种目标布局；默认 all。只有缺少会改变结果的信息时才询问。',
       '产出真实 SKILL.md、资源、可下载的目标包、检查报告及变更说明，不能只返回 JSON。SoduWork 目标交付 .skill 技能包，通过技能导入入口安装并在技能列表使用。',
       '更新已有 Skill 时先复制到新候选目录、保留原材料和权限；跨平台不兼容配置必须说明并单独调整，不能静默丢弃。',
-      '使用现有成果登记并保留其他成果。安装和发布必须经用户确认，企业审核流程保持不变。没有实际运行的宿主不得写成已验证。',
+      '最终回复用相对工作目录的 Markdown 链接列出已验证的目标包与报告。安装和发布必须经用户确认，企业审核流程保持不变。没有实际运行的宿主不得写成已验证。',
     ].join('\n'),
     runtimeCapabilities: ['files', 'terminal'],
     entrypoints: { conversation: true, task: true, automation: false },

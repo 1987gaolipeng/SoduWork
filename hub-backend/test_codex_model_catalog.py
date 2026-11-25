@@ -8,15 +8,16 @@ import time
 import unittest
 from unittest.mock import patch
 
-from app.services import agent_setup, codex_account_models, codex_model_catalog as catalog
+from app.services import agent_setup, codex_account_home, codex_account_models, codex_model_catalog as catalog
 
 
 class CodexModelCatalogTests(unittest.TestCase):
     def test_cold_refresh_reads_account_receipt_and_excludes_static_candidates(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
-            home = root / "source"
-            home.mkdir()
+            terminal = root / "source"
+            terminal.mkdir()
+            home = Path(codex_account_home.connected_home(str(root), create=True))
             cache = home / "models_cache.json"
             probe_dirs = []
             account_row = {"slug": "account-model", "display_name": "Account model", "visibility": "list",
@@ -43,7 +44,7 @@ class CodexModelCatalogTests(unittest.TestCase):
 
             with patch.object(agent_setup, "_bin_of", return_value="selected-codex.exe"), \
                     patch.object(catalog, "_run", side_effect=native), \
-                    patch.dict(os.environ, CODEX_HOME=str(home), OPENAI_API_KEY="unused", NODE_OPTIONS="unused"):
+                    patch.dict(os.environ, CODEX_HOME=str(terminal), OPENAI_API_KEY="unused", NODE_OPTIONS="unused"):
                 for previous in (None, {"client_version": "0.142.5", "models": [{"slug": "old-model"}]}):
                     if previous:
                         cache.write_text(json.dumps(previous))
@@ -54,7 +55,8 @@ class CodexModelCatalogTests(unittest.TestCase):
                     self.assertEqual(result["models"], [{"id": "account-model", "label": "Account model",
                                      "reasoningLevels": ["high"], "defaultReasoning": "high"}])
                 self.assertTrue(all(not path.exists() for path in probe_dirs))
-                self.assertFalse((root / "agents").exists())
+                self.assertFalse((root / "agents/codex").exists())
+                self.assertEqual(list(terminal.iterdir()), [])
 
     def test_bundled_menu_cannot_validate_another_accounts_cache_or_an_unsupported_command(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -276,7 +278,8 @@ class CodexModelCatalogTests(unittest.TestCase):
 
     def test_cache_replaced_in_the_same_account_directory_discards_pending_result(self):
         with tempfile.TemporaryDirectory() as temp:
-            home = Path(temp).resolve()
+            root = Path(temp).resolve()
+            home = Path(codex_account_home.connected_home(str(root), create=True))
             file = home / "models_cache.json"
             row = {"slug": "previous", "visibility": "list"}
             before = {"client_version": "1", "identity": "previous", "models": [row]}
@@ -288,10 +291,10 @@ class CodexModelCatalogTests(unittest.TestCase):
                 file.write_text(json.dumps({**before, "identity": "different"}))
                 return json.dumps({"models": [row]}).encode()
 
-            with patch.dict(os.environ, CODEX_HOME=str(home)), \
+            with patch.dict(os.environ, CODEX_HOME=str(root / "terminal")), \
                     patch.object(agent_setup, "_bin_of", return_value="selected-codex.exe"), \
                     patch.object(catalog, "_run", side_effect=replace):
-                result = codex_account_models.list_models(str(home))
+                result = codex_account_models.list_models(str(root))
             self.assertTrue(result["retryable"])
             self.assertFalse(result["catalogAvailable"])
             self.assertEqual(result["models"], [])

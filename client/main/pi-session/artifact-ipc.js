@@ -3,6 +3,7 @@
 const path = require('path');
 const fs = require('fs');
 const attachments = require('./attachments');
+const cacheAccess = require('./task-attachment-access.cjs');
 const attachmentContract = require('./attachment-contract');
 const artifactRuntime = require('../conversation/artifact-runtime');
 const shareArchive = require('../conversation/zip-archive');
@@ -12,6 +13,14 @@ const { shell, nativeImage, dialog } = require('electron');
 const imageClipboard = require('../conversation/image-clipboard');
 
 function install({ app, ipcMain, BrowserWindow, session, workDir, resolveSession = async handle => handle }) {
+  async function outputAccess(ref, target) {
+    const original = session.get(ref);
+    if (!original) throw Error('会话不在了');
+    const handle = await resolveSession(original);
+    const access = await cacheAccess.authorize(app, original, ref, target);
+    if (!access && !require('./outputs').inside(handle.cwd, target)) throw Error('这个文件不在这条对话的工作目录里');
+    return { handle, access };
+  }
   require('./tool-detail-ipc').install({ ipcMain, session, BrowserWindow });
   require('../conversation/delivery-package-ipc').install({ ipcMain, session, BrowserWindow, dialog, resolveSession });
 async function _attachmentTarget(handle, ref, token) {
@@ -63,7 +72,7 @@ async function _attachmentImage(handle, ref, token) {
     if (!original) return { ok: false, reason: '会话不在了' };
     try {
       const handle = await resolveSession(original);
-      const { got, delivery, items } = await artifactRuntime.snapshotAsync(handle);
+      const { got, delivery, items } = await artifactRuntime.viewSnapshotAsync(handle);
       if (handle.historyArtifacts) {
         const artifacts = artifactRuntime.decorate(ref, { items });
         const primary = new Set(delivery.items.map(item => item.artifactId));
@@ -147,15 +156,11 @@ async function _attachmentImage(handle, ref, token) {
    * Open outputs with the system application only within this conversation's workspace.
    */
   ipcMain.handle('pi-session-open-output', async (event, ref, target) => {
-    const original = session.get(ref);
-    let s;
-    try { s = original && await resolveSession(original); }
-    catch (error) { return { ok: false, reason: String(error.message || error) }; }
-    if (!s) return { ok: false, reason: '会话不在了' };
-    const outputs = require('./outputs');
-    if (!outputs.inside(s.cwd, target)) return { ok: false, reason: '这个文件不在这条对话的工作目录里' };
-    const err = await shell.openPath(String(target));
-    return err ? { ok: false, reason: err } : { ok: true };
+    try {
+      await outputAccess(ref, target);
+      const err = await shell.openPath(String(target));
+      return err ? { ok: false, reason: err } : { ok: true };
+    } catch (error) { return { ok: false, reason: error.message }; }
   });
 
   /*
@@ -164,13 +169,15 @@ async function _attachmentImage(handle, ref, token) {
    * model-generated pages.
    */
   ipcMain.handle('pi-session-open-in-app', async (event, ref, target) => {
-    const original = session.get(ref);
-    let s;
-    try { s = original && await resolveSession(original); }
-    catch (error) { return { ok: false, reason: String(error.message || error) }; }
-    if (!s) return { ok: false, reason: '会话不在了' };
+    let s, access, preview;
+    try {
+      ({ handle: s, access } = await outputAccess(ref, target));
+      if (access) {
+        preview = await artifactRuntime.previewInput(s, ref, target, access);
+        if (!preview.ok) return preview;
+      }
+    } catch (error) { return { ok: false, reason: error.message }; }
     const outputs = require('./outputs');
-    if (!outputs.inside(s.cwd, target)) return { ok: false, reason: '这个文件不在这条对话的工作目录里' };
     const { BrowserWindow } = require('electron');
     const name = path.basename(String(target));
     const win = new BrowserWindow({
@@ -184,8 +191,9 @@ async function _attachmentImage(handle, ref, token) {
     win.webContents.on('page-title-updated', (e) => { e.preventDefault(); });
     // Validate same-window navigation against workspace boundaries to prevent generated links from reading unrelated local files.
     win.webContents.on('will-navigate', (e, url) => {
+      if (preview && url.startsWith(new URL(preview.url).origin + '/')) return;
       const nav = outputs.navigation(s.cwd, url);
-      if (nav.kind === 'inside') return;
+      if (!preview && nav.kind === 'inside' && !cacheAccess.isPrivate(app, nav.path)) return;
       e.preventDefault();
       if (nav.kind === 'external') shell.openExternal(nav.url).catch(() => {});
     });
@@ -193,11 +201,12 @@ async function _attachmentImage(handle, ref, token) {
     win.webContents.setWindowOpenHandler(({ url }) => {
       const nav = outputs.navigation(s.cwd, url);
       if (nav.kind === 'external') shell.openExternal(nav.url).catch(() => {});
-      else if (nav.kind === 'inside') setImmediate(() => win.loadURL(nav.url));
+      else if (!preview && nav.kind === 'inside' && !cacheAccess.isPrivate(app, nav.path)) setImmediate(() => win.loadURL(nav.url));
       return { action: 'deny' };
     });
     win.once('ready-to-show', () => win.show());
-    win.loadFile(String(target));
+    if (preview) win.loadURL(preview.url);
+    else win.loadFile(String(target));
     return { ok: true };
   });
 
@@ -205,18 +214,20 @@ async function _attachmentImage(handle, ref, token) {
    * Read preview text only from this conversation's workspace with a bounded size.
    */
   ipcMain.handle('pi-session-read-output', async (event, ref, target) => {
-    const original = session.get(ref);
-    let s;
-    try { s = original && await resolveSession(original); }
-    catch (error) { return { ok: false, reason: String(error.message || error) }; }
-    if (!s) return { ok: false, reason: '会话不在了' };
-    const outputs = require('./outputs');
-    if (!outputs.inside(s.cwd, target)) return { ok: false, reason: '这个文件不在这条对话的工作目录里' };
     try {
-      return await readOutputText(target);
-    } catch (e) {
-      return { ok: false, reason: String((e && e.message) || e) };
-    }
+      const { access } = await outputAccess(ref, target);
+      if (!access) return await readOutputText(target);
+      const result = await readOutputText(target, async (file, flags) => {
+        const fd = await fs.promises.open(file, flags | (fs.constants.O_NOFOLLOW || 0));
+        try {
+          if (!access.verify(file, await fd.stat({ bigint: true }))) throw Error('成果文件已变化');
+          return fd;
+        } catch (error) { await fd.close(); throw error; }
+      });
+      await access.authorize();
+      if (!access.verify(target)) throw Error('成果文件已变化');
+      return result;
+    } catch (error) { return { ok: false, reason: error.message }; }
   });
 
   // The native code editor can save only an existing text file inside the
@@ -231,7 +242,7 @@ async function _attachmentImage(handle, ref, token) {
     const outputs = require('./outputs');
     const rawTarget = String(target || '');
     const candidate = path.isAbsolute(rawTarget) ? path.resolve(rawTarget) : path.resolve(s.cwd, rawTarget);
-    if (!outputs.inside(s.cwd, candidate)) return { ok: false, reason: '这个文件不在当前会话工作目录里' };
+    if (cacheAccess.isPrivate(app, candidate) || !outputs.inside(s.cwd, candidate)) return { ok: false, reason: '这个文件不在当前会话工作目录里' };
     const value = String(text == null ? '' : text);
     const CAP = 4 * 1024 * 1024;
     if (Buffer.byteLength(value, 'utf8') > CAP) return { ok: false, reason: '代码文件超过 4 MB，暂不支持在线保存' };
@@ -251,22 +262,24 @@ async function _attachmentImage(handle, ref, token) {
   // check and return only a typed byte payload to the renderer.
   ipcMain.handle('pi-session-read-output-binary', async (event, ref, target) => {
     try {
-      const handle = session.get(ref);
-      return require('../library-output.cjs').readAsync(handle && await resolveSession(handle), target);
+      const original = session.get(ref);
+      const handle = original && await resolveSession(original);
+      const access = await cacheAccess.authorize(app, original, ref, target);
+      if (!access) return await require('../library-output.cjs').readAsync(handle, target);
+      const file = require('../conversation/metadata-snapshot.cjs').read(access.root, target, { maxBytes: require('../library-binary.cjs').MAX_BYTES });
+      await access.authorize();
+      if (!access.verify(target, file.stat)) throw Error('成果文件已变化');
+      return require('../library-output.cjs').payload(target, file.bytes);
     } catch (error) { return { ok: false, reason: String(error.message || error) }; }
   });
 
   /* Reveal the output in the file manager for external editing. */
   ipcMain.handle('pi-session-reveal-output', async (event, ref, target) => {
-    const original = session.get(ref);
-    let s;
-    try { s = original && await resolveSession(original); }
-    catch (error) { return { ok: false, reason: String(error.message || error) }; }
-    if (!s) return { ok: false, reason: '会话不在了' };
-    const outputs = require('./outputs');
-    if (!outputs.inside(s.cwd, target)) return { ok: false, reason: '这个文件不在这条对话的工作目录里' };
-    shell.showItemInFolder(String(target));
-    return { ok: true };
+    try {
+      await outputAccess(ref, target);
+      shell.showItemInFolder(String(target));
+      return { ok: true };
+    } catch (error) { return { ok: false, reason: error.message }; }
   });
 
   /* Offer one Open folder action in the delivery header rather than repeating it for every file. */

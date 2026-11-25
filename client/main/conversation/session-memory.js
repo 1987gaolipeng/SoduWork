@@ -109,8 +109,11 @@ function dimensionSpecs(options = {}, sessionId = '') {
   // It is not an engineering workspace and must not create one permanent
   // memory record per conversation.
   if (cwd && options.workspaceExplicit !== false) {
-    const normalized = cwd.replace(/\\/g, '/').toLowerCase();
-    specs.push({ scope: 'workspace', key: stableKey('workspace', normalized), workspaceKey: stableKey('workspace', normalized) });
+    let normalized;
+    try { normalized = fs.realpathSync(cwd); } catch (_) { normalized = path.resolve(cwd); }
+    if (process.platform === 'win32') normalized = normalized.replace(/\\/g, '/').toLowerCase();
+    const key = stableKey('workspace', normalized);
+    specs.push({ scope: 'workspace', key, workspaceKey: key });
   }
   const project = String(options.sidebarProjectId || options.projectId || '').trim();
   if (project) specs.push({ scope: 'project', key: project, projectKey: project });
@@ -177,7 +180,7 @@ async function context(app, identity, options = {}, requestFn = request) {
         try {
           const importedIds = selected.filter(id => /^[a-f0-9]{32}$/.test(id));
           const imported = importedMemory.context({ app, owner: localOwner, ids: importedIds });
-          const documents = localMemory.contextIds({ app, owner: localOwner, cwd: options.cwd || '', ids: selected.filter(id => !importedIds.includes(id)) });
+          const documents = localMemory.contextIds({ app, owner: localOwner, cwd: options.cwd || '', scopes: specs, ids: selected.filter(id => !importedIds.includes(id)) });
           const selectedContext = { items: [...imported.items, ...documents.items], prompt: [imported.prompt, documents.prompt].filter(Boolean).join('\n\n') };
           if (selectedContext.items.length) {
             legacy = { ids: selected, items: selectedContext.items, prompt: selectedContext.prompt };
@@ -410,12 +413,12 @@ function install({ app, ipcMain, dialog, BrowserWindow, identityOf, requestFn = 
     const scopeName = raw.scope ? dimensionScope(raw.scope) : '';
     if (raw.scope && !scopeName) throw Error('Invalid memory scope');
     if (scopeName === 'session') return { ok: true, items: [], hasMore: false };
-    const result = await local.list({ cwd: raw.cwd || '', scope: scopeName });
+    const result = await local.list({ cwd: raw.cwd || '', scope: scopeName, scopes: dimensionSpecs(raw) });
     const search = String(raw.search || '').trim().toLowerCase();
     if (search) result.items = result.items.filter(row => (row.title + ' ' + row.summary).toLowerCase().includes(search));
     return result;
   });
-  dimensionWrap('get', async (_event, raw) => local.get({ cwd: raw?.cwd || '', id: dimensionId(raw) }));
+  dimensionWrap('get', async (_event, raw) => local.get({ cwd: raw?.cwd || '', id: dimensionId(raw), scopes: dimensionSpecs(raw || {}) }));
   dimensionWrap('create', async (_event, body = {}) => {
     if (body.scope && body.scope !== 'personal') throw Error('Only personal Markdown can be created here');
     return local.create({ title: String(body.title || '').trim(), content: body.content || '' });

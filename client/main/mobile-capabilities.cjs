@@ -80,7 +80,7 @@ function create({ app, identityOf, conversation, pluginStore = plugins, fetchCat
     const shared = pluginStore.service({ app, identityOf, beforeWrite: () => guard(true), validateWrite: checkVersion });
     if (body.operation === 'plugin.prepare') {
       return require('./mobile-plugin-turn.cjs').prepare({ app, pluginStore, shared,
-        args, context: body._turnContext, guard });
+        args, context: body._turnContext, owner: identityKey, guard });
     }
     if (body.operation === 'catalog') {
       const result = { plugins: pluginStore.catalog(app, true).map(display), skills: [], connectors: [], market: [], errors: {} };

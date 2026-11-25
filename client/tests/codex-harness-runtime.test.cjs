@@ -59,6 +59,9 @@ test('Codex Harness sends complete Skill metadata and rejects malformed Skills',
 test('Runner stages byte-only image attachments for non-Pi runtimes', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-runner-byte-attachment-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const cwd = path.join(root, 'selected-project');
+  fs.mkdirSync(cwd);
+  const app = { getPath: name => path.join(root, name) };
   const alias = 'byte-attachment';
   const ref = _uuidV5(NAMESPACE, 'chat:' + alias + ':qwen');
   const calls = [];
@@ -70,13 +73,13 @@ test('Runner stages byte-only image attachments for non-Pi runtimes', async t =>
     } };
     return { ok: true, data: { ok: true } };
   } };
-  const adapter = createRunnerRuntimeAdapter({ runtimeSpec: runtimeCatalog.runtime('qwen'),
+  const adapter = createRunnerRuntimeAdapter({ runtimeSpec: runtimeCatalog.runtime('qwen'), app,
     runnerRuntime: runtime,
     modelConfig: { fetchModel: async () => ({ ok: true, model: {
       id: 'fixture', baseUrl: 'http://fixture.invalid', key: 'secret', input: ['text', 'image'],
     } }) } });
   const session = await adapter.createSession({ runtimeId: 'test', identity: { clientId: 'test' },
-    native: { runner: { openOptions: { ref, cwd: root } } } });
+    native: { runner: { openOptions: { ref, cwd } } } });
   t.after(() => session.dispose());
   const sent = session.send({ text: '分析下', attachments: [{
     name: '人才盘点封面.png', type: 'image/png', size: 4,
@@ -86,6 +89,8 @@ test('Runner stages byte-only image attachments for non-Pi runtimes', async t =>
   const dispatch = calls.find(row => row.op === 'job.dispatch');
   assert.equal(dispatch.payload.localFiles.length, 1);
   assert.equal(dispatch.payload.localFiles[0].contentType, 'image/png');
+  assert.deepEqual(fs.readdirSync(cwd), []);
+  assert.deepEqual(fs.readFileSync(dispatch.payload.localFiles[0].path), Buffer.from([137, 80, 78, 71]));
   assert.ok(path.isAbsolute(dispatch.payload.localFiles[0].path));
   assert.match(dispatch.payload.localFiles[0].path, /\.soduwork-inputs[\\/]/);
   assert.equal(session.snapshot().messages[0].attachments[0].name, '人才盘点封面.png');

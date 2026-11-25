@@ -90,9 +90,10 @@ const server=http.createServer(async(req,res)=>{
     case 'try':{
       const trial=await grant.resolve({app,cwd,pluginIds:[a],identityOf:()=>{throw Error('No network allowed')}});
       const exported=personal.exportDraft(app,a);
-      const bundle=resources.materialize(exported.resources,cwd,exported.key);
-      for(const item of exported.resources)assert.equal(fs.readFileSync(path.join(bundle.directory,item.path)).toString('base64'),item.content);
-      result={count:bundle.items.length,context:trial.items[0].context,hashes:bundle.items};break;
+      const [directory]=trial.readRoots, hashes=resources.summary(exported.resources);
+      assert.equal(fs.existsSync(path.join(cwd,'.soduwork')),false);
+      for(const item of exported.resources)assert.equal(fs.readFileSync(path.join(directory,item.path)).toString('base64'),item.content);
+      result={count:hashes.length,context:trial.items[0].context,hashes};break;
     }
     default:throw Error('No production endpoint in isolated fixture');
    }

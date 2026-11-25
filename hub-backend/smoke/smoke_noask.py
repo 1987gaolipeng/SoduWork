@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Regression checks for public module contracts."""
+import hashlib
 import io
 import json
 import os
@@ -81,9 +82,11 @@ chk("OpenCode 无人值守时禁用反问与重复死循环提示",
     oc_permission.get("question") == "deny" and oc_permission.get("doom_loop") == "deny",
     oc_permission)
 
-expected_temp = os.path.normcase(os.path.join(approved_root, "temp"))
-chk("所有 CLI 的临时文件也留在用户授权工作根",
-    all(os.path.normcase(oc_env.get(k) or "") == expected_temp for k in ("TEMP", "TMP", "TMPDIR")),
+temp_scope = hashlib.sha256(approved_root.encode()).hexdigest()[:32]
+expected_temp = os.path.normcase(os.path.join(os.path.realpath(SMOKE_DATA), "agent-runtimes", "temp", temp_scope))
+chk("OpenCode 临时文件只写入 Runner 专属目录",
+    all(os.path.normcase(oc_env.get(k) or "") == expected_temp for k in ("TEMP", "TMP", "TMPDIR"))
+    and os.path.isdir(expected_temp) and not os.path.exists(os.path.join(approved_root, "temp")),
     {k: oc_env.get(k) for k in ("TEMP", "TMP", "TMPDIR")})
 
 # Test clarification detection and non-question controls.

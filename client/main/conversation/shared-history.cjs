@@ -23,6 +23,8 @@ function cloudCacheSourceId(row, identity) {
 function create({ app, session, workRoot, identityOf = () => require('./requirement-context').cachedIdentity(app), store = require('./replica-store.cjs').createWorker(
   path.join(app.getPath('userData'), 'conversation-replicas', 'history.sqlite')) }) {
   const observed = new Map();
+  const artifactArchive = require('./device-artifact-archive.cjs');
+  void artifactArchive.reclaim(app.getPath('userData')).catch(() => {});
   let closed = false, closing;
   const scoped = require('./history-scope.cjs').create({ app, store, identityOf });
   const ordinaryDeviceChat = row => !row.cached && !row.historyProtection && access.usesDeviceChatContext(app, { chatId: row.id }, row);
@@ -68,6 +70,30 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     for (let i = 0; i < rows.length; i += 200) result.push(...await store.register(rows.slice(i, i + 200), options));
     return result;
   }
+  let upgradeEpoch, upgradeWork;
+  function upgradeStoredReceipts(actor) {
+    if (!actor.readScope || !store.archiveUpgradePage || upgradeEpoch === actor.historyEpoch || closed) return;
+    upgradeEpoch = actor.historyEpoch;
+    const previous = upgradeWork;
+    upgradeWork = (async () => {
+      await previous;
+      let after = '';
+      while (!closed && upgradeEpoch === actor.historyEpoch) {
+        await new Promise(resolve => setImmediate(resolve));
+        scoped.guard(actor);
+        const rows = await store.archiveUpgradePage(after);
+        if (!rows.length) break;
+        for (const row of rows) {
+          if (closed) return;
+          scoped.guard(actor);
+          after = row.id;
+          if (!scoped.readable(row, actor) || !ordinaryDeviceChat(row)) continue;
+          try { await deviceHistory.saved(row.id, { onlyUpgrade: true, verify: () => scoped.guard(actor) }); }
+          catch (_) { /* The next launch or an explicit read retries while source files remain. */ }
+        }
+      }
+    })().catch(() => { if (upgradeEpoch === actor.historyEpoch) upgradeEpoch = undefined; });
+  }
   async function projectRows(rows, archived = false, records) {
     const native = [], discovered = rows.filter(isNative);
     for (let offset = 0; offset < discovered.length; offset += 200) {
@@ -110,6 +136,7 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     }
     registered = repaired;
     registered = registered.filter(Boolean);
+    upgradeStoredReceipts(actor);
     deviceHistory.schedule(registered.filter(row => scoped.readable(row, actor)));
     const byId = new Map();
     for (const row of registered) for (const id of [row.id, ...row.historyAliasIds]) byId.set(id, row);
@@ -150,6 +177,9 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     scoped.guard(captured);
     const result = await store.lifecycle(row.id, action, { account: accountId(captured.identity),
       hub: captured.identity?.hub, device: captured.identity?.clientId }, options);
+    if (result?.ok && action === 'delete' && !row.cached) {
+      await artifactArchive.detach(app.getPath('userData'), row.id);
+    }
     scoped.guard(captured); return result;
   }
   async function deleteCloudCaches(sourceIds) {
@@ -326,6 +356,65 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
       : require('./model-selection').preference(app, nativeId).read());
     return { adapterId, name, label: name, ...historyModel(name) };
   }
+  function artifactGuards(row, content, captured, current) {
+    if (!row || row.deleted || row.cached || !content?.localArtifactHistory || content.historyProtection) return null;
+    const received = require('./device-history.cjs').locallyReceivedArtifacts(row, content);
+    const { imported, digest } = content;
+    function readable(candidate) {
+      if (!received) return !imported && ordinaryDeviceChat(candidate);
+      if (candidate.deviceTransferId !== imported.transferId) return false;
+      access.assertOwner(app, candidate.id, currentActor(captured), candidate);
+      return true;
+    }
+    if (!readable(row)) return null;
+    const guard = () => {
+      current();
+      access.assertDeviceReadable(app, row.id, currentActor(captured), row);
+      if (!readable(row)) throw Error('会话归属已变化，请重新打开成果');
+    };
+    const authorize = async () => {
+      const latest = await resolve(row.id, captured);
+      if (!latest || latest.deleted || latest.cwd !== row.cwd || !readable(latest) ||
+          await store.deviceHistoryVersion(row.id) !== digest)
+        throw Error('会话归属或历史版本已变化，请重新打开成果');
+      if (!received && row.adapterId === 'pi') await require('./device-history-native.cjs').probe({ app, session, row: latest,
+        guard: evidence => {
+          guard();
+          if (!ordinaryDeviceChat(mergeNativeEvidence(latest, evidence))) throw Error('会话归属已变化，请重新打开成果');
+        } });
+      guard();
+      if (!readable(latest)) throw Error('会话归属已变化，请重新打开成果');
+    };
+    return { guard, authorize };
+  }
+  function bindContinuationArtifacts(handle, recovery, current) {
+    if (!recovery?.artifactHistory?.archive?.files?.length) return;
+    const { id, deviceTransferId } = recovery.row, captured = scoped.actor();
+    const receipts = new Map(recovery.artifactHistory.archive.files.map(file => [file.relative, file.sourceStamp]));
+    const same = require('./runtime-artifacts.cjs').same;
+    let digest, reader;
+    require('./artifact-runtime').bindContinuationArchive(handle, async () => {
+      current();
+      scoped.guard(captured);
+      const version = await store.deviceHistoryVersion(id);
+      if (!version) return null;
+      if (digest === version) return reader;
+      const row = await resolve(id, captured), content = await store.deviceHistory(id);
+      if (!row || row.deviceTransferId !== deviceTransferId || content?.digest !== version) return null;
+      const guards = artifactGuards(row, content, captured, current);
+      if (!guards) return null;
+      const records = content.localArtifactHistory;
+      const accepted = rows => (rows || []).filter(row => same(row.stamp, receipts.get(row.metadata.relative)));
+      // Bind only receipts carried across this continuation. A later generation may
+      // move their bytes, but it cannot grant this handle access to additional files.
+      const saved = require('./device-artifact-archive.cjs').projection(app.getPath('userData'), id,
+        { ...records, items: accepted(records.items), resources: accepted(records.resources) });
+      reader = saved?.items.length ? require('./device-history-artifacts.cjs').view(
+        saved.root, saved, guards.guard, guards.authorize) : null;
+      digest = version;
+      return reader;
+    });
+  }
   async function open(id, { historyPreview = false, allowContinuation = false, previewReason = '' } = {}) {
     const captured = scoped.actor(), row = await resolve(id, captured);
     if (!row || row.deleted) return null;
@@ -338,7 +427,10 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     const actor = currentActor(captured);
     const shared = access.assertDeviceReadable(app, row.id, actor, row)?.sharedOnDevice;
     let openingBody = content && !row.cached && !content.historyProtection && !shared ? content : null;
+    const localArtifacts = content?.localArtifactHistory;
     const previewRow = { ...row,
+      ...(localArtifacts && !content.historyProtection &&
+        (localArtifacts.archivePending || localArtifacts.archive?.omitted > 0) ? { artifactBackupIncomplete: true } : {}),
       ...(content ? { deviceHistory: true, historyContentState: !content.coverage?.complete ? 'partial' :
         require('./device-history-native.cjs').unresolvedTools(content.snapshot).length || content.coverage?.unresolvedTools?.length
           ? 'unresolved-tools' : 'available' } : {}),
@@ -358,30 +450,17 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
       const original = view[name];
       view[name] = (...args) => { access.assertDeviceReadable(app, row.id, currentActor(captured), row); return original(...args); };
     }
-    if (historyPreview && content?.localArtifactHistory && !content.imported && !content.historyProtection && ordinaryDeviceChat(row)) {
+    if (historyPreview) {
       let disposed = false;
-      const close = view.close;
-      view.close = async () => { disposed = true; return close(); };
-      const guard = () => {
+      const guards = artifactGuards(row, content, captured, () => {
         if (disposed) throw Error('会话已关闭，请重新打开成果');
-        access.assertDeviceReadable(app, row.id, currentActor(captured), row);
-        if (!ordinaryDeviceChat(row)) throw Error('会话归属已变化，请重新打开成果');
-      };
-      const authorize = async () => {
-        const latest = await resolve(row.id, captured);
-        if (!latest || latest.deleted || latest.cwd !== row.cwd || !ordinaryDeviceChat(latest) ||
-            await store.deviceHistoryVersion(row.id) !== content.digest)
-          throw Error('会话归属或历史版本已变化，请重新打开成果');
-        if (row.adapterId === 'pi') await require('./device-history-native.cjs').probe({ app, session, row: latest,
-          guard: evidence => {
-            guard();
-            if (!ordinaryDeviceChat(mergeNativeEvidence(latest, evidence))) throw Error('会话归属已变化，请重新打开成果');
-          } });
-        guard();
-        if (!ordinaryDeviceChat(latest))
-          throw Error('会话归属已变化，请重新打开成果');
-      };
-      view.historyArtifacts = require('./device-history-artifacts.cjs').view(row.cwd, content.localArtifactHistory, guard, authorize);
+      });
+      if (guards) {
+        const close = view.close;
+        view.close = async () => { disposed = true; return close(); };
+        view.historyArtifacts = require('./device-history-artifacts.cjs').archivedView(
+          app.getPath('userData'), row.id, row.cwd, content.localArtifactHistory, guards.guard, guards.authorize);
+      }
     }
     const load = view.loadHistory;
     view.loadHistory = async (...args) => { scoped.guard(captured); await load(...args); scoped.guard(captured); };
@@ -593,8 +672,8 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     return scoped.directory(after, limit, captured);
   }
   return { resolve, read, open, register, projectRows, lifecycle, deleteCloudCaches, remoteLifecycle, accountDisplayLinks, capture, observe, store, directory, preserveLegacyOutbox,
-    exportPortable: deviceHistory.exportPortable, importPortable: deviceHistory.importPortable,
-    prepareContinuation: deviceHistory.prepareContinuation, backfill: deviceHistory.refresh,
+    transferSources: deviceHistory.transferSources, exportPortable: deviceHistory.exportPortable, importPortable: deviceHistory.importPortable,
+    bindContinuationArtifacts, prepareContinuation: deviceHistory.prepareContinuation, backfill: deviceHistory.refresh,
     captureScope: () => scoped.actor(), guardScope: captured => scoped.guard(captured),
     async indexedRow(id) {
       const captured = scoped.actor(), row = await store.get(id);
@@ -604,6 +683,7 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     async page(options) {
       const captured = scoped.actor(), result = await scoped.page(options, captured);
       scoped.guard(captured);
+      upgradeStoredReceipts(captured);
       return { ...result, chats: result.chats.map(row => {
         const { displayCloudSourceId: ignored, ...entry } = row;
         const source = cloudCacheSourceId(row, captured.identity);
@@ -625,7 +705,7 @@ function create({ app, session, workRoot, identityOf = () => require('./requirem
     close() { return closing ||= (async () => {
       for (const entry of observed.values()) entry.dispose();
       await Promise.all([...observed.values()].map(entry => entry.flush()));
-      closed = true; observed.clear(); await deviceHistory.close(); await store.close();
+      closed = true; observed.clear(); await upgradeWork; await deviceHistory.close(); await store.close();
     })(); } };
 }
 // Source locators permit passive transcript recovery, not lifecycle ownership

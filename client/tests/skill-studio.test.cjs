@@ -61,6 +61,14 @@ test('all targets contain real packages and SoduWork exports a native skill pack
   const native = report.exports.find(row => row.target === 'soduwork');
   assert.match(native.file, /-soduwork\.skill$/);
   assert.equal(native.skillRoot, 'purchase-check/');
+  const observed = require('../main/pi-session/outputs').scan(f.root, 0, Date.now() - 5000);
+  const text = '[Skill](delivery/' + native.file + ')';
+  const reply = { messages: [{ role: 'user', text: 'Build a skill' }, { role: 'assistant', text }] };
+  const snapshot = require('../main/conversation/delivery-contract').fromReply(f.root, reply, observed);
+  assert.equal(snapshot.delivery.source, 'conversation');
+  const cards = await require('../main/pi-session/plugin-draft-candidates').collectAsync(f.root, snapshot);
+  assert.deepEqual(cards.map(card => [card.relative, card.skillPackage]), [['delivery/' + native.file, true]]);
+  assert.equal(fs.existsSync(path.join(f.root, '.soduwork')), false);
   const entries = require('../main/plugin-package-reader.cjs')._readEntries(fs.readFileSync(path.join(f.out, native.file)));
   for (const [name, bytes] of Object.entries(validate(f.source).files)) {
     assert.deepEqual(entries.get(native.skillRoot + name), bytes);

@@ -12,7 +12,7 @@ from pathlib import Path
 from .opencode_runtime_config import OpenCodeEnvironmentError
 from .opencode_session_migration import OpenCodeSessionMigrationError
 
-from .local_base import (_COMPACT_AT, _CTX_WINDOW_DEFAULT, _LOCK, _MEM_LINES, _PROFILES,
+from .local_base import (_COMPACT_AT, _CTX_WINDOW_DEFAULT, _LOCK, _HISTORY_FAILURE, _PROFILES,
                          _RUNS, _WIN, _append_events)
 from .local_base import _env_for, _opencode_bin
 from .local_base import _save_meta, _store_dir
@@ -94,14 +94,11 @@ def _note(ref: str, text: str, kind: str = "sys") -> None:
         if run is None:
             return
         seq = int(run.get("seq") or 0) + 1
-        run["seq"] = seq
         it = {"seq": seq, "kind": kind, "tool": "", "text": text,
               "at": _now_iso(), "seg": run.get("segment", 1)}
         from . import turn_correlation
         turn_correlation.stamp(run, it)
-        run["lines"] = (run.get("lines") or []) + [it]
-        del run["lines"][:-_MEM_LINES]
-    _append_events(ref, [it])
+        _append_events(ref, [it])
 
 
 def _same_execution(ref: str, run: dict, worker) -> bool:
@@ -254,6 +251,8 @@ def prepare_resume(ref: str, text: str, cfg: dict | None, *, recovery: bool = Fa
         run = _RUNS.get(ref)
         if not run:
             return {"ok": False, "error": "这个本地会话已经不在了"}
+        if run.get("failureKind") == _HISTORY_FAILURE:
+            return {"ok": False, "error": run["error"]}
         if run.get('_hostCleanup'):
             return {"ok": False, "error": "The previous execution host is still stopping"}
         if recovery and (run.get("_accessTransition") or {}).get("cancelled"):

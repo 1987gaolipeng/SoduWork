@@ -210,15 +210,15 @@ function _localFiles(items) {
  * must do the same or a non-Pi turn loses the file when its optimistic bubble
  * is replaced by the runtime snapshot.
  */
-async function _prepareRunnerAttachments(items, root) {
+async function _prepareRunnerAttachments(items, cwd, app, ref) {
   const source = Array.isArray(items) ? items : [];
   const pending = source.map((item, index) => ({ item, index }))
     .filter(({ item }) => item && item.data != null &&
       !path.isAbsolute(String(item.path || item.stagedPath || '')));
   if (!pending.length) return source;
-  const staged = await attachmentStaging.stage(path.resolve(String(root || '')), pending.map(({ item }) => item), {
-    stagingDir: path.join(path.resolve(String(root || '')), '.soduwork-inputs'),
-  });
+  const { createConfiguration } = require('../pi-session/environment-ipc');
+  const stagingDir = app ? path.join(createConfiguration(() => app).workDir(app), 'temp', ref, '.soduwork-inputs') : '';
+  const staged = await attachmentStaging.stage(cwd, pending.map(({ item }) => item), { stagingDir });
   if (!staged?.files || staged.files.length !== pending.length) {
     throw Error('有附件无法复制到当前会话，请重新选择后发送');
   }
@@ -1761,7 +1761,8 @@ async function createRunnerHandle(request, defaults, initialSession) {
         const byteAttachments = (Array.isArray(next.attachments) ? next.attachments : []).some(item =>
           item && item.data != null && !path.isAbsolute(String(item.path || item.stagedPath || '')));
         if (byteAttachments) {
-          return _prepareRunnerAttachments(next.attachments, cwd).then(staged => {
+          const inputRef = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,159}$/.test(alias) ? alias : predictedRef;
+          return _prepareRunnerAttachments(next.attachments, cwd, app, inputRef).then(staged => {
             next.attachments = staged;
             return send();
           });

@@ -53,6 +53,13 @@ class PiRuntimeConfigTests(unittest.TestCase):
             self.assertEqual((original / "models.json").read_text(), "private-original")
         self.assertEqual(env["HOME"], self.parent_environment["HOME"])
 
+    def test_native_npm_probes_keep_logs_out_of_the_personal_cache(self):
+        self.parent_environment["NPM_CONFIG_CACHE"] = str(self.personal / "npm")
+        env = self.environment()
+        self.assertEqual(Path(env["npm_config_cache"]), Path(env["PI_CODING_AGENT_DIR"]) / "npm-cache")
+        self.assertNotIn("NPM_CONFIG_CACHE", env)
+        self.assertFalse((self.personal / "npm").exists())
+
     def test_separate_dispatches_cannot_replace_each_others_model(self):
         first = self.environment()
         second = self.environment("dispatch-two", {**self.llm, "model": "other", "key": "other-key"})
@@ -144,6 +151,16 @@ class PiRuntimeConfigTests(unittest.TestCase):
         value = json.loads((Path(env["PI_CODING_AGENT_DIR"]) / "models.json").read_text())
         self.assertEqual(value["providers"]["company"]["api"], "anthropic-messages")
         self.assertNotIn("compat", value["providers"]["company"])
+
+    def test_redirected_session_directory_never_receives_product_history(self):
+        directory = Path(self.environment()["PI_CODING_AGENT_DIR"])
+        try:
+            (directory / "sessions").symlink_to(self.personal, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest("Directory links unavailable: " + str(exc))
+        with self.assertRaises(RuntimeError):
+            self.environment()
+        self.assertEqual((self.personal / "models.json").read_text(), "private-original")
 
     def test_other_runtimes_do_not_rewrite_pi_environment(self):
         with patch.dict(os.environ, self.parent_environment):

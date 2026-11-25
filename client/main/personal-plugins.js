@@ -762,12 +762,12 @@ function resolve(app, rawIds, options = {}) {
         throw new Error('本机插件资源与版本清单不一致，请重新导入可信插件版本');
       }
     }
-    const resourceBundle = options.cwd ? pluginResources.materialize(version.body.resources,
-      options.cwd, plugin.key, { allowLegacyContent: true }) : null;
+    const resourceBundle = options.cwd ? pluginResources.forTurn(version.body.resources,
+      app, options, plugin.key, { allowLegacyContent: true }) : null;
     const resourceGuide = resourceBundle ? pluginResources.guidance(resourceBundle) : '';
     if (resourceBundle?.directory) {
       readRoots.push(resourceBundle.directory);
-      resourceBundles.push({ pluginId: plugin.id, key: plugin.key, digest: resourceBundle.digest,
+      resourceBundles.push({ pluginId: plugin.id, key: plugin.key, digest: resourceBundle.digest, cacheScope: resourceBundle.cacheScope,
         resources: pluginResources.normalize(version.body.resources, { allowLegacyContent: true }) });
     }
     return {

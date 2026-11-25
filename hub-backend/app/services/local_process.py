@@ -16,6 +16,8 @@ from collections.abc import Callable
 
 from . import local_spool
 from .local_base import (
+    HistoryWriteError,
+    _HISTORY_FAILURE,
     _HARD_LIMIT_S,
     _IDLE_LIMIT_S,
     _LAUNCH_TREE_UNCONFIRMED,
@@ -192,6 +194,34 @@ def _durable_drain_state(
     return previous or current, started, now - started > _DURABLE_DRAIN_GRACE_S
 
 
+def _stop_after_history_failure(ref, spool, kill_tree, *, pid, proc=None):
+    """Retain unread output and stop only the host that produced it."""
+    with _LOCK:
+        run = _RUNS.get(ref)
+        if (not run or run.get("failureKind") != _HISTORY_FAILURE
+                or (run.get("stream") or {}).get("id") != spool.get("id")
+                or run.get("pid") != pid):
+            return False
+    # A sibling callback or watchdog can observe the fence before this reader.
+    # Checking the stream, PID and handle keeps a newer launch out of scope.
+    if proc is not None:
+        settled = proc.poll() is not None
+    else:
+        settled = not _pid_alive(pid)
+    if not settled:
+        settled = kill_tree(ref, expected_pid=pid, expected_proc=proc)
+    with _LOCK:
+        if _RUNS.get(ref) is run and (run.get("stream") or {}).get("id") == spool.get("id"):
+            if settled:
+                run.update(proc=None, pid=None, detached=False)
+            else:
+                run["error"] += " 执行进程退出尚未确认。"
+            from .local_stream import _scrub_runtime_config
+            _scrub_runtime_config(ref)
+            _save_meta(ref)
+    return True
+
+
 def _consume_stream(
     ref: str,
     spool: dict,
@@ -205,24 +235,34 @@ def _consume_stream(
         current = _RUNS.get(ref)
         if not current or str((current.get('stream') or {}).get('id') or '') != spool['id']:
             return
-    before = dict(term)
-    on_line(ref, line, term, stream=stream, stream_end=end)
-    save_due = before != term
-    with _LOCK:
-        current = _RUNS.get(ref)
-        if not current or str((current.get('stream') or {}).get('id') or '') != spool['id']:
-            return
-        active = dict(current.get('stream') or {})
-        offsets = dict(active.get('offsets') or {})
-        offsets[stream] = max(int(offsets.get(stream) or 0), int(end or 0))
-        active['offsets'] = offsets
-        current['stream'] = active
-        current['terminal'] = dict(term)
-        if time.time() - float(current.get('streamMetaAt') or 0) > 1:
-            current['streamMetaAt'] = time.time()
-            save_due = True
-    if save_due:
-        _save_meta(ref)
+        if '_streamConsumer' not in current:
+            current['_streamConsumer'] = threading.Lock()
+        consumer = current['_streamConsumer']
+    # Live and recovery callbacks for this run share one commit boundary.
+    # A cursor is acknowledged only after all events for its native line are durable.
+    with consumer:
+        with _LOCK:
+            active = (_RUNS.get(ref) or {}).get('stream') or {}
+            if active.get('id') != spool['id'] or end <= int((active.get('offsets') or {}).get(stream) or 0):
+                return
+        before = dict(term)
+        on_line(ref, line, term, stream=stream, stream_end=end)
+        save_due = before != term
+        with _LOCK:
+            current = _RUNS.get(ref)
+            if not current or str((current.get('stream') or {}).get('id') or '') != spool['id']:
+                return
+            active = dict(current.get('stream') or {})
+            offsets = dict(active.get('offsets') or {})
+            offsets[stream] = max(int(offsets.get(stream) or 0), int(end or 0))
+            active['offsets'] = offsets
+            current['stream'] = active
+            current['terminal'] = dict(term)
+            if time.time() - float(current.get('streamMetaAt') or 0) > 1:
+                current['streamMetaAt'] = time.time()
+                save_due = True
+        if save_due:
+            _save_meta(ref)
 
 
 def spawn(
@@ -528,17 +568,23 @@ def spawn(
             _consume_stream(ref, spool, term, stream, line, end, on_line)
 
         _watchdog(ref, proc, finish=finish, kill_tree=kill_tree)
-        code, outcome = local_spool.follow(
-            _store_dir(ref),
-            spool,
-            consume,
-            proc=proc,
-            should_continue=lambda: ((_RUNS.get(ref) or {}).get('state') == 'running'),
-            on_tick=lambda: _capture_started(ref, spool, owner),
-        )
+        try:
+            code, outcome = local_spool.follow(
+                _store_dir(ref),
+                spool,
+                consume,
+                proc=proc,
+                should_continue=lambda: ((_RUNS.get(ref) or {}).get('state') == 'running'),
+                on_tick=lambda: _capture_started(ref, spool, owner),
+            )
+        except HistoryWriteError:
+            close_broker()
+            _stop_after_history_failure(ref, spool, kill_tree, pid=proc.pid, proc=proc)
+            return
         _capture_started(ref, spool, owner)
         if outcome == 'cancelled':
             close_broker()
+            _stop_after_history_failure(ref, spool, kill_tree, pid=proc.pid, proc=proc)
             return
         close_broker()
         hard_error = '' if code is not None else '执行进程退出了，但没有写回可靠的退出状态'
@@ -553,8 +599,14 @@ def spawn(
 
         try:
             finish(ref, int(code if code is not None else 1), term, hard_error)
+        except HistoryWriteError:
+            # A failed terminal marker retains the same evidence as a failed output event.
+            return
         finally:
-            local_spool.cleanup(_store_dir(ref), spool)
+            with _LOCK:
+                failed = (_RUNS.get(ref) or {}).get("failureKind") == _HISTORY_FAILURE
+            if not failed:
+                local_spool.cleanup(_store_dir(ref), spool)
 
     thread = threading.Thread(target=worker, name='ai_local:' + ref[:8], daemon=True)
     _THREADS.add(thread)
@@ -652,6 +704,7 @@ def recover(
                 on_tick=tick,
             )
             if outcome == 'cancelled':
+                _stop_after_history_failure(ref, spool, kill_tree, pid=pid)
                 return
             _capture_started(ref, spool)
             _save_meta(ref)
@@ -670,6 +723,9 @@ def recover(
                 outcome = 'cancelled'
                 return
             finish(ref, int(code if code is not None else 1), term, hard_error)
+        except HistoryWriteError:
+            outcome = 'cancelled'
+            _stop_after_history_failure(ref, spool, kill_tree, pid=pid)
         except Exception as exc:  # noqa: BLE001
             with _LOCK:
                 protected = bool((_RUNS.get(ref) or {}).get('accessPolicy'))

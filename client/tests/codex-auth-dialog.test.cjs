@@ -74,6 +74,26 @@ test('unknown status retains a separate explicit authorization choice', async ()
   await f.click('close');
 });
 
+test('managed connections offer both login scopes before consulting terminal credentials', async () => {
+  const f = interactiveFixture({ managedLoginHome: true, authStatus: 'unauthed' });
+  await f.settle();
+  assert.equal(f.element('primary').textContent, '复用本机登录');
+  assert.match(f.element('description').textContent, /复制到 SoduWork/);
+  const independent = f.element('foot').children[1];
+  assert.equal(independent.hidden, false);
+  independent.listeners.click();
+  assert.deepEqual(f.calls, []);
+  await f.click('primary');
+  assert.equal(f.calls[0].action, 'login-isolated');
+  await f.click('close');
+  const reuse = interactiveFixture({ managedLoginHome: true, authStatus: 'unauthed' });
+  await reuse.settle();
+  assert.deepEqual(reuse.calls, []);
+  await reuse.click('primary');
+  assert.equal(reuse.calls[0].action, 'login-reuse');
+  await reuse.click('close');
+});
+
 test('unknown status without login capability remains unavailable and cancellation starts no work', async () => {
   for (const change of [{ installed: false }, { loginAvailable: false }, { loginFlowVersion: 0 }, {}]) {
     const f = interactiveFixture(change);

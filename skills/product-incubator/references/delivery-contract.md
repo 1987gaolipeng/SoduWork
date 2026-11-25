@@ -32,6 +32,6 @@ node <技能目录>/scripts/release-check.cjs <证据根目录> <acceptance.json
 
 ## 断点续作
 
-每个节点都携带原始资料索引和最新孵化状态：goal、scope、readiness、phase、sourceRefs、acceptance、completed、openIssues、nextActions、candidate、updatedAt，schemaVersion=1。节点文件使用 `incubation-state.json`，包内 `.soduwork/product-incubation.json`。完成项引用可检查的文件/测试证据；待办保留明确下一步。每次恢复核对实际文件，不全盘重新制作，不声称恢复了不可访问的远端文件。
+每个节点都携带原始资料索引和最新孵化状态：goal、scope、readiness、phase、sourceRefs、acceptance、completed、openIssues、nextActions、candidate、updatedAt，schemaVersion=1。节点交接文件与包根目录中的状态均为 `incubation-state.json`，可读取旧包中的 `.soduwork/product-incubation.json`。完成项引用可检查的文件/测试证据；待办保留明确下一步。每次恢复核对实际文件，不全盘重新制作，不声称恢复了不可访问的远端文件。
 
 生产目标、计费开通、真实外发、数据迁移和收费资源均不是默认授权。交付包本身不等于已上线，更不等于已有付费用户。

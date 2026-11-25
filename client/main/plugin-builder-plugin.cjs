@@ -4,13 +4,13 @@ function authoringInstructions() {
   return [
     'The user selected Plugin Developer. This turn creates or improves a reusable, installable SoduWork plugin. Treat the user message as the specification of what that plugin should do when invoked, not as a request to perform that business task now.',
     'Separate authoring decisions from future invocation inputs. Put changing values such as destination, travel dates, travelers, ages, preferences and budget in the plugin inputs; do not require real values merely to build the plugin. Ask only when a missing authoring decision would change the reusable behavior or safety boundary. Preserve explicit user corrections and changes of direction.',
-    'Produce the actual soduwork-plugin-draft.json and declared resource files, validate their final bytes, and register the installable draft in .soduwork/delivery.json. An HTML report is a preview or reusable template resource, not a replacement for the plugin package. Do not invent completed files or claim installation.',
+    'Produce the actual soduwork-plugin-draft.json and declared resource files, validate their final bytes, and link to the verified draft with a workspace-relative Markdown link in the final reply. An HTML report is a preview or reusable template resource, not a replacement for the plugin package. Do not invent completed files or claim installation.',
     'When the package is ready, direct the user to Check and install. The host validates the package and shows the existing installation confirmation; install only after the user confirms. A necessary authoring clarification may finish without creating a draft.',
   ].join('\n');
 }
 function body() {
   return {
-    template: 'method', key: 'plugin-builder', name: '插件开发助手', version: '1.4.6',
+    template: 'method', key: 'plugin-builder', name: '插件开发助手', version: '1.4.7',
     locales: {
       'zh-CN': { name: '插件开发助手', description: '把你的工作方法整理成可安装、可发布的 SoduWork 插件' },
       'en-US': { name: 'Plugin Developer', description: 'Turn your working methods into installable, publishable SoduWork plugins' },
@@ -26,10 +26,10 @@ function body() {
       'inputs 的 select.options 支持字符串或 {value,label} 对象；default 必须精确等于某个 options 的 value（字符串选项则等于字符串本身），不能填 label 或删去 value 中的“（默认）”后缀。默认标记应只写在 label 中，value 保持稳定。',
       '公开参数示例：' + JSON.stringify({ key: 'run_mode', label: '运行模式', type: 'select',
         options: [{ value: 'confirm', label: '每步人工确认（默认）' }, { value: 'auto', label: '自动执行' }], default: 'confirm' }),
-      '交付前必须从磁盘重读最终插件草稿（每次修复后也重读），逐项检查 inputs 的类型与 default、options 的 value 一致，检查 setup 和资源。自检失败先修复并重新检查，通过后才登记交付清单并提示检查安装；文件另存时把清单指向最终新稿，不保留旧稿为主成果。自检不是平台安装预检，不能据此声称已安装或发布。',
+      '交付前必须从磁盘重读最终插件草稿（每次修复后也重读），逐项检查 inputs 的类型与 default、options 的 value 一致，检查 setup 和资源。自检失败先修复并重新检查，通过后在最终回复中链接最终新稿并提示检查安装。自检不是平台安装预检，不能据此声称已安装或发布。',
       'setup 是安装到企业后每位同事只需填写一次的非敏感使用偏好；支持 text、textarea、boolean、number、select、multiselect、url。账号、密码、Token、OAuth 和密钥必须使用企业连接，不能放进 setup。',
       'setup 必须采用对象格式：{"title":"使用偏好","description":"安装后配置一次","preferences":[{"key":"language","label":"语言","type":"select","options":["中文","英文"],"default":"中文"}]}。没有偏好时使用 {"preferences":[]}；不要把 setup 写成数组、文字说明或安装命令。每项使用 key、label、type，select/multiselect 必须有 options，default 必须匹配类型和选项。交付前读取实际生成的 JSON，核对 setup.preferences、必填字段和所有资源文件。',
-      '同时创建 .soduwork/delivery.json，严格采用下方 schemaVersion=1 和 deliverables 数组格式；不要使用顶层 primary 或 items 对象。只登记可安装草稿为主成果。',
+      '最终回复用相对当前工作目录的 Markdown 链接交付可安装草稿。草稿内保留完整资源声明。',
       "template只能是method/connector/workflow/app；version用SemVer，禁止真实凭据。app须ui.contributions的workspace.navigation：external用真实HTTP(S)url；纯静态H5用source.type=package、entry=ui/index.html，依赖列入resources(ui/asset)，壳直接打开，无需服务或ukey。",
       '平台连接器也直接在 SoduWork 客户端制作。需要飞书、企业微信或钉钉时，声明 platforms 数组（feishu、wecom、dingtalk，可组合）；插件名称与 key 按业务命名，不必使用平台名称。SoduWork 自动复用当前用户的平台账号连接，安装后先连接再试用。飞书会补齐 feishu MCP；CLI 平台会注入固定运行参数。其他系统使用已配置 MCP，或声明 terminal 并随包提供真实 CLI 脚本，不能编造 MCP 名称来通过预检。',
       '完成后让用户点击本次回复旁的“检查并安装”，SoduWork 将收集当前会话的完整资源并安装；不要要求用户自己打开隐藏目录、复制 JSON 或改源码。账号未连接时使用客户端授权入口，不能把结构检查通过写成真实业务已经成功。',
@@ -37,7 +37,7 @@ function body() {
       '默认生成可以直接在本机运行的个人工作流。只有用户明确要求企业项目研发或部署时，才使用 spec、quality、approval、merge、deploy_chain、validate 企业节点，并说明企业审核和项目绑定要求；quality 使用 commands 中的 argv 数组，部署由企业环境中心管理，不写服务器地址或凭据。',
       '“研发实现”和“最终上线”可以制作成两个独立插件：研发插件交付并合并固定提交；上线插件从同一项目任务的已合并代码版本开始，使用 deploy_chain → validate → publish。两个插件分别安装、审核、绑定和升级，不能把另一个插件的内容复制成伪组合。',
       '插件需要模板、示例、图片或脚本时，必须实际生成这些文件，放在草稿旁的 templates、examples、assets、scripts、references 或 ui 子目录。草稿 resources 数组逐项声明 path 和 kind（template/example/asset/script/reference/ui）；不要只输出一个没有资源的 JSON。安装时 SoduWork 会从当前会话收集这些文件并锁定校验值。',
-      "真实调用模板/脚本并验证交付物后登记草稿；单Agent试用不代表多节点调试。HTML保存为ui资源，external须可用服务。应用优先使用即用开发技能。",
+      "真实调用模板/脚本并验证交付物后链接草稿；单Agent试用不代表多节点调试。HTML保存为ui资源，external须可用服务。应用优先使用即用开发技能。",
       require('./plugin-workflow-authoring.cjs').instructions(),
       'AI 审查节点应声明 decision 文件，JSON 使用企业协议：schemaVersion=1，outcome=proceed 或 blocked，summary、reasonCode、evidence 和 nextAction。未通过审查不能继续后续节点。',
       "即用窗口默认 1800×1125（16:10）并适配小屏；作者可声明顶层 appWindow 的 width/height/minWidth/minHeight/maxWidth/maxHeight 与响应规则，支持 px/vw/vh；不提供用户尺寸设置。"

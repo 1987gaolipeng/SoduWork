@@ -196,3 +196,43 @@ test('repository JSON is inferred only from output directories while manifests r
     assert.deepEqual(delivery.classify(root, files).items, []);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a completed reply registers its observed files without writing into the project', t => {
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-chat-delivery-')));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const target = path.join(cwd, 'final report.pdf');
+  fs.writeFileSync(target, 'synthetic');
+  const observed = require('../main/pi-session/outputs').scan(cwd, 0, Date.now() - 5000);
+  const speech = (text, extra) => ({ messages: [{ role: 'user', text: 'Generate a report' }, { role: 'assistant', text, ...extra }] });
+  const link = '[Report](final%20report.pdf)';
+  const receipt = delivery.fromReply(cwd, speech(link), observed);
+  assert.equal(receipt.delivery.source, 'conversation');
+  assert.deepEqual(receipt.delivery.items.map(item => item.path), [target]);
+  assert.deepEqual(receipt.delivery.warnings, []);
+  assert.deepEqual(fs.readdirSync(cwd), ['final report.pdf']);
+  assert.equal(delivery.fromReply(cwd, speech(link, { done: false }), observed), observed);
+  assert.equal(delivery.fromReply(cwd, speech('`' + link + '`'), observed), observed);
+  assert.equal(delivery.fromReply(cwd, speech(link + ' [Missing](other.pdf)'), observed).delivery.warnings.length, 1);
+  fs.writeFileSync(target, 'replacement bytes');
+  assert.equal(delivery.fromReply(cwd, speech(link), observed), observed);
+});
+
+test('a new reply can deliver a different file after upgrading a simple legacy manifest', t => {
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-legacy-delivery-')));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const file = path.join(cwd, delivery.MANIFEST_RELATIVE);
+  fs.mkdirSync(path.dirname(file));
+  fs.writeFileSync(path.join(cwd, 'previous.txt'), 'previous');
+  const manifest = { schemaVersion: 1, deliverables: [{ path: 'previous.txt' }] };
+  const start = Date.now() - 5000;
+  fs.writeFileSync(file, JSON.stringify(manifest));
+  fs.utimesSync(file, 42, 42);
+  fs.writeFileSync(path.join(cwd, 'new.txt'), 'new');
+  const state = { messages: [{ role: 'user', text: 'Make a new report' }, { role: 'assistant', text: '[Report](new.txt)' }] };
+  const collect = () => delivery.fromReply(cwd, state, require('../main/pi-session/outputs').scan(cwd, 0, start));
+  assert.deepEqual(collect().delivery.items.map(item => item.relative), ['new.txt']);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)), manifest);
+  fs.writeFileSync(file, JSON.stringify({ ...manifest, presentation: 'summary' }));
+  fs.utimesSync(file, 42, 42);
+  assert.equal(collect().delivery.presentation, 'summary');
+});

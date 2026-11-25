@@ -19,6 +19,21 @@ test('resources normalize deterministically, preserve bytes and reject mutated d
   assert.deepEqual(resources.summary(first)[0],{path:first[0].path,kind:'script',sha256:first[0].sha256,size:first[0].size});
 });
 
+test('turn caches preserve old workspace content and isolate the selected account and session', t => {
+  const cwd = fixture(t), fixtureRoot = fixture(t), app = { getPath: () => fixtureRoot };
+  const item = draft(), legacy = path.join(cwd, '.soduwork', 'plugins', item.key, 'edited-note');
+  fs.mkdirSync(path.dirname(legacy), { recursive: true });
+  fs.writeFileSync(legacy, 'existing local notes');
+  const resolve = (owner, ref) => resources.forTurn(item.resources, app, { cwd, ref, owner }, item.key);
+  const first = resolve('fixture-a', 'session-1');
+  const otherAccount = resolve('fixture-b', 'session-1');
+  const otherSession = resolve('fixture-a', 'session-2');
+  assert.equal(resolve('fixture-a', 'session-1').directory, first.directory);
+  assert.equal(new Set([first.directory, otherAccount.directory, otherSession.directory]).size, 3);
+  assert.equal(fs.readFileSync(legacy, 'utf8'), 'existing local notes');
+  assert.deepEqual(fs.readdirSync(path.dirname(legacy)), ['edited-note']);
+});
+
 test('resources reject traversal, Windows aliases, duplicates, credentials and invalid encodings', () => {
   for (const name of ['../a','assets/../a','assets\\a','C:/a','/assets/a','assets/.env','assets/CON.txt','assets/a:stream','assets/a.','assets/run.exe']) {
     assert.throws(()=>resources.normalize([{path:name,kind:'asset',encoding:'utf8',content:'x'}]),undefined,name);
@@ -57,13 +72,16 @@ test('install, portable export, import and real turn resolution preserve resourc
   assert.equal(imported.checksum,installed.checksum);
   const resolved=await grant.resolve({app,cwd,pluginIds:[installed.pluginId],identityOf:()=>{throw Error('must stay offline')}});
   assert.match(resolved.items[0].context,/本轮插件随包资源/);
-  const directory=path.join(cwd,'.soduwork/plugins/template-demo',resources.digest(exported.resources));
+  const [directory]=resolved.readRoots;
+  assert.equal(path.relative(root,directory),path.join('runner','data','plugin-resource-cache',
+    resolved.resourceBundles[0].cacheScope,'template-demo',resources.digest(exported.resources)));
+  assert.deepEqual(fs.readdirSync(cwd),[]);
   assert.equal(fs.readFileSync(path.join(directory,'templates/报告.md'),'utf8'),'# {{title}}\n');
   assert.equal(fs.existsSync(path.join(cwd,'sample')),false,'Install does not execute scripts');
-  resources.materialize(exported.resources,cwd,'template-demo');
+  resources.forTurn(exported.resources,app,{cwd},'template-demo');
   fs.writeFileSync(path.join(directory,'templates/报告.md'),'changed');
   /* Repair locally modified resources through backup and manifest restoration instead of blocking every send. */
-  const rescuedTurn=resources.materialize(exported.resources,cwd,'template-demo');
+  const rescuedTurn=resources.forTurn(exported.resources,app,{cwd},'template-demo');
   assert.deepEqual(rescuedTurn.rescued,['templates/报告.md']);
   assert.equal(fs.readFileSync(path.join(directory,'templates/报告.md'),'utf8'),'# {{title}}\n','original restored');
   const firstBackup = rescuedTurn.backups[0];
@@ -73,9 +91,9 @@ test('install, portable export, import and real turn resolution preserve resourc
   assert.match(rescuedGuide,/修改已分别备份/);
   assert.ok(rescuedGuide.includes('- templates/报告.md → ' + firstBackup.backup),'guidance identifies the actual backup');
   assert.doesNotMatch(rescuedGuide,/undefined/);
-  assert.equal(resources.materialize(exported.resources,cwd,'template-demo').rescued.length,0,'idempotent resend');
+  assert.equal(resources.forTurn(exported.resources,app,{cwd},'template-demo').rescued.length,0,'idempotent resend');
   fs.writeFileSync(path.join(directory,'templates/报告.md'),'second edit');
-  const again=resources.materialize(exported.resources,cwd,'template-demo');
+  const again=resources.forTurn(exported.resources,app,{cwd},'template-demo');
   assert.deepEqual(again.rescued,['templates/报告.md']);
   assert.notEqual(again.backups[0].backup,firstBackup.backup);
   assert.equal(fs.readFileSync(path.join(directory,again.backups[0].backup),'utf8'),'second edit');
@@ -133,7 +151,7 @@ test('repair preserves a resource replaced by a directory across later edits', t
 });
 
 test('resource cache refuses a junction escape and keeps unrelated files unchanged', t => {
-  const root=fixture(t), other=fixture(t);fs.symlinkSync(other,path.join(root,'.soduwork'),'junction');
+  const root=fixture(t), other=fixture(t);fs.symlinkSync(other,path.join(root,'template-demo'),'junction');
   assert.throws(()=>resources.materialize(draft().resources,root,'template-demo'),/链接|联接/);
   assert.deepEqual(fs.readdirSync(other),[]);
 });
@@ -233,8 +251,8 @@ test('legacy personal resources remain usable when an example intentionally rese
     identityOf: () => { throw Error('must stay offline'); } });
   assert.equal(resolved.items.length, 1);
   assert.match(resolved.items[0].context, /本轮插件随包资源/);
-  const resourcePath = path.join(cwd, '.soduwork', 'plugins', 'template-demo',
-    resources.digest(legacyResource), 'examples', 'security-fixture.py');
+  assert.equal(fs.existsSync(path.join(cwd, '.soduwork')), false);
+  const resourcePath = path.join(resolved.readRoots[0], 'examples', 'security-fixture.py');
   assert.equal(fs.readFileSync(resourcePath, 'utf8'),
     'PASSWORD = "admin123456"  # fixture for the audit plugin');
 });

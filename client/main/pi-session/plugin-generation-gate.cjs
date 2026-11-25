@@ -113,7 +113,7 @@ async function inspect({handle, snapshot, files: indexedFiles, app, preflight} =
 function finalDeliveryRevision(snapshot) {
   const delivery = snapshot?.delivery;
   if (!delivery || delivery.presentation === 'summary') return '';
-  const files = delivery.source === 'manifest' ? delivery.items || []
+  const files = ['manifest', 'conversation'].includes(delivery.source) ? delivery.items || []
     : delivery.source === 'inferred' ? (snapshot.files || []).filter(file => /\.html?$/i.test(file.relative || file.name || '')) : [];
   if (!files.length) return '';
   return JSON.stringify([delivery.source, delivery.summary, files.map(file =>

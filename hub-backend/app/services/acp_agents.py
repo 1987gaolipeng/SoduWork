@@ -152,19 +152,38 @@ def home_env(key: str, env: dict, work_root: str, *, installation_root: str | No
     if not declaration or not work_root:
         return
     folder = declaration["folder"]
-    home = os.path.join(os.path.abspath(os.path.expanduser(work_root)), folder)
+    root = Path(work_root).expanduser().absolute()
+    home = str(root / folder)
     try:
-        os.makedirs(home, exist_ok=True)
-    except OSError:
+        if not Path(home).resolve().is_relative_to(root.resolve() / folder):
+            raise OSError("Managed agent home redirects to another directory")
+        os.makedirs(home, mode=0o700, exist_ok=True)
+    except (OSError, RuntimeError):
         # A private-home failure must not launch against inherited account state.
-        # Suppress filesystem diagnostics that may contain personal paths.
         raise RuntimeError("执行组件的独立数据目录无法创建，请检查 Runner 数据目录权限、同名文件或磁盘空间后重试。") from None
-    # Only reviewed env names and a relative one-segment folder are accepted by
-    # the catalog loader; no source-controlled declaration can escape this root.
+    names = {declaration["env"].upper()}
+    if key == "codex-harness":
+        names.add("CODEX_SQLITE_HOME")
+    if key == "qwen":
+        # Qwen resolves its runtime override before its home or operator settings.
+        # Keep existing explicit locations contained in this agent's managed home.
+        configured = next((value for name, value in env.items()
+                           if name.upper() == "QWEN_RUNTIME_DIR" and value), "")
+        runtime = Path(configured).expanduser() if configured else None
+        if not runtime or not runtime.is_absolute() or not runtime.resolve().is_relative_to(Path(home).resolve()):
+            runtime = Path(home)
+        names.add("QWEN_RUNTIME_DIR")
+    for name in list(env):
+        if name.upper() in names:
+            del env[name]
     env[declaration["env"]] = home
+    if key == "qwen":
+        env["QWEN_RUNTIME_DIR"] = str(runtime)
     from . import agent_shell
     agent_shell.apply(env, key)
-    if key == "dsh":
+    if key == "codex-harness":
+        env["CODEX_SQLITE_HOME"] = home
+    elif key == "dsh":
         dsh_runtime.apply_env(env, installation_root or work_root)
     elif key == "kimi":
         from . import kimi_runtime

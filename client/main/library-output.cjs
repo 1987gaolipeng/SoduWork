@@ -14,6 +14,11 @@ const MIME = {
   '.zip': 'application/zip', '.mp4': 'video/mp4', '.webm': 'video/webm',
 };
 
+function payload(filename, data) {
+  return { ok: true, name: path.basename(filename), size: data.length,
+    mimeType: MIME[path.extname(filename).toLowerCase()] || 'application/octet-stream', data: data.toString('base64') };
+}
+
 // Resolve public artifact IDs in the main process; never interpret an ID as a path.
 function read(session, target) {
   if (!session) return { ok: false, reason: '会话不在了' };
@@ -28,9 +33,7 @@ function read(session, target) {
     } else return { ok: false, reason: '当前成果暂时无法上传到资料库' };
     if (!outputs.inside(session.cwd, candidate)) return { ok: false, reason: '这个文件不在这条对话的工作目录里' };
     const resolved = fs.realpathSync(candidate);
-    const data = binary.readFile(resolved);
-    return { ok: true, name: path.basename(resolved), size: data.length,
-      mimeType: MIME[path.extname(resolved).toLowerCase()] || 'application/octet-stream', data: data.toString('base64') };
+    return payload(resolved, binary.readFile(resolved));
   } catch (error) { return { ok: false, reason: String(error.message || error) }; }
 }
 async function readAsync(session, target) {
@@ -43,4 +46,4 @@ async function readAsync(session, target) {
   }
   return read(session, target);
 }
-module.exports = { read, readAsync };
+module.exports = { read, readAsync, payload };

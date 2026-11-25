@@ -115,7 +115,7 @@ node scripts/validate.cjs --draft /work/new-candidate/soduwork-plugin-draft.json
 
 使用本轮随包的真实脚本路径、实际草稿路径和当前会话目录。校验脚本复用安装器同源的路径、文件收集与草稿规范，拒绝根目录资源、越界/链接、缺失文件、校验不符和无效包内入口。失败先修复，再读取最终磁盘文件重新验证；退出码为 0 后才登记成果并提示“检查并安装”。校验不修改文件、不安装、不启动脚本，也不能证明页面或业务运行成功。不要用 `JSON.parse`、HTML 语法检查或开发预览正常代替这一步。
 
-读取实际 JSON、检查全部文件，合并当前工作目录 `.soduwork/delivery.json` 的已有成果，唯一 primary 指向真实 `soduwork-plugin-draft.json`。清单必须使用 `{"schemaVersion":1,"deliverables":[{"path":"soduwork-plugin-draft.json","kind":"file","title":"即用草稿","primary":true}]}`，字段是 deliverables，不能写成 items。脚手架生成在子目录时，应把子目录内交付路径合并到当前会话的成果清单，不覆盖其他成果。不能声称安装会自动启动本地服务；只有真实服务已运行时页面才能打开。
+读取磁盘中的最终 JSON，按草稿声明逐项检查依赖资源。在最终回复中链接已验证的草稿，例如 `[即用草稿](my-app/soduwork-plugin-draft.json)`。路径以当前会话工作目录为起点，包含实际子目录。不能声称安装会自动启动本地服务；只有真实服务已运行时页面才能打开。
 
 使用本次回复旁的“检查并安装”：现有链路收集当前会话资源、预检并安装个人即用；不让用户去隐藏目录复制 JSON。需要分发时用原有导出入口生成 `.soduwork-plugin`，升版不覆盖旧版本。个人安装与企业审核/远端上架分别报告。
 

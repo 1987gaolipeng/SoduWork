@@ -387,7 +387,7 @@ for command_name in npm node; do
     RUNTIME_PATH="$(dirname "$executable"):$RUNTIME_PATH"
   fi
 done
-UNIT_PATH="$($PY -c 'import json,sys; print("Environment=" + json.dumps("PATH=" + sys.argv[1], ensure_ascii=False).replace("%", "%%"))' "$RUNTIME_PATH")"
+UNIT_PATH="$("$PY" -c 'import json,sys; print("Environment=" + json.dumps("PATH=" + sys.argv[1], ensure_ascii=False).replace("%", "%%"))' "$RUNTIME_PATH")"
 say "   Node/npm/Pi 已通过自检；Agent 安装位于 Runner 私有数据目录。"
 
 START_CMD="$RUN_PY $ROOT/src/hub-backend/runner_main.py --config $CFG"

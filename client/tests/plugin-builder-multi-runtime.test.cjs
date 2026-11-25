@@ -107,11 +107,11 @@ test('the installed builder supplies the actual runtime IDs and current collabor
   assert.ok(instructions.length < 8000, 'the shipped prompt must not silently truncate the workflow contract');
 });
 
-test('builder delivery example is accepted by the real manifest parser and exposes only the installable draft', t => {
+test('the builder reply example exposes only the installable draft without project metadata', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-builder-delivery-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const app = { getPath: () => root }, builder = personal.get(app, personal.BUILDER_ID);
-  assert.equal(builder.version, '1.4.6');
+  assert.equal(builder.version, '1.4.7');
   assert.match(builder.localDraft.instructions, /source\.type=package.*entry=ui\/index\.html/);
   const instructions = builder.localDraft.instructions;
   const parseLine = prefix => {
@@ -120,17 +120,17 @@ test('builder delivery example is accepted by the real manifest parser and expos
     return JSON.parse(line.slice(line.indexOf('{')));
   };
   const sample = parseLine('最小双底座流程示例');
-  const manifest = parseLine('交付清单示例');
+  const text = instructions.split('\n').find(line => line.startsWith('最终回复示例'));
+  assert.ok(text);
   const installed = personal.create(app, sample).plugin;
   assert.deepEqual(personal.exportDraft(app, installed.pluginId).runtime, ['files']);
-  fs.mkdirSync(path.join(root, '.soduwork'));
   fs.writeFileSync(path.join(root, 'soduwork-plugin-draft.json'), JSON.stringify(sample));
-  fs.writeFileSync(path.join(root, '.soduwork/delivery.json'), JSON.stringify(manifest));
-  const delivery = require('../main/conversation/delivery-contract');
-  const files = ['soduwork-plugin-draft.json', '过程说明.md'].map(relative => ({ relative, name: relative,
-    path: path.join(root, relative), size: 100, at: Date.now(), changedInTurn: true }));
-  const result = delivery.classify(root, files);
-  assert.equal(result.source, 'manifest');
+  fs.writeFileSync(path.join(root, '过程说明.md'), 'notes');
+  const observed = require('../main/pi-session/outputs').scan(root, 0, Date.now() - 5000);
+  const reply = { messages: [{ role: 'user', text: 'Build a plugin' }, { role: 'assistant', text }] };
+  const result = require('../main/conversation/delivery-contract').fromReply(root, reply, observed).delivery;
+  assert.equal(result.source, 'conversation');
+  assert.equal(fs.existsSync(path.join(root, '.soduwork')), false);
   assert.deepEqual(result.warnings, []);
   assert.deepEqual(result.items.map(item => [item.relative, item.kind, item.primary]),
     [['soduwork-plugin-draft.json', 'file', true]]);

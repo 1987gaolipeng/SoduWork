@@ -89,20 +89,14 @@ function create({ app, identityOf, session, history, peer, confirmReceive, verif
     const ctx = await current(), sid = input.sessionId, target = input.targetDeviceId;
     if (!textId(sid) || !textId(target) || target === ctx.device || blocked(sid)) throw Error('迁移目标或会话不可用');
     const { h,row } = await live(ctx,sid);
-    let scanned;
-    try { scanned = await files.inventory(app,h.cwd); }
-    catch (_) {
-      // A protected, missing, or oversized working directory still permits
-      // transferring history alone; no paths from that directory are offered.
-      scanned = { root: null, files: [], excluded: [], total: 0,
-        notice: '工作目录不可读取或超出文件迁移范围，本次仅迁移会话历史。' };
-    }
+    const retained = await history.transferSources?.(sid, h.ref) || [];
+    const scanned = await files.review(app, h.cwd, retained);
     await check(ctx);
     const op = crypto.randomUUID();
     for (const [key,p] of previews) if (p.expires < Date.now() || p.sid === sid) previews.delete(key);
     previews.set(op,{...ctx,identity:undefined,op,sid,target,handle:h,scanned,expires:Date.now()+300000});
     return { operationId:op,sessionId:sid,targetDeviceId:target,state:'preview',title:row.title || '',
-      files:scanned.files.map(f=>({path:f.path,size:f.size})),excludedCount:scanned.excluded.length,
+      files:scanned.files.map(f=>({path:f.path,size:f.size,...(f.historyAlias ? {historyAlias:f.historyAlias} : {})})),excludedCount:scanned.excluded.length,
       totalBytes:scanned.total, workspaceNotice:scanned.notice || '' };
   }
   async function rpc(ctx,r,method,params) {
@@ -163,10 +157,9 @@ function create({ app, identityOf, session, history, peer, confirmReceive, verif
       for (const record of storage().pendingAborts(ctx.scope,p.sid,p.target)) await sendAbort(ctx,record);
       const bundle = await history.exportPortable(p.sid);
       if (unsettledTools(bundle.snapshot)) throw Error('历史中仍有结果未确认的工具，无法安全交接');
-      const body = await files.pack(app,h.cwd,p.scanned,input.selectedPaths,bundle);
+      const body = await files.pack(app,h.cwd,p.scanned,input.selectedPaths,bundle,await history.transferSources?.(p.sid,h.ref));
       if (body.length > files.MAX_PACKAGE) throw Error('迁移包超过容量限制');
-      const chosen = new Set(input.selectedPaths), fileCount = chosen.size;
-      const totalBytes = p.scanned.files.filter(f=>chosen.has(f.path)).reduce((n,f)=>n+f.size,0);
+      const { count: fileCount, bytes: totalBytes } = files.selectedFiles(p.scanned,input.selectedPaths);
       const currentHandle = (await live(ctx,p.sid)).h;
       if (currentHandle !== h) throw Error('会话已变化，请重新预览');
       const segments = require('./runtime-segments').read(app,p.sid);
@@ -202,7 +195,7 @@ function create({ app, identityOf, session, history, peer, confirmReceive, verif
           {code:'DEVICE_TRANSFER_EXECUTION_UNCONFIRMED'});
         const finalHistory = await history.exportPortable(p.sid);
         if (finalHistory.sha256 !== bundle.sha256) throw Error('会话历史已变化，请在源电脑重新预览');
-        const finalBody = await files.pack(app,p.scanned.root,p.scanned,input.selectedPaths,finalHistory);
+        const finalBody = await files.pack(app,h.cwd,p.scanned,input.selectedPaths,finalHistory,await history.transferSources?.(p.sid,h.ref));
         if (files.hash(finalBody) !== files.hash(body)) throw Error('迁移内容已变化，请重新预览');
         await check(ctx);
         const indexed = await history.resolve(p.sid);
@@ -350,7 +343,7 @@ function create({ app, identityOf, session, history, peer, confirmReceive, verif
           const packet = files.parse(storage().assemble(op),r);
           const cwd = await files.activate(storage().root,op,packet.files);
           await guard();
-          await history.importPortable(packet.history,{identity:ctx.identity,cwd,transferId:op,predecessor:storage().historyStamp(op),files:packet.files.map(({path,size,sha256})=>({path,size,sha256})),assertCurrent:guard});
+          await history.importPortable(packet.history,{identity:ctx.identity,cwd,transferId:op,predecessor:storage().historyStamp(op),files:packet.files.map(({path,size,sha256,artifact,attachmentKey})=>({path,size,sha256,artifact,attachmentKey})),assertCurrent:guard});
           await guard();
           storage().transaction(()=>{storage().state(op,'activating','active');storage().clear(op);});
         }

@@ -24,6 +24,7 @@ async function create({ row, read, historyPreview = false, allowContinuation = f
       row.historyContentState === 'unresolved-tools' ? '历史中有工具缺少终结回执，结果尚未确认，暂时只能查看，不能恢复执行或迁移' : previewReason || '仅保存了部分历史，无法完整恢复执行上下文',
   };
   else if (historyPreview && previewReason) value.historyRecovery = { mode: 'device-history', reason: previewReason };
+  if (historyPreview && row.artifactBackupIncomplete) value.artifactBackupIncomplete = true;
   const keyFor = (page, item, cursor, index) => page.format === 'events'
     ? 'stream:' + String(item.streamId || item.id || cursor + ':' + index)
     : 'message:' + cursor + ':' + index;

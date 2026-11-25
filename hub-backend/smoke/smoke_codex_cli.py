@@ -19,7 +19,7 @@ sys.path.insert(0, ".")
 SMOKE_DATA = tempfile.mkdtemp(prefix="soduwork-smoke-codex-")
 os.environ["SODUWORK_DATA_ROOT"] = SMOKE_DATA
 
-from app.services import agent_setup, cli_account_auth, codex_account_acp, local_base, local_stream  # noqa: E402
+from app.services import agent_setup, cli_account_auth, codex_account_acp, codex_account_home, local_base, local_stream  # noqa: E402
 from app.services.local_base import _PROFILES, _RUNS, _codex_bin  # noqa: E402
 
 ok = fail = 0
@@ -189,6 +189,7 @@ with (
     det = agent_setup.detect("codex", has_model=False, probes={})
     chk("已安装但未登录不能宣称可派活",
         det["installed"] and det["state"] == "unauthed" and det["auth"] == "unauthed", det)
+    codex_account_home.connected_home(SMOKE_DATA, create=True)
     login.return_value = (0, "Logged in using ChatGPT")
     det = agent_setup.detect("codex", has_model=False, probes={})
     chk("CLI 确认已登录才 ready，不依赖共享模型",

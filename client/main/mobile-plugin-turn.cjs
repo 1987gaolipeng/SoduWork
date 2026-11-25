@@ -3,7 +3,7 @@
 // Called only through the owning Runner's private pipe with a Hub-signed
 // selection. Reuse desktop resolution and authorization; never accept a prompt,
 // plugin body, resource path or capability grant from the mobile renderer.
-async function prepare({ app, pluginStore, shared, args, context, guard }) {
+async function prepare({ app, pluginStore, shared, args, context, owner, guard }) {
   const selected = args.plugins;
   if (!Array.isArray(selected) || !selected.length || selected.length > 3 ||
       !context || context.ref !== args.ref || typeof context.cwd !== 'string' || !context.cwd)
@@ -22,7 +22,7 @@ async function prepare({ app, pluginStore, shared, args, context, guard }) {
   await verify();
   const prepared = await require('./pi-session/plugin-turn').prepare({
     capabilityIds: context.capabilityIds || [], readOnly: context.readOnly === true,
-    resolvePlugins: async ids => pluginStore.resolve(app, ids, { cwd: context.cwd }),
+    resolvePlugins: async ids => pluginStore.resolve(app, ids, { cwd: context.cwd, ref: context.ref, owner }),
   }, { plugins: selected });
   try {
     if (!prepared.ok) throw Error(prepared.reason);

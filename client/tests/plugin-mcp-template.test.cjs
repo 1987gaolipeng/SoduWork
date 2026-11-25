@@ -116,7 +116,7 @@ test('enabled dependencies bypass templates and superseded previews cannot impor
 });
 test('creator prompts preserve resource and authorization boundaries', t => {
   const f = fixture(t), builder = personal.get(f.app, personal.BUILDER_ID);
-  assert.equal(builder.version, '1.4.6');
+  assert.equal(builder.version, '1.4.7');
   assert.match(builder.localDraft.instructions, /source\.type=package.*entry=ui\/index\.html/);
   assert.equal(require('../main/mcp-studio-plugin').body(f.app).version, '1.3.0');
   assert.match(builder.localDraft.instructions, /references\/connections\//);

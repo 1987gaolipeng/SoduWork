@@ -157,7 +157,7 @@ async function resolve(options) {
   if (localIds.length) await sourceAccess.check({ app: opts.app, identityOf: opts.identityOf,
     fetchImpl: opts.fetchImpl, timeoutMs: opts.timeoutMs, action: 'use',
     sourceIds: sourceAccess.sourcesForIds(personalPlugins._read(opts.app).plugins, localIds) });
-  const local = localIds.length ? personalPlugins.resolve(opts.app, localIds, { cwd: opts.cwd }) : { items: [] };
+  const local = localIds.length ? personalPlugins.resolve(opts.app, localIds, { cwd: opts.cwd, ref: opts.ref, owner: opts.owner }) : { items: [] };
   const readRoots = [...(local.readRoots || [])], resourceBundles = [...(local.resourceBundles || [])];
   // Restore the account/MCP before asking the Hub for a grant. Otherwise a
   // fresh Feishu installation can request a ticket before its connection exists.
@@ -251,9 +251,10 @@ async function resolve(options) {
     if (pluginResources.digest(files) !== incoming.digest) throw new Error('插件资源清单校验失败');
     if (files.length) {
       if (!opts.cwd) throw new Error('当前会话没有可用的插件资源目录');
-      const bundle = pluginResources.materialize(files, opts.cwd, item.key);
+      const bundle = pluginResources.forTurn(files, opts.app, { cwd: opts.cwd, ref: opts.ref,
+        owner: require('../device-auth-request').accountScopeKey(identity) }, item.key);
       readRoots.push(bundle.directory);
-      resourceBundles.push({ pluginId: item.pluginId, key: item.key, digest: bundle.digest, resources: files });
+      resourceBundles.push({ pluginId: item.pluginId, key: item.key, digest: bundle.digest, cacheScope: bundle.cacheScope, resources: files });
       item.context = pluginResources.guidance(bundle) + '\n\n' + String(item.context || '');
     }
     // Never retain base64 resources in renderer state, transcript or turn badges.

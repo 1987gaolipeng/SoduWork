@@ -34,7 +34,7 @@ function endpoint(t, root, name, source, expectedSources = [source ? 'peer-targe
     history: async () => ({ ok: true, chats: source ? [row] : [] }), archivedHistory: async () => ({ ok: true, chats: [] }),
     availableRuntimes: async () => ({ ok: true, availableRuntimes: [{ id: 'pi' }] }),
   };
-  const history = sharedHistory.create({ app, session, identityOf: () => id,
+  const history = sharedHistory.create({ app, session, identityOf: () => id, workRoot: () => root,
     store: replica.createWorker(path.join(profile, 'conversation-replicas', 'history.sqlite')) });
   const certificate = certificates()[name], remembered = [];
   let transfer, accepted = 0;
@@ -281,4 +281,155 @@ test('three real TLS desktops return A to B to C to A while B is offline, anchor
     assert.equal(saved.grant.source,C.id.clientId);
     assert.equal(saved.grant.target,A.id.clientId);
   } finally { journal.close(); }
+});
+
+
+test('direct migration restores only selected archived output and rebuilds its grant on the receiver', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'device-artifact-handoff-'));
+  const source = endpoint(t, root, 'peer-source', true), target = endpoint(t, root, 'peer-target', false);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const field of ['taskId', 'taskIds', 'activeTaskId']) delete source.row[field];
+  const attachment = require('../../main/pi-session/attachment-contract');
+  const stage = path.join(root, 'temp', source.handle().ref, '.soduwork-inputs');
+  fs.mkdirSync(stage, { recursive: true });
+  const input = path.join(stage, 'chosen-input.txt'), outside = path.join(root, 'other-session.txt');
+  fs.writeFileSync(input, 'stage');
+  fs.writeFileSync(path.join(stage, 'unreferenced.txt'), 'other');
+  fs.writeFileSync(outside, 'other');
+  const prompt = attachment.augment('Create the fixtures.', [
+    { name: 'chosen-input.txt', path: input, size: 5 }, { name: 'other-session.txt', path: outside, size: 5 } ]);
+  fs.mkdirSync(path.dirname(source.archive), { recursive: true });
+  fs.writeFileSync(source.archive, [
+    { type: 'session', id: SID, cwd: source.workspace },
+    { type: 'message', id: 'u', message: { role: 'user', content: prompt } },
+    { type: 'message', id: 'a', message: { role: 'assistant', content: 'Complete.' } },
+  ].map(row => JSON.stringify(row)).join('\n') + '\n');
+  const outputs = ['chosen.md', 'not-chosen.md'].map(name => {
+    const bytes = Buffer.from('Archived ' + name);
+    fs.writeFileSync(path.join(source.workspace, name), bytes);
+    return { action: 'created', path: name, after: { exists: true, path: name, size: bytes.length,
+      hash: crypto.createHash('sha256').update(bytes).digest('hex') } };
+  });
+  await source.history.projectRows([source.row]);
+  await source.history.backfill(SID, { journal: { cwd: fs.realpathSync(source.workspace), turnId: 'captured', files: outputs } });
+  source.history.observe(source.handle(), source.id);
+  assert.equal((await source.history.transferSources(SID)).length, 2);
+  fs.rmSync(source.workspace, { recursive: true });
+  await target.peer.listen({ host: '127.0.0.1', port: 0 });
+  const offer = target.peer.createPairingOffer();
+  await source.peer.connect({ endpoint: offer.endpoints[0], offer: offer.offer, expectedDeviceId: offer.deviceId });
+  const preview = await source.transfer.preview({ sessionId: SID, targetDeviceId: 'peer-target' });
+  const staged = preview.files.find(file => file.path.endsWith('/chosen-input.txt'))?.path;
+  assert.ok(staged);
+  assert.deepEqual(preview.files.map(file => file.path).sort(), [...outputs.map(file => file.path), staged].sort());
+  assert.equal((await source.transfer.start({ ...preview, selectedPaths: ['chosen.md', staged] })).state, 'done');
+  const row = await target.history.resolve(SID), saved = await target.history.store.deviceHistory(SID);
+  assert.equal(fs.readFileSync(path.join(row.cwd, staged), 'utf8'), 'stage');
+  const attached = saved.snapshot.messages[0].attachments;
+  assert.equal(attachment.previewPath(attached[0].previewRef), path.join(row.cwd, staged));
+  assert.equal(attached[1].availability, 'missing');
+  assert.equal(saved.localArtifactHistory.transferId, row.deviceTransferId);
+  assert.equal(fs.readFileSync(path.join(row.cwd, 'chosen.md'), 'utf8'), 'Archived chosen.md');
+  assert.equal(fs.existsSync(path.join(row.cwd, 'not-chosen.md')), false);
+  assert.equal(JSON.stringify(saved.localArtifactHistory).includes(source.workspace), false);
+  fs.unlinkSync(path.join(row.cwd, 'chosen.md'));
+  const restored = await target.history.open(SID, { historyPreview: true });
+  const result = await restored.historyArtifacts.snapshotAsync();
+  assert.deepEqual(result.items.map(file => file.relative), ['chosen.md']);
+  assert.ok(result.items[0].path.startsWith(target.app.getPath('userData') + path.sep));
+  assert.equal(fs.readFileSync(result.items[0].path, 'utf8'), 'Archived chosen.md');
+  const third = endpoint(t, root, 'peer-third', false, ['peer-target']);
+  await continueOnDevice(target, 'artifact-receiver');
+  await connectDevices(target, third);
+  const next = await target.transfer.preview({ sessionId: SID, targetDeviceId: third.id.clientId });
+  assert.equal((await target.transfer.start({ ...next, selectedPaths: ['chosen.md', staged] })).state, 'done');
+  const final = await third.history.store.deviceHistory(SID);
+  const thirdCwd = (await third.history.resolve(SID)).cwd;
+  assert.equal(attachment.previewPath(final.snapshot.messages[0].attachments[0].previewRef), path.join(thirdCwd, staged));
+  assert.equal(fs.readFileSync(path.join(thirdCwd, 'chosen.md'), 'utf8'), 'Archived chosen.md');
+});
+
+async function ordinarySource(t, root) {
+  const peer = endpoint(t, root, 'peer-source', true);
+  for (const field of ['taskId', 'taskIds', 'activeTaskId']) delete peer.row[field];
+  fs.mkdirSync(path.dirname(peer.archive), { recursive: true });
+  fs.writeFileSync(peer.archive, [
+    { type: 'session', id: SID, cwd: peer.workspace },
+    { type: 'message', id: 'user', message: { role: 'user', content: 'Create a website.' } },
+    { type: 'message', id: 'reply', message: { role: 'assistant', content: 'Complete.' } },
+  ].map(row => JSON.stringify(row)).join('\n') + '\n');
+  await peer.history.projectRows([peer.row]); await peer.history.backfill(SID);
+  peer.history.observe(peer.handle(), peer.id);
+  return peer;
+}
+
+async function recordOutputs(device, cwd, values) {
+  const entries = Object.entries(values).map(([name, text]) => {
+    const file = path.join(cwd, name);
+    fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text);
+    return { action: 'created', path: name, after: { path: name, exists: true,
+      size: Buffer.byteLength(text), hash: crypto.createHash('sha256').update(text).digest('hex') } };
+  });
+  await device.history.backfill(SID, { journal: { cwd, files: entries, turnId: crypto.randomUUID() } });
+}
+
+test('a text-only handoff preserves new receiver outputs for the next handoff after its workspace moves', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'receiver-artifact-turn-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const A = await ordinarySource(t, root), B = endpoint(t, root, 'peer-target', false);
+  const C = endpoint(t, root, 'peer-third', false, ['peer-target']);
+  await connectDevices(A, B);
+  const first = await A.transfer.preview({sessionId: SID, targetDeviceId: B.id.clientId});
+  assert.equal((await A.transfer.start({...first, selectedPaths: []})).state, 'done');
+  const original = await B.history.store.deviceHistory(SID);
+  assert.equal(original.localArtifactHistory, undefined);
+  await continueOnDevice(B, 'new-owner');
+  const row = await B.history.resolve(SID);
+  fs.writeFileSync(path.join(row.cwd, 'outside-receipt.md'), 'never selected');
+  await recordOutputs(B, row.cwd, { 'new-output.md': 'written on B', '.soduwork/evidence/new.png': 'image fixture' });
+  const saved = await B.history.store.deviceHistory(SID);
+  assert.equal(saved.localArtifactHistory?.transferId, row.deviceTransferId);
+  fs.renameSync(row.cwd, row.cwd + '-moved');
+  const onB = await B.history.open(SID, { historyPreview: true });
+  assert.deepEqual((await onB.historyArtifacts.snapshotAsync()).items.map(file => file.relative).sort(),
+    ['.soduwork/evidence/new.png', 'new-output.md']);
+  await connectDevices(B, C);
+  const next = await B.transfer.preview({sessionId: SID, targetDeviceId: C.id.clientId});
+  const selected = ['conversation-evidence/new.png', 'new-output.md'];
+  assert.deepEqual(next.files.map(file => file.path).sort(), selected);
+  assert.equal((await B.transfer.start({...next, selectedPaths: selected})).state, 'done');
+  const third = await C.history.resolve(SID);
+  assert.equal(fs.readFileSync(path.join(third.cwd, selected[0]), 'utf8'), 'image fixture');
+  assert.equal(fs.readFileSync(path.join(third.cwd, selected[1]), 'utf8'), 'written on B');
+  assert.equal(fs.existsSync(path.join(third.cwd, 'outside-receipt.md')), false);
+});
+
+test('a changed website and its archived original can migrate together with a single selection per shared resource', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'historical-tree-choice-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const A = await ordinarySource(t, root), B = endpoint(t, root, 'peer-target', false);
+  const original = '<link rel="stylesheet" href="assets/style.css">OLD';
+  const edited = original.replace('OLD', 'NEW');
+  await recordOutputs(A, A.workspace, { 'index.html': original, 'assets/style.css': 'html{}' });
+  fs.writeFileSync(path.join(A.workspace, 'index.html'), edited);
+  await connectDevices(A, B);
+  const request = { sessionId: SID, targetDeviceId: B.id.clientId };
+  fs.mkdirSync(path.join(A.workspace, 'Conversation-History'));
+  fs.writeFileSync(path.join(A.workspace, 'Conversation-History', 'index.html'), 'unrelated');
+  await assert.rejects(A.transfer.preview(request), /conversation-history/);
+  fs.rmSync(path.join(A.workspace, 'Conversation-History'), { recursive: true });
+  const first = await A.transfer.preview(request), files = first.files;
+  assert.deepEqual(files.map(f => f.path).sort(), ['assets/style.css', 'conversation-history/index.html', 'index.html']);
+  assert.equal(files.find(f => f.path === 'assets/style.css').historyAlias, 'conversation-history/assets/style.css');
+  assert.equal((await A.transfer.start({...first, selectedPaths: files.map(f => f.path)})).state, 'done');
+  const cwd = (await B.history.resolve(SID)).cwd;
+  assert.equal(fs.readFileSync(path.join(cwd, 'index.html'), 'utf8'), edited);
+  assert.equal(fs.readFileSync(path.join(cwd, 'conversation-history/index.html'), 'utf8'), original);
+  for (const prefix of ['', 'conversation-history/']) assert.equal(fs.readFileSync(path.join(cwd, prefix + 'assets/style.css'), 'utf8'), 'html{}');
+  fs.renameSync(cwd, cwd + '-moved');
+  const view = await B.history.open(SID, { historyPreview: true });
+  const artifact = (await view.historyArtifacts.snapshotAsync()).items.find(f => f.kind === 'website');
+  assert.equal(artifact.relative, 'conversation-history/index.html');
+  assert.equal(fs.readFileSync(artifact.path, 'utf8'), original);
+  assert.equal(fs.readFileSync(path.join(path.dirname(artifact.path), 'assets/style.css'), 'utf8'), 'html{}');
 });

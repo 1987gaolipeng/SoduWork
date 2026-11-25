@@ -68,7 +68,7 @@ def t_codex_home() -> None:
 
 
 def t_codex_temp_boundary() -> None:
-    """Every Codex conversation gets isolated state and only imports login."""
+    """Codex account and conversation temp state have separate managed directories."""
     with tempfile.TemporaryDirectory() as temp:
         home = os.path.join(temp, "codex-source")
         data = os.path.join(temp, "soduwork-data")
@@ -88,7 +88,8 @@ def t_codex_temp_boundary() -> None:
             ok(codex_env.get("PYTHONUTF8") == "1"
                and codex_env.get("PYTHONIOENCODING") == "utf-8",
                "Runner 子进程统一使用 UTF-8，不继承 Windows 本地代码页")
-            expected = os.path.join(runtime_home, ".soduwork-tmp")
+            from app.services import codex_runtime_home
+            expected = os.path.join(data, "agents", "codex", codex_runtime_home._folder("../chat:one"), ".soduwork-tmp")
             ok(os.path.commonpath([runtime_home, data]) == os.path.abspath(data),
                "Codex 会话目录固定在 SoduWork 私有数据根内", runtime_home)
             ok(codex_env.get("TEMP") == expected
@@ -96,8 +97,9 @@ def t_codex_temp_boundary() -> None:
                and codex_env.get("TMPDIR") == expected,
                "Codex 内部临时文件与 CODEX_HOME 保持同一存储边界", codex_env.get("TEMP"))
             ok(os.path.isdir(expected), "Codex 私有临时目录已准备")
-            ok(Path(runtime_home, "auth.json").read_text(encoding="utf-8")
-               == '{"auth_mode":"test"}', "仅同步 Codex 登录状态")
+            ok(not Path(runtime_home, "auth.json").exists() and
+               Path(home, "auth.json").read_text(encoding="utf-8") == '{"auth_mode":"test"}',
+               "新建会话不导入终端登录，终端源文件保持原状")
             ok(not Path(runtime_home, "config.toml").exists(),
                "不继承个人 hooks、MCP 和运行配置")
             again = local_base._env_for(

@@ -16,6 +16,8 @@ const screenshotEvidence = require('./screenshot-evidence');
 const artifactTitle = require('./artifact-title');
 const selection = require('./delivery-selection');
 
+const continuationArchives = new WeakMap();
+const archiveReaders = new WeakMap();
 const RECORDS = new Map();
 const PENDING = new Map();
 const IDLE_MS = 20 * 60 * 1000;
@@ -30,6 +32,8 @@ const MIME = Object.freeze({
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.bmp': 'image/bmp',
+  '.avif': 'image/avif',
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
@@ -45,6 +49,8 @@ const MIME = Object.freeze({
   '.wasm': 'application/wasm',
   '.pdf': 'application/pdf',
   '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/plain; charset=utf-8',
+  '.markdown': 'text/plain; charset=utf-8',
   '.xml': 'application/xml; charset=utf-8',
 });
 
@@ -107,6 +113,27 @@ async function snapshotAsync(session) {
   return sessionSnapshot(session, scanned, recovered, merged);
 }
 
+// Only the interactive output index and its read actions consult archived bytes.
+async function viewSnapshotAsync(session) {
+  return appendArchivedItems(session, await snapshotAsync(session));
+}
+async function appendArchivedItems(session, current) {
+  const getArchive = continuationArchives.get(session);
+  if (!current || !getArchive) return current;
+  const reader = await getArchive();
+  if (!reader) return current;
+  await reader.authorize();
+  const ids = new Set(current.items.map(item => item.artifactId));
+  const relative = new Set(current.items.map(item => item.relative));
+  for (const item of reader.snapshot().items) {
+    if (ids.has(item.artifactId) || relative.has(item.relative)) continue;
+    const historical = { ...item, primary: false, changedInTurn: false, pluginDraft: false, actions: ['open'] };
+    archiveReaders.set(historical, reader);
+    current.items.push(historical);
+  }
+  return current;
+}
+
 function sessionSnapshot(session, scanned, recovered, candidates) {
   if (!session) return null;
   if (session.historyArtifacts) return session.historyArtifacts.snapshot();
@@ -125,6 +152,7 @@ function sessionSnapshot(session, scanned, recovered, candidates) {
   if (!scanned) scanned = typeof session.outputSnapshot === 'function'
     ? session.outputSnapshot() : { files: typeof session.outputs === 'function' ? session.outputs() : [] };
   const state = session.snapshot?.() || {};
+  scanned = deliveryContract.fromReply(session.cwd, state, scanned);
   const captures = screenshotEvidence.toolPaths(session.cwd, state.tools || []);
   const declared = deliveryContract.readManifest(session.cwd);
   const processFiles = new Set((Array.isArray(declared?.processFiles) ? declared.processFiles : [])
@@ -211,6 +239,17 @@ async function resolveAsync(session, artifactId) {
   return resolveSnapshot(session, artifactId, await snapshotAsync(session));
 }
 
+async function resolveView(session, artifactId) {
+  const current = await snapshotAsync(session);
+  if (current?.items.some(row => row.artifactId === artifactId)) return resolveSnapshot(session, artifactId, current);
+  const snapshot = await appendArchivedItems(session, current);
+  const item = snapshot?.items.find(row => row.artifactId === artifactId);
+  const reader = archiveReaders.get(item);
+  if (!reader) return resolveSnapshot(session, artifactId, snapshot);
+  if (!reader.verify(item.path)) return { ok: false, reason: '成果文件已改变或无法读取' };
+  return { ok: true, item, path: item.path, stat: fs.statSync(item.path), snapshot, historyArtifacts: reader };
+}
+
 function resolveSnapshot(session, artifactId, snapshot) {
   if (!snapshot) return { ok: false, reason: '这条会话已经结束' };
   const item = snapshot.items.find((row) =>
@@ -258,6 +297,7 @@ function publicArtifact(ref, item) {
     at: Number(item && item.at || 0),
     preview: Boolean(item && item.preview),
     primary: item ? item.primary !== false : true,
+    ...(archiveReaders.has(item) ? { archivedReadOnly: true } : {}),
     processEvidence: Boolean(item && item.processEvidence),
     changedInTurn: Boolean(item && item.changedInTurn),
     ...(item && item.pluginDraft ? { pluginDraft: true, pluginPackage: Boolean(item.pluginPackage), skillPackage: Boolean(item.skillPackage),
@@ -283,7 +323,7 @@ function decorate(ref, delivery) {
 async function decorateForSharing(ref, delivery) {
   const artifacts = decorate(ref, delivery);
   await Promise.all(artifacts.map(async (artifact, index) => {
-    if (artifact.kind !== 'website') return;
+    if (artifact.kind !== 'website' || archiveReaders.has(delivery.items[index])) return;
     // share-related archives the resolved entry's parent. Display paths may be aliases or truncated.
     const entry = await fs.promises.realpath(delivery.items[index].path).catch(() => null);
     artifact.websiteDirectoryId = entry
@@ -414,10 +454,10 @@ function probe(url) {
 }
 
 async function startPreview(session, ref, artifactId, current) {
-  const found = await resolveAsync(session, artifactId);
+  const found = await resolveView(session, artifactId);
   if (!current()) return { ok: false, reason: '这条会话的预览已经关闭' };
   if (!found.ok) return found;
-  if (!['website', 'video'].includes(found.item.kind) && !(found.historyArtifacts && found.item.kind === 'pdf')) return { ok: false, reason: '这份成果不支持流式预览' };
+  if (!['website', 'video'].includes(found.item.kind) && !(found.historyArtifacts && found.item.kind === 'pdf') && !archiveReaders.has(found.item)) return { ok: false, reason: '这份成果不支持流式预览' };
   return startResolvedPreview(found, ref, artifactId);
 }
 
@@ -430,7 +470,7 @@ async function startResolvedPreview(found, ref, artifactId) {
     return { ok: true, artifactId, status: 'running', url: current.url };
   }
   if (current) stopRecord(current);
-  const root = fs.realpathSync(path.dirname(found.path));
+  const root = found.previewRoot || fs.realpathSync(path.dirname(found.path));
   const entry = fs.realpathSync(found.path);
   const record = {
     key, ref: String(ref || ''), artifactId: String(artifactId || ''),
@@ -456,7 +496,7 @@ async function startResolvedPreview(found, ref, artifactId) {
   } catch (error) { stopRecord(record); throw error; }
   if (record.closed) { stopRecord(record); return { ok: false, reason: '这条会话的预览已经关闭' }; }
   const address = record.server.address();
-  const name = encodeURIComponent(path.basename(entry));
+  const name = path.relative(root, entry).split(path.sep).map(encodeURIComponent).join('/');
   record.url = 'http://127.0.0.1:' + Number(address && address.port || 0) + '/' + name;
   if (!await probe(record.url) || record.closed) {
     stopRecord(record);
@@ -474,25 +514,27 @@ async function preview(session, ref, artifactId) {
   return promise;
 }
 
-async function previewInput(session, ref, rawTarget) {
+async function previewInput(session, ref, rawTarget, cacheAccess) {
   if (!session?.cwd) return { ok: false, reason: '这条会话已经结束' };
   const target = path.resolve(String(rawTarget || ''));
-  if (!outputs.inside(session.cwd, target)) return { ok: false, reason: '只能预览当前会话工作区里的文件' };
+  if (!cacheAccess && !outputs.inside(session.cwd, target)) return { ok: false, reason: '只能预览当前会话工作区里的文件' };
   let entry, stat;
   try {
-    const root = fs.realpathSync(session.cwd);
+    if (cacheAccess) { await cacheAccess.authorize(); if (!cacheAccess.verify(target)) throw Error('成果未核验'); }
+    const root = cacheAccess?.root || fs.realpathSync(session.cwd);
     entry = fs.realpathSync(target); stat = fs.statSync(entry);
     if (!within(root, entry, false) || !stat.isFile()) return { ok: false, reason: '文件的真实路径超出了当前会话工作区' };
   } catch (_) { return { ok: false, reason: '预览文件已经不存在' }; }
   const extension = path.extname(entry).toLowerCase();
-  const kind = ['.html', '.htm'].includes(extension) ? 'website' : /^video\//.test(MIME[extension] || '') ? 'video' : '';
+  const kind = ['.html', '.htm'].includes(extension) ? 'website' : /^video\//.test(MIME[extension] || '') ? 'video' : cacheAccess && MIME[extension] ? 'file' : '';
   if (!kind) return { ok: false, reason: '这个文件不支持网页流式预览' };
   // An input can be served without scanning the folder or declaring a result.
   // This private runtime key never enters the conversation's artifact index.
   const id = 'input_' + crypto.createHash('sha256').update(entry).digest('hex');
   const key = keyOf(ref, id);
   if (PENDING.has(key)) return PENDING.get(key);
-  const promise = startResolvedPreview({ path: entry, stat, item: { kind, at: stat.mtimeMs } }, ref, id)
+  const promise = startResolvedPreview({ path: entry, stat, item: { kind, at: stat.mtimeMs },
+    historyArtifacts: cacheAccess, previewRoot: cacheAccess?.root }, ref, id)
     .finally(() => { if (PENDING.get(key) === promise) PENDING.delete(key); });
   PENDING.set(key, promise);
   return promise;
@@ -509,6 +551,7 @@ async function action(session, ref, artifactId, rawAction, deps) {
   const key = keyOf(ref, artifactId);
   if (actionName === 'status') {
     const record = RECORDS.get(key);
+    if (record?.historyArtifacts) await record.historyArtifacts.authorize();
     return { ok: true, artifactId, status: record && record.server.listening ? 'running' : 'stopped',
       url: record && record.server.listening ? record.url : '' };
   }
@@ -517,8 +560,19 @@ async function action(session, ref, artifactId, rawAction, deps) {
     stopRecord(RECORDS.get(key));
     return { ok: true, artifactId, status: 'stopped' };
   }
-  const found = await resolveAsync(session, artifactId);
+  const found = await resolveView(session, artifactId);
   if (!found.ok) return found;
+  if (archiveReaders.has(found.item)) {
+    if (actionName === 'open') {
+      // The operating system may edit files it opens. Expose this verified
+      // revision through the same read-only loopback preview used for websites.
+      const opened = await preview(session, ref, artifactId);
+      if (opened.ok && !MIME[path.extname(found.path).toLowerCase()]) await deps.shell.openExternal(opened.url);
+      return opened;
+    }
+    if (!['read', 'image', 'image-full'].includes(actionName))
+      return { ok: false, reason: '历史成果仅支持查看已核验的文件' };
+  }
   if (actionName === 'location') return { ok: true, path: found.path };
   if (actionName === 'open' && (found.item.kind === 'website' || found.historyArtifacts && ['pdf', 'video'].includes(found.item.kind))) {
     return preview(session, ref, artifactId);
@@ -629,6 +683,8 @@ if (typeof sweep.unref === 'function') sweep.unref();
 
 module.exports = {
   snapshot: sessionSnapshot,
+  viewSnapshotAsync,
+  bindContinuationArchive(handle, reader) { continuationArchives.set(handle, reader); },
   snapshotAsync,
   decorate,
   decorateForSharing,

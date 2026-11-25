@@ -636,7 +636,7 @@ if (!gotTheLock) {
   function startDesktop(credentials) {
     _deviceAuth.install({ app, ipcMain, safeStorage, credentials, onAuthUnavailable: _runnerRuntime.pauseForHubChange });
     _runnerRuntime.install({ app, ipcMain, identityOf: _deviceAuth.identity, sessionOf: _deviceAuth.session,
-      canConnect: _deviceAuth.canConnect });
+      canConnect: _deviceAuth.canConnect, localOwnerOf: _deviceAuth.localOwner, onSessionIssued: _deviceAuth.onSessionIssued });
     /*
      * Adopt the Runner-managed office engine so client probes and child processes use the same
      * installation. Missing engines must not block startup.
