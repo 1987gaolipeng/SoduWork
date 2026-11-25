@@ -3,7 +3,7 @@
 const crypto = require('node:crypto');
 const { mergeNativeEvidence } = require('./history-evidence.cjs');
 
-function conversationTranscriptEntries(messages) {
+function conversationTranscriptEntries(messages, { includeMessageId = false } = {}) {
   const visible = [];
   for (const message of messages || []) {
     if (!message || !['user', 'assistant'].includes(message.role)) continue;
@@ -21,8 +21,10 @@ function conversationTranscriptEntries(messages) {
         .map(block => block.text).join('\n');
     }
     if (typeof text !== 'string' || !text.length) continue;
-    visible.push({ role: message.role, text, ...(message.role === 'assistant' && typeof message.done === 'boolean'
-      ? { done: message.done } : {}) });
+    const entry = { role: message.role, text };
+    if (includeMessageId && typeof message.id === 'string') entry.id = message.id;
+    if (message.role === 'assistant' && typeof message.done === 'boolean') entry.done = message.done;
+    visible.push(entry);
   }
   return visible;
 }

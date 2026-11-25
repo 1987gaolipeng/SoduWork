@@ -823,3 +823,35 @@ test('different stream boundaries for identical assistant text preserve native m
   await view.close();
   assert.equal((await f.history.prepareContinuation('one', { refresh: true })).prefix.messages.length, 2);
 });
+
+test('rapidly captured chats on different Runners reopen once and retain their own continuation', async t => {
+  const f = setup(t);
+  const { conversationTranscriptMessages } = require('../main/conversation/conversation-transcript.cjs');
+  const rows = ['codex', 'opencode', 'qwen', 'kimi', 'codex-harness'].map(adapterId =>
+    ({ ...f.row, id: 'chat-' + adapterId, adapterId, path: '' }));
+  const entries = new Map(rows.map(row => [row.id, row]));
+  f.session.archivedConversation = async (_app, id) => entries.get(id);
+  f.session.historyEntry = async (_app, id) => entries.has(id)
+    ? { ok: true, entry: entries.get(id) } : { ok: false, notFound: true };
+  t.mock.method(require('../main/runner-runtime'), 'rpc', async (_method, { ref, since }) => ({
+    ok: true, data: { ref, seq: 2, items: [
+      { seq: 1, kind: 'user', text: 'Hello' },
+      { seq: 2, kind: 'say', streamId: 'answer', text: 'Reply from ' + ref, done: true },
+    ].filter(item => item.seq > since) },
+  }));
+  await Promise.all(rows.map(async row => {
+    const messages = [{ role: 'user', text: 'Hello ' }, { role: 'assistant', text: 'Reply from ' + row.id }];
+    await f.history.capture({ historyRow: () => row, snapshot: () => ({ messages }) }, f.identityOf());
+    await f.history.backfill(row.id);
+  }));
+  for (const row of rows.reverse()) {
+    const view = await f.history.open(row.id, { historyPreview: true, allowContinuation: true });
+    const expected = [{ role: 'user', text: 'Hello' }, { role: 'assistant', text: 'Reply from ' + row.id }];
+    try {
+      assert.deepEqual(conversationTranscriptMessages(view.snapshot().messages), expected, row.id);
+      assert.equal(view.snapshot().execution.canContinueOnDevice, true, row.id);
+      const resumed = await f.history.prepareContinuation(row.id, { refresh: true });
+      assert.deepEqual(conversationTranscriptMessages(resumed.prefix.messages), expected, row.id);
+    } finally { await view.close(); }
+  }
+});

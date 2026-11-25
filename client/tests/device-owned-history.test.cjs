@@ -821,3 +821,37 @@ test('only a confirmed first-page Runner archive absence can continue a preserve
   reply = ({ since }) => since ? missing : { ok: true, data: { ok: true, seq: 2, items: [event] } };
   await assert.rejects(f.history.prepareContinuation(row.id, { refresh: true }), { code: 'NATIVE_HISTORY_UNAVAILABLE' });
 });
+
+test('Runner journal input without trailing spaces matches the recorded conversation in turn order', () => {
+  const { withTranscript } = require('../main/conversation/conversation-body.cjs');
+  const messages = [
+    { role: 'user', text: 'first', id: 'segment:a:1' },
+    { role: 'assistant', blocks: [{ kind: 'text', text: 'one' }] },
+    { role: 'user', text: 'first', id: 'segment-b:1' },
+    { role: 'assistant', text: 'two' },
+  ];
+  const data = { snapshot: { messages }, coverage: { complete: true,
+    sources: [{ id: 'segment:a', adapterId: 'codex' }, { id: 'segment-b', adapterId: 'qwen' }] } };
+  const dialogue = messages.map((m, i) => ({ role: m.role, text: i % 2 ? (m.text || 'one') : 'first  ' }));
+  assert.equal(withTranscript(data, dialogue), data);
+  for (const changed of [' first', 'first\n', 'first\t ', 'first\u00a0 ', 'other']) {
+    const result = withTranscript(data, [{ role: 'user', text: changed }, ...dialogue.slice(1)]);
+    assert.equal(result.coverage.complete, false);
+    assert.equal(result.snapshot.messages[messages.length].historyTranscriptBoundary, true);
+  }
+  const differentReply = withTranscript(data, [...dialogue.slice(0, 3), { role: 'assistant', text: 'two ' }]);
+  assert.equal(differentReply.coverage.complete, false);
+  const pi = { ...data, coverage: { complete: true, sources: [{ id: 'segment:a', adapterId: 'pi' }] } };
+  assert.equal(withTranscript(pi, dialogue).coverage.complete, false);
+});
+
+test('assistant blocks joined in the displayed conversation match split native messages', () => {
+  const { withTranscript } = require('../main/conversation/conversation-body.cjs');
+  const snapshot = { messages: ['first', 'second', 'third'].map(text => ({ role: 'assistant', text })) };
+  const data = { snapshot, coverage: { complete: true } };
+  const dialogue = text => [{ role: 'assistant', text }, { role: 'assistant', text: 'third' }];
+  assert.equal(withTranscript(data, dialogue('first\nsecond')), data);
+  for (const changed of ['first\n\nsecond', 'fir\nstsecond', 'first second']) {
+    assert.equal(withTranscript(data, dialogue(changed)).coverage.complete, false);
+  }
+});
