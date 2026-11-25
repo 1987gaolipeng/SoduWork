@@ -35,6 +35,7 @@ async function fixture(t, spec, { delayedDispatch = false, delayedPlugin = false
     error: status === 'stopped' ? '你把它叫停了' : '' });
   const runtime = { async rpc(op, value) {
     calls.push({ op, value });
+    if (op === 'runtime.models') return { ok: true, data: { ok: true, catalogAvailable: true, models: [{ id: 'account-model' }] } };
     if (op === 'runtime.detect') return { ok: true, data: {} };
     if (op === 'job.dispatch') {
       const receipt = { ok: true, data: { ok: true,

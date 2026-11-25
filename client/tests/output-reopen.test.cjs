@@ -33,6 +33,7 @@ for (const spec of catalog.runnerRuntimes()) test(spec.id + ': old outputs remai
   const adapter = createRunnerRuntimeAdapter({ runtimeSpec: spec,
     modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'fixture', key: 'fixture' } }) },
     runnerRuntime: { async rpc(op) {
+      if (op === 'runtime.models') return { ok: true, data: { ok: true, catalogAvailable: true, models: [{ id: 'account-model' }] } };
       if (op === 'job.comment') { next = true; return { ok: true, data: { ok: true } }; }
       if (op === 'job.session') return { ok: true, data: { status: 'done', started: recent / 1000, ended: (recent + 5000) / 1000, firstStarted: old / 1000,
         items: [{ seq: 1, kind: 'user', text: 'create a website', at: new Date(old).toISOString() },

@@ -13,6 +13,7 @@ async function harness(t, spec, failStop = false) {
   const push = (kind, text) => rows.push({ seq: rows.length + 1, kind, text });
   const runtime = { async rpc(op, value) {
     calls.push({ op, value });
+    if (op === 'runtime.models') return { ok: true, data: { ok: true, catalogAvailable: true, models: [{ id: 'account-model' }] } };
     if (op === 'runtime.detect') return { ok: true, data: {} };
     if (op === 'job.dispatch') {
       status = 'running'; push('user', value.ctx.conversationUserText);
@@ -84,7 +85,7 @@ for (const spec of catalog.runnerRuntimes()) test(spec.id + ' immediate send wai
   assert.equal(sent.text, 'B'); assert.equal(sent.localFiles[0].path, f.attachment);
   assert.match(sent.promptText, /Retain plugin context/); assert.deepEqual(f.resolutions, [['fixture']]);
   if (spec.modelMode !== 'account') assert.ok(JSON.stringify(sent.cfg).includes('picked-model'));
-  else assert.equal(f.handle.snapshot().modelSelection.activeName, '', 'native account model selection remains unchanged');
+  else assert.equal(f.handle.snapshot().modelSelection.activeName, spec.id === 'codex' ? 'account-model' : '', 'the active account model survives interruption');
   assert.deepEqual(f.handle.snapshot().execution.queue.map(x => x.id), [later.queueId, task.queueId]);
   f.complete(); assert.equal((await now.completion).ok, true); assert.equal((await later.completion).ok, true); assert.equal((await task.completion).ok, true);
   assert.deepEqual(f.calls.filter(x => x.op === 'job.comment').map(x => x.value.text), ['B', 'C', 'Task D']);
