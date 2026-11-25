@@ -284,8 +284,8 @@ function OrgModal({ spec, orgs, onClose, onDone }) {
     finally { setBusy(false) }
   }
 
-  return <Modal className="org-editor" title={editing ? tx("编辑部门") : tx("新建部门")} icon="building" draft={[name, parentId, dataSource]} onClose={onClose}
-    foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : editing ? tx("保存部门") : tx("创建部门")}</button></>}>
+  return <Modal className="org-editor" title={editing ? tx("编辑部门") : tx("新建部门")} icon="building" draft={[name, parentId, dataSource]} busy={busy} onClose={onClose}
+    foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : editing ? tx("保存部门") : tx("创建部门")}</button></>}>
     <div className="og-modal-copy"><b>{editing ? tx("调整部门身份与组织位置") : tx("把新部门放到正确的管理范围内")}</b><span>{tx("成员不会随部门自动移动，需要在用户管理中单独调整归属。")}</span></div>
     <label className="og-modal-field"><span>{tx("部门名称")}</span><input className="f-in" value={name} onChange={(event) => setName(event.target.value)} placeholder={tx("例如：产品研发中心")} autoFocus /></label>
     {!editing && <SourceField value={dataSource} onChange={setDataSource} />}

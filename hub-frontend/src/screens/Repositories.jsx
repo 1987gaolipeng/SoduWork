@@ -387,9 +387,9 @@ function MapToProjectModal({ row, onClose, onDone }) {
     } catch (e) { toast(tx("没挂上：") + e.message) } finally { setBusy(false) }
   }
 
-  return <Modal scope="project-governance" title={tx("挂进项目：") + (row.displayName || row.fullName)} draft={[pid === projects[0]?.id ? '' : pid, form]} onClose={onClose} footer={dismiss =>
+  return <Modal scope="project-governance" title={tx("挂进项目：") + (row.displayName || row.fullName)} draft={[pid === projects[0]?.id ? '' : pid, form]} busy={busy} onClose={onClose} footer={dismiss =>
     <>
-      <button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
+      <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
       <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("正在挂载…") : tx("挂进项目")}</button>
     </>
   }>

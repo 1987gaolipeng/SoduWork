@@ -90,8 +90,8 @@ function AssignModal({ task, clients, onClose, onDone }) {
   }
 
   return (
-    <Modal draft={[cid, makeBinding]} title={tx("分配到 SoduWork")} icon="link" onClose={onClose}
-      foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
+    <Modal draft={[cid, makeBinding]} title={tx("分配到 SoduWork")} icon="link" busy={busy} onClose={onClose}
+      foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
         <button className="btn btn-primary" disabled={busy || !cid} onClick={go}><Icon name="check" />{busy ? tx("分配中…") : tx("确认分配")}</button></>}>
       <div className="muted" style={{ fontSize: 14.5, marginBottom: 8 }}>{tx("把需求 ")}<b style={{ color: 'var(--ink)' }}>{task.title}</b>{tx(" 分配给一个 SoduWork 处理。")}{task.externalActor && <>{tx("处理人 ")}<span className="mono">{task.externalActor}</span>。</>}
       </div>

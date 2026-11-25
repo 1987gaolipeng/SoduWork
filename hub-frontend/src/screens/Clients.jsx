@@ -103,7 +103,7 @@ function PairDevice({ onClose, onPaired }) {
     toast(tx("设备已激活并完成归属"))
     onPaired()
   }
-  return <Modal title={tx("配对设备")} onClose={busy ? undefined : onClose} dirty={!!owner || !!token}
+  return <Modal title={tx("配对设备")} busy={busy} onClose={onClose} dirty={!!owner || !!token}
     foot={dismiss => <>
       <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
       <button className="btn btn-primary" disabled={busy || !owner || !token.trim()} onClick={pair}>{tx("配对并激活")}</button>
@@ -279,13 +279,22 @@ function ClientDetail({ client, onClose, onChanged }) {
   const [d, setD] = useState(null)
   const [notice, setNotice] = useState('')
   const [owner, setOwner] = useState(client.ownerUserId || '')
-  const [busy, setBusy] = useState('')
+  const [pendingActions, setPendingActions] = useState([])
+  const busy = pendingActions.length > 0
   const [pairingToken, setPairingToken] = useState('')
   const [updates, setUpdates] = useState([])
   const [confirm, setConfirm] = useState(null)   // Confirmation state for destructive remote actions.
   const detailScope = useRef(null)
   const pushLock = useRef(false)
   const updatePolling = useRef(null)
+
+  function beginAction(name) {
+    const scope = detailScope.current
+    setPendingActions(actions => [...actions, name])
+    return () => {
+      if (detailScope.current === scope) setPendingActions(actions => actions.filter(action => action !== name))
+    }
+  }
 
   useEffect(() => {
     let alive = true
@@ -294,7 +303,7 @@ function ClientDetail({ client, onClose, onChanged }) {
     pushLock.current = false
     setD(null)
     setPairingToken('')
-    setBusy('')
+    setPendingActions([])
     api.clientDetail(client.id)
       .then((next) => { if (alive && !scope.revision) { setD(next); setOwner(next.ownerUserId || '') } })
       .catch(() => { if (alive && !scope.revision) setD({ ...client, config: {} }) })
@@ -332,7 +341,7 @@ function ClientDetail({ client, onClose, onChanged }) {
     if (!scope) return false
     pushLock.current = true
     ++scope.revision
-    setBusy(label)
+    const finish = beginAction(label)
     try {
       const r = await api.pushClient(client.id, body)
       if (detailScope.current !== scope) return false
@@ -353,17 +362,18 @@ function ClientDetail({ client, onClose, onChanged }) {
         toast(tx("设备当前离线，指令未送达，请设备上线后重试"))
       }
       onChanged && onChanged()
-      return body?.type === "notice" ? delivered : true
+      return body?.type === 'config.patch' || delivered
     } catch (e) {
       if (detailScope.current === scope) toast(tx("失败：") + e.message)
       return false
     } finally {
-      if (detailScope.current === scope) { pushLock.current = false; setBusy('') }
+      if (detailScope.current === scope) pushLock.current = false
+      finish()
     }
   }
   async function saveOwner() {
     if (saveDisabled) return
-    setBusy('owner')
+    const finish = beginAction('owner')
     try {
       const before = authState((d || client).authState).key
       const result = await api.assignClient(client.id, owner || null, needsPairing ? pairingToken.trim() : undefined)
@@ -375,24 +385,29 @@ function ClientDetail({ client, onClose, onChanged }) {
       onChanged && onChanged()
     }
     catch (e) { toast(tx("失败：") + tx(e.message)) }
-    setBusy('')
+    finish()
   }
 
   async function changeAccess(action) {
-    setBusy(action)
+    const finish = beginAction(action)
+    let accepted = false
     try {
       if (action === 'revoke') await api.revokeClient(client.id)
       else await api.resetClientEnrollment(client.id)
-      await reloadDetail()
+      accepted = true
       toast(action === 'revoke' ? tx("设备访问已停用") : tx("登记已清除，等待设备重新连接"))
+      await reloadDetail()
       onChanged && onChanged()
-    } catch (e) { toast(tx("失败：") + e.message) }
-    setBusy('')
+    } catch (e) { toast((accepted ? tx("刷新失败，以下显示上次成功读取的数据。") : tx("失败：")) + e.message) }
+    finish()
+    return accepted
   }
   async function requestUpdate() {
-    setBusy('update')
+    const finish = beginAction('update')
+    let accepted = false
     try {
       const result = await api.requestClientUpdate(client.id)
+      accepted = true
       if (result.alreadyCurrent) toast(tx("这台 SoduWork 已经是最新版本"))
       else {
         toast(result.delivered
@@ -401,8 +416,9 @@ function ClientDetail({ client, onClose, onChanged }) {
         await reloadDetail()
       }
       onChanged && onChanged()
-    } catch (e) { toast(tx("升级请求失败：") + e.message) }
-    setBusy('')
+    } catch (e) { toast((accepted ? tx("刷新失败，以下显示上次成功读取的数据。") : tx("升级请求失败：")) + e.message) }
+    finish()
+    return accepted
   }
   const updateLabel = {
     queued: tx("等待设备上线"), available: tx("发现新版本"), downloading: tx("正在下载"),
@@ -415,17 +431,17 @@ function ClientDetail({ client, onClose, onChanged }) {
   const auth = authState(current.authState)
   const ownerUnchanged = owner === (current.ownerUserId || '')
   const needsPairing = !!owner && (auth.key !== 'active' || !ownerUnchanged)
-  const saveDisabled = busy === 'owner' || (!owner && ownerUnchanged) || (ownerUnchanged && auth.key === 'active')
+  const saveDisabled = pendingActions.includes('owner') || (!owner && ownerUnchanged) || (ownerUnchanged && auth.key === 'active')
     || (needsPairing && (auth.key === 'revoked' || !pairingToken.trim()))
   return (
     <>
-      <Modal dirty={Boolean(notice || pairingToken) || !ownerUnchanged} wide className="client-detail-modal" onClose={onClose}
+      <Modal dirty={Boolean(notice || pairingToken) || !ownerUnchanged} wide className="client-detail-modal" busy={busy} onClose={onClose}
         title={<span className="client-detail-heading"><span className="cli"><span className="ava">{(client.name || client.id).slice(0, 1)}</span><span className="nm">{client.name || client.id}</span></span>
           <span className={'status-dot ' + (client.online ? 'on' : 'off')}><i />{client.online ? tx("在线") : tx("离线")}</span></span>}
         foot={dismiss => <>
-          {can('client.update') && <button className="btn btn-primary" disabled={busy === 'update'} onClick={() => setConfirm({ title: tx("升级完整客户端"), text: client.online ? tx("系统会创建可追踪的升级任务，客户端下载并校验完整安装包后，由用户确认重启安装。确定下发？") : tx("设备当前离线。升级任务会持久排队，设备下次上线后自动领取，不会丢失。确定排队？"), confirmText: tx("确认升级"), run: requestUpdate })} title={tx("升级完整客户端")}><Icon name="external" />{tx("升级客户端")}</button>}
-          {can('client.control') && <button className="btn btn-ghost" disabled={busy === 'reload'} onClick={() => setConfirm({ text: tx("将强制该 SoduWork 立即刷新，会打断用户正在做的事。确定？"), run: () => push({ type: 'command', action: 'reload' }, 'reload') })}><Icon name="refresh" />{tx("强制刷新")}</button>}
-          <button className="btn btn-ghost" onClick={dismiss}>{tx("关闭")}</button>
+          {can('client.update') && <button className="btn btn-primary" disabled={pendingActions.includes('update')} onClick={() => setConfirm({ title: tx("升级完整客户端"), text: client.online ? tx("系统会创建可追踪的升级任务，客户端下载并校验完整安装包后，由用户确认重启安装。确定下发？") : tx("设备当前离线。升级任务会持久排队，设备下次上线后自动领取，不会丢失。确定排队？"), confirmText: tx("确认升级"), run: requestUpdate })} title={tx("升级完整客户端")}><Icon name="external" />{tx("升级客户端")}</button>}
+          {can('client.control') && <button className="btn btn-ghost" disabled={pendingActions.includes('reload')} onClick={() => setConfirm({ text: tx("将强制该 SoduWork 立即刷新，会打断用户正在做的事。确定？"), run: () => push({ type: 'command', action: 'reload' }, 'reload') })}><Icon name="refresh" />{tx("强制刷新")}</button>}
+          <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("关闭")}</button>
         </>}>
           {!d && <div className="muted">{tx("加载中…")}</div>}
           <div className={'device-auth-panel ' + auth.key}>
@@ -434,7 +450,7 @@ function ClientDetail({ client, onClose, onChanged }) {
               <span>{auth.help}</span>
             </div>
             {can('client.control') && auth.key === 'active' && (
-              <button className="btn btn-ghost device-auth-action" disabled={busy === 'revoke'} onClick={() => setConfirm({
+              <button className="btn btn-ghost device-auth-action" disabled={pendingActions.includes('revoke')} onClick={() => setConfirm({
                 title: tx("停用设备访问"),
                 text: tx("这会立即让该设备的全部会话失效，但不会删除设备或需求。确定停用？"),
                 confirmText: tx("确定停用"),
@@ -442,7 +458,7 @@ function ClientDetail({ client, onClose, onChanged }) {
               })}>{tx("停用访问")}</button>
             )}
             {can('client.control') && auth.key !== 'active' && (
-              <button className="btn btn-ghost device-auth-action" disabled={busy === 'reset'} onClick={() => setConfirm({
+              <button className="btn btn-ghost device-auth-action" disabled={pendingActions.includes('reset')} onClick={() => setConfirm({
                 title: tx("重新登记设备"),
                 text: tx("这会清除当前设备身份和用户归属。设备再次连接后会回到待激活状态，需要重新选择归属用户。确定继续？"),
                 confirmText: tx("清除并重新登记"),
@@ -463,19 +479,19 @@ function ClientDetail({ client, onClose, onChanged }) {
           {can('client.assign') && (
             <div><span className="f-lbl">{tx("归属用户（决定 SoduWork 所属部门）")}</span>
               <div className="client-detail-input-action">
-                <OwnerSelect allowUnassigned value={owner} onChange={next => { setOwner(next); setPairingToken('') }} disabled={busy === 'owner'} />
+                <OwnerSelect allowUnassigned value={owner} onChange={next => { setOwner(next); setPairingToken('') }} disabled={pendingActions.includes('owner')} />
                 <button className="btn btn-primary" disabled={saveDisabled} onClick={saveOwner}><Icon name="check" />{auth.key === 'active' ? tx("保存") : tx("激活并保存")}</button>
               </div>
             </div>
           )}
           {can('client.assign') && needsPairing && auth.key !== 'revoked' &&
-            <PairingTokenInput value={pairingToken} onChange={setPairingToken} disabled={busy === 'owner'} />}
+            <PairingTokenInput value={pairingToken} onChange={setPairingToken} disabled={pendingActions.includes('owner')} />}
 
           {can('client.control') && (
             <div><label className="f-lbl">{tx("发一条通知（客户端气泡显示）")}</label>
               <div className="client-detail-input-action">
                 <input className="f-in" value={notice} onChange={(e) => setNotice(e.target.value)} placeholder={tx("例：请重启一下 SoduWork 更新配置")} />
-                <button className="btn btn-primary" disabled={busy === 'notice' || !notice.trim()} onClick={async () => {
+                <button className="btn btn-primary" disabled={pendingActions.includes('notice') || !notice.trim()} onClick={async () => {
                   const text = notice.trim()
                   if (!text) return
                   if (await push({ type: 'notice', text }, 'notice')) setNotice('')
@@ -487,7 +503,7 @@ function ClientDetail({ client, onClose, onChanged }) {
           {can('client.control') && (
             <div><label className="f-lbl">{tx("远程设提醒强度")}</label>
               <div className="seg">{[['off', tx("关闭")], ['light', tx("轻柔")], ['strong', tx("明显")]].map(([v, l]) => (
-                <button type="button" key={v} disabled={!!busy || !d} aria-pressed={cfg.remind === v} className={'s' + (cfg.remind === v ? ' on' : '')} onClick={() => push({ type: 'config.patch', patch: { remind: v } }, 'remind')}>{l}</button>
+                <button type="button" key={v} disabled={busy || !d} aria-pressed={cfg.remind === v} className={'s' + (cfg.remind === v ? ' on' : '')} onClick={() => push({ type: 'config.patch', patch: { remind: v } }, 'remind')}>{l}</button>
               ))}</div>
             </div>
           )}
@@ -495,7 +511,7 @@ function ClientDetail({ client, onClose, onChanged }) {
           {can('client.control') && (
             <div><label className="f-lbl">{tx("远程换皮肤")}</label>
               <div className="seg">{[['bear-vivid', tx("玻璃")], ['box-biz', tx("五彩盒子")], ['diamond-ice', tx("钻石")]].map(([v, l]) => (
-                <button type="button" key={v} disabled={!!busy || !d} aria-pressed={selectedSkin(cfg) === v} className={'s' + (selectedSkin(cfg) === v ? ' on' : '')} onClick={() => push({ type: 'config.patch', patch: skinConfig(v) }, 'skin')}>{l}</button>
+                <button type="button" key={v} disabled={busy || !d} aria-pressed={selectedSkin(cfg) === v} className={'s' + (selectedSkin(cfg) === v ? ' on' : '')} onClick={() => push({ type: 'config.patch', patch: skinConfig(v) }, 'skin')}>{l}</button>
               ))}</div>
             </div>
           )}
@@ -528,7 +544,8 @@ function ClientDetail({ client, onClose, onChanged }) {
             </div>
           )}
       </Modal>
-      {confirm && <Confirm title={confirm.title || tx("确认远程操作")} text={confirm.text} danger confirmText={confirm.confirmText || tx("确定下发")} onConfirm={() => { confirm.run(); setConfirm(null) }} onClose={() => setConfirm(null)} />}
+      {confirm && <Confirm title={confirm.title || tx("确认远程操作")} text={confirm.text} danger confirmText={confirm.confirmText || tx("确定下发")}
+        onConfirm={async () => { if (await confirm.run()) setConfirm(null) }} onClose={() => setConfirm(null)} />}
     </>
   )
 }

@@ -67,7 +67,7 @@ function draftSnapshot(value) {
   })
 }
 
-export function Modal({ title, icon, onClose, children, foot, footer, wide, size, scope = '', className = '', draft, dirty = false }) {
+export function Modal({ title, icon, onClose, children, foot, footer, wide, size, scope = '', className = '', draft, dirty = false, busy = false }) {
   const uiLocale = useLocale();
   const dialog = useRef(null)
   const titleId = useId()
@@ -81,8 +81,9 @@ export function Modal({ title, icon, onClose, children, foot, footer, wide, size
   // saved forms can compare with their current server baseline via dirty instead.
   const [initialDraft] = useState(() => draftSnapshot(draft))
   const [confirmDiscard, setConfirmDiscard] = useState(false)
+  if (busy && confirmDiscard) setConfirmDiscard(false)
   function dismiss() {
-    if (!onClose) return
+    if (busy || !onClose) return
     if (dirty || (draft !== undefined && draftSnapshot(draft) !== initialDraft)) setConfirmDiscard(true)
     else onClose()
   }
@@ -104,7 +105,7 @@ export function Modal({ title, icon, onClose, children, foot, footer, wide, size
         role="dialog" aria-modal={true} aria-labelledby={titleId} tabIndex={-1}>
         <div className="modal-head">
           {icon && <span className="int-ico" style={{ width: 26, height: 26 }}><Icon name={icon} /></span>}
-          <span id={titleId} className="modal-title">{title}</span><button type="button" className="mx" aria-label={tx("关闭")} onClick={dismiss}>✕</button>
+          <span id={titleId} className="modal-title">{title}</span><button type="button" className="mx" aria-label={tx("关闭")} disabled={busy} onClick={dismiss}>✕</button>
         </div>
         <div className="modal-body">{children}</div>
         {actions && <div className="modal-foot">{typeof actions === 'function' ? actions(dismiss) : actions}</div>}
@@ -124,9 +125,9 @@ export function Confirm({ title, text, danger, confirmText = tx("确定"), cance
   const [busy, setBusy] = useState(false)
   async function go() { setBusy(true); try { await onConfirm() } catch (e) { toast(tx("失败：") + (e.message || e)) } finally { setBusy(false) } }
   return (
-    <Modal size="compact" title={title || tx("确认操作")} icon="alert" onClose={onClose}
-      foot={<>
-        <button className="btn btn-ghost" data-dialog-autofocus={focusCancel || undefined} onClick={onClose}>{cancelText}</button>
+    <Modal size="compact" title={title || tx("确认操作")} icon="alert" onClose={onClose} busy={busy}
+      foot={dismiss => <>
+        <button className="btn btn-ghost" data-dialog-autofocus={focusCancel || undefined} disabled={busy} onClick={dismiss}>{cancelText}</button>
         <button className={'btn ' + (danger ? 'btn-danger' : 'btn-primary')} disabled={busy} onClick={go}>{busy ? tx("处理中…") : confirmText}</button>
       </>}>
       <div className="modal-confirm-copy">{text}</div>

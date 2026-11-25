@@ -49,8 +49,8 @@ export default function ModelProviderDeletion({ providerId, onClose, onDeleted }
     } finally { setSaving(false) }
   }
 
-  return <Modal title={tx('删除模型服务')} icon="alert" onClose={() => { if (!saving) onClose() }}
-    foot={<><button className="btn btn-ghost" disabled={saving} onClick={onClose}>{tx('取消')}</button>
+  return <Modal title={tx('删除模型服务')} icon="alert" busy={saving} onClose={onClose}
+    foot={dismiss => <><button className="btn btn-ghost" disabled={saving} onClick={dismiss}>{tx('取消')}</button>
       <button className="btn btn-danger" disabled={saving || !impact || input !== providerId}
         onClick={remove}>{saving ? tx('处理中…') : tx('删除')}</button></>}>
     {notice && <p role="alert">{tx(notice)}</p>}

@@ -62,6 +62,7 @@ export default function PluginCenter({ setupContext, onNavigate }) {
   const [categoryManagerOpen, setCategoryManagerOpen] = useState(false)
   const [catalogCategories, setCatalogCategories] = useState([])
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
   const [categoryRevision, setCategoryRevision] = useState(0)
   const [evaluationData, setEvaluationData] = useState(null)
   const [evaluationBusy, setEvaluationBusy] = useState('')
@@ -325,8 +326,8 @@ export default function PluginCenter({ setupContext, onNavigate }) {
     } finally { setBusy('') }
   }
   async function deletePlugin(force = false) {
-    if (!deleteTarget) return
-    setBusy('delete:' + deleteTarget.id)
+    if (!deleteTarget || deleting) return
+    setDeleting(true)
     try {
       await api.deletePlugin(deleteTarget.id, force)
       toast(tx(force ? "插件已强制删除：已自动下架并解除在用关系" : "插件已删除，历史审计记录仍会保留"))
@@ -337,7 +338,7 @@ export default function PluginCenter({ setupContext, onNavigate }) {
       await load()
     } catch (error) {
       toast(tx("插件暂时不能删除：") + error.message)
-    } finally { setBusy('') }
+    } finally { setDeleting(false) }
   }
   async function startEvaluation(version, caseItem, options = {}) {
     const capabilities = version.capabilities || {}
@@ -580,8 +581,8 @@ export default function PluginCenter({ setupContext, onNavigate }) {
     {publishersOpen && <PluginPublisherKeys onClose={() => setPublishersOpen(false)} />}
     {categoryManagerOpen && <PluginCategoryManager open onClose={() => setCategoryManagerOpen(false)}
       onSaved={(items) => { setCatalogCategories(items || []); setCategoryRevision((value) => value + 1); refreshGovernance(true) }} />}
-    {deleteTarget && <PluginDeleteConfirm plugin={deleteTarget} busy={busy === 'delete:' + deleteTarget.id}
-      onClose={() => !busy && setDeleteTarget(null)} onConfirm={deletePlugin} />}
+    {deleteTarget && <PluginDeleteConfirm plugin={deleteTarget} busy={deleting}
+      onClose={() => setDeleteTarget(null)} onConfirm={deletePlugin} />}
     {publisherCandidate && <PluginPublisherCandidate {...publisherCandidate} onClose={() => setPublisherCandidate(null)} onRegistered={async () => { await loadDetail(selected); await load() }} />}
     {riskConfirm && <PluginRiskConfirm request={riskConfirm} busy={riskBusy} onClose={() => !riskBusy && setRiskConfirm(null)} onConfirm={confirmRiskAction} />}
   </div>
@@ -592,8 +593,8 @@ function pickRecommended(items) { return items.find((x) => x.key === 'project-va
 function PluginDeleteConfirm({ plugin, busy, onClose, onConfirm }) {
   const uiLocale = useLocale();
   const [force, setForce] = useState(false);
-  return <Modal scope="plugin-page" title={tx("删除插件")} icon="trash" onClose={onClose} foot={<>
-    <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>{tx("取消")}</button>
+  return <Modal scope="plugin-page" title={tx("删除插件")} icon="trash" busy={busy} onClose={onClose} foot={dismiss => <>
+    <button type="button" className="btn btn-ghost" onClick={dismiss} disabled={busy}>{tx("取消")}</button>
     <button type="button" className="btn btn-danger" onClick={() => onConfirm(force)} disabled={busy}>{busy ? tx("正在删除…") : (force ? tx("强制删除") : tx("确认删除"))}</button>
   </>}>
     <div className="plugin-delete-confirm">
@@ -617,8 +618,8 @@ function BulkImportModal({ data, busy, onClose, onConfirm }) {
   const [rightsConfirmed, setRightsConfirmed] = useState(false)
   const files = data.files || []
   const result = data.result
-  return <Modal draft={result ? undefined : { sourceLabel, rightsConfirmed }} scope="plugin-page" title={tx("批量导入插件包")} icon="box" onClose={onClose} foot={dismiss => <>
-    <button className="btn btn-ghost" onClick={dismiss}>{result ? tx("关闭") : tx("取消")}</button>
+  return <Modal draft={result ? undefined : { sourceLabel, rightsConfirmed }} scope="plugin-page" title={tx("批量导入插件包")} icon="box" busy={busy} onClose={onClose} foot={dismiss => <>
+    <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{result ? tx("关闭") : tx("取消")}</button>
     {!result && <button className="btn btn-primary" disabled={busy || !files.length}
       onClick={() => onConfirm({ sourceLabel, rightsConfirmed })}>
       {busy ? tx("正在校验并导入…") : tx("提交 {0} 个包审核", [files.length])}
@@ -671,7 +672,7 @@ function SimulationModal({ plugin, version, initialProjectId = '', onClose }) {
     setBusy(false)
   }
   return <Modal scope="plugin-page" wide title={tx("预检与模拟 · {0}", [plugin.name])} icon="check"
-    onClose={busy ? undefined : onClose} foot={dismiss => <>
+    busy={busy} onClose={onClose} foot={dismiss => <>
       <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("关闭")}</button>
       <button className="btn btn-primary" disabled={busy} onClick={run}>{busy ? tx("正在体检…") : result ? tx("重新模拟") : tx("开始模拟")}</button>
     </>}>

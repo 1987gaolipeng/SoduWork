@@ -121,11 +121,11 @@ export function DevFlowModal({ value, inherit, defaultSteps, presets, title, rep
   const mrNow = v.mr || (inherit || {}).mr || 'none'
   return (
     <Modal wide title={title} icon="tree" draft={[v.branch || '', v.commit || '', v.selftest || '', v.extra || '', v.mrTarget || '',
-      v.screenshot || (inherit ? '' : 'auto'), v.mr || (inherit ? '' : 'none'), v.steps || []]} onClose={onClose}
+      v.screenshot || (inherit ? '' : 'auto'), v.mr || (inherit ? '' : 'none'), v.steps || []]} busy={busy} onClose={onClose}
       foot={dismiss => <>
         <DevFlowPreview cfg={v} repoId={repoId} />
         <span className="ml-auto" />
-        <button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
+        <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
         <button className="btn btn-primary" disabled={busy}
           onClick={async () => { setBusy(true); try { await onSave(v) } finally { setBusy(false) } }}>{busy ? tx("保存中…") : tx("保存")}</button>
       </>}>

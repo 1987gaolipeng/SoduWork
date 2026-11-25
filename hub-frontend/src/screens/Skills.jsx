@@ -211,7 +211,7 @@ export default function Skills() {
 
       {policyPreview && (
         <PolicyPreview impact={policyPreview.impact} busy={busy} onSave={save}
-          onClose={() => { if (!busy) setPolicyPreview(null) }} />
+          onClose={() => setPolicyPreview(null)} />
       )}
       {preview && (
         <ImportPreview value={preview} busy={busy} existing={new Set(rows.map((item) => item.name))}
@@ -223,9 +223,9 @@ export default function Skills() {
 
 function PolicyPreview({ impact, busy, onSave, onClose }) {
   return (
-    <Modal className="cap-policy-preview" title={tx("开放策略变更预览")} onClose={onClose}
-      foot={<>
-        <button className="btn btn-ghost" disabled={busy} onClick={onClose}>{tx("取消")}</button>
+    <Modal className="cap-policy-preview" title={tx("开放策略变更预览")} busy={busy} onClose={onClose}
+      foot={dismiss => <>
+        <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
         <span className="ml-auto" />
         <button className="btn btn-primary cap-policy-confirm" disabled={busy || !impact || !(impact.added.length || impact.removed.length)} onClick={onSave}>
           {busy && impact ? tx("保存中…") : tx("确认保存")}
@@ -355,9 +355,9 @@ function ImportPreview({ value, busy, existing, onClose, onImport }) {
     return true
   })
   return (
-    <Modal wide title={tx("导入公司 Skill")} icon="plug" onClose={onClose}
-      foot={<>
-        <button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+    <Modal wide title={tx("导入公司 Skill")} icon="plug" busy={busy} onClose={onClose}
+      foot={dismiss => <>
+        <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
         <span className="ml-auto" />
         <button className="btn btn-primary" disabled={busy || !ready.length} onClick={onImport}>
           {busy ? tx("正在导入…") : tx("导入 ") + ready.length + tx(" 个 Skill")}
@@ -470,10 +470,10 @@ export function RepoSkills({ repoId, repoName }) {
           <Icon name="pencil" />{tx("配置")}</button>
       </div>
       {open && (
-        <Modal draft={[...shown].sort()} wide title={'Skill · ' + (repoName || tx("这个工程"))} icon="plug" onClose={discard}
+        <Modal draft={[...shown].sort()} wide title={'Skill · ' + (repoName || tx("这个工程"))} icon="plug" busy={busy} onClose={discard}
           foot={dismiss => <>
             <button className="btn btn-ghost" disabled={busy} onClick={() => save(null)}>{tx("改回公司默认")}</button>
-            <span className="ml-auto" /><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
+            <span className="ml-auto" /><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
             <button className="btn btn-primary" disabled={busy}
               onClick={() => save(selected || new Set(company))}>{busy ? tx("保存中…") : tx("保存")}</button>
           </>}>

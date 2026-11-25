@@ -327,8 +327,8 @@ function LegalEditor({ uiLocale }) {
         </>}
       </fieldset>}
     </main>
-    {dialog && <Modal title={tx(dialog.title)} icon={dialog.danger ? 'alert' : 'file'} size="compact" className="legal-dialog" onClose={() => { if (!busy) setDialog(null) }}
-      foot={<><button className="btn btn-ghost" disabled={busy} onClick={() => setDialog(null)}>{tx('取消')}</button>
+    {dialog && <Modal title={tx(dialog.title)} icon={dialog.danger ? 'alert' : 'file'} size="compact" className="legal-dialog" busy={busy} onClose={() => setDialog(null)}
+      foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx('取消')}</button>
         <button className={'btn ' + (dialog.danger ? 'btn-danger' : 'btn-primary')} disabled={busy} onClick={dialog.confirm}>{tx(busy ? '处理中…' : dialog.label)}</button></>}>
       <p>{tx(dialog.text)}</p>{dialog.detail && <p className="legal-dialog-detail" translate="no">{dialog.detail}</p>}
       {dialog.publish && <LanguageImpact current={state.currentLocales} draft={draft} scheduled={!!effectiveAt} localeName={localeName} />}

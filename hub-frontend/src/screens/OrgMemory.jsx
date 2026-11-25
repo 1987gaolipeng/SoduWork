@@ -32,7 +32,7 @@ function Editor({ value, setValue, onSave, onClose, busy }) {
   const uiLocale = useLocale();
   const formId = useId()
   const setField = (key, next) => setValue({ ...value, fields: { ...value.fields, [key]: next } })
-  return <Modal draft={value} wide className="om-dialog" icon="memory" title={tx("补充与修正")} onClose={onClose}
+  return <Modal draft={value} wide className="om-dialog" icon="memory" title={tx("补充与修正")} busy={busy} onClose={onClose}
     foot={dismiss => <><span className="modal-foot-note">{tx("自动记忆会持续更新，补充内容将单独保留。")}</span><button type="button" className="btn btn-ghost" onClick={dismiss} disabled={busy}>{tx("取消")}</button><button type="submit" form={formId} className="btn btn-primary" disabled={busy}>{busy ? tx("保存中…") : tx("保存组织记忆")}</button></>}>
     <form id={formId} className="om-editor" onSubmit={(e) => { e.preventDefault(); onSave() }}>
     <label className="om-wide"><span>{tx("记忆名称")}</span><input required maxLength="240" value={value.title} onChange={(e) => setValue({ ...value, title: e.target.value })} placeholder={tx("组织共同记忆")} /></label>
