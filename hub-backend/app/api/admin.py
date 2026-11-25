@@ -2206,8 +2206,8 @@ async def test_alert_config(
     session: AsyncSession = Depends(get_session),
 ):
     """Send a real test notification to the configured destination."""
-    from ..services import notify
-    from ..services import client_access
+    from ..services import client_access, notify
+
     # The configured channel is shared by all administrators.
     try:
         await email_auth.take_limits(session, [
