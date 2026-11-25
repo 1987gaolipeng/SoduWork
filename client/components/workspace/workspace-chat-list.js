@@ -118,6 +118,7 @@
     },
     fileProject: row => ctx.sidebarProjects?.recoverFirstSend(row),
     openRecord: id => global.WorkspaceHost?.open('create', { firstSendIntentId: id }),
+    openDraft: row => global.WorkspaceHost?.open('create', { firstSendDraft: row }),
     hasHistory(id) {
       if (!id || historyOwner !== accountOwner() || hiddenRow({ id })) return false;
       const local = localRecords.get(canonicalLocalId(id) || id);
@@ -836,7 +837,7 @@ function _paintChatLocale(button) {
 
 function _paintChatRow(row, c, isPinned) {
     const id = String(c.id || '');
-    const selected = ctx.active === 'create' && (c.firstSend ? firstSends?.activeId === c.firstSend.intentId :
+    const selected = ctx.active === 'create' && (c.firstSend ? firstSends?.activeId === c.firstSend.intentId || selectedChat(c.firstSend.sessionId) :
       selectedChat(id) || selectedCloudCache(id));
     const state = ctx.chatState(c);
     const label = c.title || '未命名对话';
@@ -853,6 +854,7 @@ function _paintChatRow(row, c, isPinned) {
     b.className = 'ws-task ws-chat is-' + state + (c.pending ? ' is-pending' : '') +
       (selected ? ' is-active' : '');
     b.dataset.chatId = id; b.dataset.firstSend = c.firstSend?.intentId || ''; b.disabled = !id && !c.firstSend;
+    b.dataset.firstSendSession = c.firstSend?.sessionId || '';
     b.dataset.sidebarChatId = c.displaySlotId || id;
     b.setAttribute('aria-current', selected ? 'page' : 'false');
     const { ids: harnesses, draft } = displayedHarnesses(c);
@@ -1245,7 +1247,7 @@ function refreshAccountHistory() {
     ctx.activeChatId = next;
     global.WorkspaceNavigation?.chatChanged(next);
     for (const button of ctx.root?.querySelectorAll('.ws-chat') || []) {
-      const selected = ctx.active === 'create' && (button.dataset.firstSend ? firstSends?.activeId === button.dataset.firstSend :
+      const selected = ctx.active === 'create' && (button.dataset.firstSend ? firstSends?.activeId === button.dataset.firstSend || selectedChat(button.dataset.firstSendSession, next) :
         selectedChat(button.dataset.chatId, next) || selectedCloudCache(button.dataset.chatId, next));
       if (button.classList.contains('is-active') === selected) continue;
       button.classList.toggle('is-active', selected);

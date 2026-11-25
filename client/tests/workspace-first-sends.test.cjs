@@ -2,14 +2,18 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const vm = require('node:vm'), fs = require('node:fs'), path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../components/workspace/workspace-first-sends.js'), 'utf8');
-function fixture({ associations, ack, fileProject, associationState, retry, hasHistory, nativeChat } = {}) {
-  let scope = 'A', notify, result = Promise.resolve({ ok: true, rows: [] }), pane;
-  const opened = [], retried = [], dismissed = [], routes = [];
+function fixture({ associations, ack, fileProject, associationState, hasHistory, nativeChat } = {}) {
+  let scope = 'A', result = Promise.resolve({ ok: true, rows: [] }), pane;
+  const opened = [], drafts = [], routes = [];
   const document = {
     createElement(tag) {
       assert.equal(tag, 'section');
       const parts = new Map();
-      return { dataset: {}, isConnected: false, append(markup) { assert.doesNotMatch(markup, /<dialog/i); },
+      return { dataset: {}, isConnected: false,
+        append(markup) {
+          assert.doesNotMatch(markup, /<(?:dialog|button)\b/i);
+          assert.match(markup, /class="nchat-content-area"/);
+        },
         remove() { this.isConnected = false; },
         querySelector(key) {
           if (!parts.has(key)) parts.set(key, {});
@@ -18,110 +22,81 @@ function fixture({ associations, ack, fileProject, associationState, retry, hasH
     },
   };
   const host = { replaceChildren(node) { pane?.remove(); pane = node; node.isConnected = true; } };
-  const copied = [];
-  const window = { ChatDomPatch: { htmlFragment: markup => markup }, NativeChat: nativeChat,
-    navigator: { clipboard: { writeText: async text => { copied.push(text); } } } };
+  const navigation = { generation: 0 };
+  const window = { ChatDomPatch: { htmlFragment: markup => markup }, NativeChat: nativeChat, WorkspaceNavigation: navigation };
   vm.runInNewContext(source, { window, document });
-  const api = { firstSends: () => result, firstSendAssociations: associations, ackFirstSendAssociations: ack,
-    onFirstSendsChanged(fn) { notify = fn; return () => { notify = null; }; },
-    async retryFirstSend(id) { retried.push(id); return retry ? retry(id) : { ok: true }; },
-    async dismissFirstSend(...args) { dismissed.push(args); return { ok: true }; } };
+  const api = { firstSends: () => result, firstSendAssociations: associations, ackFirstSendAssociations: ack };
   const model = window.WorkspaceFirstSends.create({ api: () => api, owner: () => scope, fileProject, associationState, hasHistory,
-    openRecord(id) { routes.push(id); model.mount(id, host); }, repaint() {}, openChat(row) { opened.push(row.sessionId); } });
-  return { model, opened, retried, dismissed, routes, copied, list: (known = [], hidden = () => false) => model.recent(known, hidden),
+    openRecord(id) { routes.push(id); navigation.generation++; model.mount(id, host); },
+    openDraft(row) { drafts.push(row.intentId); pane.remove(); },
+    openChat(row) { opened.push(row.sessionId); pane.remove(); }, repaint() {} });
+  return { model, opened, drafts, routes, list: (known = [], hidden = () => false) => model.recent(known, hidden),
     render(rows) { result = Promise.resolve({ ok: true, rows }); return model.refresh(); },
-    defer(promise) { result = promise; return notify(); }, switch() { scope = 'B'; model.clear(); },
+    hold() { const deferred = Promise.withResolvers(); result = deferred.promise; return rows => deferred.resolve({ ok: true, rows }); },
+    navigate() { navigation.generation++; }, switch() { scope = 'B'; navigation.generation++; model.clear(); },
     get pane() { return pane; } };
 }
-test('pending first sends are actionable by intent and merge with confirmed history only by native id', async () => {
-  const f = fixture(), a = { intentId: 'first-a', title: 'Same title', at: 1, status: 'opening', text: 'Request A' },
-    b = { ...a, intentId: 'first-b', at: 2, status: 'failed', canRetry: true, text: 'Request B' };
-  await f.render([a, b]);
-  assert.deepEqual(Array.from(f.list(), row => row.localId), ['first-b', 'first-a']);
-  f.model.show(b.intentId);
-  assert.deepEqual(f.routes, [b.intentId]);
-  assert.equal(f.model.activeId, b.intentId);
-  assert.equal(f.pane.querySelector('.nbubble').textContent, b.text);
-  await f.pane.querySelector('[data-send-action]').onclick();
-  assert.deepEqual(f.retried, [b.intentId]);
-  await f.render([a, { ...b, status: 'uncertain', canRetry: false, sessionId: 'native-b' }]);
-  await f.pane.querySelector('[data-send-action]').onclick();
-  assert.deepEqual(f.opened, ['native-b']); assert.deepEqual(f.retried, [b.intentId]);
-  await f.render([a, { ...b, status: 'accepted', sessionId: 'native-b' }]);
+const settled = () => new Promise(resolve => setImmediate(resolve));
+test('a failed first send with incomplete inputs shows selectable text and filenames inline, with no actions', async () => {
+  const f = fixture(), row = { intentId: 'i', title: 'A title', status: 'failed', text: '<original>', attachmentNames: ['chart.png'], reason: 'offline' };
+  await f.render([row]); f.model.show('i'); await settled();
+  assert.equal(f.model.activeId, 'i'); assert.deepEqual(f.routes, ['i']); assert.deepEqual(f.opened, []);
+  assert.equal(f.pane.querySelector('[data-send-title]').textContent, row.title);
+  assert.equal(f.pane.querySelector('.nbubble').textContent, row.text);
+  assert.equal(f.pane.querySelector('[data-send-files]').textContent, 'chart.png');
+  assert.equal(f.pane.querySelector('[role="status"]').textContent, 'offline');
+  await f.render([]);
+  assert.equal(f.pane.querySelector('.nbubble').textContent, '');
+  assert.equal(f.pane.querySelector('[data-send-title]').textContent, '');
+  assert.equal(f.pane.querySelector('[role="status"]').textContent, '这条发送记录已不可用');
+});
+test('a delivery without a receipt merges only by native id and opens its original session without sending', async () => {
+  const f = fixture(), a = { intentId: 'a', title: 'Same title', at: 1, status: 'opening', text: 'A' },
+    b = { ...a, intentId: 'b', at: 2, status: 'uncertain', text: 'B' };
+  await f.render([a, b]); f.model.show('b'); await settled();
+  assert.deepEqual(Array.from(f.list(), row => row.localId), ['b', 'a']);
+  assert.equal(f.pane.querySelector('.nbubble').textContent, 'B'); assert.deepEqual(f.opened, []);
+  assert.equal(f.pane.querySelector('[role="status"]').textContent, '尚未收到这条消息的发送回执。');
+  await f.render([a, { ...b, sessionId: 'native' }]);
+  assert.deepEqual(f.opened, ['native']);
+  await f.render([a, { ...b, status: 'accepted', sessionId: 'native' }]);
   assert.equal(f.list([{ id: 'other', title: a.title }]).length, 2);
-  assert.equal(f.list([{ id: 'native-b' }]).length, 1);
-  assert.equal(f.list([], id => id === 'native-b').length, 1);
+  assert.equal(f.list([{ id: 'native' }]).length, 1);
+  assert.equal(f.list([], id => id === 'native').length, 1);
 });
-test('dismissal confirmation follows the displayed attempt and status across in-chat status updates', async () => {
-  const f = fixture(), row = { intentId: 'first-a', status: 'failed', text: 'first draft' };
-  await f.render([row]); f.model.show(row.intentId);
-  const button = f.pane.querySelector('[data-send-dismiss]');
-  await button.onclick();
-  await f.render([{ ...row, attemptId: 'ui-edited', text: 'edited draft' }]);
-  await button.onclick();
-  assert.deepEqual(f.dismissed, []);
-  await f.render([{ ...row, attemptId: 'ui-edited', status: 'uncertain' }]);
-  await button.onclick();
-  assert.deepEqual(f.dismissed, []);
-  await f.render([{ ...row, attemptId: 'ui-edited', status: 'uncertain' }]);
-  await button.onclick();
-  assert.deepEqual(f.dismissed, [['first-a', 'ui-edited', 'uncertain']]);
-});
-test('the failed record opens the original draft for editing only after checking the same refused attempt', async () => {
+test('one sidebar click opens a verified refusal for editing or preserves a later draft already there', async () => {
   let state = 'editable', restored = 0;
   const f = fixture({ hasHistory: () => true, nativeChat: { firstSendEditState: () => state,
     restoreFirstSendForEdit() { restored++; return true; } } });
-  const row = { intentId: 'i', attemptId: 'a', sessionId: 's', status: 'failed', canAttachFailed: true, canRetry: true, text: 'original' };
-  await f.render([row]); f.model.show('i');
-  const action = f.pane.querySelector('[data-send-action]'), copy = f.pane.querySelector('[data-send-copy]');
-  assert.equal(action.textContent, '编辑后发送'); await action.onclick();
-  state = 'occupied'; await f.render([row]); assert.equal(action.textContent, '打开会话'); await action.onclick();
-  state = 'reselect'; await f.render([row]); assert.equal(action.hidden, true);
-  assert.equal(copy.hidden, false); await copy.onclick();
-  assert.deepEqual(f.copied, ['original']); assert.equal(restored, 1);
-  assert.deepEqual(f.opened, ['s', 's']); assert.deepEqual(f.retried, []);
-  state = 'editable'; await f.render([row]);
-  let release; const checking = f.defer(new Promise(resolve => { release = resolve; }));
-  const clicked = action.onclick(); f.switch(); release({ ok: true, rows: [row] }); await Promise.all([checking, clicked]);
-  assert.equal(restored, 1); assert.deepEqual(f.opened, ['s', 's']);
+  const row = { intentId: 'i', attemptId: 'a', sessionId: 's', status: 'failed', canAttachFailed: true, text: 'original' };
+  await f.render([row]); f.model.show('i'); await settled();
+  assert.deepEqual(f.opened, ['s']); assert.equal(restored, 1);
+  state = 'occupied'; f.model.show('i'); await settled();
+  assert.deepEqual(f.opened, ['s', 's']); assert.equal(restored, 1);
+  state = 'starter'; await f.render([{ ...row, sessionId: '' }]); f.model.show('i'); await settled();
+  assert.deepEqual(f.drafts, ['i']); assert.equal(restored, 1);
 });
-test('a compacted delivery opens only a confirmed chat still in the current catalog', async () => {
-  let exists = true;
-  const f = fixture({ hasHistory: id => exists && id === 'native' });
-  const row = { intentId: 'i', sessionId: 'native', text: 'private', status: 'sending' };
-  await f.render([row]); f.model.show('i');
-  const action = f.pane.querySelector('[data-send-action]');
-  await f.render([{ ...row, status: 'accepted' }]); await f.render([]); assert.equal(action.hidden, true);
-  await f.render([{ ...row, status: 'accepted', confirmed: true }]); await f.render([]);
-  assert.equal(f.pane.querySelector('.nbubble').textContent, ''); assert.equal(action.textContent, '打开会话');
-  await action.onclick(); assert.deepEqual(f.opened, ['native']);
-  exists = false; await f.render([]); assert.equal(action.hidden, true);
-  await action.onclick(); assert.deepEqual(f.opened, ['native']);
+test('a superseding attempt, late navigation or account switch cannot restore or reopen the old draft', async () => {
+  for (const interruption of ['attempt', 'navigate', 'switch']) {
+    let restored = 0;
+    const f = fixture({ nativeChat: { firstSendEditState: () => 'editable', restoreFirstSendForEdit() { restored++; return true; } } });
+    const row = { intentId: 'i', attemptId: 'a', sessionId: 's', status: 'failed', text: 'private' };
+    await f.render([row]); const finish = f.hold(); f.model.show('i');
+    if (interruption === 'switch') f.switch();
+    if (interruption === 'navigate') f.navigate(); // Another open can still be waiting for its IPC, leaving the pane connected.
+    finish([interruption === 'attempt' ? { ...row, attemptId: 'b' } : row]); await settled();
+    assert.deepEqual(f.opened, []); assert.equal(restored, 0);
+    if (interruption === 'switch') { assert.equal(f.pane.isConnected, false); assert.equal(f.list().length, 0); }
+  }
 });
-test('switching account clears open request text and ignores a late first-send list', async () => {
-  const f = fixture(), row = { intentId: 'first-private', text: 'A only', at: 1, status: 'sending' };
-  await f.render([row]); f.model.show(row.intentId);
-  let release;
-  const pending = f.defer(new Promise(resolve => { release = resolve; }));
-  f.switch(); await f.render([]); release({ ok: true, rows: [row] }); await pending;
-  assert.equal(f.pane.isConnected, false); assert.equal(f.list().length, 0);
-});
-test('removing or opening another conversation while retrying cannot repaint the new conversation', async () => {
-  let finish;
-  const f = fixture({ retry: () => new Promise(resolve => { finish = resolve; }) });
-  const row = { intentId: 'first-x', status: 'failed', text: 'old message', canRetry: true };
-  await f.render([row]); f.model.show(row.intentId);
-  const original = f.pane, retrying = original.querySelector('[data-send-action]').onclick();
-  original.remove();
-  await f.render([{ ...row, intentId: 'first-y', text: 'other conversation' }]);
-  f.model.show('first-y');
-  finish({ ok: false, reason: 'late failure' }); await retrying;
-  assert.deepEqual(f.opened, []);
-  assert.equal(f.pane.querySelector('.nbubble').textContent, 'other conversation');
-  assert.equal(f.pane.querySelector('[role="status"]').textContent, '发送失败');
-  await f.render([]);
-  assert.equal(f.pane.querySelector('.nbubble').textContent, '');
-  assert.equal(f.pane.querySelector('[data-send-action]').hidden, true);
+test('a delivery compacted between click and read opens only a confirmed session still in the catalog', async () => {
+  for (const [confirmed, exists] of [[false, true], [true, false], [true, true]]) {
+    const f = fixture({ hasHistory: id => exists && id === 'native' });
+    const row = { intentId: 'i', sessionId: 'native', status: 'accepted', confirmed, text: 'private' };
+    await f.render([row]); const finish = f.hold(); f.model.show('i'); finish([]); await settled();
+    assert.deepEqual(f.opened, confirmed && exists ? ['native'] : []);
+    assert.equal(f.pane.querySelector('.nbubble').textContent, '');
+  }
 });
 test('cold recovery waits for the catalog and acknowledges the project only after successful filing', async () => {
   const row = { intentId: 'first-1', sessionId: 'native-1', title: 'Original', sidebarProjectId: 'project-1' };

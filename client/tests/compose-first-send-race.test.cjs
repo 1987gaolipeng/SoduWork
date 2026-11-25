@@ -74,6 +74,54 @@ function fixture(t, { modelReady = Promise.resolve(true), openReady, send, first
 const oldPlugin = { pluginId: 'local:app-developer', name: '即用开发' };
 const newPlugin = { pluginId: 'local:new-plugin', name: 'New draft plugin' };
 
+test('a pre-allocation draft opens an ordinary composer without allocating and consumes its original intent only on send', async t => {
+  const calls = [];
+  const row = { intentId: 'first-original', attemptId: 'first-attempt', status: 'failed', text: 'original text',
+    canRestoreText: true, draftOptions: { adapterId: 'pi', modelName: 'glm-model', cwd: 'X:/project',
+      projectId: 'P', sidebarProjectId: 'S', mode: 'full', accessMode: 'standard' } };
+  const f = fixture(t, { firstSendApi: {
+    async startFirstSend(request) { calls.push(request); return { ok: true, row: { title: request.text } }; },
+    async waitFirstSend() { return { ok: true, row: { status: 'accepted', sessionId: 'native-fixed' } }; },
+    async attachFirstSend() { return { ok: true, ref: 'ref-fixed', sessionId: 'native-fixed', snapshot: { messages: [] } }; },
+  } });
+  f.g.ChatWorkbenchAnnotations.submit = submit => submit({ notes: [] });
+  f.type('unrelated new chat draft', [newPlugin]);
+  f.g.NativeChat.rememberDraft(row.intentId, 'next turn from earlier');
+  assert.equal(f.g.openComposePanel({ firstSendDraft: row }), true);
+  assert.equal(f.opens.length, 0); assert.equal(calls.length, 0);
+  const input = f.document.getElementById('nchatInput');
+  assert.equal(input.value, 'original text');
+  input.value = ''; input.dispatchEvent(new Event('input'));
+  input.value = 'revised after clearing'; input.dispatchEvent(new Event('input'));
+  assert.equal(await f.g.NativeChat.send(), true);
+  assert.equal(calls.length, 1); assert.equal(calls[0].intentId, row.intentId);
+  assert.equal(calls[0].retryAttempt.expected, row.attemptId); assert.equal(calls[0].text, 'revised after clearing');
+  for (const [key, value] of Object.entries(row.draftOptions)) assert.equal(calls[0].open[key], value);
+  assert.equal(f.draft('native-fixed'), 'next turn from earlier');
+  assert.equal(f.draft('new'), 'unrelated new chat draft');
+});
+
+test('a refusal before allocation after navigating away keeps the complete plugin draft and the next-turn input separate', async t => {
+  const finished = deferred(); let row;
+  const f = fixture(t, { firstSendApi: {
+    async startFirstSend(request) {
+      row = { status: 'failed', intentId: request.intentId, attemptId: request.intentId, canRestoreText: false,
+        text: request.text, draftOptions: { adapterId: 'pi', modelName: 'fixture-model' } };
+      return { ok: true, row: { title: request.text } };
+    },
+    async waitFirstSend() { await finished.promise; return { ok: true, row }; },
+  } });
+  f.type('requires plugin options', [{ ...oldPlugin, inputValues: { name: 'sample' } }]);
+  const pending = f.submit(); await until(() => Boolean(row));
+  const next = f.document.getElementById('nchatInput'); next.value = 'next turn'; next.dispatchEvent(new Event('input'));
+  f.newSession(); f.type('other chat'); finished.resolve(); await pending;
+  assert.equal(f.g.NativeChat.firstSendEditState(row, false), 'starter');
+  assert.equal(f.g.openComposePanel({ firstSendDraft: row }), true);
+  assert.equal(f.document.getElementById('nchatInput').value, 'requires plugin options');
+  assert.equal(f.draft(row.intentId), 'next turn'); assert.equal(f.draft('new'), 'other chat');
+  assert.equal(f.opens.length, 0); assert.equal(f.calls.length, 0);
+});
+
 test('new-session navigation during model preparation cannot send old text or clear the newer draft and plugin', async t => {
   const ready = deferred(), f = fixture(t, { modelReady: ready.promise });
   f.type('original submitted text', [oldPlugin]);

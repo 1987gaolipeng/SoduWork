@@ -293,7 +293,7 @@ test('a local workflow refuses an invalid first prompt before admission and acce
   assert.equal((await call('start', request)).ok, true);
   const refused = (await call('wait', intentId)).row;
   assert.equal(refused.status, 'failed');
-  assert.equal(refused.canRetry, true);
+  assert.equal(refused.canAttachFailed, true);
   assert.match(refused.reason, /20000/);
   assert.equal(f.turns.length, 0);
   const attached = await call('attach', intentId, refused.attemptId);

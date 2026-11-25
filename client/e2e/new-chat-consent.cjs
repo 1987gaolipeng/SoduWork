@@ -182,7 +182,7 @@ app.whenReady().then(async () => {
   await until('document.querySelector("#cpPermissionName").textContent==="完全访问"'); failNextOpen = true;
   const beforeFailure = calls.length, beforeDialog = dialogs; await click('#cpGo'); await until(() => calls.length === beforeFailure + 1);
   await until('document.querySelector(".nbad-copy")?.textContent.includes("Isolated initialization failure") && !NativeChat.isBusy()', 'failed native initialization');
-  const failedOpen = await js('soduWorkAPI.piSession.firstSends().then(r=>r.rows.find(row=>row.canRetry && !row.sessionId))');
+  const failedOpen = await js('soduWorkAPI.piSession.firstSends().then(r=>r.rows.find(row=>row.status==="failed" && !row.sessionId && row.text==="Fresh draft"))');
   assert.ok(failedOpen);
   assert.equal(await js('document.querySelector("#nchatInput").value'), 'Fresh draft');
   await js("document.querySelector('#nchatInput').value='Retry same draft';document.querySelector('#nchatInput').dispatchEvent(new Event('input',{bubbles:true}));void 0;");
@@ -215,7 +215,7 @@ app.whenReady().then(async () => {
   failNextOpen = true;
   await click('#cpGo');
   await until('document.querySelector(".nbad-copy")?.textContent.includes("Isolated initialization failure") && !NativeChat.isBusy()', 'independent failed draft');
-  const original = await js('soduWorkAPI.piSession.firstSends().then(r=>r.rows.find(row=>row.canRetry && !row.sessionId))');
+  const original = await js('soduWorkAPI.piSession.firstSends().then(r=>r.rows.find(row=>row.status==="failed" && !row.sessionId && row.text==="Two separate conversations"))');
   assert.equal(original.text, 'Two separate conversations');
   const beforeIndependent = sends.length;
   await draft('Two separate conversations'); await click('#cpGo');
@@ -223,7 +223,7 @@ app.whenReady().then(async () => {
   const independent = sends.at(-1).submissionId;
   assert.notEqual(independent, original.intentId);
   assert.equal((await js(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(independent)})`)).row.status, 'accepted');
-  assert.equal((await js(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(original.intentId)})`)).row.canRetry, true);
+  assert.equal((await js(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(original.intentId)})`)).row.status, 'failed');
   report.cases.push('A new composer with identical text starts an independent conversation and preserves the old failed request for recovery.');
   report.stage = 'sidebar first-send recovery';
   await draft('Keep this independent draft');
@@ -238,16 +238,27 @@ app.whenReady().then(async () => {
   await until(`Boolean(document.querySelector(${JSON.stringify(recordButton)}))`, 'visible sidebar recovery row');
   const beforeInspect = { opens: calls.length, sends: sends.length, dialogs };
   await click(recordButton);
-  await until('document.querySelector("#cpChat .nmsg.user .nbubble")?.textContent==="Two separate conversations"', 'original message in conversation');
-  assert.match(await js('document.querySelector("#cpChat [role=status]").textContent'), /Isolated initialization failure/);
+  await until('document.querySelector("#nchatInput")?.value==="Two separate conversations"', 'original draft opens directly in a normal composer');
+  assert.equal(await js('Boolean(document.querySelector("[data-send-action],[data-send-dismiss]"))'), false);
   assert.equal(await js('Boolean(document.querySelector("dialog[open]"))'), false);
   assert.equal(await js(`document.querySelector(${JSON.stringify(recordButton)}).getAttribute('aria-current')`), 'page');
-  await shot('sidebar-recovery-inline');
+  await click('#nchatInput'); await js('document.getElementById("nchatInput").select()');
+  await win.webContents.insertText('Edited in the original sidebar draft');
   await js('WorkspaceHost.open("create",{newSession:true});void 0;');
   assert.equal(await js('document.querySelector("#cpInput").value'), 'Keep this independent draft');
   assert.equal(await js('Boolean(document.querySelector("[data-first-send-record]"))'), false);
   assert.deepEqual({ opens: calls.length, sends: sends.length, dialogs }, beforeInspect);
-  report.cases.push('Mouse selection of a failed sidebar send shows its original message and reason inside the conversation. Returning to a new chat restores the independent draft. No modal, runtime allocation or resend occurred.');
+  await click(recordButton);
+  await until('document.querySelector("#nchatInput")?.value==="Edited in the original sidebar draft"', 'the edited first-send draft survives navigation');
+  await click('#nchatSend');
+  await until(() => sends.length === beforeInspect.sends + 1, 'the user explicitly sends the edited request');
+  const settledDraft = (await js(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(original.intentId)})`)).row;
+  assert.equal(settledDraft.status, 'accepted'); assert.equal(settledDraft.sessionId, sends.at(-1).ref);
+  assert.equal(sends.at(-1).text, 'Edited in the original sidebar draft');
+  assert.equal(calls.length, beforeInspect.opens + 1); assert.equal(dialogs, beforeInspect.dialogs);
+  assert.equal(calls.at(-1).accessPolicy.mode, 'readonly');
+  assert.equal(calls.at(-1).adapterId, original.adapterId);
+  report.cases.push('Mouse selection of a retained failed first send opens its editable draft directly. Returning to a new chat restores the independent draft without allocating a runtime or resending.');
   assert.deepEqual(await js('errors'), []); assert.deepEqual(report.errors, []);
   report.runtimeOpens = calls; report.nativeDialogs = dialogs; report.sentMessages = sends.length; report.ok = true;
 }).catch(async error => { report.error = error.stack || String(error); try { if (win) { report.rendererErrors = await js('errors'); await shot('failure'); } } catch {} }).finally(() => {

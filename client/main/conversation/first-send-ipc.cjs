@@ -81,8 +81,8 @@ function install({ app, session, ipcMain, BrowserWindow, identityOf, openConvers
         { expected, ref, sessionId: handle.sessionId, attemptId });
     } catch (error) { return { ok: false, reason: String(error.message || error) }; }
   });
-  for (const action of ['start', 'list', 'wait', 'attach', 'retry', 'dismiss', 'associations', 'ack-associations']) {
-    ipcMain.handle('pi-first-send-' + action, async (event, input, sessionId, expectedStatus) => {
+  for (const action of ['start', 'list', 'wait', 'attach', 'associations', 'ack-associations']) {
+    ipcMain.handle('pi-first-send-' + action, async (event, input, sessionId) => {
       try {
         if (action === 'start') return await service.start(event, input);
         if (action === 'list') return await service.list(event);
@@ -92,7 +92,7 @@ function install({ app, session, ipcMain, BrowserWindow, identityOf, openConvers
           const result = await service.act(event, input, 'attach', sessionId);
           return attach(event, result.row.sessionId);
         }
-        return await service.act(event, input, action, sessionId, expectedStatus);
+        return await service.act(event, input, action, sessionId);
       } catch (error) { return { ok: false, reason: String(error.message || error) }; }
     });
   }

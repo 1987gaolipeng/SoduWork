@@ -202,7 +202,7 @@ if (typeof electron === 'string') {
       'pi-session-release':{ok:true},
       'pi-session-open-application':{ok:true, handled:false},
       'pi-session-outputs':{ok:true, items:[], artifacts:[]},
-      'pi-session-runtimes':{ok:true, runtimes:runtimeRows},
+      'pi-session-runtimes':{ok:true, runtimes:runtimeRows}, 'recent-workspace-get':{ok:true, dir:''},
       'pi-session-conversation-runtimes':{ok:true, runtimes:runtimeRows, availableRuntimes:runtimeRows, missing:[]},
       'access-preferences-get':{ok:true, mode:'standard', revision:0},
       'conversation-delivery-inspect':{ok:false, reason:'Not exercised by this isolated fixture'},
@@ -255,9 +255,10 @@ if (typeof electron === 'string') {
     // sidebar action that another window could still have on screen.
     await delay(1000);
     const initialId = JSON.stringify(sendCalls[0].submissionId);
-    assert.equal(await js(`soduWorkAPI.piSession.firstSends().then(r => r.rows.some(row => row.intentId === ${initialId} && row.canRetry))`),
-      false, 'a successful foreground resend must retire the original sidebar retry');
-    assert.equal((await js(`soduWorkAPI.piSession.retryFirstSend(${initialId})`)).ok, false);
+    assert.equal(await js(`soduWorkAPI.piSession.firstSends().then(r => r.rows.some(row => row.intentId === ${initialId} && row.status === "failed"))`),
+      false, 'the original first-send record cannot remain failed after a successful foreground resend');
+    assert.equal(await js('typeof soduWorkAPI.piSession.retryFirstSend'), 'undefined');
+    assert.equal(await js('typeof soduWorkAPI.piSession.dismissFirstSend'), 'undefined');
     assert.equal(offline.opens, 1); assert.equal(offline.successfulDispatches, 1);
     assert.equal(await js('document.querySelector("#nchatInput").value'), '');
     await shot('02-explicit-send-succeeded');
@@ -349,42 +350,34 @@ if (typeof electron === 'string') {
       WorkspaceShell.setActive('create'); document.getElementById('wsCanvas').append(document.getElementById('cpChat'));
       WorkspaceShell.refreshConversationHistory(); void 0;`);
     const sidebarButton = id => '.ws-chat[data-first-send="' + id + '"]';
-    const recordAction = '[data-first-send-record] [data-send-action]';
-    async function showRecord(id, actionText) {
+    async function selectRecord(id) {
       const button = sidebarButton(id);
       await until(`document.querySelector(${JSON.stringify(button)})`, 'sidebar entry');
       await click(button);
-      await until(`document.querySelector('[data-first-send-record]')?.dataset.firstSendRecord === ${JSON.stringify(id)}
-        && document.querySelector(${JSON.stringify(recordAction)})?.textContent === ${JSON.stringify(actionText)}`, actionText);
     }
-    await showRecord(ambiguousId, '打开会话');
-    assert.equal((await js(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(ambiguousId)})`)).row.status, 'uncertain');
-    assert.equal((await js(`soduWorkAPI.piSession.retryFirstSend(${JSON.stringify(ambiguousId)})`)).ok, false);
-    await click(recordAction);
+    await until(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(ambiguousId)}).then(r=>r.row.status==='uncertain')`, 'unconfirmed admission');
+    await selectRecord(ambiguousId);
     await until(`NativeChat.sessionInfo()?.sessionId === ${JSON.stringify(ambiguous.handle.sessionId)} &&
       !document.querySelector('[data-first-send-record]')`, 'open the uncertain original for inspection');
     assert.equal(ambiguous.dispatchAttempts, 1); assert.equal(sendCalls.length, beforeSidebar);
 
-    await showRecord(sidebarId, '编辑后发送');
     const held = Promise.withResolvers();
     holdList = held;
-    await click(recordAction);
+    await selectRecord(sidebarId);
     await until(() => holdList === null, 'pending journal recheck');
-    try { await showRecord(newerId, '打开会话'); }
+    try { await selectRecord(newerId); }
     finally { held.resolve(); }
     await delay(100);
-    assert.equal(await js('document.querySelector("[data-first-send-record]")?.dataset.firstSendRecord'), newerId);
     assert.equal(sendCalls.length, beforeSidebar);
-    await click(recordAction);
     await until(`NativeChat.sessionInfo()?.sessionId === ${JSON.stringify(newer.handle.sessionId)} &&
       document.querySelector('#nchatInput')?.value === '保留我刚输入的新内容'`, 'later composer draft takes precedence');
     assert.equal(newer.successfulDispatches, 0); assert.equal(sendCalls.length, beforeSidebar);
 
-    await showRecord(sidebarId, '编辑后发送');
-    await click(recordAction);
+    await selectRecord(sidebarId);
     await until(`NativeChat.sessionInfo()?.sessionId === ${JSON.stringify(sidebar.handle.sessionId)} &&
       document.querySelector('#nchatInput')?.value === '从侧栏修改这句'`, 'editable input in the original session');
     assert.equal(sendCalls.length, beforeSidebar, 'opening an editable draft cannot send it');
+    assert.equal(await js('Boolean(document.querySelector("[data-send-action],[data-send-dismiss]"))'),false);
     await click('#nchatInput'); await win.webContents.insertText('，明确修改');
     const revised = await js('document.querySelector("#nchatInput").value');
     assert.ok(revised.includes('明确修改') && revised.includes('从侧栏修改这句'));
@@ -394,8 +387,6 @@ if (typeof electron === 'string') {
     assert.equal(sidebar.comments, 0); assert.equal(sendCalls.length, beforeSidebar + 1); assert.equal(sendCalls.at(-1).text, revised);
     const settled = (await js(`soduWorkAPI.piSession.waitFirstSend(${JSON.stringify(sidebarId)})`)).row;
     assert.equal(settled.status, 'accepted'); assert.equal(settled.sessionId, sidebar.handle.sessionId);
-    assert.equal(settled.canRetry, false);
-    assert.equal((await js(`soduWorkAPI.piSession.retryFirstSend(${JSON.stringify(sidebarId)})`)).ok, false);
     ambiguous.releaseRead();
     report.cases.push('Mouse navigation from the sidebar edits a proven refusal in its original conversation and submits the revision once. Another draft, an uncertain send and a superseded asynchronous record opening remain isolated.');
     assert.deepEqual(await js('errors'), []);

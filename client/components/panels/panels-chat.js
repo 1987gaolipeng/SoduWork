@@ -20,6 +20,8 @@
     get _collabStatus() { return _collabStatus; },
     get _collabTerminal() { return _collabTerminal; },
     get _retainFailedConversationDraft() { return _retainFailedConversationDraft; },
+    get _hasConversationDraft() { return _hasConversationDraft; },
+    get _restoreConversationDraft() { return _restoreConversationDraft; },
     get _draftKeyForCurrentSession() { return _draftKeyForCurrentSession; },
     get _draftOwnerScope() { return _draftOwnerScope; },
     get _pluginResolveBusy() { return _pluginResolveBusy; }, set _pluginResolveBusy(value) { _pluginResolveBusy = value; },
@@ -167,7 +169,7 @@
   const { reset: _resetMessageRenderer, _finalReplyIndexes, rich, _richPlain, CARET, _ensureHlCss, _inject, _blockHtml, _MCP_SAY, _friendlyTool, _toolHtml, _render, _ctxText, _tokenText, _ctxHtml, _uiHtml } = global.ChatMessageRenderer.create(context);
   const { _queueRows, _renderQueue, _queueAction, _updateQueueOrder, _cancelQueued } = global.ChatSendQueue.create(context);
   const { _chatDraftBridge, _workModel, _workConversationContext, _openPluginDebug, _openWorkAction, _pickProposal, _maybeProposal, _renderProposal, _dismissProposal, _proposalAction } = global.ChatWorkIntent.create(context);
-  const { firstSendEditState, restoreFirstSendForEdit, _withConversationDraftRestore, _draftKeyForCurrentSession, _draftOwnerScope, _clearConversationDraftScope, _flushConversationDrafts, _rememberConversationText, _rememberConversationDraft, _conversationDraftText, _conversationDraftSkills, _clearConversationDraft, _moveConversationDraft, _restoreConversationDraft, _retainFailedConversationDraft, _restoreRetainedConversationFailure, _restoreRetryDraft, _openPluginAuthRecovery, _restoreFailedDraft } = global.ChatDraftRecovery.create(context);
+  const { firstSendEditState, restoreFirstSendForEdit, _hasConversationDraft, _withConversationDraftRestore, _draftKeyForCurrentSession, _draftOwnerScope, _clearConversationDraftScope, _flushConversationDrafts, _rememberConversationText, _rememberConversationDraft, _conversationDraftText, _conversationDraftSkills, _clearConversationDraft, _moveConversationDraft, _restoreConversationDraft, _retainFailedConversationDraft, _restoreRetainedConversationFailure, _restoreRetryDraft, _openPluginAuthRecovery, _restoreFailedDraft } = global.ChatDraftRecovery.create(context);
   let _ref = '';            // Current conversation reference.
   let _sessionId = '';      // Persistent Pi session ID for resuming the same live session.
   let _off = null;          // Event unsubscribe function.
@@ -793,7 +795,8 @@
     _pendingAttachmentNames = _sessionInputs.map((item) => item && (item.name || item.filename)).filter(Boolean);
     if (cachedSnapshot && !_ref) _snap = cachedSnapshot;
     if (first && !global.ChatSessionController?.ordinaryFirstSend?.(context)) _clearConversationDraft(_draftKey);
-    _mount();
+    const chatRoot = _mount();
+    if (chatRoot?.dataset?.firstSendDraftId) delete chatRoot.dataset.firstSendDraftId;
     if (!first) _restoreConversationDraft(_draftKey);
     if (inputFiles.length) _messageAttachments?.addReferences(inputFiles);
     if (global.WorkIntent) WorkIntent.showGoal(_mount(), _sessionOptions, 'nchat');
@@ -991,6 +994,24 @@
     };
   }
   function hasSession() { return !!(_ref || _sessionId); }
+  function openFirstSendDraft(row) {
+    if (firstSendEditState(row, false) !== 'starter') return false;
+    reset();
+    if (!restoreFirstSendForEdit(row, false)) return false;
+    _draftKey = 'first-send-draft:' + row.intentId;
+    _sessionOptions = { ...row.draftOptions };
+    _wd = { dir: _sessionOptions.cwd || '', name: _sessionOptions.workspaceLabel || '临时工作区' };
+    _mode = _sessionOptions.mode || 'full';
+    _sessionCaps = _sessionOptions.capabilities || [];
+    prepare(_sessionOptions);
+    _mount().dataset.firstSendDraftId = row.intentId;
+    _restoreConversationDraft(_draftKey);
+    _restoreRetainedConversationFailure();
+    global.ChatChrome?.resume?.(row.title || '');
+    _render();
+    document.getElementById('nchatInput')?.focus();
+    return true;
+  }
   function prepare(options) {
     // Work forms reserve an archive without opening an Agent. Transfer the
     // selected model here so their composer and first normal send agree.
@@ -1079,7 +1100,7 @@
     rememberComposerDraft: _rememberConversationDraft,
     restoreComposerDraft: _restoreConversationDraft,
     withDraftRestore: _withConversationDraftRestore,
-    firstSendEditState, restoreFirstSendForEdit,
+    firstSendEditState, restoreFirstSendForEdit, openFirstSendDraft,
     getDraft: (key) => _conversationDraftText(key),
     getDraftSkills: (key) => _conversationDraftSkills(key),
     clearDraft: (key) => _clearConversationDraft(key),

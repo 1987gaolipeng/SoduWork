@@ -75,10 +75,8 @@ const conversationSession = {
   firstSends: () => ipcRenderer.invoke('pi-first-send-list'),
   firstSendAssociations: () => ipcRenderer.invoke('pi-first-send-associations'),
   ackFirstSendAssociations: (id, sessionId) => ipcRenderer.invoke('pi-first-send-ack-associations', id, sessionId),
-  retryFirstSend: (id, attemptId) => ipcRenderer.invoke('pi-first-send-retry', id, attemptId),
   retryFirstSendInPlace: (id, attemptId, ref, text, files, options) =>
     ipcRenderer.invoke('pi-first-send-retry-in-place', id, attemptId, ref, text, files, options),
-  dismissFirstSend: (id, attemptId, status) => ipcRenderer.invoke('pi-first-send-dismiss', id, attemptId, status),
   onFirstSendsChanged(fn) {
     const listener = () => fn();
     ipcRenderer.on('pi-first-send-changed', listener);

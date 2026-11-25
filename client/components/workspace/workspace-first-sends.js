@@ -3,8 +3,13 @@
   const states = { opening: '正在启动', sending: '正在发送', accepted: '已发送', failed: '发送失败', uncertain: '发送待确认' };
   function label(key, fallback) { return global.SoduWorkI18n?.t('workspace.firstSend.' + key, fallback) || fallback; }
   function status(row) { return label(row.status, states[row.status]); }
+  function deliveryNote(row) {
+    if (!row) return label('unavailable', '这条发送记录已不可用');
+    if (row.status === 'uncertain' && !row.sessionId) return label('noReceipt', '尚未收到这条消息的发送回执。');
+    return row.reason || status(row);
+  }
 
-  function create({ api, owner, repaint, openChat, openRecord, associationState, fileProject, hasHistory }) {
+  function create({ api, owner, repaint, openChat, openRecord, openDraft, associationState, fileProject, hasHistory }) {
     let rows = new Map(), loadedOwner = '', version = 0, off, detail;
     let applying = new Set();
     function close() {
@@ -48,7 +53,7 @@
       loadedOwner = scope;
       rows = new Map(reply.rows.filter(row => row?.intentId && Object.hasOwn(states, row.status))
         .map(row => [row.intentId, row]));
-      if (detail?.pane.isConnected && detail.scope === scope) detail.paint(rows.get(detail.id));
+      if (detail?.pane.isConnected && detail.scope === scope) detail.paint(rows.get(detail.id), true);
       else if (detail?.pane.isConnected) close();
       else detail = null;
       repaint();
@@ -64,119 +69,61 @@
       })).sort((a, b) => b.at - a.at);
     }
     function show(id) {
-      if (loadedOwner !== owner()) return;
-      const row = rows.get(id);
-      if (!row) return;
-      if (row.status === 'accepted' && row.sessionId) { openChat(row); return; }
-      openRecord(id);
+      if (loadedOwner === owner() && rows.has(id)) return openRecord(id);
     }
     function mount(id, host) {
       close();
-      const scope = owner(), pane = document.createElement('section');
+      const scope = owner(), navigation = global.WorkspaceNavigation?.generation;
+      const initial = loadedOwner === scope ? rows.get(id) : undefined;
+      const pane = document.createElement('section');
       pane.className = 'nchat';
       pane.dataset.firstSendRecord = id;
-      pane.append(global.ChatDomPatch.htmlFragment('<div class="nchat-main"><div class="nchat-scroll" tabindex="0"><div class="nchat-inner">' +
-        '<div class="nmsg user"><div class="nbubble" data-user-content></div><small data-send-files data-user-content></small></div>' +
-        '<div class="nmsg ai"><p role="status"></p><div class="ws-first-send-actions">' +
-        '<button type="button" data-send-action></button><button type="button" data-send-copy></button><button type="button" data-send-dismiss></button></div></div></div></div></div>'));
-      const user = pane.querySelector('.nmsg.user'), text = pane.querySelector('.nbubble'),
-        files = pane.querySelector('[data-send-files]'), message = pane.querySelector('[role="status"]'),
-        action = pane.querySelector('[data-send-action]'), copy = pane.querySelector('[data-send-copy]'), dismiss = pane.querySelector('[data-send-dismiss]');
-      const current = () => detail?.pane === pane && pane.isConnected && owner() === scope;
-      let confirmDismiss = null, confirmedChat;
-      const catalogChat = () => confirmedChat && hasHistory?.(confirmedChat.sessionId) ? confirmedChat : undefined;
-      function editState(value) {
-        return global.NativeChat?.firstSendEditState?.(value, Boolean(hasHistory?.(value.sessionId))) || '';
-      }
-      function paint(value) {
-        if (value?.status === 'accepted' && value.confirmed && value.sessionId)
-          confirmedChat = { status: 'accepted', sessionId: value.sessionId };
-        else if (value) confirmedChat = null;
-        value ||= catalogChat();
-        if (!value) {
-          user.hidden = true; text.textContent = ''; files.textContent = '';
-          action.hidden = true; copy.hidden = true; dismiss.hidden = true; confirmDismiss = null;
-          message.textContent = label('unavailable', '这条发送记录已不可用');
-          return;
+      pane.append(global.ChatDomPatch.htmlFragment(
+        '<div class="nchat-stage"><div class="nchat-main">' +
+        '<header class="nchat-head"><div class="nchat-head-title"><span><b data-send-title data-user-content></b></span></div></header>' +
+        '<div class="nchat-content-area"><div class="nchat-scroll" tabindex="0"><div class="nchat-inner">' +
+        '<div class="nmsg user"><div class="nbubble" data-user-content></div><small data-send-files data-user-content></small>' +
+        '<div class="nstatus show" role="status"></div></div></div></div></div></div></div>'));
+      const title = pane.querySelector('[data-send-title]'), text = pane.querySelector('.nbubble'), files = pane.querySelector('[data-send-files]'),
+        message = pane.querySelector('[role="status"]');
+      let confirmedChat, opened = false;
+      function paint(row, fresh) {
+        if (row?.status === 'accepted' && row.confirmed && row.sessionId)
+          confirmedChat = { status: 'accepted', sessionId: row.sessionId };
+        else if (row) confirmedChat = undefined;
+        const value = row || (confirmedChat && hasHistory?.(confirmedChat.sessionId) ? confirmedChat : undefined);
+        title.textContent = value?.title || '';
+        text.textContent = value?.text || ''; text.hidden = !text.textContent;
+        files.textContent = (value?.attachmentNames || []).join(' · '); files.hidden = !files.textContent;
+        message.textContent = deliveryNote(value);
+
+        // Route only on a fresh journal read while the same sidebar selection owns the page.
+        if (!fresh || !value || opened || detail?.pane !== pane || !pane.isConnected ||
+            owner() !== scope || navigation !== global.WorkspaceNavigation?.generation ||
+            row && initial && (row.attemptId || id) !== (initial.attemptId || id)) return;
+        const known = Boolean(value.sessionId && hasHistory?.(value.sessionId));
+        const state = value.status === 'failed' && global.NativeChat?.firstSendEditState?.(value, known);
+        if (state === 'starter') {
+          opened = true;
+          return openDraft(value);
         }
-        if (confirmDismiss && (confirmDismiss.attemptId !== (value.attemptId || id) || confirmDismiss.status !== value.status))
-          confirmDismiss = null;
-        text.textContent = value.text || '';
-        files.textContent = (value.attachmentNames || []).join(' · '); files.hidden = !files.textContent;
-        user.hidden = !text.textContent && !files.textContent;
-        const state = editState(value);
-        const hint = state === 'occupied' ? label('existingDraft', '原会话里已有未发送的草稿') :
-          state === 'reselect' ? label('reselect', '请复制原文，在新会话中重新选择所需附件或能力后发送') : '';
-        message.textContent = [status(value), value.reason, hint].filter(Boolean).join(' · ');
-        const inspect = value.sessionId && (['accepted', 'uncertain'].includes(value.status) || state === 'occupied');
-        const retry = value.status === 'failed' && !value.canAttachFailed && value.canRetry;
-        action.hidden = !(state === 'editable' || inspect || retry);
-        action.textContent = state === 'editable' ? label('edit', '编辑后发送') : inspect ? label('open', '打开会话') : label('retry', '重试发送');
-        copy.hidden = !(value.status === 'failed' && value.text && global.navigator?.clipboard);
-        copy.textContent = label('copy', '复制原文');
-        dismiss.hidden = !['failed', 'uncertain'].includes(value.status);
-        dismiss.textContent = confirmDismiss ? label('confirmDismiss', '确认移除') : label('dismiss', '移除发送记录');
+        if (!value.sessionId) return;
+        if (value.status === 'accepted' || value.status === 'uncertain' || state === 'occupied' ||
+            state === 'editable' && global.NativeChat.restoreFirstSendForEdit(value, known)) {
+          opened = true;
+          return openChat(value);
+        }
       }
       detail = { pane, id, scope, paint };
-      copy.onclick = async () => {
-        const value = rows.get(id);
-        if (!current() || value?.status !== 'failed' || !value.text) return;
-        try { await global.navigator.clipboard.writeText(value.text); }
-        catch (error) { if (current()) message.textContent = error.message; }
-      };
-      dismiss.onclick = async () => {
-        const value = rows.get(id);
-        if (!current() || !value || dismiss.disabled || !['failed', 'uncertain'].includes(value.status)) return;
-        if (!confirmDismiss) {
-          confirmDismiss = { attemptId: value.attemptId || id, status: value.status };
-          paint(value); return;
-        }
-        const confirmation = confirmDismiss;
-        confirmDismiss = null;
-        paint(value);
-        dismiss.disabled = true;
-        try {
-          const result = await api().dismissFirstSend(id, confirmation.attemptId, confirmation.status);
-          if (!current()) return;
-          await refresh();
-          if (current() && !result?.ok) message.textContent = result?.reason || status(value);
-        } catch (error) { if (current()) message.textContent = error.message; }
-        finally { if (current()) dismiss.disabled = false; }
-      };
-      action.onclick = async () => {
-        const value = rows.get(id) || catalogChat();
-        if (!current() || !value || action.disabled) return;
-        action.disabled = true;
-        try {
-          if (value.sessionId && ['accepted', 'uncertain'].includes(value.status)) { openChat(value); return; }
-          if (value.status !== 'failed') return;
-          if (value.canAttachFailed) {
-            const reply = await api().firstSends();
-            if (!current()) return;
-            const displayed = rows.get(id);
-            if (displayed?.status !== value.status || displayed.attemptId !== value.attemptId ||
-                displayed.sessionId !== value.sessionId) return;
-            const fresh = reply?.ok && reply.rows?.find(row => row.intentId === id);
-            if (!fresh || fresh.status !== 'failed' || !fresh.canAttachFailed || fresh.attemptId !== value.attemptId ||
-                fresh.sessionId !== value.sessionId) { await refresh(); return; }
-            const state = editState(fresh);
-            if (state === 'occupied' || state === 'editable' &&
-                global.NativeChat.restoreFirstSendForEdit(fresh, Boolean(hasHistory?.(fresh.sessionId)))) await openChat(fresh);
-            else paint(fresh);
-            return;
-          }
-          if (!value.canRetry) return;
-          const result = await api().retryFirstSend(id, value.attemptId || id);
-          if (!current()) return;
-          await refresh();
-          if (current() && !result?.ok) message.textContent = result?.reason || label('failed', states.failed);
-        } catch (error) { if (current()) message.textContent = error.message || label('failed', states.failed); }
-        finally { if (current()) action.disabled = false; }
-      };
-      paint(loadedOwner === scope ? rows.get(id) : undefined); host.replaceChildren(pane);
+      host.replaceChildren(pane);
+      paint(initial, false);
+      void refresh();
       return true;
     }
-    return { clear, refresh, recent, show, mount, get activeId() { return detail?.pane.isConnected ? detail.id : ''; } };
+    return { clear, refresh, recent, show, mount, get activeId() {
+      return detail?.pane.isConnected ? detail.id :
+        global.document?.querySelector('#cpChat [data-first-send-draft-id]')?.dataset.firstSendDraftId || '';
+    } };
   }
   global.WorkspaceFirstSends = { create, status };
 })(window);

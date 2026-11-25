@@ -12,7 +12,6 @@ const allowedOpen = ['adapterId', 'modelName', 'thinkingLevel', 'reasoningEffort
 const select = (object, keys) => Object.fromEntries(keys.filter(key => Object.hasOwn(object || {}, key)).map(key => [key, object[key]]));
 const interrupted = '客户端在发送前已关闭，可恢复这条消息。';
 const uncertain = '暂时无法确认执行底座是否收到消息，请先查看原会话。';
-const terminal = new Set(['failed', 'uncertain', 'accepted']);
 const attemptOf = row => row.attemptId || row.intentId;
 const isProvenRefusal = value => value?.notSent === true || (value?.retrySafe === true &&
   ['plugin-validation', 'plugin-grant', 'skill-selection'].includes(value.failureKind));
@@ -63,13 +62,23 @@ function create({ root, actor, assertCurrent, open, send, received, notify }) {
   function publicRow(row) {
     const canAttachFailed = row.status === 'failed' && Boolean(row.refusedAt);
     const preparation = row.turn?.inputPreparation;
+    // Before allocation there is no history to supply these choices. Return only
+    // ordinary editor settings; a one-use grant or special launch must be reselected.
+    const accessMode = row.options?.accessMode;
+    const recoverAccess = accessMode === 'readonly' || accessMode === 'standard' && row.options.mode !== 'readonly' ||
+      !accessMode && row.options?.mode === 'readonly';
+    const starter = row.status === 'failed' && !row.sessionId && recoverAccess &&
+      !row.options.pluginEditId && !row.options.contextPrompts?.length &&
+      (!row.options.intent || row.options.intent === 'chat') && row.options.mode !== 'goal';
     return { attemptId: attemptOf(row), ...select(row, ['intentId', 'sessionId', 'title', 'text', 'at', 'status', 'reason', 'adapterId',
       'modelName', 'acceptedAt', 'attachmentNames', 'confirmed']), ...(preparation?.userText ?
         { text: preparation.userText } : {}), canAttachFailed,
-      canRestoreText: canAttachFailed && Boolean(row.text?.trim()) && !row.attachmentNames?.length &&
+      ...(starter ? { draftOptions: { ...select(row.options, ['adapterId', 'modelName', 'thinkingLevel', 'reasoningEffort',
+        'capabilities', 'cwd', 'workspaceLabel', 'mode', 'accessMode', 'projectId', 'repoId', 'memoryIds']),
+        sidebarProjectId: row.sidebarProjectId || '' } } : {}),
+      canRestoreText: Boolean(canAttachFailed || starter) && Boolean(row.text?.trim()) && !row.attachmentNames?.length &&
         !row.turn?.plugins?.length && !row.turn?.skills?.length && !row.options?.pluginEditId && !row.needsSelection &&
-        (!preparation || Object.keys(preparation).every(key => key === 'userText') && preparation.userText === row.text),
-      canRetry: row.status === 'failed' && row.ready === true && !row.needsSelection };
+        (!preparation || Object.keys(preparation).every(key => key === 'userText') && preparation.userText === row.text) };
   }
   function retire(files, row, deleted = false) {
     // Keep duplicate delivery idempotent after the source conversation was
@@ -120,7 +129,7 @@ function create({ root, actor, assertCurrent, open, send, received, notify }) {
   async function run(files, row, context, request, prepared) {
     try {
       let attachmentWarnings;
-      if (request?.attachments.length) {
+      if (request.attachments.length) {
         const staged = await attachments.stage(files.inputs, request.attachments, { stagingDir: files.inputs });
         if (!staged.files.length)
           throw Error(staged.warnings[0] || '附件尚未完整保存，请重新选择');
@@ -129,24 +138,9 @@ function create({ root, actor, assertCurrent, open, send, received, notify }) {
       }
       prepared(attachmentWarnings);
       await assertCurrent(context);
-      if (!request) for (const file of row.files || []) {
-        const stat = await fs.promises.stat(file.path).catch(() => null);
-        if (!stat || (file.kind === 'dir' ? !stat.isDirectory() : !stat.isFile() || stat.size !== file.size)) {
-          update(files, row, { needsSelection: true });
-          throw Error('已保存的附件不可用，请重新选择后发送');
-        }
-      }
-      if (!request && row.reallocate) update(files, row, { sessionId: '', reallocate: false });
-      const freshOptions = { ...row.options, attachments: row.files, ...select(request?.open, ['accessDraftId', 'accessConsentId']) };
-      let opened = request?.ref ? { ok: true, ref: request.ref, sessionId: row.sessionId }
+      const freshOptions = { ...row.options, attachments: row.files, ...select(request.open, ['accessDraftId', 'accessConsentId']) };
+      const opened = request.ref ? { ok: true, ref: request.ref, sessionId: row.sessionId }
         : await open(context, row.sessionId ? { chatId: row.sessionId } : freshOptions);
-      if (!request && row.sessionId && opened?.notFound === true && !opened.code) {
-        // A refused first send can leave a Pi allocation with no native file.
-        // Only an explicit retry after proven non-admission can reallocate it.
-        await assertCurrent(context);
-        update(files, row, { sessionId: '' });
-        opened = await open(context, freshOptions);
-      }
       if (!opened?.ok || !opened.ref || !opened.sessionId) throw Error(opened?.reason || '会话尚未打开');
       if (row.sessionId && row.sessionId !== opened.sessionId) throw Error('原会话标识已变化，请重新打开');
       await assertCurrent(context);
@@ -159,7 +153,7 @@ function create({ root, actor, assertCurrent, open, send, received, notify }) {
         if (!refusal) return;
         const latest = activeRow(files);
         if (!latest || latest.confirmed || attemptOf(latest) !== attempt || !['accepted','uncertain'].includes(latest.status)) return;
-        update(files, latest, { status: 'failed', reallocate: true, refusedAt: Date.now(), reason: String(refusal.reason || interrupted) });
+        update(files, latest, { status: 'failed', refusedAt: Date.now(), reason: String(refusal.reason || interrupted) });
       };
       const settled = outcome => {
         if (isProvenRefusal(outcome)) { refusal = outcome; settleRefusal(); return; }
@@ -338,36 +332,20 @@ function create({ root, actor, assertCurrent, open, send, received, notify }) {
     update(files, row, { sidebarProjectId: '' });
     return { ok: true };
   }
-  async function act(event, id, action, expectedAttempt, expectedStatus) {
+  async function act(event, id, action, expectedAttempt) {
+    if (action !== 'wait' && action !== 'attach') throw Error('未知的首发操作');
     const context = await actor(event), files = paths(context.owner, id);
     const draft = activeRow(files), row = draft || read(files.receipt);
     if (!row) throw Error('找不到这条首发请求');
     if (row.deleted) throw Error('这条会话已经删除');
     if (draft) recover(files, row, context);
-    if (action === 'wait' || action === 'attach') {
-      const result = await (flights.get(files.key)?.finished || { row: publicRow(row), workflowRun: row.workflowRun });
-      await assertCurrent(context);
-      if (action === 'attach' && (!draft || (expectedAttempt || id) !== result.row.attemptId ||
-          (result.row.status !== 'accepted' && !result.row.canAttachFailed) ||
-          Date.now() - (row.refusedAt || result.row.acceptedAt || 0) >= 60000))
-        throw Error('请从历史记录重新打开这条会话');
-      return { ok: true, ...result };
-    }
-    if (flights.has(files.key) || !terminal.has(row.status)) throw Error('首条消息正在提交');
-    if (action === 'retry') {
-      if (!publicRow(row).canRetry || (expectedAttempt || id) !== attemptOf(row)) throw Error('请查看原会话或重新选择输入');
-      probes.delete(files.key); admitted.delete(files.key);
-      // An interrupted open never submitted to a native queue. It retains its
-      // original submission ID while the new attempt fences concurrent actions.
-      update(files, row, { status: 'opening', reason: '', nativeSubmissionId: row.sessionId ? '' : row.nativeSubmissionId || attemptOf(row),
-        attemptId: 'first-' + crypto.randomUUID(), receiptTarget: undefined, acceptedAt: 0, refusedAt: 0 });
-      launch(files, row, context); return { ok: true, row: publicRow(row) };
-    }
-    if (action !== 'dismiss') throw Error('未知的首发操作');
-    if (!draft || !['failed', 'uncertain'].includes(row.status) || row.status !== expectedStatus || attemptOf(row) !== expectedAttempt)
-      throw Error('这条首发请求的状态已变化，请重新查看后移除');
-    retire(files, row);
-    notify(); return { ok: true };
+    const result = await (flights.get(files.key)?.finished || { row: publicRow(row), workflowRun: row.workflowRun });
+    await assertCurrent(context);
+    if (action === 'attach' && (!draft || (expectedAttempt || id) !== result.row.attemptId ||
+        (result.row.status !== 'accepted' && !result.row.canAttachFailed) ||
+        Date.now() - (row.refusedAt || result.row.acceptedAt || 0) >= 60000))
+      throw Error('请从历史记录重新打开这条会话');
+    return { ok: true, ...result };
   }
   return { start, list, act, associations, ackAssociations, forgetSession };
 }

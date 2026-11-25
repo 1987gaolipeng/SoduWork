@@ -6,6 +6,9 @@ const { randomUUID } = require('node:crypto');
 const { create } = require('../main/conversation/first-send.cjs');
 const tick = () => new Promise(done => setImmediate(done));
 function gate() { let resolve; const promise = new Promise(done => { resolve = done; }); return { resolve, promise }; }
+function sendEditedDraft(service, request, expected = request.intentId) {
+  return service.start(null, { ...request, retryAttempt: { expected, next: 'first-' + randomUUID() } });
+}
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-first-send-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -42,8 +45,28 @@ test('only refused plain text can be reconstructed from a cold journal', async t
   assert.equal((await refusal({ skills: ['review'] })).canRestoreText, false);
   assert.equal((await refusal({ plugins: [{ pluginId: 'selected', inputValues: { path: 'private' } }] })).canRestoreText, false);
 });
+test('unallocated plain text retains ordinary model and project settings across restart without replaying access grants', async t => {
+  const f = fixture(t), config = { ...f.config, open: async () => ({ ok: false, reason: 'unavailable' }) };
+  const req = { ...f.request('first text'), turn: {}, sidebarProjectId: 'S' };
+  Object.assign(req.open, { cwd: 'D:/project', projectId: 'P', accessMode: 'standard' });
+  const service = create(config); await service.start(null, req); await service.act(null, req.intentId, 'wait');
+  const cold = create(config), row = (await cold.list(null)).rows[0];
+  assert.equal(row.sessionId, ''); assert.equal(row.status, 'failed'); assert.equal(row.canRestoreText, true);
+  assert.deepEqual(row.draftOptions, { adapterId: 'opencode', modelName: 'glm', cwd: 'D:/project',
+    projectId: 'P', accessMode: 'standard', sidebarProjectId: 'S' });
+  req.intentId = 'first-' + randomUUID(); req.open.accessMode = 'full';
+  await cold.start(null, req); const restricted = (await cold.act(null, req.intentId, 'wait')).row;
+  assert.equal(restricted.canRestoreText, false); assert.equal(restricted.draftOptions, undefined);
+  req.intentId = 'first-' + randomUUID(); req.open.accessMode = ''; req.open.mode = 'full';
+  await cold.start(null, req);
+  assert.equal((await cold.act(null, req.intentId, 'wait')).row.draftOptions, undefined, 'the current default could grant more access');
+  req.intentId = 'first-' + randomUUID(); req.open.mode = 'readonly';
+  await cold.start(null, req);
+  assert.equal((await cold.act(null, req.intentId, 'wait')).row.draftOptions.mode, 'readonly');
+  assert.equal(f.sends.length, 0);
+});
 
-for (const winner of ['composer', 'sidebar']) test('only the first ' + winner + ' retry can consume a failed attempt', async t => {
+test('two edits to the same refused turn can dispatch only once and late settlement cannot change the winner', async t => {
   const f = fixture(t), request = f.request('original text'), attempts = [], completions = new Map();
   const service = create({ ...f.config, received: async () => false,
     async send(_context, ref, text, files, options, settled) {
@@ -54,28 +77,19 @@ for (const winner of ['composer', 'sidebar']) test('only the first ' + winner + 
   completions.get(first.attemptId)({ ok: false, notSent: true, reason: 'refused before write' });
   let failure = (await service.act(null, request.intentId, 'wait')).row;
   assert.equal(failure.canAttachFailed, true);
-  const composer = () => service.start(null, { ...request, text: 'edited in original composer' }, {
-    expected: first.attemptId, attemptId: 'ui-next', ref: 'ref-1', sessionId: first.sessionId });
-  const sidebar = () => service.act(null, request.intentId, 'retry', first.attemptId);
-  if (winner === 'composer') {
-    const [front, side] = await Promise.allSettled([composer(), sidebar()]);
-    assert.equal(front.value.ok, true); assert.equal(side.status, 'rejected');
-  } else {
-    const [side, front] = await Promise.all([sidebar(), composer()]);
-    assert.equal(side.ok, true); assert.equal(front.code, 'FIRST_SEND_RETRY_STALE');
-  }
+  const edit = (text, attemptId) => service.start(null, { ...request, text }, {
+    expected: first.attemptId, attemptId, ref: 'ref-1', sessionId: first.sessionId });
+  const [firstEdit, laterEdit] = await Promise.all([edit('edited in original composer', 'ui-next'), edit('second edit', 'ui-other')]);
+  assert.equal(firstEdit.ok, true); assert.equal(laterEdit.code, 'FIRST_SEND_RETRY_STALE');
   const latest = (await service.act(null, request.intentId, 'wait')).row;
   assert.equal(attempts.length, 2);
-  assert.notEqual(attempts[1].id, first.attemptId);
-  assert.equal(attempts[1].ref, winner === 'composer' ? 'ref-1' : 'ref-2');
-  assert.equal(attempts[1].text, winner === 'composer' ? 'edited in original composer' : request.text);
+  assert.deepEqual(attempts[1], { id: 'ui-next', ref: 'ref-1', text: 'edited in original composer' });
   completions.get(first.attemptId)({ ok: false, notSent: true, reason: 'late previous refusal' });
   assert.equal((await service.act(null, request.intentId, 'wait')).row.status, 'accepted');
   completions.get(latest.attemptId)({ ok: false, notSent: true, reason: 'new refusal' });
   failure = (await service.act(null, request.intentId, 'wait')).row;
   assert.equal(failure.status, 'failed'); assert.equal(failure.reason, 'new refusal');
-  assert.equal((await composer()).code, 'FIRST_SEND_RETRY_STALE');
-  await assert.rejects(sidebar(), /重新选择输入/);
+  assert.equal((await edit('old attempt', 'ui-stale')).code, 'FIRST_SEND_RETRY_STALE');
   assert.equal(attempts.length, 2);
 });
 
@@ -91,20 +105,15 @@ test('an edited draft retries a refused open on the same intent with its current
   const edited = { ...original, text: 'edited',
     retryAttempt: { expected: failure.attemptId, next }, turn: { inputPreparation: { userText: 'edited' } },
     open: { ...original.open, modelName: 'replacement', accessConsentId: 'new-interactive-grant' } };
-  await service.start(null, edited);
-  await assert.rejects(service.act(null, original.intentId, 'retry', failure.attemptId));
+  const [admitted, stale] = await Promise.all([service.start(null, edited),
+    sendEditedDraft(service, { ...original, text: 'different edit' }, failure.attemptId)]);
+  assert.equal(admitted.ok, true); assert.equal(stale.code, 'FIRST_SEND_RETRY_STALE');
   const result = (await service.act(null, original.intentId, 'wait')).row;
   assert.equal(result.text, 'edited'); assert.equal(result.attemptId, next); assert.equal(result.status, 'accepted');
   assert.equal(attempts[1].modelName, 'replacement'); assert.equal(attempts[1].accessConsentId, 'new-interactive-grant');
   assert.equal(f.sends.length, 1); assert.equal(f.sends[0].options.submissionId, next);
   assert.equal((await service.act(null, original.intentId, 'attach', next)).row.sessionId, result.sessionId);
   await assert.rejects(service.act(null, original.intentId, 'attach', failure.attemptId));
-  const dismissed = f.request();
-  const stopped = create({ ...f.config, open: async () => ({ ok: false, reason: 'offline' }) });
-  await stopped.start(null, dismissed); await stopped.act(null, dismissed.intentId, 'wait');
-  await stopped.act(null, dismissed.intentId, 'dismiss', dismissed.intentId, 'failed');
-  assert.equal((await stopped.start(null, { ...dismissed, retryAttempt: { expected: dismissed.intentId, next } })).code,
-    'FIRST_SEND_RETRY_STALE', 'A stale composer cannot resurrect a dismissed failure from its tombstone');
 });
 
 test('pre-admission refusal retains the allocated handle and recognizes only the edited retry receipt after restart', async t => {
@@ -127,20 +136,21 @@ test('pre-admission refusal retains the allocated handle and recognizes only the
   assert.equal((await cold.list(null)).rows[0].status, 'uncertain'); await tick();
   assert.equal((await cold.act(null, req.intentId, 'wait')).row.status, 'uncertain');
   assert.equal((await cold.start(null, req, expected)).code, 'FIRST_SEND_RETRY_STALE');
-  await assert.rejects(cold.act(null, req.intentId, 'retry', 'ui-corrected'));
+  assert.equal((await cold.start(null, req, { ...expected, expected: 'ui-corrected', attemptId: 'ui-again' })).code,
+    'FIRST_SEND_RETRY_STALE', 'An unconfirmed turn must not be replayed even with its current attempt id');
   received.push('ui-corrected');
   const restarted = create(config); await restarted.list(null); await tick();
   assert.equal((await restarted.act(null, req.intentId, 'wait')).row.status, 'accepted');
   assert.equal(f.opens.length, 1); assert.deepEqual(sends.map(row => row.ref), ['ref-1', 'ref-1']);
 });
 
-test('a switched retry records its native segment and explicitly reopens the selected runtime after another refusal', async t => {
+test('an edited retry on a different runtime records its native segment and keeps its original conversation', async t => {
   const f = fixture(t), req = f.request(), completions = [], captures = [];
   const service = create({ ...f.config, received: async () => false,
     async send(_ctx, ref, text, files, options, settled, sessionId, rememberTarget) {
       completions.push(settled);
-      if (completions.length === 2) rememberTarget('pi', 'switched-native-segment', () => 'replacement');
-      else rememberTarget(completions.length === 1 ? 'opencode' : 'pi', sessionId);
+      if (completions.length > 1) rememberTarget('pi', 'switched-native-segment', () => 'replacement');
+      else rememberTarget('opencode', sessionId);
       captures.push(JSON.parse(fs.readFileSync(path.join(f.root, f.a, req.intentId + '.json'), 'utf8')));
       return { ok: true };
     } });
@@ -151,10 +161,11 @@ test('a switched retry records its native segment and explicitly reopens the sel
   assert.equal(captures[1].sessionId, initial.sessionId);
   assert.deepEqual(captures[1].receiptTarget, { adapterId: 'pi', sessionId: 'switched-native-segment' });
   completions[1]({ ok: false, notSent: true, reason: 'new runtime offline' });
-  await service.act(null, req.intentId, 'retry', retry.attemptId);
+  assert.equal((await service.start(null, { ...req, text: 'corrected again' }, {
+    ...retry, expected: retry.attemptId, attemptId: 'ui-corrected-again' })).ok, true);
   assert.equal((await service.act(null, req.intentId, 'wait')).row.status, 'accepted');
-  assert.equal(f.opens[1].adapterId, 'pi'); assert.equal(f.opens[1].modelName, 'replacement');
-  assert.equal(captures[2].receiptTarget, undefined); assert.notEqual(captures[2].sessionId, initial.sessionId);
+  assert.equal(f.opens.length, 1); assert.equal(captures[2].adapterId, 'pi'); assert.equal(captures[2].modelName, 'replacement');
+  assert.deepEqual(captures[2].receiptTarget, captures[1].receiptTarget); assert.equal(captures[2].sessionId, initial.sessionId);
 });
 
 test('two simultaneous first sends finish independently and identical IPC retries do not duplicate work', async t => {
@@ -183,12 +194,12 @@ test('two simultaneous first sends finish independently and identical IPC retrie
   await tick();
   const accepted = fs.readFileSync(path.join(f.root, f.a, a.intentId + '.json'), 'utf8');
   assert.doesNotMatch(accepted, /private-grant|accessConsentId|"text"/);
-  await assert.rejects(service.act(null, a.intentId, 'dismiss', a.intentId, 'accepted'), /状态已变化/);
+  assert.equal((await sendEditedDraft(service, a)).code, 'FIRST_SEND_RETRY_STALE');
   await service.start(null, a);
   assert.equal(f.sends.length, 2);
 });
 
-test('a stale dismissal cannot discard an edited retry awaiting its native receipt', async t => {
+test('a stale edit and a second send cannot overwrite a turn awaiting its native receipt after restart', async t => {
   const f = fixture(t), request = f.request(), id = request.intentId;
   let sends = 0;
   const config = { ...f.config, received: async () => false, async send() {
@@ -199,40 +210,46 @@ test('a stale dismissal cannot discard an edited retry awaiting its native recei
   const failed = (await service.act(null, id, 'wait')).row;
   assert.equal(failed.status, 'failed');
   const attemptId = 'ui-edited';
-  await service.start(null, { ...request, text: 'edited draft' },
-    { ref: 'ref-1', sessionId: failed.sessionId, expected: failed.attemptId, attemptId });
+  const retry = { ref: 'ref-1', sessionId: failed.sessionId, expected: failed.attemptId, attemptId };
+  await service.start(null, { ...request, text: 'edited draft' }, retry);
   assert.equal((await service.act(null, id, 'wait')).row.status, 'accepted');
-  await assert.rejects(service.act(null, id, 'dismiss', failed.attemptId, failed.status), /状态已变化/);
+  assert.equal((await service.start(null, request, retry)).code, 'FIRST_SEND_RETRY_STALE');
 
   const cold = create(config);
   const [pending] = (await cold.list(null)).rows;
   assert.equal(pending.status, 'uncertain'); assert.equal(pending.text, 'edited draft');
-  await assert.rejects(cold.act(null, id, 'dismiss', failed.attemptId, pending.status), /状态已变化/);
-  await assert.rejects(cold.act(null, id, 'dismiss', attemptId, failed.status), /状态已变化/);
-  assert.equal((await cold.act(null, id, 'dismiss', attemptId, pending.status)).ok, true);
-  assert.deepEqual((await create(config).list(null)).rows, []);
+  assert.equal((await cold.start(null, request, retry)).code, 'FIRST_SEND_RETRY_STALE');
+  assert.equal((await cold.start(null, request, { ...retry, expected: attemptId, attemptId: 'ui-other' })).code,
+    'FIRST_SEND_RETRY_STALE');
+  assert.equal((await cold.act(null, id, 'wait')).row.text, 'edited draft');
   assert.equal(sends, 2);
 });
 
-test('a refused open keeps staged clipboard bytes, selected model and attachment for an explicit retry', async t => {
+test('a refused open preserves the staged attachment and sends the newly selected input and consent after restart', async t => {
   const f = fixture(t), req = f.request('original first turn'), denied = create({ ...f.config,
     open: async () => ({ ok: false, reason: 'modelo unavailable' }) });
   req.attachments = [{ name: 'clip.txt', type: 'text/plain', data: Buffer.from('original clipboard') }];
   await denied.start(null, req);
   const failed = (await denied.act(null, req.intentId, 'wait')).row;
-  assert.equal(failed.canRetry, true); assert.equal(failed.modelName, 'glm');
+  assert.equal(failed.canRestoreText, false); assert.equal(failed.modelName, 'glm');
   assert.deepEqual(failed.attachmentNames, ['clip.txt']);
-  assert.doesNotMatch(fs.readFileSync(path.join(f.root, f.a, req.intentId + '.json'), 'utf8'), /private-grant/);
+  const saved = fs.readFileSync(path.join(f.root, f.a, req.intentId + '.json'), 'utf8');
+  assert.doesNotMatch(saved, /private-grant/);
+  assert.equal(fs.readFileSync(JSON.parse(saved).files[0].path, 'utf8'), 'original clipboard');
   const send = f.config.send;
   const afterRestart = create({ ...f.config, send: async (...args) => {
-    assert.equal(fs.readFileSync(args[3][0].path, 'utf8'), 'original clipboard'); return send(...args);
+    assert.equal(fs.readFileSync(args[3][0].path, 'utf8'), 'new clipboard'); return send(...args);
   } });
   assert.equal((await afterRestart.list(null)).rows[0].text, req.text);
   assert.equal(f.opens.length, 0);
-  await afterRestart.act(null, req.intentId, 'retry');
-  assert.equal((await afterRestart.act(null, req.intentId, 'wait')).row.status, 'accepted');
-  assert.equal(f.opens[0].accessConsentId, undefined);
-  assert.equal(f.sends.length, 1); assert.equal(f.sends[0].options.submissionId, req.intentId);
+  const edited = { ...req, open: { ...req.open, accessConsentId: 'new-grant' },
+    attachments: [{ name: 'replacement.txt', data: Buffer.from('new clipboard') }] };
+  assert.equal((await sendEditedDraft(afterRestart, edited)).ok, true);
+  const accepted = (await afterRestart.act(null, req.intentId, 'wait')).row;
+  assert.equal(accepted.status, 'accepted'); assert.notEqual(accepted.attemptId, req.intentId);
+  assert.equal(f.opens[0].modelName, 'glm'); assert.equal(f.opens[0].accessConsentId, 'new-grant');
+  assert.equal(f.sends.length, 1); assert.equal(f.sends[0].options.submissionId, accepted.attemptId);
+  assert.deepEqual(f.sends[0].files.map(file => file.name), ['replacement.txt']);
   await tick();
   assert.equal(fs.existsSync(path.join(f.root, f.a, req.intentId + '.inputs')), false);
 });
@@ -243,14 +260,15 @@ test('interrupted opens stay recoverable, lost send acknowledgements reconcile o
   await service.start(null, req); await service.act(null, req.intentId, 'wait');
   const file = path.join(f.root, f.a, req.intentId + '.json'), row = JSON.parse(fs.readFileSync(file));
   fs.writeFileSync(file, JSON.stringify({ ...row, status: 'opening' }));
-  assert.equal((await create(f.config).list(null)).rows[0].canRetry, true);
+  assert.equal((await create(f.config).list(null)).rows[0].status, 'failed');
   fs.writeFileSync(file, JSON.stringify({ ...row, status: 'sending', sessionId: 'saved-id' }));
   const receipt = gate();
   const cold = create({ ...f.config, received: async (_context, item) => {
     assert.equal(item.sessionId, 'saved-id'); assert.equal(item.intentId, req.intentId); return receipt.promise;
   } });
   assert.equal((await cold.list(null)).rows[0].status, 'uncertain');
-  await assert.rejects(cold.act(null, req.intentId, 'retry'), /原会话/);
+  assert.equal((await cold.start(null, req, {
+    ref: 'ref-1', sessionId: 'saved-id', expected: req.intentId, attemptId: 'ui-other' })).code, 'FIRST_SEND_RETRY_STALE');
   receipt.resolve(true); await tick();
   assert.equal((await cold.list(null)).rows[0].status, 'accepted'); assert.equal(f.sends.length, 0);
 });
@@ -261,7 +279,7 @@ test('a different identity cannot read or retry a draft, and switching identity 
   await service.start(null, req); await opened.promise;
   f.use(f.b);
   assert.deepEqual((await service.list(null)).rows, []);
-  await assert.rejects(service.act(null, req.intentId, 'retry'), /找不到/);
+  assert.equal((await sendEditedDraft(service, req)).code, 'FIRST_SEND_RETRY_STALE');
   delayed.resolve({ ok: true, ref: 'wrong-scope', sessionId: 'old' }); await tick();
   assert.equal(f.sends.length, 0); f.use(f.a);
   assert.equal((await service.act(null, req.intentId, 'wait')).row.status, 'failed');
@@ -278,8 +296,9 @@ test('a queue acknowledgement followed by a crash before the first native event 
   assert.doesNotMatch(JSON.stringify(disk), /private-grant/);
   const cold = create({ ...f.config, received: async () => false });
   const [row] = (await cold.list(null)).rows;
-  assert.equal(row.status, 'uncertain'); assert.equal(row.text, req.text); assert.equal(row.canRetry, false);
-  await assert.rejects(cold.act(null, req.intentId, 'retry'), /原会话/);
+  assert.equal(row.status, 'uncertain'); assert.equal(row.text, req.text); assert.equal(row.canRestoreText, false);
+  assert.equal((await cold.start(null, req, { ref: 'ref-1', sessionId: row.sessionId,
+    expected: row.attemptId, attemptId: 'ui-duplicate' })).code, 'FIRST_SEND_RETRY_STALE');
   await cold.start(null, req); assert.equal(f.sends.length, 1);
 });
 
@@ -287,24 +306,24 @@ test('missing attachments and ephemeral plugin input are visible and cannot be r
   const f = fixture(t), service = create({ ...f.config, open: async () => ({ ok: false, reason: 'offline' }) });
   const file = f.request(); file.attachments = [{ name: 'missing.txt', path: path.join(f.root, 'missing.txt') }];
   assert.equal((await service.start(null, file)).ok, false);
-  assert.equal((await service.act(null, file.intentId, 'wait')).row.canRetry, false);
+  assert.equal((await service.act(null, file.intentId, 'wait')).row.canRestoreText, false);
   const plugin = f.request(); plugin.turn.plugins[0].inputValues = { key: 'transient-plugin-value' };
   await service.start(null, plugin); await service.act(null, plugin.intentId, 'wait');
-  assert.equal((await service.list(null)).rows.find(row => row.intentId === plugin.intentId).canRetry, false);
+  assert.equal((await service.list(null)).rows.find(row => row.intentId === plugin.intentId).canRestoreText, false);
   assert.doesNotMatch(fs.readFileSync(path.join(f.root, f.a, plugin.intentId + '.json'), 'utf8'), /transient-plugin-value/);
 });
 
-test('partially readable ordinary attachments report what was skipped and cold retry uses only the saved copies', async t => {
+test('partially readable attachments report what was skipped and the next submission uses only reselected files', async t => {
   const f = fixture(t), req = f.request(), missing = path.join(f.root, 'missing.txt');
   req.attachments = [{ name: 'missing.txt', path: missing }, { name: 'notes.txt', data: Buffer.from('original notes') }];
   const offline = create({ ...f.config, open: async () => ({ ok: false, reason: 'offline' }) });
   const saved = await offline.start(null, req);
   assert.equal(saved.ok, true, saved.reason); assert.match(saved.attachmentWarnings[0], /missing\.txt/);
   const failed = (await offline.act(null, req.intentId, 'wait')).row;
-  assert.equal(failed.canRetry, true); assert.deepEqual(failed.attachmentNames, ['notes.txt']);
+  assert.equal(failed.canRestoreText, false); assert.deepEqual(failed.attachmentNames, ['notes.txt']);
   fs.writeFileSync(missing, 'appeared after the original send');
   const cold = create({ ...f.config, received: async () => false });
-  await cold.act(null, req.intentId, 'retry');
+  assert.equal((await sendEditedDraft(cold, { ...req, attachments: [req.attachments[1]] })).ok, true);
   assert.equal((await cold.act(null, req.intentId, 'wait')).row.status, 'accepted');
   assert.deepEqual(f.sends[0].files.map(file => file.name), ['notes.txt']);
   assert.equal(fs.readFileSync(f.sends[0].files[0].path, 'utf8'), 'original notes');
@@ -391,14 +410,16 @@ test('a queue-level refusal stays retryable, an ambiguous failure stays visible,
     if (rows.get(refused.intentId).status === 'failed' && rows.get(ambiguous.intentId).status === 'uncertain') break;
     await new Promise(resolve => setTimeout(resolve, 20));
   }
-  assert.equal(rows.get(refused.intentId).canRetry, true);
-  assert.equal(rows.get(ambiguous.intentId).canRetry, false);
+  assert.equal(rows.get(refused.intentId).canAttachFailed, true);
+  assert.equal(rows.get(ambiguous.intentId).canAttachFailed, false);
   assert.equal(rows.get(ambiguous.intentId).text, ambiguous.text);
   assert.equal(rows.get(model.intentId).status, 'accepted');
   assert.equal(rows.get(model.intentId).text, undefined);
-  await service.act(null, refused.intentId, 'retry');
-  assert.equal((await service.act(null, refused.intentId, 'wait')).row.sessionId, 'chat-4');
-  assert.equal(f.opens[3].modelName, 'glm'); assert.equal(f.opens[3].chatId, undefined);
+  const first = rows.get(refused.intentId);
+  assert.equal((await service.start(null, { ...refused, text: 'edited after quota refusal' }, {
+    expected: first.attemptId, attemptId: 'ui-quota-resolved', ref: 'ref-1', sessionId: first.sessionId })).ok, true);
+  assert.equal((await service.act(null, refused.intentId, 'wait')).row.sessionId, first.sessionId);
+  assert.equal(f.opens.length, 3); assert.equal(settlements.length, 4);
 });
 
 test('cold project filing requires durable acceptance and the exact session acknowledgement', async t => {
@@ -462,7 +483,9 @@ test('deletion retires confirmed and unconfirmed first sends without reviving de
     const receipt = JSON.parse(fs.readFileSync(path.join(f.root, f.a, 'receipts', input.intentId + '.json'), 'utf8'));
     assert.deepEqual(receipt, { intentId: input.intentId, deleted: true });
     assert.equal((await cold.start(null, input)).ok, false);
-    await assert.rejects(cold.act(null, input.intentId, 'retry'), /已经删除/);
+    const edited = await cold.start(null, { ...input, text: 'stale edit after deletion' }, {
+      expected: input.intentId, ref: 'r', sessionId: 'public-target', attemptId: 'ui-deleted' });
+    assert.equal(edited.ok, false); assert.match(edited.reason, /已经删除/);
   }
   fs.writeFileSync(savedFile, savedRequest); // Simulate a crash after the tombstone but before cleanup.
   assert.equal((await cold.start(null, delayed)).ok, false); assert.equal(fs.existsSync(savedFile), false);

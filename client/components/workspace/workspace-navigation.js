@@ -157,7 +157,7 @@
     global.WorkspaceHost?.open('create', { newSession: true });
   }
 
-  global.WorkspaceNavigation = { record, chatChanged, open, scopeChanged };
+  global.WorkspaceNavigation = { record, chatChanged, open, scopeChanged, get generation() { return epoch; } };
   if (global.__deskPanel !== 'workspace') return;
   global.addEventListener?.('soduwork-data-scope-changed', scopeChanged);
   global.addEventListener?.('soduwork-device-auth', () => {

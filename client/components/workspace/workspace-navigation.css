@@ -189,11 +189,7 @@ html[data-desk-panel="workspace"][data-workspace-layout="utility"] .ws-resizer{d
   padding:0;border:0;background:transparent;line-height:1}
 .ws-chat-runtime[hidden]{display:none}
 .ws-chat[data-history-content="missing"]::after,.ws-chat[data-history-content="first-send"]::after{content:attr(data-history-label);flex:none;font-size:12px;color:var(--ink-3);padding-left:4px}
-[data-first-send-record] .nbubble{white-space:pre-wrap;overflow-wrap:anywhere}
 [data-first-send-record] [data-send-files]{overflow-wrap:anywhere;color:var(--ink-3)}
-.ws-first-send-actions{display:flex;gap:12px}
-.ws-first-send-actions button{background:none;border:0;padding:4px 0;font:inherit;color:var(--accent);cursor:pointer}
-.ws-first-send-actions button:disabled{color:var(--ink-3);cursor:default}
 .ws-chat-pin[hidden],.ws-chat-more[hidden],[data-first-send-record] [hidden]{display:none}
 .ws-chat-runtime .agent-brand{--agent-brand-size:20px;width:20px;height:20px;flex:0 0 20px;position:relative;
   border:1px solid var(--line-3);border-radius:50%;background:var(--ws-side,var(--bg-0));box-shadow:none}

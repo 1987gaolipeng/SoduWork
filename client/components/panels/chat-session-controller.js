@@ -622,7 +622,7 @@ async function _sendCore(textOverride, sendOptions) {
     const text = typed.trim() ? typed : '请查看并处理我附上的文件。';
     const sentAt = Date.now();
     const draftText = annotations.length || composerText.trim() ? composerText : text;
-    const retrySource = fromComposer && !sendTaskId && ctx._conversationDrafts?.get(sendDraftKey)?.firstSendRetry;
+    const retrySource = useComposer && !sendTaskId && ctx._conversationDrafts?.get(sendDraftKey)?.firstSendRetry;
     const sentFiles = fromComposer ? ctx._messageAttachments.files() : []; const attachmentRefsPromise = fromComposer ? ctx._messageAttachments.refs(retainedApi || ctx._api()) : Promise.resolve(appAttachments);
     const pluginDraft = fromComposer ? (ctx._pluginMention?.draft?.() || selectedPlugins) : [];
     const failedDraft = { text: homeDraft?.text ?? draftText, files: (homeDraft?.files || sentFiles).slice(), skills: skillSubmission.skills.slice(), plugins: resolvedPlugins.map(item =>
@@ -647,6 +647,7 @@ async function _sendCore(textOverride, sendOptions) {
       const token = ctx._beginSendState?.();
       const submittedInput = useComposer ? composerInput : homeDraft?.text;
       const inputRevision = useComposer ? composerRevision : entryRevision;
+      const recoveryKey = 'first-send-draft:' + intentId;
       let saved = false, refusedBeforeOpen = false;
       // The native ID is assigned later. Give next-turn edits their own key before
       // invoking IPC so navigation during admission cannot move them into a new chat.
@@ -667,7 +668,9 @@ async function _sendCore(textOverride, sendOptions) {
         ctx._messageAttachments.clear();
         ctx._pluginMention?.consume?.(resolvedPlugins); ctx._skillPicker?.consume?.(selectedSkills);
       }
-      ctx._rememberConversationDraft();
+      // Edits for the next turn may already be waiting under the intent ID.
+      if (retrySource && sendDraftKey === recoveryKey) ctx._restoreConversationDraft(intentId);
+      else ctx._rememberConversationDraft();
       try {
         const files = await attachmentRefsPromise;
         if (!currentSendScope()) return false;
@@ -675,7 +678,7 @@ async function _sendCore(textOverride, sendOptions) {
           sidebarProjectId: open.sidebarProjectId, ...(retrySource ? { retryAttempt: { expected: retrySource.attemptId, next: attemptId } } : {}) });
         if (admission?.ok || admission?.row?.attemptId === attemptId) failedDraft.firstSendRetry = { intentId, attemptId };
         else if (retrySource) failedDraft.firstSendRetry = retrySource;
-        refusedBeforeOpen = admission?.row?.status === 'failed' && !admission.row.sessionId;
+        refusedBeforeOpen = admission?.row?.status === 'failed' && !admission.row.sessionId && admission.row.attemptId === attemptId;
         if (!admission?.ok) throw Error(admission?.reason || '首条消息未保存');
         saved = true;
         if (currentSendView()) {
@@ -696,7 +699,10 @@ async function _sendCore(textOverride, sendOptions) {
         if (!currentSendScope()) return false;
         if (result.row.sessionId) {
           ctx._moveConversationDraft(intentId, result.row.sessionId);
-          if (currentSendView() && ctx._draftKey === intentId) ctx._draftKey = result.row.sessionId;
+          if (currentSendView() && ctx._draftKey === intentId) {
+            ctx._draftKey = result.row.sessionId;
+            if (el.dataset.firstSendDraftId === intentId) delete el.dataset.firstSendDraftId;
+          }
           if (result.row.status === 'failed' && result.row.canAttachFailed && failedDraft.firstSendRetry)
             ctx._retainFailedConversationDraft(result.row.sessionId, failedDraft, result.row.reason);
         }
@@ -720,17 +726,24 @@ async function _sendCore(textOverride, sendOptions) {
         if (currentSendView()) void ctx.refreshHistory();
         return true;
       } catch (error) {
+        const retained = refusedBeforeOpen && failedDraft.firstSendRetry && currentSendScope();
+        if (retained) {
+          if (currentSendView()) releaseStarterDraft();
+          ctx._retainFailedConversationDraft(recoveryKey, failedDraft, String(error.message || error));
+          if (currentSendView() && !ctx._hasConversationDraft(intentId)) ctx._draftKey = recoveryKey;
+          if (!currentSendView()) void ctx.refreshHistory();
+        }
         if (currentSendView()) {
-          if (!saved && ctx._draftKey === intentId && sendDraftKey !== intentId) {
+          if (!retained && !saved && ctx._draftKey === intentId && sendDraftKey !== intentId) {
             releaseStarterDraft();
             ctx._moveConversationDraft(intentId, sendDraftKey);
             ctx._draftKey = sendDraftKey;
           }
           if (saved) { ctx._pending = ''; ctx._pendingBaseline = null; }
-          // A saved request has a stable retry/inspection action in the
-          // sidebar. Restoring it into a new composer could run it twice.
+          // Unconfirmed delivery stays with its own sidebar record.
+          const keepNewInput = retained && ctx._draftKey !== recoveryKey;
           ctx._fail(saved && !refusedBeforeOpen ? '请在侧栏查看这条首发请求' : '这一轮没发出去',
-            String(error.message || error), refusedBeforeOpen || !saved ? failedDraft : null);
+            String(error.message || error), !keepNewInput && (refusedBeforeOpen || !saved) ? failedDraft : null);
         }
         return false;
       } finally { ctx._finishSendState?.(token); }

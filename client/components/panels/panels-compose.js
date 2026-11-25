@@ -823,6 +823,13 @@
       return true;
     }
     const chatOpenSeq = ++_chatOpenSeq;
+    if (q.firstSendDraft) {
+      _rememberComposeDraft();
+      _leaveStarterForHistory();
+      p.dataset.stage = 'chat'; setTab();
+      global.WorkspaceShell?.setActiveChat?.('');
+      return global.NativeChat?.openFirstSendDraft(q.firstSendDraft) === true;
+    }
     if (q.firstSendIntentId && global.WorkspaceShell?.mountFirstSend) {
       _rememberComposeDraft();
       _leaveStarterForHistory();
