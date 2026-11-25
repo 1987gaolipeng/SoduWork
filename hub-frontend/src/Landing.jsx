@@ -65,8 +65,9 @@ function Download({ pkgs, variant = 'fill' }) {
   const className = 'w-cta w-cta-' + variant
   if (target.web && pkgs !== null) return <a className={className} href={target.href || '#downloads'}>
     {target.href ? tx('打开网页版') : tx('查看其他平台')}</a>
-  return ready ? <a className={className} href={target.href}><Glyph name="download" size={18} />{tx('下载员工客户端')}</a>
-    : <button type="button" className={className} disabled aria-busy={pkgs === null}><Glyph name="download" size={18} />{tx('下载员工客户端')}</button>
+  if (ready) return <a className={className} href={target.href}><Glyph name="download" size={18} />{tx('下载员工客户端')}</a>
+  if (pkgs === null) return <button type="button" className={className} disabled aria-busy="true"><Glyph name="download" size={18} />{tx('正在确认安装包…')}</button>
+  return <a className={className} href="#downloads"><Glyph name="download" size={18} />{tx('查看各平台发布状态')}</a>
 }
 function DownloadMeta({ pkgs, onRetry }) {
   const { info, meta, label, web, href } = primaryTarget(pkgs)

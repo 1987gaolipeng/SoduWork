@@ -131,6 +131,13 @@ async def api_contract() -> None:
         ok("secret" not in body and "secretHash" not in body,
            "enrollment response disclosed a long-lived credential")
 
+        ok("pairingToken" not in body, "ordinary enrollment returned an administrative proof")
+        async with SessionLocal() as session:
+            ok(await session.get(models.Client, device_id) is None, "anonymous bootstrap reserved a device ID")
+        pairing = await client.post("/api/v1/clients/enroll?pairing=true", headers=enroll_headers,
+                                    json={"device": device_id, "platform": "test"})
+        ticket = pairing.json()["pairingToken"]
+
         unproven = await client.post(
             "/api/v1/clients/enroll", headers={"X-Device-Key": "u" * 48},
             json={"device": "assigned-without-proof", "name": "Old assigned row"},
@@ -138,6 +145,10 @@ async def api_contract() -> None:
         ok(unproven.status_code == 200 and unproven.json().get("activationRequired") is True
            and not unproven.json().get("session"),
            "an assigned row without an existing credential bypassed activation")
+        async with SessionLocal() as session:
+            reserved = await session.get(models.Client, "assigned-without-proof")
+            ok(not reserved.secret_hash and reserved.user_ref == "security-admin",
+               "anonymous bootstrap modified a reserved device")
         inactive_owner = await client.post(
             "/api/v1/clients/enroll", headers={"X-Device-Key": "i" * 48},
             json={"device": "inactive-owner-device", "name": "Inactive owner device"},
@@ -165,15 +176,38 @@ async def api_contract() -> None:
             "/api/v1/clients/register",
             headers={"X-Soduwork-Secret": device_key}, json={"device": device_id},
         )
-        ok(old_register.status_code == 404 if STRICT else old_register.status_code == 200,
+        ok(old_register.status_code == (404 if STRICT else 403),
            "legacy registration behavior does not match the migration stage")
 
-        assigned = await client.post(
-            f"/api/v1/admin/clients/{device_id}/assign",
-            headers=admin_headers, json={"userId": "security-admin"},
-        )
+        for route in ("assign", "activate"):
+            missing_proof = await client.post(f"/api/v1/admin/clients/assigned-without-proof/{route}",
+                                              headers=admin_headers, json={"userId": "security-admin"})
+            ok(missing_proof.status_code == 403, "administrative activation requires physical-device proof")
+        reserved_pair = await client.post("/api/v1/clients/enroll?pairing=true",
+                                          headers={"X-Device-Key": "u" * 48},
+                                          json={"device": "assigned-without-proof", "platform": "win32/x64"})
+        reserved_claim = {"userId": "security-admin", "pairingToken": reserved_pair.json()["pairingToken"]}
+        wrong_device = await client.post("/api/v1/admin/clients/assigned-without-proof/assign",
+                                         headers=admin_headers, json={**reserved_claim, "pairingToken": ticket})
+        ok(wrong_device.status_code == 403, "assignment accepted proof for a different device")
+        reserved_approval = await client.post("/api/v1/admin/clients/assigned-without-proof/assign",
+                                              headers=admin_headers, json=reserved_claim)
+        ok(reserved_approval.status_code == 200, "authorized pairing of a reserved device failed")
+        async with SessionLocal() as session:
+            reserved = await session.get(models.Client, "assigned-without-proof")
+            ok(reserved.auth_state == "active" and reserved.platform == "win32/x64"
+               and device_auth.secret_matches(reserved, "u" * 48), "reserved device binding did not persist")
+        reset = await client.post("/api/v1/admin/clients/assigned-without-proof/reset-enrollment",
+                                  headers=admin_headers)
+        stale = await client.post("/api/v1/admin/clients/assigned-without-proof/activate",
+                                  headers=admin_headers, json=reserved_claim)
+        ok(reset.status_code == 200 and stale.status_code == 409, "reset did not invalidate pairing proof")
+        assignment = {"userId": "security-admin", "pairingToken": ticket}
+        assigned = await client.post("/api/v1/admin/clients/pair", headers=admin_headers, json=assignment)
         ok(assigned.status_code == 200 and assigned.json().get("authState") == "active",
-           "owner assignment did not atomically activate the enrolled device: " + assigned.text)
+           "authorized pairing did not activate the enrolled device")
+        replay = await client.post("/api/v1/admin/clients/pair", headers=admin_headers, json=assignment)
+        ok(replay.status_code == 409, "consumed pairing proof was accepted again")
 
         second = await client.post(
             "/api/v1/clients/enroll", headers=enroll_headers,

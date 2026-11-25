@@ -9,9 +9,10 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
-from ..deps import require_perm
+from ..deps import require_perm, require_platform_quota_admin
 from ..models import AppSetting, AuditLog, ModelDef, ModelProvider, User
-from ..services import client_access, client_domain_events, quota_plans as qp, quota_usage, rbac
+from ..services import client_access, client_domain_events, quota_usage, rbac
+from ..services import quota_plans as qp
 from ..services.model_runtime import lock_setting
 
 router = APIRouter(prefix="/api/v1/admin/quotas", tags=["quotas"])
@@ -80,6 +81,7 @@ async def configuration(user: User = Depends(require_perm("quota.manage")),
 async def save_configuration(body: CatalogUpdate,
                              user: User = Depends(require_perm("quota.manage")),
                              session: AsyncSession = Depends(get_session)):
+    require_platform_quota_admin(user)
     row = await lock_setting(session, qp.CATALOG_KEY)
     old = qp.catalog_from(row.value)
     if old["revision"] != body.revision:
@@ -167,22 +169,27 @@ async def preview_plan(body: PlanPreview, user: User = Depends(require_perm("quo
 
 
 @router.get("/members")
-async def members(q: str = Query(default="", max_length=100),
+async def members(q: str = Query(default="", max_length=100), isActive: bool | None = None,
                   offset: int = Query(default=0, ge=0), limit: int = Query(default=50, ge=1, le=100),
                   user: User = Depends(require_perm("quota.manage")),
                   session: AsyncSession = Depends(get_session)):
     scope = await rbac.scope_org_ids(session, user)
     filters = [User.account_deleted_at.is_(None)]
+    if isActive is not None:
+        filters.append(User.is_active.is_(isActive))
     if scope is not None:
         filters.append(User.org_id.in_(scope or {"__none__"}))
     if q.strip():
         # Escape wildcards so a user name search remains literal and bounded.
         match = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         filters.append(or_(User.username.ilike(match, escape="\\"), User.display_name.ilike(match, escape="\\")))
-    total = await session.scalar(select(func.count()).select_from(User).where(*filters))
-    users = list((await session.scalars(select(User).where(*filters).order_by(
-        User.created_at, User.id).offset(offset).limit(limit))).all())
-    return {"total": total, "items": await member_items(session, users), "offset": offset, "limit": limit}
+    total = (await session.execute(select(func.count()).select_from(User).where(*filters))).scalar_one()
+    items = []
+    if offset < total:
+        users = list((await session.scalars(select(User).where(*filters).order_by(
+            User.created_at, User.id).offset(offset).limit(limit))).all())
+        items = await member_items(session, users)
+    return {"total": total, "items": items, "offset": offset, "limit": limit}
 
 
 async def member_items(session, users):

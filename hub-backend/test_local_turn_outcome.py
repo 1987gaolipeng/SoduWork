@@ -98,7 +98,7 @@ class TurnOutcomeTests(unittest.TestCase):
 
     def test_model_diagnostics_classify_without_publishing_provider_body(self):
         for value, expected in (
-            ('401 {"secret":"private-key"}', "请检查模型授权"),
+            ('401 {"secret":"private-key"}', "个人服务请在「我的模型」检查个人 Key，企业服务请联系管理员核对模型授权"),
             ({"error": {"status": 403, "message": "Bearer private-key"}}, "模型请求被拒绝（HTTP 403）"),
             ({"error": {"status": 403, "code": "1113", "message": "private-key"}}, "供应商错误码 1113"),
             ('404 status code (no body)', "HTTP 404"),

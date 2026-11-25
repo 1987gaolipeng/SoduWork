@@ -26,6 +26,12 @@ def identity_only(endpoint):
     return endpoint
 
 
+def without_device_heartbeat(endpoint):
+    """Keep device authentication read-only on this route."""
+    endpoint.__soduwork_without_device_heartbeat__ = True
+    return endpoint
+
+
 def quota_prefetch(endpoint):
     """Prefetch fresh policy for an endpoint that resolves admission itself."""
     endpoint.__soduwork_quota_prefetch__ = True
@@ -63,9 +69,9 @@ async def authenticated_client(
 ) -> Client:
     """Authenticate a device session, with a bounded hash-only rollout bridge."""
     include_quota = _needs_ai_quota(request)
+    endpoint = request.scope.get("endpoint") if request is not None else None
     if authorization and authorization.startswith("Device "):
         try:
-            endpoint = request.scope.get("endpoint") if request is not None else None
             if getattr(endpoint, "__soduwork_identity_only__", False) and not include_quota:
                 from .services.auth_principals import from_token
                 client, _ = await from_token(session, authorization[7:].strip())
@@ -82,7 +88,7 @@ async def authenticated_client(
             raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
     else:
         raise HTTPException(status_code=401, detail="需要有效的 SoduWork 设备会话")
-    if device_auth.should_write_last_seen(client.id):
+    if not getattr(endpoint, "__soduwork_without_device_heartbeat__", False) and device_auth.should_write_last_seen(client.id):
         if isinstance(client, DevicePrincipal):
             result = await session.execute(update(Client).where(
                 Client.id == client.id, Client.user_ref == client.user_ref,
@@ -185,6 +191,15 @@ def require_perm(key: str):
         return user
     setattr(dep, "__soduwork_permissions__", (key,))
     return dep
+
+
+def require_platform_quota_admin(user: User) -> None:
+    if not user.is_super:
+        raise HTTPException(
+            status_code=403,
+            detail="平台级套餐与默认额度仅超级管理员可修改",
+            headers={"X-Error-Code": "quota.platform_write_forbidden"},
+        )
 
 
 def require_any_perm(*keys: str):

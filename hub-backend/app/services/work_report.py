@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from datetime import date as _date
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import String, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,11 +87,22 @@ async def collect_period(session: AsyncSession, user_id: str, period_type: str =
         author = entry.get("by")
         return author == user_id if author else owned_here
 
+    period_end = datetime.fromtimestamp(hi / 1000, timezone.utc)
+
+    def existed_in_period(task: models.Task) -> bool:
+        created = task.created_at
+        if created is None:
+            return True
+        # SQLite returns the database's UTC timestamp without an offset.
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        return created < period_end
+
     open_tasks = [{
         "taskId": task.id, "title": task.title or "未命名", "status": task.status,
         "statusCn": _STATUS_CN.get(task.status, task.status),
         "priority": getattr(task, "priority", "") or "normal",
-    } for task in owned if task.status in ("todo", "doing")]
+    } for task in owned if task.status in ("todo", "doing") and existed_in_period(task)]
 
     items, done, seen = [], [], set()
     for task, owned_here in [(task, True) for task in owned] + [(task, False) for task in authored]:
@@ -224,7 +235,12 @@ async def generate_for(session: AsyncSession, user: models.User, anchor: str = "
     report.done_count = len(material["done"])
     report.progress_count = material["progressCount"]
     report.active_count = len(material["items"])
-    report.items = material["items"]
+    activity = material["items"]
+    active_ids = {item["taskId"] for item in activity}
+    report.items = activity + [
+        {**item, "backlogOnly": True, "progress": []}
+        for item in material["open"] if item["taskId"] not in active_ids
+    ]
     report.updated_at = datetime.now().astimezone()
     if not existing:
         session.add(report)

@@ -11,11 +11,13 @@
   const detailText = value => String(value || '').startsWith('platform_') ? ({platform_rate_limited:'平台暂时限制发送频率，正在等待',platform_send_unconfirmed:'平台尚未确认送达，请先核对手机消息',platform_timeout:'平台响应超时，请核对手机消息',platform_recipient_rejected:'平台拒绝向此会话发送，请检查机器人权限'}[value] || '平台回传未完成，请检查机器人授权和平台状态') : String(value || '');
   function field(parent, name, node) { const label = el('label', undefined, 'cap-field wide'); label.append(el('span', name), node); parent.append(label); return node; }
   function input(value = '', secret = false) { const node = el('input', undefined, 'cap-input'); node.value = value; node.type = secret ? 'password' : 'text'; node.autocomplete = 'off'; node.maxLength = 16384; return node; }
-  function mount(content, ctx) {
+  function mount(content, ctx, onAvailability) {
     const api = ctx.editorContext().api;
     if (!api.im) return () => {};
     const owner = api.taskStorageKey?.('ops');
     const section = el('section', undefined, 'cap-section cap-template-section im-remote');
+    section.tabIndex = -1;
+    section.setAttribute('aria-label', '手机远程对话');
     const head = el('header', undefined, 'connector-section-heading'), title = el('div', undefined, 'cap-section-head');
     title.append(el('b', '手机远程对话'), el('span', '通过已绑定的机器人继续电脑上的任务'));
     const actions = el('div', undefined, 'im-actions'), list = el('div', undefined, 'im-connections');
@@ -71,7 +73,8 @@
         const result = await api.im.catalog(options());
         if (!current() || ticket !== revision) return;
         catalog = result; add.disabled = !result.available;
-        note.textContent = result.available ? '先连接机器人，再绑定一个任务。电脑离线时消息会等待；执行结果会回传到原 IM 会话。' : '服务尚未启用远程对话；现有连接器仍可照常使用。';
+        onAvailability?.(result.available);
+        note.textContent = result.available ? '先连接机器人，再绑定一个任务。电脑离线时消息会等待；执行结果会回传到原 IM 会话。' : '请管理员在 Hub 启用 IM_ENABLED 并重启服务。自托管部署请在 deployment.json 中设置 imEnabled 为 true，重新启动后在此刷新。';
         list.replaceChildren();
         for (const item of result.connections || []) {
           const row = el('article', undefined, 'im-connection'), copy = el('div');
@@ -79,7 +82,12 @@
           const manage = button('管理', () => { if (current()) openConnection(item); }); manage.disabled = !result.available;
           row.append(copy, manage); list.append(row);
         }
-      } catch (error) { if (current() && ticket === revision) note.textContent = errorText(error); }
+      } catch (error) {
+        if (current() && ticket === revision) {
+          note.textContent = errorText(error);
+          onAvailability?.(undefined);
+        }
+      }
       finally { if (current() && ticket === revision) refreshButton.disabled = false; }
     }
     function create() {
@@ -227,6 +235,7 @@
       if (api.taskStorageKey?.('ops') === owner) return;
       modalCleanup?.(); ++modalRevision; ctx.closeModal(); list.replaceChildren(); add.disabled = refreshButton.disabled = true;
       note.textContent = '账号已切换，请重新打开连接器页面。';
+      onAvailability?.(undefined);
     }
     global.addEventListener('soduwork-data-scope-changed', scopeChanged);
     actions.append(refreshButton, add); refresh();

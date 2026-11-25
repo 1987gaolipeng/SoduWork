@@ -13,6 +13,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.schema import CreateSchema, DropSchema
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app import models, automation_models
+from app.account_conversation_models import AccountConversation
 from app.db import Base
 from app.services import usage_ledger as ledger, usage_analytics as analytics, client_access
 
@@ -64,6 +65,24 @@ class UsageAccountingTests(unittest.IsolatedAsyncioTestCase):
         result = await ledger.from_client(self.session, self.client, payload)
         await self.session.commit()
         return result
+
+    async def test_historical_daily_chat_keeps_its_own_source_scope(self):
+        self.session.add(AccountConversation(owner_user_id=self.user.id, source_client_id=self.client.id,
+                         source_session_id="conversation", title="Private title"))
+        event = await self.report(10)
+        event.source_title = "Private title"
+        daily = (await self.session.scalars(select(models.AIUsageDaily))).one()
+        daily.billing_user_id = "previous-owner"
+        await self.session.commit()
+        for category in ("chat", "task"):
+            if category == "task":
+                event.source_type = "task"
+                event.reported_chat_session_id = None
+                event.source_id = "subsequent-task"
+                await self.session.commit()
+            entry = (await analytics.overview(self.session, user_id="previous-owner"))["recent"][0]
+            self.assertEqual((entry["sourceId"], entry["sourceVerification"], entry["title"]),
+                             ("", "unverified", "对话"))
 
     async def test_model_changes_do_not_relabel_old_daily_facts(self):
         await self.report(100, model='A', cost=0.0000015)

@@ -10,7 +10,7 @@ fs.mkdirSync(out,{recursive:true});
 const profile=fs.mkdtempSync(path.join(os.tmpdir(),'soduwork-attachment-test-'));
 app.setPath('userData',profile);
 const report={ok:false,mode:'requirements-drawer',checks:[],requests:[]};
-const files=[
+const previewFiles=[
   {id:'html0001',filename:'05_指标模块验证报告.html',contentType:'text/html',body:Buffer.from('<!doctype html><meta charset="utf-8"><h1>HTML 附件验收</h1>')},
   {id:'mark0001',filename:'测试执行报告.md',contentType:'text/markdown',body:Buffer.from('# Markdown 附件验收\n\n修复后可以查看。')},
   {id:'text0001',filename:'说明.txt',contentType:'text/plain',body:Buffer.from('Text 附件验收')},
@@ -20,6 +20,24 @@ const files=[
   {id:'word0001',filename:'资料.docx',contentType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',body:Buffer.from('isolated document bytes: test OS handoff only')},
   {id:'png00001',filename:'图片.png',contentType:'image/png',isImage:true,body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6+0sAAAAASUVORK5CYII=','base64')},
 ];
+const files=[...previewFiles,
+  {id:'exe00001',filename:'report.pdf.EXE',contentType:'application/octet-stream',body:Buffer.from('Inert sample bytes')},
+  {id:'svg00001',filename:'drawing.SVG',contentType:'image/svg+xml',body:Buffer.from('Inert drawing sample')},
+  {id:'type0001',filename:'label.bin',contentType:'text/html; charset=UTF-8',body:Buffer.from('Inert text sample')},
+];
+const warnedIds=['html0001','exe00001','svg00001','type0001'];
+async function checkDownloadWarnings(){
+  for(const file of files){
+    const selector=JSON.stringify(`[data-rq-download="${file.id}"]`);
+    const warning=await js(`(()=>{
+      const button=document.querySelector(${selector});
+      const note=document.getElementById(button.getAttribute('aria-describedby'));
+      return note?.checkVisibility() ? note.textContent : '';
+    })()`);
+    if(warnedIds.includes(file.id))assert.match(warning,/勿直接运行/,file.filename);
+    else assert.equal(warning,'',file.filename);
+  }
+}
 const ticket='attachment-fixture-ticket-1234567890';
 const bundleRoot=path.join(profile,'bundle-input');fs.mkdirSync(bundleRoot);
 for(const file of files.slice(0,3))fs.writeFileSync(path.join(bundleRoot,file.filename),file.body);
@@ -84,9 +102,11 @@ app.whenReady().then(async()=>{
     ? new Response(fixtureHtml().replace(/(?:src|href)="\//g,match=>match.slice(0,-1)+base+'/'),{headers:{'content-type':'text/html; charset=utf-8'}})
     : net.fetch(request,{bypassCustomProtocolHandlers:true}));
   win=new BrowserWindow({show:false,width:1280,height:800,webPreferences:{preload:path.join(client,'preload.js'),session:isolated,offscreen:true,nodeIntegration:false,contextIsolation:true,sandbox:true,backgroundThrottling:false}});
-  await win.loadURL(desk);await until(()=>js("document.querySelectorAll('[data-rq-file]').length===8"),'cards rendered');
+  await win.loadURL(desk);await until(()=>js(`document.querySelectorAll('[data-rq-file]').length===${files.length}`),'cards rendered');
   files.find(f=>f.id==='pdf00001').body=await win.webContents.printToPDF({pageSize:'A4'});
-  for(const f of files){
+  await js("document.querySelector('[data-rq-file]').closest('details').open=true");
+  await checkDownloadWarnings();
+  for(const f of previewFiles){
     await js('toasts.length=0');const o=opened.length,v=viewers.length;
     await click(`[data-rq-file="${f.id}"]`);
     if(/\.(html|docx)$/.test(f.filename)){await until(()=>opened.length>o,'system handoff');assert.deepEqual(fs.readFileSync(opened.at(-1)),f.body);assert.equal(path.basename(opened.at(-1)),f.filename);report.checks.push({filename:f.filename,systemHandoff:true,downloadedBytesMatch:true})}
@@ -96,6 +116,18 @@ app.whenReady().then(async()=>{
   }
   {
     for(const f of files){const n=saves.length;await js('toasts.length=0');await click(`[data-rq-download="${f.id}"]`);await until(()=>saves.length===n+1&&fs.existsSync(saves.at(-1))&&fs.readFileSync(saves.at(-1)).equals(f.body),'save success');assert.equal(saves.length,n+1);assert.deepEqual(fs.readFileSync(saves.at(-1)),f.body);await until(()=>js(`document.querySelector('[data-rq-file-id="${f.id}"] [data-rq-download-status]').textContent.includes('文件已保存')`),'row save receipt');report.checks.push({filename:f.filename,downloadSaved:true})}
+    await checkDownloadWarnings();
+    report.checks.push('Download warnings are visible before and after saving EXE, HTML, SVG and MIME-identified attachments; ordinary files retain their existing actions');
+    for(const locale of ['zh-CN','en-US','ja-JP','ko-KR']){
+      await js(fs.readFileSync(path.join(client,'core/locales',locale+'-runtime-surfaces.js'),'utf8'));
+    }
+    await js(fs.readFileSync(path.join(client,'core/i18n.js'),'utf8'));
+    for(const [locale,phrase] of [['en-US','Verify its source'],['ja-JP','入手元を確認'],['ko-KR','출처를 확인'],['zh-CN','勿直接运行']]){
+      await js(`SoduWorkI18n.setLocale(${JSON.stringify(locale)},{persist:false,broadcast:false})`);
+      const text=await js("document.querySelector('[data-rq-file-id=exe00001] [data-i18n]').textContent");
+      assert.ok(text.includes(phrase),locale);
+    }
+    report.checks.push('The attachment warning follows all four desktop languages');
     let releaseSave;saveGate=new Promise(resolve=>{releaseSave=resolve});const initialDialogs=dialogCalls;
     await click('[data-rq-download="html0001"]');
     assert.equal(await js("document.querySelector('[data-rq-download=html0001]').disabled"),true);

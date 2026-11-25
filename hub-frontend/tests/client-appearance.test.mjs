@@ -93,10 +93,11 @@ test('a detail reload started during a skin update cannot overwrite the confirme
   let reads = 0
   const h = await fixture(t, { pushClient: () => request.promise,
     clientDetail: async () => ++reads === 1 ? structuredClone(client) : detail.promise,
-    users: async () => [{ id: 'member-b', displayName: 'Other member' }], assignClient: async () => ({ authState: 'active' }),
+    assignClient: async () => ({ authState: 'active' }),
   }, ['client.control', 'client.assign'])
   const skin = h.button('玻璃').props.onClick()
-  h.page.nodes(node => node.type === 'SelectMenu')[0].props.onChange({ target: { value: 'member-b' } })
+  h.page.nodes(node => node.type.name === 'OwnerSelect')[0].props.onChange('member-b')
+  h.page.nodes(node => node.type.name === 'PairingTokenInput')[0].props.onChange('test-pairing-code')
   const save = h.page.nodes(node => node.type === 'button' && node.props.onClick?.name === 'saveOwner')[0].props.onClick()
   await h.page.flush()
   assert.equal(reads, 2)

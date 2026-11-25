@@ -428,6 +428,11 @@ function _bind(el) {
         cloudHandoff: ctx._snap?.cloudHandoff, busy: ctx._runtimeBusy(), runtimeSwitching: ctx._snap?.runtimeSwitching,
         recoveryRequired: ctx._snap?.execution?.recoveryRequired, recoveryReason: ctx._snap?.statusText, ...draftControls.state() }),
       say: message => { if (typeof petSay === 'function') petSay(message); },
+      catalogChanged: state => {
+        el.dataset.modelCatalogBlocked = String(state.blocked);
+        el.dataset.modelCatalogReason = state.reason || '';
+        ChatTools.paintSendButton(el, ctx._runtimeBusy(), ctx._messageAttachments, ctx._stopState, _canStop(), ctx._sendState);
+      },
       accessChanged: result => {
         const value = result.snapshot || result;
         if (ctx._snap) ctx._snap = { ...ctx._snap, accessPolicy: value.accessPolicy, nextAccessPolicy: value.nextAccessPolicy || null,
@@ -532,6 +537,12 @@ function _bind(el) {
     }
     if (global.ChatWorkbench) ChatWorkbench.bind(el, () => ({
       ref: ctx._ref, cwd: ctx._wd?.dir, intent: ctx._sessionOptions, pending: ctx._pending,
+      revealTool(id) {
+        const tool = ctx._snap?.tools?.find(item => String(item.id) === id);
+        if (!tool) return;
+        const size = (ctx._snap.messages?.length || 0) - Math.max(0, Number(tool.after) || 0);
+        if (size > ctx._messageWindowSize) { ctx._messageWindowSize = size; ctx._render(); }
+      },
     }));
     if (global.ChatWorkbenchAnnotations) ChatWorkbenchAnnotations.bind(el, {
       scope: () => ctx._sessionId || ctx._ref || 'draft:' + ctx._viewEpoch,
@@ -580,6 +591,10 @@ function _bind(el) {
       if (rework) { void ctx._collabAction('rework-task', { taskId: rework.getAttribute('data-task-rework') }); return; }
       const receipt = e.target.closest('[data-task-receipt]');
       if (receipt) { ctx._collabAction('open-task', { taskId: receipt.getAttribute('data-task-receipt') }); return; }
+      const failure = e.target.closest('[data-skill-failure]');
+      if (failure) { void global.ChatToolDetails?.openSkillFailure(ctx, failure); return; }
+      const record = e.target.closest('[data-command-record]');
+      if (record) { global.ChatToolDetails?.openRecord(ctx, record.dataset.commandRecord, record); return; }
       const detailRetry = e.target.closest('[data-tool-detail-retry]');
       if (detailRetry) { global.ChatToolDetails?.activate(ctx, detailRetry.dataset.toolDetailRetry, true); return; }
       const read = e.target.closest('[data-dks-read]');

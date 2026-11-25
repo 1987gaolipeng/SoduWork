@@ -13,3 +13,6 @@
 .qm-impact dl{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 16px;align-items:baseline}
 .qm-impact dd{font-variant-numeric:tabular-nums;text-align:end;color:var(--ink-2);max-width:24ch}
 .qm-impact details p{margin-block:6px}
+
+.qm-token-hint { font-size: inherit; color: var(--ink-2); }
+.qm-token-hint:empty { position: absolute; }

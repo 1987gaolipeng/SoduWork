@@ -199,9 +199,7 @@ async def run() -> None:
            "wrong password rebound an employee account")
         async with SessionLocal() as session:
             row = await session.get(models.Client, device_2)
-            ok(row is not None and row.auth_state == "pending" and
-               not row.user_ref,
-               "failed sign-in changed the device binding")
+            ok(row is None, "failed sign-in reserved a new device ID")
 
         second_login = await login(
             client, device_2, key_2, account, password)

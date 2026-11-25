@@ -15,6 +15,9 @@ const BAD_HUB = '后台地址应为不带路径的 http:// 或 https:// 地址';
 // Both packaged and source clients may select a self-hosted Hub at login.
 function normalizeHub(raw) {
   const value = String(raw || '').trim();
+  if (/^(?:https?:\/\/)?\d+\.?(?=[:/?#]|$)/i.test(value)) {
+    throw new Error('主机名不能只包含数字，请填写完整 IP 地址或域名');
+  }
   let parsed;
   try { parsed = new URL(/^https?:\/\//i.test(value) ? value : 'http://' + value); }
   catch (_) { throw new Error(BAD_HUB); }

@@ -120,6 +120,29 @@ class ManagedModelReadOnlyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(models_, self.legacy_models)
         self.assertEqual(keys, self.legacy_keys)
 
+    async def test_invalid_personal_model_config_preserves_models_providers_and_keys(self):
+        provider = {"id": "custom-mine", "name": "Mine", "baseUrl": "https://mine.invalid/v1"}
+        model = {"providerId": "custom-mine", "name": "mine", "label": "Original",
+                 "config": {"capabilities": {"toolCalling": "supported", "streaming": "supported"}}}
+        response = await self.save({"providers": [provider], "models": [model],
+                                    "keys": {"custom-mine": "original-fixture"}})
+        self.assertEqual(response.status_code, 200, response.text)
+        before = await self.state()
+        saved_model = next(row for row in before[1] if row["providerId"] == "custom-mine")
+        self.assertEqual(saved_model["config"]["capabilities"], model["config"]["capabilities"])
+        with patch.object(client_domain_events, "device_changed", new_callable=AsyncMock) as notify:
+            for malformed in ([], "not-an-object"):
+                with self.subTest(config=malformed):
+                    response = await self.save({
+                        "providers": [{**provider, "name": "Changed", "baseUrl": "https://changed.invalid/v1"}],
+                        "models": [{**model, "label": "Changed", "config": malformed}],
+                        "keys": {"custom-mine": "changed-fixture"},
+                    })
+                    self.assertEqual(response.status_code, 400, response.text)
+                    self.assertEqual(response.headers.get("X-Error-Code"), "model.config.invalid-object")
+                    self.assertEqual(await self.state(), before)
+            notify.assert_not_awaited()
+
     async def test_managed_probes_never_contact_upstream_or_write_global_evidence(self):
         with patch.object(model_catalog, "probe_sync") as probe, \
                 patch.object(model_capabilities.probe, "run", new_callable=AsyncMock) as capability_probe:

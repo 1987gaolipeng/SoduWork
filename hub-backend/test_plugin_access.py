@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, patch
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 
 import httpx
-from fastapi import FastAPI, Header
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -119,6 +119,89 @@ class PluginAccessTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
         self.temporary._storage_patch.stop()
         self.temporary.cleanup()
+
+    async def test_manager_can_toggle_legacy_binding_for_project_in_scope(self):
+        self.plugin.org_id = None
+        self.session.add(models.Project(id="team-project", org_id="team"))
+        binding = await self.session.get(am.PluginBinding, "permission-binding")
+        binding.org_id = None
+        binding.project_id = "team-project"
+        await self.session.commit()
+
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                response = await self.http.patch(
+                    f"/api/v1/admin/plugins/bindings/{binding.id}", json={"enabled": enabled})
+                self.assertEqual(response.status_code, 200, response.text)
+                await self.session.refresh(binding)
+                self.assertEqual((binding.org_id, binding.project_id, binding.enabled),
+                                 ("team", "team-project", enabled))
+
+    async def test_superuser_can_maintain_platform_binding(self):
+        admin = await self.session.get(models.User, "admin")
+        admin.is_super = True
+        self.plugin.org_id = None
+        binding = await self.session.get(am.PluginBinding, "permission-binding")
+        binding.org_id = None
+        await self.session.commit()
+
+        response = await self.http.patch(
+            f"/api/v1/admin/plugins/bindings/{binding.id}", json={"enabled": False})
+        self.assertEqual(response.status_code, 200, response.text)
+        await self.session.refresh(binding)
+        self.assertIsNone(binding.org_id)
+        self.assertFalse(binding.enabled)
+
+    async def test_moving_or_detaching_legacy_project_binding_preserves_owner(self):
+        self.plugin.org_id = None
+        self.session.add_all([
+            models.Project(id="original-project", org_id="team"),
+            models.Project(id="next-project", org_id="team"),
+        ])
+        binding = await self.session.get(am.PluginBinding, "permission-binding")
+        for recorded_owner in (None, "company"):
+            for project_id in ("next-project", ""):
+                with self.subTest(recorded_owner=recorded_owner, project_id=project_id):
+                    binding.org_id, binding.project_id = recorded_owner, "original-project"
+                    await self.session.commit()
+                    response = await self.http.patch(
+                        f"/api/v1/admin/plugins/bindings/{binding.id}",
+                        json={"projectId": project_id, "enabled": False})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    await self.session.refresh(binding)
+                    self.assertEqual((binding.org_id, binding.project_id), ("team", project_id))
+
+    async def test_stale_owner_in_update_conflicts_without_changing_binding(self):
+        self.plugin.org_id = None
+        self.session.add(models.Project(id="team-project", org_id="team"))
+        binding = await self.session.get(am.PluginBinding, "permission-binding")
+        binding.org_id, binding.project_id = "company", "team-project"
+        await self.session.commit()
+
+        response = await self.http.patch(
+            f"/api/v1/admin/plugins/bindings/{binding.id}",
+            json={"orgId": binding.org_id, "enabled": False})
+        self.assertEqual(response.status_code, 409, response.text)
+        await self.session.refresh(binding)
+        self.assertEqual((binding.org_id, binding.project_id, binding.enabled),
+                         ("company", "team-project", True))
+
+    async def test_scoped_binding_guard_requires_a_trusted_owner(self):
+        self.session.add_all([
+            models.Project(id="team-project", org_id="team"),
+            models.Project(id="outside-project", org_id="other"),
+            models.Project(id="unowned-project", org_id=None),
+        ])
+        admin = await self.session.get(models.User, "admin")
+        scope = await rbac.scope_org_ids(self.session, admin)
+        for owner, project in ((None, ""), (None, "missing-project"), (None, "unowned-project"),
+                               (None, "outside-project"), ("other", ""), ("team", "outside-project"),
+                               ("other", "team-project")):
+            with self.subTest(owner=owner, project=project):
+                binding = am.PluginBinding(org_id=owner, project_id=project)
+                with self.assertRaises(HTTPException) as rejected:
+                    await plugins._scoped_binding_owner(self.session, binding, scope)
+                self.assertEqual(rejected.exception.status_code, 403)
 
     async def test_simulate_rejects_nonempty_non_object_fields(self):
         self.version.workflow = {"nodes": []}

@@ -81,8 +81,9 @@ def _env(git_creds: dict | None = None, ref: str = "") -> dict:
 
 
 def _git(cwd: str, *args: str, git_creds: dict | None = None,
-         ref: str = "", timeout: float | None = None) -> tuple[int, str]:
-    """Run Git and return its exit code and combined output, explicitly bypassing HTTP proxies."""
+         ref: str = "", timeout: float | None = None,
+         raw_output: bool = False) -> tuple[int, str]:
+    """Run Git without HTTP proxies; raw output preserves machine-readable stdout."""
     # Supply commit identity explicitly for merge operations.
     # Server processes may have no global Git identity configured.
     cmd = ["git", "--no-pager", "-c", "http.proxy=", "-c", "https.proxy=",
@@ -104,13 +105,16 @@ def _git(cwd: str, *args: str, git_creds: dict | None = None,
             env=_env(git_creds, ref),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
+            stderr=subprocess.PIPE if raw_output else subprocess.STDOUT,
+            text=not raw_output,
+            encoding=None if raw_output else "utf-8",
+            errors=None if raw_output else "replace",
             **process_opts,
         )
-        output, _ = proc.communicate(timeout=limit)
+        output, error_output = proc.communicate(timeout=limit)
+        if raw_output:
+            raw = (output or b"") + ((error_output or b"") if proc.returncode else b"")
+            return proc.returncode, raw.decode("utf-8", errors="replace")
         return proc.returncode, (output or "").strip()
     except subprocess.TimeoutExpired:
         if proc is not None:
@@ -121,6 +125,8 @@ def _git(cwd: str, *args: str, git_creds: dict | None = None,
                 # Never wait on an inherited pipe after the bounded cleanup.
                 if proc.stdout:
                     proc.stdout.close()
+                if proc.stderr:
+                    proc.stderr.close()
         return 124, f"超时（>{limit:g}s）：git {' '.join(args)}"
     except FileNotFoundError:
         return 127, "这台机器上没有 git"
@@ -300,10 +306,10 @@ def branch_commits(server_dir: str, branch: str, target: str,
         if sha.strip():
             commits.append({"sha": sha.strip(), "subject": subject.strip()[:200]})
     # Use a three-dot diff to show only the branch's changes for review.
-    code2, out2 = _git(server_dir, "diff", "--no-ext-diff", "--name-only",
+    code2, out2 = _git(server_dir, "diff", "--no-ext-diff", "--name-only", "-z",
                        f"origin/{target}...origin/{branch}",
-                       git_creds=git_creds, ref=ref)
-    files = [x.strip() for x in out2.splitlines() if x.strip()][:40] if code2 == 0 else []
+                       git_creds=git_creds, ref=ref, raw_output=True)
+    files = [x for x in out2.split("\0") if x][:40] if code2 == 0 else []
     return {
         "ok": True,
         "commits": commits,

@@ -34,6 +34,9 @@ def command(exe, args, ws, cfg, profile):
     return [*actual[:actual.index("--") + 1], *peer] if agent in {"codex-harness", "opencode", "qwen", "dsh"} else [*peer, *args]
 local_process._command_argv = command
 def environment(profile, *_args, **_kwargs):
+    if profile is local_base._PROFILES["opencode"]:
+        from tests.opencode_peer_session import environment as opencode_environment
+        return opencode_environment(work / "opencode")
     return dict(os.environ)
 local_process._env_for = environment
 local_stream._llm_gate_check = lambda *_args: ""

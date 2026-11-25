@@ -157,8 +157,8 @@ function CapacityForm({ initial, providers, models, onClose, onSaved }) {
     } catch (e) { setError(e.message || tx("保存失败，当前输入已保留")) }
     finally { setBusy(false) }
   }
-  return <Modal title={tx("并发与等待")} wide onClose={onClose} foot={<>
-    <button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+  return <Modal draft={policy} title={tx("并发与等待")} wide onClose={onClose} foot={dismiss => <>
+    <button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
     <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : tx("保存")}</button></>}>
     <p className="muted">{tx("按模型服务实际额度设置。各项上限同时生效；已提交请求继续使用原策略。这里控制并发，不替代服务商的每分钟额度。")}</p>
     <div className="model-runtime-form">{FIELDS.map(([key, label, min, max]) => <label key={key} className="f-lbl">{label}

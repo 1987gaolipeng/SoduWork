@@ -39,9 +39,10 @@ async function create(root, mode = 'standard', changed = () => {}, options = {})
     noExtensions: !options.extensionPaths?.length, additionalExtensionPaths: options.extensionPaths || [], noSkills: true,
     additionalSkillPaths: options.skillDirs || [], noPromptTemplates: true, noThemes: true, noContextFiles: true, systemPrompt: 'Isolated test' });
   await resourceLoader.reload();
+  const tools = [...(options.builtinTools || ['read', 'write', 'edit']), ...(options.customTools || []).map(tool => tool.name)];
   const { session } = await sdk.createAgentSession({ cwd: workspace, agentDir: root, modelRuntime: runtime,
     model: runtime.getModel('access-fixture', 'access-fixture'), settingsManager, resourceLoader,
-    sessionManager: options.persist ? sdk.SessionManager.create(workspace, path.join(root, 'sessions')) : sdk.SessionManager.inMemory(), tools: options.restrictReadonly && mode === 'readonly' ? ['read'] : ['read', 'write', 'edit', ...(options.customTools || []).map(tool => tool.name)], customTools: options.customTools || [] });
+    sessionManager: options.persist ? sdk.SessionManager.create(workspace, path.join(root, 'sessions')) : sdk.SessionManager.inMemory(), tools: options.restrictReadonly && mode === 'readonly' ? ['read'] : tools, customTools: options.customTools || [] });
   const policy = mode ? require('../../main/access-control/policy').create(mode, workspace) : null;
   const scopes = require('../../main/access-control/resource-read-scope');
   const skillReadScope = scopes.fromSkills(resourceLoader.getSkills().skills);
@@ -53,7 +54,7 @@ async function create(root, mode = 'standard', changed = () => {}, options = {})
       nextResources.settingsManager.applyOverrides({ compaction: { enabled: false }, retry: { enabled: false } });
       const rebuilt = await sdk.createAgentSession({ cwd: workspace, agentDir: root, modelRuntime: runtime,
         model: previous.model, settingsManager: nextResources.settingsManager, resourceLoader: nextResources.resourceLoader,
-        sessionManager: previous.sessionManager, tools: options.restrictReadonly && nextPolicy.mode === 'readonly' ? ['read'] : ['read', 'write', 'edit', ...(options.customTools || []).map(tool => tool.name)], customTools: options.customTools || [] });
+        sessionManager: previous.sessionManager, tools: options.restrictReadonly && nextPolicy.mode === 'readonly' ? ['read'] : tools, customTools: options.customTools || [] });
       return { ...rebuilt, resources: nextResources };
     },
     send: (tool, args) => session.prompt(JSON.stringify({ tool, args })),

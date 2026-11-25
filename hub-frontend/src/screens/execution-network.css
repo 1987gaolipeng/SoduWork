@@ -46,6 +46,12 @@
 .en-table tr:last-child td{border-bottom:0}
 .en-table tbody tr{transition:background .12s}
 .en-table tbody tr:hover{background:color-mix(in srgb,var(--accent-soft) 35%,var(--surface))}
+/* Header cells are buttons so sorting stays keyboard reachable and labelled. */
+.en-table th .en-th-sort{display:inline-flex;align-items:center;gap:4px;padding:0;border:0;background:none;font:inherit;font-weight:inherit;letter-spacing:inherit;color:inherit;cursor:pointer;text-align:left}
+.en-table th .en-th-sort:hover,.en-table th .en-th-sort:focus-visible{color:var(--ink-2)}
+.en-table th .en-th-sort.is-active{color:var(--accent)}
+.en-table th .en-th-arrow{line-height:1;opacity:.85}
+.en-export-btn{flex:0 0 auto}
 .en-device{display:flex;align-items:center;gap:9px;min-width:250px}
 
 

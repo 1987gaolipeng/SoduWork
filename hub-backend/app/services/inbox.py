@@ -9,6 +9,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
+from ..deps import has_perm
 from ..realtime import hub
 from ..schemas import _ms, task_to_api
 from . import rbac, repository_issue_access, task_assignment, task_events
@@ -262,8 +263,11 @@ async def claim_for_user(session: AsyncSession, me: models.User, tid: str) -> di
     if not (me and me.is_active):
         return {"ok": False, "reason": "unassigned"}
     repository = await repository_issue_access.linked(session, tid)
-    if not repository and not me.org_id:
-        return {"ok": False, "reason": "unassigned"}
+    if not repository:
+        if not has_perm(me, "task.dispatch"):
+            return {"ok": False, "reason": "permission_denied"}
+        if not me.org_id:
+            return {"ok": False, "reason": "unassigned"}
     box = await pick_box(session, me.id)
     if box is None:
         return {"ok": False, "reason": "no_box"}
