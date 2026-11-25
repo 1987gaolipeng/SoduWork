@@ -413,7 +413,7 @@ class CloudRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_lost_ingestion_commit_ack_does_not_create_a_second_attachment(self):
         tid, status = await self.artifact_fixture()
         with patch.object(ai_remote, "fetch_attachment_for_sync", return_value=b"# Report\nComplete.\n") as download, \
-             patch.object(storage, "put", return_value="fixture"):
+             patch.object(storage, "put", return_value="fixture"), patch.object(storage, "delete") as remove:
             async with self.sessions() as session:
                 original_commit = session.commit
 
@@ -430,6 +430,37 @@ class CloudRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(retry["files"], 0)
                 self.assertEqual(len(files), 1)
                 self.assertEqual(download.call_count, 1)
+                remove.assert_not_called()
+
+    async def test_partial_ingestion_recovers_cleanup_and_retries_the_same_turn(self):
+        tid, status = await self.artifact_fixture()
+        status["attachments"].append({"filename": "second.md", "id": "second"})
+        real_put = storage.put
+        keys = []
+
+        def interrupt_second(key, data, content_type):
+            keys.append(key)
+            result = real_put(key, data, content_type)
+            if len(keys) == 2:
+                raise OSError("Lost storage acknowledgement")
+            return result
+
+        with patch.object(storage, "_LOCAL_DIR", self.temp.name), \
+             patch.object(ai_remote, "fetch_attachment_for_sync", return_value=b"# Report\nResult.\n"):
+            async with self.sessions() as session:
+                with patch.object(storage, "put", side_effect=interrupt_second), \
+                     patch.object(storage, "delete", return_value=False):
+                    with self.assertRaisesRegex(OSError, "acknowledgement"):
+                        await artifact_ingest.pull_artifacts(session, tid, {}, status, "execution", settle=False)
+                self.assertEqual(list(await session.scalars(select(models.Attachment.id))), [])
+            async with self.sessions() as session:
+                result = await artifact_ingest.pull_artifacts(session, tid, {}, status, "execution", settle=False)
+                self.assertEqual(result["files"], 2)
+                for key in keys:
+                    with self.assertRaises(FileNotFoundError):
+                        storage.get(key, "local")
+                for row in await session.scalars(select(models.Attachment)):
+                    self.assertEqual(storage.get(row.storage_key, row.backend), b"# Report\nResult.\n")
 
     async def test_ingestion_preserves_outer_write_transaction_and_storage_failure_rollback(self):
         tid, status = await self.artifact_fixture()

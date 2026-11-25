@@ -197,15 +197,23 @@ async def _dispatch_flow(session: AsyncSession, g: dict, client, repo) -> dict:
     from .. import automation_models as am
     from ..realtime import hub
     from . import task_events as ev
-    from . import workflow_engine
+    from fastapi import HTTPException
+    from . import batch_dispatch, task_requirements, workflow_engine
 
     binding = await session.get(am.PluginBinding, g["flowBindingId"])
     if binding is None or not binding.enabled:
         return {**g, "dispatched": False, "error": "交付流程绑定不在了（可能刚被停用）"}
-    rows = [t for t in [await session.get(models.Task, x) for x in g["taskIds"]]
-            if t is not None and t.status == "todo"]
+    try:
+        rows = await batch_dispatch.lock_members(session, g["taskIds"], client)
+        for task in rows:
+            task_requirements.ensure_executable(task)
+            if task.status != "todo" or task.repo_id != repo.id:
+                raise ValueError("源任务状态或工程已变更，这轮先不派")
+    except (ValueError, HTTPException) as error:
+        await session.rollback()
+        return {**g, "dispatched": False, "error": str(error)}
     if len(rows) < 2:
-        return {**g, "dispatched": False, "error": "源任务状态刚变了（不足两条待办），这轮先不派"}
+        return {**g, "dispatched": False, "error": "不足两条待办，这轮先不派"}
     # Include every source task's title and description, matching batch_dispatch.
     # Use plain-text emphasis because the detail panel does not render Markdown.
     parts = ["本批合并自测试平台推来的 %d 条 bug，请「一条一条修、每条单独提交」：" % len(rows)]

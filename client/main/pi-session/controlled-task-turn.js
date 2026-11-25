@@ -34,6 +34,7 @@ function executionSpec(task, requested = {}) {
     agentId, assigneeType,
     model: requested.model !== undefined ? requested.model : context.model || task.model || '', context,
     reasoningEffort: requested.reasoningEffort || context.reasoningEffort || '',
+    ...(requested.inputManifest ? {inputManifest: requested.inputManifest} : {}),
     inputs: requested.inputs || {} };
 }
 
@@ -128,6 +129,7 @@ function create({ request, task, spec, scope, interval = 1500, wait = ms => new 
           repoId: spec.repoId, execution: spec.context.execution || {}, conversationTurn: scope }
           : { assigneeId: spec.agentId, assigneeType: spec.assigneeType || 'agent', brief: text, repo: spec.repo, model: spec.model,
             reasoningEffort: spec.reasoningEffort,
+            ...(spec.inputManifest ? {inputManifest: spec.inputManifest} : {}),
             executionContext: { ...spec.context, strategy: 'direct' }, conversationTurn: scope });
     } catch (error) {
       if (error.authRequired || error.permissionRequired) {

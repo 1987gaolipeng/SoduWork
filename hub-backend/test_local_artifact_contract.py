@@ -3,13 +3,40 @@ import io
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import zipfile
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
-from app.services import ai_local
+from app.services import ai_local, ai_remote, artifact_bytes, artifact_ingest
+
+
+class ArtifactTransferLimitTests(unittest.TestCase):
+    def test_local_read_bounds_file_growth_and_accepts_the_exact_limit(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(artifact_bytes, "MAX_BYTES", 4):
+            path = Path(root, "report.md")
+            path.write_bytes(b"1234")
+            self.assertEqual(artifact_ingest._read_local_artifact(root, path.name), b"1234")
+            path.write_bytes(b"12345")
+            with self.assertRaises(artifact_bytes.ArtifactTooLarge):
+                artifact_ingest._read_local_artifact(root, path.name)
+            with patch.object(artifact_bytes.os, "fstat", return_value=SimpleNamespace(st_size=4)):
+                with self.assertRaises(artifact_bytes.ArtifactTooLarge):
+                    artifact_ingest._read_local_artifact(root, path.name)
+
+    def test_remote_reported_and_actual_bytes_obey_the_same_limit(self):
+        with patch.object(artifact_bytes, "MAX_BYTES", 4):
+            for size, content in [(5, b"a"), (4, b"abcde"), (4, b"abcd")]:
+                packet = {"ok": True, "data": {"size": size, "offset": 0, "eof": True, "bytes": content}}
+                with self.subTest(size=size, content=content), patch.object(ai_remote.runner_hub, "call_sync",
+                                                                          return_value=packet):
+                    if max(size, len(content)) > 4:
+                        with self.assertRaises(artifact_bytes.ArtifactTooLarge):
+                            ai_remote._download(None, "turn", "result")
+                    else:
+                        self.assertEqual(ai_remote._download(None, "turn", "result"), content)
 
 
 class LocalArtifactContractTests(unittest.TestCase):

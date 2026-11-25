@@ -103,6 +103,7 @@
       '<select class="fwd-repo-sel" id="fwdRepoSel" aria-label="关联工程" disabled><option>正在加载…</option></select></label>' +
       '<small id="fwdRepoHint"></small></div>' +
       '<section class="fwd-materials"><div class="fwd-property-heading"><b>相关材料</b>' +
+      '<button type="button" id="fwdPreviewInputs" hidden>预览</button>' +
       (global.Requirements?.canManageMaterials?.(task) ? '<button type="button" data-material-add>添加材料</button><input type="file" multiple hidden>' : '') +
       '</div><ul data-material-list></ul><small data-material-status role="status">正在加载材料…</small></section>' +
       '<label class="fwd-note-wrap"><span>补充内容 <i>选填</i></span>' +

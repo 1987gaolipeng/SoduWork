@@ -7,7 +7,7 @@ import unittest
 import uuid
 import httpx
 from unittest.mock import patch
-from test_handoff_target_diagnostics import WORK
+from handoff_test_support import setup_handoff_database
 from app import db, models
 from app.api import cloud_environments as cloud_api
 from app.automation_models import RunnerNode
@@ -16,7 +16,7 @@ from app.services import device_auth, runner_hub, runner_registry
 
 class PersonalCloudEnvironmentTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        await db.init_db()
+        await setup_handoff_database(self)
         self.prefix = uuid.uuid4().hex[:12]
         self.org = self.prefix + "-org"
         self.foreign_org = self.prefix + "-foreign"
@@ -43,21 +43,12 @@ class PersonalCloudEnvironmentTests(unittest.IsolatedAsyncioTestCase):
         self.app.include_router(cloud_api.router)
         self.http = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://isolated",
                                       headers={"Authorization": "Device " + token})
-        runner_hub._RUNNERS.clear()
-
-    async def asyncTearDown(self):
-        runner_hub._RUNNERS.clear()
-        await self.http.aclose()
-        async with db.SessionLocal() as session:
-            from sqlalchemy import delete
-            await session.execute(delete(RunnerNode).where(RunnerNode.id.startswith(self.prefix)))
-            await session.commit()
-        await db.engine.dispose()
+        self.addAsyncCleanup(self.http.aclose)
 
     def live(self, name, *, client_id="", org_id=None):
         rid = self.prefix + "-" + name
         node = runner_hub._Runner(None, {
-            "runnerId": rid, "host": name, "workRoot": str(WORK / "remote-work"),
+            "runnerId": rid, "host": name, "workRoot": str(self.work / "remote-work"),
             "agents": [{"key": "codex", "auth": "authed"}], "caps": ["handoff1"],
             "capabilities": {"available": ["files", "terminal"]},
         })

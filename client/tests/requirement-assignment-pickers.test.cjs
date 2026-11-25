@@ -24,6 +24,42 @@ const agent = (key, extra = {}) => ({key, name: key, available: true, ...extra})
 const flow = (bindingId, extra = {}) => ({bindingId, name: bindingId, runnable: true,
   selectionSource: 'installed', workflow: [{type: 'ai', route: {agentSource: 'runtime'}}], ...extra});
 
+test('direct dispatch binds only the current task preview and ignores a superseded response', async () => {
+  const calls = [], pending = [];
+  const h = fixture({}, {SoduWorkAPI: {
+    aiPreview: () => new Promise(resolve => pending.push(resolve)),
+    dispatchToAI: async (...args) => { calls.push(args); return {ok: true}; },
+  }});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../components/panels/panels-forward.js'), 'utf8'), h.ctx);
+  h.ctx.window.RequirementAssignment.inScope = () => false;
+  const box = {style: {}, innerHTML: ''};
+  h.nodes.set('fwdPrev', box);
+  const send = tid => h.ctx._dispatchAITo(tid, {id: 'pi', type: 'agent'}, 'Pi');
+  const preview = (id, manifest) => ({title: id, description: id, carried: {inputManifest: manifest}});
+  h.ctx._fwdReset('first', true);
+  await send('first');
+  assert.equal(calls.length, 1);
+  assert.equal(calls.at(-1).at(-1), undefined);
+  const old = h.ctx._fwdPreview('first');
+  await send('first');
+  assert.equal(calls.length, 1, 'a requested preview must be ready before sending');
+  h.ctx._fwdReset('second', true);
+  pending.shift()(preview('first', [{id: 'old'}]));
+  await old;
+  assert.equal(box.confirmedInputs, undefined);
+  await send('second');
+  assert.equal(calls.at(-1).at(-1), undefined);
+  const manifest = [{id: 'new', name: 'brief.txt', size: 1, sha256: 'digest'}];
+  const first = h.ctx._fwdPreview('second'), last = h.ctx._fwdPreview('second');
+  pending.pop()(preview('latest', manifest)); await last;
+  pending.pop()(preview('stale', [])); await first;
+  assert.match(box.innerHTML, /latest/);
+  await send('second');
+  assert.deepEqual(calls.at(-1).at(-1), manifest);
+  h.ctx._fwdReset('second', true);
+  assert.equal(box.confirmedInputs, undefined);
+});
+
 test('assignment picker renders untrusted catalog names, identifiers and diagnostics as escaped text', () => {
   const definition = fs.readFileSync(path.join(__dirname, '../core/store.js'), 'utf8')
     .split(/\r?\n/).find(line => line.startsWith('const esc='));

@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from test_handoff_target_diagnostics import TargetDiagnosticsTests as _Base
+from handoff_test_support import HandoffFixture
 from sqlalchemy import insert, select
 from app import db, models
 from app.automation_models import ExecutionEvent, ExecutionSession
@@ -242,9 +242,7 @@ class OutboxTests(unittest.TestCase):
             self.assertEqual([p["ref"] for p in second[:2]], ["ref-12", "ref-13"])
 
 
-class DurableDeliveryTests(unittest.IsolatedAsyncioTestCase):
-    asyncSetUp = _Base.asyncSetUp
-    asyncTearDown = _Base.asyncTearDown
+class DurableDeliveryTests(HandoffFixture, unittest.IsolatedAsyncioTestCase):
 
     async def seed(self):
         self.tid, self.ref = self.prefix + "-task", self.prefix + "-ref"

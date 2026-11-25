@@ -8,7 +8,7 @@ from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from test_handoff_target_diagnostics import TargetDiagnosticsTests as _Base, WORK
+from handoff_test_support import HandoffFixture
 from app import db, models
 from app.automation_models import ExecutionSession
 from app.services import (ai_exec, artifact_ingest, code_delivery,
@@ -17,9 +17,7 @@ from app.services import (ai_exec, artifact_ingest, code_delivery,
 from sqlalchemy import select
 
 
-class ExecutionSessionRoundsTests(unittest.IsolatedAsyncioTestCase):
-    asyncSetUp = _Base.asyncSetUp
-    asyncTearDown = _Base.asyncTearDown
+class ExecutionSessionRoundsTests(HandoffFixture, unittest.IsolatedAsyncioTestCase):
 
     async def test_stopped_then_resumed_chat_updates_list_and_live_task_projection(self):
         await self.seed(state="stopped")
@@ -65,7 +63,7 @@ class ExecutionSessionRoundsTests(unittest.IsolatedAsyncioTestCase):
 
     def provider(self, state):
         stack = ExitStack()
-        stack.enter_context(patch.object(storage, "_LOCAL_DIR", str(WORK / "round-artifacts")))
+        stack.enter_context(patch.object(storage, "_LOCAL_DIR", str(self.work / "round-artifacts")))
         fake = SimpleNamespace(fetch_attachment_for_sync=lambda *args: state["data"])
         stack.enter_context(patch.object(artifact_ingest, "_p", return_value=fake))
         stack.enter_context(patch.object(artifact_ingest, "_cfg_of", return_value={}))

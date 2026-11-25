@@ -2,6 +2,37 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { attachmentUrl, latestDeliveryAttachments, prepare, request } = require('../main/pi-session/task-input');
 
+test('desktop task preparation reads only the previewed files and verifies the downloaded bytes', async t => {
+  const identity = {hub: 'http://fixture'};
+  const sha256 = require('node:crypto').createHash('sha256').update('good').digest('hex');
+  const manifest = [{id: 'original', name: 'brief.txt', size: 4, sha256}];
+  let bytes = 'good', receipts = 0, previews = 0;
+  const downloads = [];
+  t.mock.method(global, 'fetch', async (url, options) => {
+    if (url.endsWith('/tasks/t')) return Response.json({id: 't'});
+    if (url.endsWith('/ai-preview')) {
+      previews++;
+      assert.deepEqual(JSON.parse(options.body).inputManifest, manifest);
+      return Response.json({carried: {inputManifest: manifest}});
+    }
+    if (url.endsWith('/attachments')) return Response.json(['excluded', 'original'].map(id => ({
+      id, filename: 'brief.txt', url: '/api/v1/attachments/' + id + '?ticket=fixture',
+    })));
+    if (url.includes('?ticket=')) { downloads.push(url); return new Response(bytes); }
+    receipts++;
+    return Response.json({turn: {state: 'queued'}, task: {id: 't'}});
+  });
+  const start = () => prepare(identity, 't', 'chat', 'turn', '', {inputManifest: manifest});
+  const result = await start();
+  assert.deepEqual(result.attachments.map(file => file.attachmentId), ['original']);
+  assert.equal(result.attachments[0].data.toString(), 'good');
+  bytes = 'edit';
+  await assert.rejects(start(), /brief\.txt.*重新预览/);
+  assert.equal(previews, 2);
+  assert.equal(receipts, 1);
+  assert.ok(downloads.every(url => url.includes('/original?')));
+});
+
 test('native prepare distinguishes inferred defaults from legacy manual policy and terminal receipts', async t => {
  const cases = [
   [{}, {}, 'infer'],

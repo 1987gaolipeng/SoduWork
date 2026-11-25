@@ -41,6 +41,7 @@ from .local_artifacts import (
     _safe_work_file,
     _rel_name,
 )
+from . import artifact_bytes
 
 log = logging.getLogger("uvicorn.error")
 
@@ -1152,10 +1153,8 @@ def _read_in(run: dict, att_id: str) -> bytes | None:
     if not p:
         return None
     try:
-        if os.path.getsize(p) > _BUNDLE_MAX_BYTES:
-            return None
         with open(p, "rb") as f:
-            return f.read()
+            return artifact_bytes.read(f, _BUNDLE_MAX_BYTES)
     except OSError:
         return None
 
@@ -1176,13 +1175,11 @@ def fetch_attachment_sync(cfg: dict, att_id: str) -> bytes | None:
     with _LOCK:
         runs = list(_RUNS.values())
     for run in runs:
-        p = os.path.join(run["ws"], att_id)
-        if os.path.isfile(p) and os.path.abspath(p).startswith(os.path.abspath(run["ws"])):
+        p = _safe_work_file(run, att_id)
+        if p:
             try:
-                if os.path.getsize(p) > 20 * 1024 * 1024:
-                    return None
                 with open(p, "rb") as f:
-                    return f.read()
+                    return artifact_bytes.read(f, 20 * 1024 * 1024)
             except OSError:
                 return None
     return None

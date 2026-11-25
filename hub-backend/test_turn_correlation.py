@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from test_handoff_target_diagnostics import TargetDiagnosticsTests as _Base
+from handoff_test_support import HandoffFixture
 from app import db, models
 from app.automation_models import ExecutionEvent, ExecutionSession, RunnerNode
 from app.services import ai_local, execution_sessions, im_execution, local_base, local_ctx, local_stream, turn_correlation
@@ -111,9 +111,7 @@ class RuntimeCorrelationTests(unittest.TestCase):
         self.assertEqual(local_base._read_events(self.ref)[-1]["admissionStartSeq"], 0)
 
 
-class HubCorrelationTests(unittest.IsolatedAsyncioTestCase):
-    asyncSetUp = _Base.asyncSetUp
-    asyncTearDown = _Base.asyncTearDown
+class HubCorrelationTests(HandoffFixture, unittest.IsolatedAsyncioTestCase):
 
     async def test_native_answers_keep_full_text_through_heartbeat_and_im_reply(self):
         shapes = {

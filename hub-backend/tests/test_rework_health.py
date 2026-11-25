@@ -108,6 +108,30 @@ class ReworkHealthTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(out["candidates"], 1)
             self.assertEqual(await task_rework.pending_cards(session), 1)
 
+    async def test_failed_card_flush_does_not_poison_next_card(self):
+        from unittest.mock import patch
+
+        now = _now()
+        async with self.sessions() as session:
+            await self._seed(session, task_id="first", card_at=now)
+            await self._seed(session, task_id="next", card_at=now - timedelta(seconds=1))
+
+            async def write_card(db, task_id, **kwargs):
+                task = await db.get(models.Task, task_id)
+                task.title = "retried"
+                event_id = "ev-first" if task_id == "first" else "second-retry"
+                db.add(models.TaskEvent(id=event_id, task_id=task_id, kind="ai.rework"))
+                await db.commit()
+                return "sent"
+
+            with patch.object(task_rework, "_retry_one", new=write_card):
+                counts = await task_rework.retry_once(session, now=now)
+        async with self.sessions() as session:
+            self.assertEqual((counts["errors"], counts["sent"]), (1, 1))
+            self.assertNotEqual((await session.get(models.Task, "first")).title, "retried")
+            self.assertEqual((await session.get(models.Task, "next")).title, "retried")
+            self.assertIsNotNone(await session.get(models.TaskEvent, "second-retry"))
+
     async def test_loop_health_shape(self):
         """Preserve heartbeat fields consumed by /healthz.rework alerting."""
         expected = ("lastSweepAt", "lastOkAt", "pending",

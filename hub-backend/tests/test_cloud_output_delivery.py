@@ -15,6 +15,7 @@ from app import models, automation_models  # register metadata, no production st
 from app.db import Base
 from app.schemas import attachment_to_api
 from app.services import artifact_ingest, cloud_code_delivery, cloud_conversations, delivery_manifest, storage
+from app.services import artifact_bytes
 
 
 class GitContextTests(unittest.IsolatedAsyncioTestCase):
@@ -61,6 +62,20 @@ class GitContextTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AttachmentOriginTests(unittest.IsolatedAsyncioTestCase):
+    async def test_oversized_output_receipt_is_visible_and_retryable(self):
+        Path(self.root.name, "report.md").write_bytes(b"too large")
+        with patch.object(artifact_bytes, "MAX_BYTES", 4), \
+             patch.object(artifact_ingest, "_by_ref_async", AsyncMock(return_value=artifact_ingest._ai_local)), \
+             patch.object(artifact_ingest, "runner_info_sync", return_value={"workDirAbs": self.root.name}):
+            result = await artifact_ingest.pull_artifacts(self.session, "task", {}, {
+                "attachments": [{"id": "report.md", "filename": "report.md"}],
+                "identifier": "execution", "round": 2}, ref="execution", settle=False)
+        self.assertEqual(result["files"], 0)
+        self.assertEqual(result["invalid"][0]["name"], "report.md")
+        rejected = await self.session.scalar(select(models.TaskEvent).where(
+            models.TaskEvent.kind == "artifact.delivery_rejected"))
+        self.assertEqual(rejected.detail["files"], ["report.md"])
+        self.assertEqual(await self.collect(local=True), b"local plaintext")
     async def asyncSetUp(self):
         self.root = tempfile.TemporaryDirectory(prefix="soduwork-cloud-ingest-")
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")

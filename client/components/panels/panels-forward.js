@@ -44,7 +44,12 @@ async function _dispatchAITo(tid, who, name) {
         strategy: 'direct', agentId: who.id, substrateKey: who.id,
         repoId: repo && repo.id, model: model,
       }) : null;
-    const result = await SoduWorkAPI.dispatchToAI(tid, who, brief.trim(), repo, model, executionContext, _fwdSubmissionMode());
+    const preview = document.getElementById('fwdPrev')?.confirmedInputs;
+    if (preview && (preview.taskId !== String(tid) || !Array.isArray(preview.manifest))) {
+      throw new Error('请先重新预览需求附件');
+    }
+    const result = await SoduWorkAPI.dispatchToAI(tid, who, brief.trim(), repo, model, executionContext,
+      _fwdSubmissionMode(), preview?.manifest);
     if (!window.RequirementAssignment.inScope(scope)) return;
     if (!result || result.ok === false) {
       const error = new Error((result && (result.reason || result.error || result.message)) ||

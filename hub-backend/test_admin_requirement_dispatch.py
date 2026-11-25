@@ -3,10 +3,12 @@
 Only the external Agent/workspace boundary is deterministic. No user data,
 Runner process, model endpoint or real workspace is touched.
 """
+import asyncio
 import importlib
 import os
 import tempfile
-from datetime import datetime, timezone
+import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -22,6 +24,7 @@ from app.auth import sign_token
 from app.db import Base, get_session
 from app.deps import current_client
 from app.services import ai_exec, dispatch_identity, task_dispatch
+from app.services import dispatch_reconcile, task_status
 
 for model_file in (Path(__file__).parent / "app").glob("*models.py"):
     importlib.import_module("app." + model_file.stem)
@@ -268,6 +271,134 @@ class AdminRequirementDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status_code, 200, result.text)
         self.assertEqual(result.json()["triageStage"], "intake")
         self.assertEqual((await self.post(result.json()["id"])).status_code, 409)
+        self.assertFalse(self.calls)
+
+    async def test_batch_lost_receipt_reuses_committed_admission_and_reconciles(self):
+        ids = [await self.create("first"), await self.create("second")]
+        body = {"taskIds": ids, "assigneeId": "runner:remote:pi"}
+        loop = asyncio.get_running_loop()
+        received = loop.create_future()
+        release_reply = threading.Event()
+        accepted = []
+
+        def lose_reply(ctx, task, files, picked, extra):
+            accepted.append((task.id, extra["dispatchId"]))
+            loop.call_soon_threadsafe(received.set_result, True)
+            release_reply.wait()
+            return {"ok": False, "uncertain": True, "error": "lost ACK",
+                    "runnerId": "remote", "runnerBootId": "boot"}
+
+        with patch.object(ai_exec, "dispatch_sync", side_effect=lose_reply), \
+             patch.object(ai_exec, "resolve_requested_sync", return_value={
+                 "id": body["assigneeId"], "runnerId": "remote", "runnerBootId": "boot"}), \
+             patch.object(tasks, "_push_task", new=AsyncMock()), \
+             patch.object(tasks, "_settle_work_dir", new=AsyncMock(return_value={"ok": True})), \
+             patch.object(tasks, "_attach_skills", new=AsyncMock()):
+            pending = asyncio.create_task(self.http.post("/api/v1/tasks/batch-dispatch", json=body))
+            try:
+                await asyncio.wait({received, pending}, return_when=asyncio.FIRST_COMPLETED)
+                if pending.done():
+                    self.fail(f"Transport was not reached: {pending.result().text}")
+                batch_id, attempt_id = accepted[0]
+                async with self.sessions() as session:
+                    self.assertIsNotNone(await session.get(models.Task, batch_id))
+                    milestones = list(await session.scalars(select(models.Milestone).where(
+                        models.Milestone.task_id == batch_id).order_by(models.Milestone.seq)))
+                    self.assertEqual([m.src_task_id for m in milestones], ids)
+                    stale = await dispatch_reconcile.candidates(
+                        session, now=datetime.now(timezone.utc) + timedelta(minutes=11))
+                    self.assertEqual([(c.attempt_id, c.runner_boot_id) for c in stale], [(attempt_id, "")])
+                overlap = await self.http.post("/api/v1/tasks/batch-dispatch", json=body)
+                self.assertEqual(overlap.status_code, 200, overlap.text)
+                self.assertTrue(overlap.json()["pending"])
+            finally:
+                release_reply.set()
+                first = await pending
+            self.assertEqual(first.status_code, 200, first.text)
+            self.assertTrue(first.json()["pending"])
+            self.assertEqual(first.json()["batchId"], overlap.json()["batchId"])
+            later = datetime.now(timezone.utc) + timedelta(minutes=2)
+            async with self.sessions() as session:
+                candidate, = await dispatch_reconcile.candidates(session, now=later)
+                self.assertEqual(candidate.runner_boot_id, "boot")
+                self.assertEqual(candidate.expected_ref, dispatch_identity.execution_ref(attempt_id))
+                state, _ = await dispatch_reconcile.apply_probe(
+                    session, candidate, {"state": "confirmed", "runnerOnline": True}, now=later)
+                self.assertEqual(state, "confirmed")
+                await session.commit()
+            replay = await self.http.post("/api/v1/tasks/batch-dispatch", json=body)
+            self.assertEqual(replay.status_code, 200, replay.text)
+            self.assertEqual(replay.json()["batchId"], batch_id)
+            self.assertFalse(replay.json()["pending"])
+            self.assertEqual(accepted, [(batch_id, attempt_id)])
+
+    async def test_rejected_batch_leaves_sources_available_for_a_new_attempt(self):
+        ids = [await self.create("a"), await self.create("b")]
+        body = {"taskIds": ids, "assigneeId": "runner:remote:pi"}
+        accepted = []
+
+        def dispatch(ctx, task, files, picked, extra):
+            accepted.append(extra["dispatchId"])
+            if len(accepted) == 1:
+                return {"ok": False, "error": "Runner declined"}
+            return {"ok": True, "issueId": dispatch_identity.execution_ref(extra["dispatchId"]),
+                    "runnerId": "remote", "assigneeCli": "pi", "provider": "runner"}
+
+        with patch.object(ai_exec, "dispatch_sync", side_effect=dispatch), \
+             patch.object(ai_exec, "resolve_requested_sync", return_value={"id": body["assigneeId"]}), \
+             patch.object(tasks, "_push_task", new=AsyncMock()), \
+             patch.object(tasks, "_settle_work_dir", new=AsyncMock(return_value={"ok": True})), \
+             patch.object(tasks, "_attach_skills", new=AsyncMock()):
+            rejected = await self.http.post("/api/v1/tasks/batch-dispatch", json=body)
+            self.assertEqual(rejected.status_code, 502, rejected.text)
+            async with self.sessions() as session:
+                self.assertEqual((await session.get(models.Task, ids[0])).status, "todo")
+                shell = await session.get(models.Task, rejected.json()["detail"]["batchId"])
+                self.assertEqual(shell.status, "cancel")
+            retry = await self.http.post("/api/v1/tasks/batch-dispatch", json=body)
+            self.assertEqual(retry.status_code, 200, retry.text)
+            replay = await self.http.post("/api/v1/tasks/batch-dispatch", json=body)
+            self.assertEqual(replay.json()["attemptId"], retry.json()["attemptId"])
+            self.assertEqual(len(set(accepted)), 2)
+            self.assertEqual(len(accepted), 2)
+
+            # Complete the real batch lifecycle. An HTTP replay after terminal
+            # settlement and a new round after an explicit reopen are distinct.
+            async with self.sessions() as session:
+                batch = await session.get(models.Task, retry.json()["batchId"])
+                await task_status.mark(session, batch, "done", engine=True, allow_incomplete=True)
+                await session.commit()
+            completed = await self.http.post("/api/v1/tasks/batch-dispatch", json=body)
+            self.assertEqual(completed.json()["batchId"], retry.json()["batchId"])
+            for tid in ids:
+                reopened = await self.http.patch(f"/api/v1/tasks/{tid}", json={"status": "todo"})
+                self.assertEqual(reopened.status_code, 200, reopened.text)
+            new_round = await self.http.post("/api/v1/tasks/batch-dispatch", json=body)
+            self.assertEqual(new_round.status_code, 200, new_round.text)
+            self.assertNotEqual(new_round.json()["batchId"], completed.json()["batchId"])
+            repeated = await self.http.post("/api/v1/tasks/batch-dispatch", json=body)
+            self.assertEqual(repeated.json()["batchId"], new_round.json()["batchId"])
+            self.assertEqual(len(accepted), 3)
+
+    async def test_ineligible_batch_member_rejects_whole_plan_and_survives_late_completion(self):
+        await self.create("ready")
+        for tid, state in (("archived", {"archived_at": datetime.now(timezone.utc)}),
+                           ("intake", {"triage_stage": "intake"}),
+                           ("clarifying", {"triage_stage": "clarifying"})):
+            await self.create(tid, **state)
+            result = await self.http.post("/api/v1/tasks/batch-dispatch", json={"taskIds": ["ready", tid]})
+            self.assertEqual(result.status_code, 409, result.text)
+        async with self.sessions() as session:
+            self.assertEqual(list(await session.scalars(select(models.Milestone))), [])
+            self.assertEqual(list(await session.scalars(select(models.TaskEvent))), [])
+            batch = models.Task(id="older-batch", title="Earlier batch", owner_client_id="owner", status="doing")
+            session.add(batch)
+            session.add(models.Milestone(task_id=batch.id, seq=0, title="Archived source", src_task_id="archived"))
+            await session.flush()
+            await task_status._close_batch_members(session, batch, engine=False)
+            archived = await session.get(models.Task, "archived")
+            self.assertEqual(archived.status, "todo")
+            self.assertIsNotNone(archived.archived_at)
         self.assertFalse(self.calls)
 
 

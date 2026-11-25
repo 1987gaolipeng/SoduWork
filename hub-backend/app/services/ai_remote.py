@@ -11,6 +11,7 @@ from collections import OrderedDict
 from . import (agent_naming, dispatch_identity, execution_capabilities,
                runner_hub, runner_skills)
 from .agent_execution_options import GATEWAY_MODEL_KINDS, supports_soduwork_model_kind
+from . import artifact_bytes
 from ..agent_catalog import AGENTS
 
 log = logging.getLogger("uvicorn.error")
@@ -19,7 +20,6 @@ PREFIX = "runner:"
 _DISPATCH_TIMEOUT = 120.0        # Allow extra time for dispatch to create a session and start its process.
 _INPUT_CHUNK = 512 * 1024         # The encoded chunk remains below the WebSocket frame-size limit.
 _OUTPUT_CHUNK = 512 * 1024
-_OUTPUT_MAX = 512 * 1024 * 1024
 
 _ACTIVE_AGENT_KEYS = frozenset(AGENTS)
 
@@ -699,7 +699,9 @@ def _download(r, ref: str, att_id: str) -> bytes | None:
             return None
         data = res.get("data") or {}
         size = int(data.get("size") or 0)
-        if size > _OUTPUT_MAX or int(data.get("offset") or 0) != offset:
+        if max(size, offset + len(chunk)) > artifact_bytes.MAX_BYTES:
+            raise artifact_bytes.ArtifactTooLarge(artifact_bytes.MAX_BYTES)
+        if int(data.get("offset") or 0) != offset:
             log.warning("Runner 产出分片元数据不一致 ref=%s file=%s offset=%d size=%d",
                         ref[:12], str(att_id)[:160], offset, size)
             return None
@@ -707,7 +709,7 @@ def _download(r, ref: str, att_id: str) -> bytes | None:
         offset += len(chunk)
         if data.get("eof"):
             return bytes(out) if offset == size else None
-        if not chunk or offset > _OUTPUT_MAX:
+        if not chunk:
             log.warning("Runner 产出分片提前结束 ref=%s file=%s offset=%d",
                         ref[:12], str(att_id)[:160], offset)
             return None

@@ -109,6 +109,7 @@ RELEASE_SMOKES = tuple(sorted((
     "test_task_account_ownership.py",
     "test_account_task_isolation.py",
     "test_account_task_surfaces.py",
+    "test_task_attachment_quota.py",
     "test_attachment_ownership_compat.py",
     "test_attachment_storage_names.py",
     "test_usage_account_keys.py",

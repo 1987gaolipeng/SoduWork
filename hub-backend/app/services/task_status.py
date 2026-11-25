@@ -116,10 +116,15 @@ async def _close_batch_members(session: AsyncSession, batch: models.Task, *,
     src_ids = [x for x in src_ids if x and x != batch.id]
     if not src_ids:
         return
-    from . import task_events
-    for sid in src_ids:
-        t = await session.get(models.Task, sid)
+    from . import task_events, task_requirements
+    for sid in sorted(set(src_ids)):
+        t = await session.get(models.Task, sid, with_for_update=True, populate_existing=True)
         if t is None or t.status in ("done", "cancel"):
+            continue
+        try:
+            task_requirements.ensure_executable(t)
+        except ValueError:
+            # A source may have been archived or returned to triage after admission.
             continue
         # The batch shell owns the one reviewed delivery for all source items. Requiring every
         # imported bug to manufacture a second artifact would leave them permanently open.

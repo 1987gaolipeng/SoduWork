@@ -180,6 +180,8 @@ async def create(session, client, request_id, raw, uploads):
                **({"targetRunnerKind": requested["targetRunnerKind"]}
                   if requested["targetRunnerKind"] else {})}
     picked = await handoffs.destination(session, client, options, source)
+    if "managedModelSelection" in picked:
+        options["managedModelSelection"] = picked["managedModelSelection"]
     if requested.get("plugins"):
         from . import conversation_turn_plugins
         await conversation_turn_plugins.validate_start(session, client, picked["runnerId"])
