@@ -68,6 +68,14 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, expected, (method, path, response.status_code))
         return response.json()
 
+    async def test_create_task_rejects_missing_or_blank_title(self):
+        for body in ({}, {"title": ""}, {"title": "  "}):
+            with self.subTest(body=body):
+                result = await self.request("POST", "tasks", 400, json=body)
+                self.assertEqual(result["detail"], "请填写需求标题")
+        async with self.sessions() as session:
+            self.assertEqual(await session.scalar(select(func.count()).select_from(models.Task)), 0)
+
     async def test_invalid_team_scope_preserves_setting_and_audit(self):
         path = "admin/team-module-scope"
         await self.request("PUT", path, json={"scope": " EVERYONE "})

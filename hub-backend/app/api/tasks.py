@@ -155,6 +155,10 @@ async def get_tasks(client: Client = Depends(current_client), session: AsyncSess
 async def create_task(
     body: TaskCreate, client: Client = Depends(current_client), session: AsyncSession = Depends(get_session)
 ):
+    # An omitted title used to fall through to the schema default "未命名" while an explicit empty
+    # string was rejected, so a dropped request body silently produced placeholder requirements.
+    if "title" not in body.model_fields_set:
+        raise HTTPException(status_code=400, detail="请填写需求标题")
     return await svc.create_task(session, client.id, body.model_dump(), origin="local")
 
 
