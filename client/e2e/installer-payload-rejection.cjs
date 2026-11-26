@@ -62,6 +62,24 @@ async function main() {
     assert.ok(setup);
     assert.deepEqual(await fs.readFile(manifestPath), originalManifest, 'test must not regenerate the inventory');
   }
+  const fresh = await fs.mkdtemp(path.join(root, 'first-install-'));
+  const versions = path.join(fresh, '.soduwork-versions');
+  await fs.mkdir(versions);
+  const sentinel = path.join(versions, 'keep.txt');
+  await fs.writeFile(sentinel, 'existing file');
+  const freshCode = await run(setup, ['/S', '/' + mode, '/D=' + fresh]);
+  assert.equal(freshCode, 2, 'initial installation must report a rejected payload');
+  assert.match(await fs.readFile(path.join(fresh, '.soduwork-update.log'), 'utf8'), /payload-verification-failed/);
+  await assert.rejects(fs.stat(path.join(fresh, executableName + '.exe')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(path.join(fresh, '.soduwork-active')), { code: 'ENOENT' });
+  // Windows can briefly keep verifier files open after its process exits.
+  const cleanupDeadline = Date.now() + 15000;
+  while ((await fs.readdir(versions)).length > 1 && Date.now() < cleanupDeadline) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.deepEqual(await fs.readdir(versions), ['keep.txt'], 'only the failed stage should be removed');
+  assert.equal(await fs.readFile(sentinel, 'utf8'), 'existing file');
+
   const code = await run(setup, ['/S', '/' + mode, '--updated', '/D=' + installed]);
   assert.equal(code, 2, 'corrupted payload must fail before activation');
   assert.equal(await fs.readFile(path.join(installed, '.soduwork-active'), 'utf8'), before);
@@ -84,7 +102,7 @@ async function main() {
   const launched = JSON.parse(await fs.readFile(launchOutput, 'utf8'));
   assert.equal(launched.exe, path.join(installed, '.soduwork-versions', before, executableName + '.exe'));
   assert.equal(await fs.readFile(path.join(root, 'profile', 'sentinel.txt'), 'utf8'), 'keep user data');
-  const result = { root, installed, setup, code, activeVersionUnchanged: true,
+  const result = { root, installed, setup, code, freshCode, firstInstallRolledBack: true, activeVersionUnchanged: true,
     previousVersionLaunched: true, userDataPreserved: true, details };
   await fs.writeFile(path.join(path.dirname(evidence), 'payload-rejection.json'), JSON.stringify(result, null, 2));
   console.log('PASS: real NSIS rejects modified runtime cleanup script; active version and user data preserved.');
