@@ -748,7 +748,8 @@
     if (!currentWorkEntry()) return;
     const attachmentContext = routed.attachmentContext;
     const intent = _intent ? _intent.current(text) : { mode: 'chat' };
-    if (['schedule', 'task'].includes(intent.mode) && global.ComposeModelPicker?.hasManualChoice?.()) {
+    if (['schedule', 'task'].includes(intent.mode) &&
+        (global.ComposeModelPicker?.hasManualChoice?.() || global.ComposeModelPicker?.usesSwitchDefault?.())) {
       const ready = await global.ComposeModelPicker.ready();
       if (!currentWorkEntry()) return;
       if (!ready) { global.petSay?.('请选择可用模型'); return; }

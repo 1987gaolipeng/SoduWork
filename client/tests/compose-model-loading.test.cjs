@@ -102,6 +102,29 @@ test('switching to local Codex uses the account default for an incompatible mode
   assert.equal(f.picker.label(), 'Codex 默认');
 });
 
+for (const [label, usable, expected] of [
+  ['uses a compatible local default', [{ name: 'hub' }, { name: 'local:mine', localOnly: true }], 'local:mine'],
+  ['leaves an empty catalog unusable', [], ''],
+  ['leaves incompatible and ambiguous models unselected', [
+    { name: 'unsupported', providerKind: 'anthropic' }, { name: 'duplicate' }, { name: 'duplicate' },
+  ], ''],
+]) test('leaving a manually selected Codex model ' + label, async () => {
+  const f = fixture();
+  f.agent('codex'); f.start(); f.reply(0, 'native'); await f.picker.ready(); f.choose('native', true);
+  const pending = f.picker.prepareRuntimeSwitch({ id: 'qwen', modelMode: 'managed' }, () => true);
+  f.requests.at(-1).resolve({ usable });
+  const model = await pending;
+  assert.equal(model.preservesModel, false);
+  f.agent('qwen'); model.apply(); await f.picker.refresh();
+  assert.equal(f.picker.value().modelName, expected);
+  assert.equal(await f.picker.ready(), Boolean(expected));
+  assert.equal(f.picker.hasManualChoice(), false);
+  const refreshed = f.picker.refresh(true);
+  f.requests.at(-1).resolve({ usable: [{ name: 'new' }] }); await refreshed;
+  assert.equal(f.picker.value().modelName, 'new');
+  assert.equal(await f.picker.ready(), true);
+});
+
 test('a failed catalog lookup, ambiguous provider, and stale switch preserve the original pair', async () => {
   const f = fixture(), row = { name: 'model', providerId: 'org' };
   f.start(); f.requests[0].resolve({ usable: [row] }); await f.picker.ready(); f.choose('model');
@@ -478,6 +501,16 @@ test('failed or malformed managed lookups can retry and a failed refresh preserv
   const failedRefresh = f.picker.refresh(true);
   f.requests[3].reject(Error('isolated unavailable')); await failedRefresh;
   assert.equal(f.picker.value().modelName, 'retained-model');
+});
+
+test('a pending Codex directory has a loading label until an authoritative empty directory blocks Send', async () => {
+  const f = fixture(); f.agent('codex'); f.start();
+  assert.equal(f.nodes.cpModelName.textContent, '正在加载模型…');
+  assert.match(f.nodes.cpModelPop.innerHTML, /正在加载模型…/);
+  f.requests[0].resolve({ ok: true, catalogAvailable: true, models: [] });
+  assert.equal(await f.picker.ready(), false);
+  assert.equal(f.nodes.cpModelName.textContent, '暂无可用模型');
+  assert.doesNotMatch(f.nodes.cpModelPop.innerHTML, /正在加载模型/);
 });
 
 test('native Codex discovery also coalesces, retries failures and keeps native selection', async () => {

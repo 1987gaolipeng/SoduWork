@@ -2488,6 +2488,16 @@ function createRunnerRuntimeAdapter(options) {
   const adapterId = String(runtimeSpec.id);
   const displayName = String(runtimeSpec.displayName);
   const defaults = { ...opts, runtimeSpec };
+  async function detectRuntime() {
+    const reply = await runtime.rpc('runtime.detect', { key: adapterId }, 15000);
+    if (adapterId === 'codex' && (!reply?.data || reply.ok === false)) {
+      throw Error(reply?.reason || '执行底座检测没有成功');
+    }
+    if (adapterId === 'codex' && (reply.data.authStatus === 'unknown' || reply.data.setupState === 'unknown')) {
+      throw Error(reply.data.why || '执行底座检测没有成功');
+    }
+    return reply?.data || {};
+  }
   const isChat = row => row.cli === adapterId && /^chat-/.test(String(row.taskId || ''));
   async function historyRow(row, metadataOnly = false) {
     return {
@@ -2507,8 +2517,11 @@ function createRunnerRuntimeAdapter(options) {
     capabilities: runnerCapabilities(runtimeSpec),
     async detect() {
       try {
-        const reply = await runtime.rpc('runtime.detect', { key: adapterId }, 15000);
-        const item = reply && reply.data || {};
+        const item = await detectRuntime().catch(async error => {
+          if (adapterId !== 'codex') throw error;
+          await new Promise(resolve => setTimeout(resolve, 500));
+          return detectRuntime();
+        });
         return item.installed && !['unauthed', 'nollm', 'missing'].includes(item.state)
           ? { ok: true, version: item.version || '', path: item.bin || '', state: item.state || 'ready',
             ...(item.accessControl ? { accessControl: item.accessControl } : {}) }

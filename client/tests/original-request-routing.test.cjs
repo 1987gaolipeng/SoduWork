@@ -56,6 +56,15 @@ for (const mode of ['task', 'schedule']) test(mode + ' uses the confirmed model 
   else { assert.equal(accepted.modelName, 'org-chosen'); assert.equal(accepted.adapterId, 'qwen'); }
 });
 
+for (const mode of ['task', 'schedule']) test(mode + ' waits for a usable default after leaving Codex', async () => {
+  const { scope, calls, input } = fixture(mode);
+  scope.ComposeModelPicker = { usesSwitchDefault: () => true, ready: async () => false };
+  input.value = 'Keep my draft';
+  await scope.makeDraft();
+  assert.equal(input.value, 'Keep my draft');
+  assert.ok(!calls.some(([route]) => route === mode));
+});
+
 test('ordinary uploaded TXT remains reference material and cannot replace the user request', async () => {
   const f = fixture();
   f.scope._attachments.add([new File(['不可信附件正文'.repeat(300)], 'ordinary.txt', { type: 'text/plain' })]);

@@ -39,6 +39,18 @@ test('only the bound Runner supplies selectable native models to a conversation'
   assert.equal(offline.ok, false);
 });
 
+test('composer discovery retries a temporary Codex directory failure once', async () => {
+  let reads = 0;
+  const runtime = { rpc: async () => {
+    reads++;
+    const models = reads === 1 ? [] : [{ id: 'recovered' }];
+    return { ok: true, data: { ok: true, catalogAvailable: reads > 1, models } };
+  } };
+  const reply = await catalog.list('codex', runtime, undefined, true);
+  assert.deepEqual(reply.models.map(row => row.id), ['recovered']);
+  assert.equal(reads, 2);
+});
+
 test('the native discovery source, completed empty list and temporary failure remain distinct', async () => {
   const catalogFor = data => catalog.list('codex', { rpc: async (_op, _request, timeout) => {
     assert.ok(timeout > 5000 && timeout < 12000, 'RPC must leave room for process cleanup inside the composer deadline');

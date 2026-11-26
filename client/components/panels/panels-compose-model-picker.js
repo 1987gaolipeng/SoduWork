@@ -17,6 +17,7 @@
   let imageModels = [];
   let nativeModels = [], nativeCatalogAvailable = false, nativeDefaultAvailable = false;
   let nativeReason = '', nativeRetryable = false, updateTimer;
+  let nativeLoading = false;
   let activeRuntime = '';
   let activeScope = '';
   let activeOwner = '';
@@ -146,11 +147,14 @@
   }
 
   function currentLabel(row, selected) {
+    if (selected.useSwitchDefault && !selected.modelName) return tx('选择模型');
     if (selected.catalogUnavailable) return selected.modelName;
     if (selected.unavailable) return tx(deviceLocal({ name: selected.modelName }) ||
       global.SoduWorkModelChoice?.imageChoice(selected.modelName)?.name.startsWith('local:')
       ? '原本地模型已删除或不可用，请重新选择' : '原模型已不可用，请重新选择');
     if (row.id === 'codex') {
+      if (nativeLoading && !nativeModels.length && !usingCodexDefault(selected)) return tx('正在加载模型…');
+      if (nativeCatalogAvailable && !nativeModels.length && !selected.modelName) return tx('暂无可用模型');
       const model = modelById(selected.modelName);
       const modelLabel = model?.label || selected.modelName || tx(usingCodexDefault(selected) ? 'Codex 默认' : '选择模型');
       const effortLabel = selected.reasoningEffort
@@ -193,6 +197,7 @@
       // device-owned models first. Valid current choices stay unchanged.
       const next = available[0];
       selected.unavailable = !next;
+      if (!next && selected.useSwitchDefault) selected.modelName = '';
       if (next) { selected.modelName = next; selected.modelChosen = false; delete selected.choice; }
       selected.thinkingLevel = '';
     } else selected.unavailable = false;
@@ -308,6 +313,9 @@
 
   function codexHtml(selected) {
     const selectedModel = modelById(selected.modelName);
+    if (nativeLoading && !nativeModels.length && !usingCodexDefault(selected)) {
+      return '<div class="cp-native-note" role="status">' + escape(tx('正在加载模型…')) + '</div>';
+    }
     const reason = nativeReason && !nativeModels.length
       ? '<div class="cp-native-note is-warning">' + escape(tx(nativeReason)) + '</div>' : '';
     if (nativeView === 'models') return heading('Codex · 使用本机账号', true) +
@@ -315,7 +323,7 @@
         '<button type="button" class="cp-mrow' + (item.id === selected.modelName ? ' on' : '') +
           '" aria-pressed="' + (item.id === selected.modelName) + '" data-native-model="' + escape(item.id) + '">' + check() +
           '<span class="cp-mtxt"><b>' + escape(item.label) + '</b></span></button>').join('') +
-      emptyList() + '</div>' + reason;
+      (nativeModels.length ? emptyList() : '') + '</div>' + reason;
     return reason + effortCard(selected, selectedModel, usingCodexDefault(selected));
   }
 
@@ -479,8 +487,9 @@
         if (!response || response.ok === false || !Array.isArray(response.usable)) throw Error('模型目录暂时不可用');
         // Device-owned connections can be paired with any local managed
         // runtime. Cloud execution must never receive their private references.
-        enterpriseModels = response.usable.filter(usable)
-          .sort((a, b) => Number(deviceLocal(b)) - Number(deviceLocal(a)));
+        enterpriseModels = response.usable.filter(usable);
+        if (state(row.id).useSwitchDefault) enterpriseModels = compatibleTextModels(row, enterpriseModels);
+        enterpriseModels.sort((a, b) => Number(deviceLocal(b)) - Number(deviceLocal(a)));
         enterpriseDefaultErrors = response?.defaultModelErrors || {};
         managedCatalogUnavailable = response.managedCatalogUnavailable === true;
         imageModels = Array.isArray(response?.mediaUsable?.image)
@@ -497,6 +506,8 @@
     }
     if (row.id === 'codex') {
       if (nativeLoaded === row.id && !force) return render();
+      nativeLoading = true;
+      render();
       try {
         const bridge = api();
         const response = prepared || await bridge?.runtimeModels?.(row.id, undefined, true);
@@ -514,7 +525,8 @@
           reconcileEffort(selected);
         }
         const previousReason = nativeReason;
-        nativeReason = String(response.reason || (nativeCatalogAvailable ? '' : '本机 Codex 模型目录暂时无法读取，请刷新重试。'));
+        nativeReason = nativeCatalogAvailable && !nativeModels.length ? '暂无可用模型' :
+          String(response.reason || (nativeCatalogAvailable ? '' : '本机 Codex 模型目录暂时无法读取，请刷新重试。'));
         if (response.upgradeState && previousReason !== nativeReason) global.petSay?.(tx(nativeReason));
         nativeRetryable = response.retryable === true || !nativeCatalogAvailable;
         nativeLoaded = row.id;
@@ -527,6 +539,7 @@
         nativeModels = []; nativeCatalogAvailable = false; nativeDefaultAvailable = false; nativeRetryable = true;
         nativeReason = '本机 Codex 模型目录暂时无法读取，请刷新重试。';
       }
+      nativeLoading = false;
       render();
       notify();
     }
@@ -537,6 +550,7 @@
     const row = runtime();
     const selected = state(row.id);
     selected.modelChosen = true;
+    selected.useSwitchDefault = false;
     selected.unavailable = false;
     selected.catalogUnavailable = false;
     selected.carriedChoice = false;
@@ -557,6 +571,15 @@
     notify();
   }
 
+  function compatibleTextModels(target, models) {
+    const names = new Set(), duplicates = new Set();
+    for (const model of models) {
+      if (names.has(model.name)) duplicates.add(model.name);
+      names.add(model.name);
+    }
+    return models.filter(model => !duplicates.has(model.name) && supportsTextModel(target, model));
+  }
+
   async function switchCatalog(target, choice) {
     let response, candidates;
     if (target.modelMode === 'managed') {
@@ -567,12 +590,7 @@
         return null;
       }
       const models = response.usable.filter(usable);
-      const names = new Set(), duplicates = new Set();
-      for (const model of models) {
-        if (names.has(model.name)) duplicates.add(model.name);
-        names.add(model.name);
-      }
-      candidates = models.filter(model => !duplicates.has(model.name) && supportsTextModel(target, model)).map(model => ({
+      candidates = compatibleTextModels(target, models).map(model => ({
         ...textChoice(model), label: model.label || model.name,
       }));
       if (!cloud() && target.id === 'pi' && global.SoduWorkModelChoice) {
@@ -605,10 +623,14 @@
     let next = candidates.find(candidate => matchesChoice(choice, candidate));
     const preservesModel = Boolean(next);
     if (!next && target.id === 'codex' && target.modelMode === 'account' && !cloud() &&
-        (candidates.length || global.SoduWorkModelChoice?.codexDefaultAvailable?.(catalog.response))) {
+        (candidates.length || catalog.response?.catalogAvailable === true ||
+          global.SoduWorkModelChoice?.codexDefaultAvailable?.(catalog.response))) {
       next = { source: 'codex', name: '' };
     }
-    if (!next) {
+    const useSwitchDefault = !next && source.id === 'codex' && !cloud();
+    if (useSwitchDefault) {
+      next = candidates.find(candidate => candidate.source === 'local') || candidates[0];
+    } else if (!next) {
       if (!candidates.length) { say(tx(catalog.response?.reason || '目标底座没有可明确选择的可用模型')); return false; }
       next = await selectReplacement(target, currentLabel(source, selected), candidates);
       if (!next || !current()) return false;
@@ -622,9 +644,11 @@
       preservesModel,
       apply() {
         const dest = state(target.id);
-        if (dest.modelName !== next.name) { dest.thinkingLevel = ''; dest.reasoningEffort = ''; }
-        Object.assign(dest, { modelName: next.name, modelChosen: Boolean(next.name), choice: next,
-          carriedChoice: Boolean(next.name), unavailable: false, catalogUnavailable: false });
+        const name = next?.name || '';
+        if (dest.modelName !== name) { dest.thinkingLevel = ''; dest.reasoningEffort = ''; }
+        const chosen = Boolean(name) && !useSwitchDefault;
+        Object.assign(dest, { modelName: name, modelChosen: chosen, choice: next, useSwitchDefault,
+          carriedChoice: chosen, unavailable: !next, catalogUnavailable: false });
         preparedCatalog = { scope: loadContext(target).key, response: catalog.response };
       },
     };
@@ -675,7 +699,7 @@
     if (!opening) return;
     searchQuery = '';
     nativeView = 'effort';
-    const pending = refresh(true);
+    const pending = runtime().id === 'codex' && loading?.scope === loadContext().key ? loading.promise : refresh(true);
     pop.classList.add('show');
     pop.showPopover?.();
     button.setAttribute('aria-expanded', 'true');
@@ -806,6 +830,7 @@
       enterpriseModels = [];
       enterpriseDefaultErrors = {}; managedCatalogUnavailable = false; imageModels = []; enterpriseLoaded = false;
       global.clearTimeout?.(updateTimer);
+      nativeLoading = false;
       nativeModels = []; nativeCatalogAvailable = false; nativeDefaultAvailable = false; nativeReason = ''; nativeRetryable = false; nativeLoaded = '';
       nativeView = 'effort';
       close();
@@ -886,6 +911,7 @@
     selected.thinkingLevel = String(saved.thinkingLevel || '');
     selected.directoryPreference = true;
     selected.modelChosen = false;
+    selected.useSwitchDefault = false;
     delete selected.choice; delete selected.carriedChoice;
     if (row.modelMode === 'managed') {
       if (!enterpriseLoaded) { selected.unavailable = true; render(); notify(); return false; }
@@ -905,6 +931,7 @@
   global.ComposeModelPicker = { bind, close, refresh, ready, value, prepareRuntimeSwitch, resetNewDraft, resetDirectory, restoreSelection, releasePreference,
     unavailableReason: () => runtime().id === 'codex' && !cloud() ? nativeReason : '',
     hasManualChoice: () => state(runtime().id).modelChosen,
+    usesSwitchDefault: () => state(runtime().id).useSwitchDefault === true,
     nativeEffort: { html: effortCard, paint: paintEffortCard, levels: effortChoices, defaultLevel: defaultEffort },
     label: () => currentLabel(runtime(), state(runtime().id)) };
   const scopeChanged = () => {
