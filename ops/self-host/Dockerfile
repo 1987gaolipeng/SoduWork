@@ -12,6 +12,7 @@ COPY hub-frontend/src ./src
 COPY hub-frontend/public ./public
 COPY hub-frontend/index.html hub-frontend/vite.config.js ./
 COPY client/core/connector-brand.js /build/client/core/connector-brand.js
+COPY client/core/locales/builtin-skills.js /build/client/core/locales/builtin-skills.js
 COPY client/components/panels/connector-config.js /build/client/components/panels/connector-config.js
 COPY client/components/client-auth/legal-html.js /build/client/components/client-auth/legal-html.js
 COPY client/components/client-auth/legal-html.css /build/client/components/client-auth/legal-html.css
@@ -28,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
        > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update && apt-get install -y --no-install-recommends git openssh-client \
-       chromium fonts-noto-cjk postgresql-client-16 \
+       chromium fonts-noto-cjk postgresql-client-16 7zip aapt \
     && apt-get purge -y --auto-remove curl gnupg && rm -rf /var/lib/apt/lists/*
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
@@ -39,7 +40,7 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
        @openai/codex@0.147.0
 COPY --from=node-runtime /usr/local/LICENSE /usr/local/LICENSE.nodejs
 WORKDIR /srv/app/hub-backend
-COPY hub-backend/requirements.txt ./requirements.txt
+COPY hub-backend/requirements.txt hub-backend/requirements-image.txt ./
 RUN python -m pip install -r requirements.txt
 
 FROM ${HUB_BASE_IMAGE} AS runtime
@@ -47,8 +48,11 @@ FROM ${HUB_BASE_IMAGE} AS runtime
 USER root
 ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /srv/app/hub-backend
-COPY hub-backend/requirements.txt ./requirements.txt
+COPY hub-backend/requirements.txt hub-backend/requirements-image.txt ./
 RUN python -m pip install --no-cache-dir -r requirements.txt
+# Refuse outdated dependency images that cannot inspect uploaded installers.
+RUN { command -v 7zz || command -v 7z; } && command -v aapt \
+    || { echo "HUB_BASE_IMAGE lacks 7zip/aapt; rebuild the deps image or use HUB_BASE_IMAGE=deps" >&2; exit 1; }
 COPY hub-backend/app ./app
 COPY hub-backend/migrations ./migrations
 COPY hub-backend/jiyong-alembic.ini ./jiyong-alembic.ini

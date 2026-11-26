@@ -110,6 +110,16 @@ class AdminRequirementDispatchTests(unittest.IsolatedAsyncioTestCase):
         return await self.http.post(f"/api/v1/admin/tasks/{tid}/ai-dispatch",
                                     headers={"Authorization": "Bearer " + sign_token(who, 1)})
 
+    async def test_admin_task_creation_validates_title_type(self):
+        headers = {"Authorization": "Bearer " + sign_token("admin", 1)}
+        for path in ("/api/v1/admin/users/owner/tasks", "/api/v1/admin/inbox"):
+            for invalid in (123, False, [], {}):
+                with self.subTest(path=path, title=invalid):
+                    response = await self.http.post(path, json={"title": invalid}, headers=headers)
+                    self.assertEqual(response.status_code, 422, response.text)
+            blank = await self.http.post(path, json={"title": "  "}, headers=headers)
+            self.assertEqual(blank.status_code, 400)
+
     async def test_admin_and_device_share_one_attempt_owner_context_admin_audit(self):
         tid = await self.create()
         first = await self.post(tid)

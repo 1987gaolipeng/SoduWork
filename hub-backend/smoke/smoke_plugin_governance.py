@@ -132,7 +132,9 @@ async def main():
         "runtime": 1, "revoked": 0,
     }, "五类治理队列分类不正确", result["counts"])
     ok(result["summary"]["attention"] == 4,
-       "待处理总数必须等于动作队列总和", result["summary"])
+       "待处理插件数必须按插件去重", result["summary"])
+    ok(result["summary"]["attentionItems"] == sum(result["counts"].values()),
+       "待处理事项数必须等于各类事项数之和", result["summary"])
     ok(result["summary"]["successRate"] == 50.0,
        "30 天成功率必须基于已决运行", result["summary"])
     ok(result["queues"]["quality"][0]["versionId"] == "v-quality"

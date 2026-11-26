@@ -93,15 +93,49 @@ test('a detail reload started during a skin update cannot overwrite the confirme
   let reads = 0
   const h = await fixture(t, { pushClient: () => request.promise,
     clientDetail: async () => ++reads === 1 ? structuredClone(client) : detail.promise,
-    users: async () => [{ id: 'member-b', displayName: 'Other member' }], assignClient: async () => ({ authState: 'active' }),
+    assignClient: async () => ({ authState: 'active' }),
   }, ['client.control', 'client.assign'])
   const skin = h.button('玻璃').props.onClick()
-  h.page.nodes(node => node.type === 'SelectMenu')[0].props.onChange({ target: { value: 'member-b' } })
+  h.page.nodes(node => node.type.name === 'OwnerSelect')[0].props.onChange('member-b')
+  h.page.nodes(node => node.type.name === 'PairingTokenInput')[0].props.onChange('test-pairing-code')
   const save = h.page.nodes(node => node.type === 'button' && node.props.onClick?.name === 'saveOwner')[0].props.onClick()
   await h.page.flush()
   assert.equal(reads, 2)
+  const isBusy = () => h.page.nodes(node => node.type === 'Modal')[0].props.busy
+  assert.equal(isBusy(), true)
   request.resolve({ delivered: true }); await skin
+  assert.equal(isBusy(), true, 'ownership save still has a pending detail response')
   detail.resolve(structuredClone(client)); await save; await h.page.flush()
+  assert.equal(isBusy(), false)
   assert.equal(h.button('玻璃').props['aria-pressed'], true)
   assert.equal(h.button('钻石').props['aria-pressed'], false)
+})
+
+test('device update confirmation waits for Hub and retries only an unaccepted request', async t => {
+  const updates = [deferred(), deferred()]
+  let attempts = 0, detailReads = 0
+  const h = await fixture(t, {
+    requestClientUpdate: () => updates[attempts++].promise,
+    clientDetail: async () => {
+      if (++detailReads > 1) throw Error('detail refresh failed')
+      return structuredClone(client)
+    },
+  }, ['client.update'])
+  const modal = () => h.page.nodes(node => node.type === 'Modal')[0]
+  const confirm = () => h.page.nodes(node => node.type === 'Confirm')[0]
+  h.page.nodes(node => node.props.title === '升级完整客户端', modal().props.foot)[0].props.onClick()
+  const first = confirm().props.onConfirm()
+  assert.ok(confirm())
+  assert.equal(modal().props.busy, true)
+  updates[0].reject(Error('request failed'))
+  await first
+  assert.ok(confirm())
+  assert.equal(modal().props.busy, false)
+  const second = confirm().props.onConfirm()
+  updates[1].resolve({ delivered: false })
+  await second
+  assert.equal(confirm(), undefined, 'Hub queued the update even though refreshing device details failed')
+  assert.equal(attempts, 2)
+  assert.ok(h.notices.some(message => message.includes('已排队')))
+  assert.match(h.notices.at(-1), /刷新失败/)
 })

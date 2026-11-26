@@ -174,31 +174,43 @@ async def revoke_device(device_id: str, body: VerifiedAction, client: Client = D
     return {"ok": True, "logoutRequired": False}
 
 
+async def _set_verified_email(session: AsyncSession, user: User, email: str) -> None:
+    if email == user.email_normalized:
+        raise account_security.error(409, "EMAIL_UNCHANGED", "请输入新的邮箱地址")
+    registered = await session.scalar(select(User.id).where(User.email_normalized == email, User.id != user.id))
+    if registered:
+        raise account_security.error(409, "EMAIL_UNAVAILABLE", "此邮箱无法绑定，请使用其他邮箱")
+    legacy = await client_access.find_user(session, email)
+    if legacy and legacy.id != user.id:
+        raise account_security.error(409, "EMAIL_UNAVAILABLE", "此邮箱无法绑定，请使用其他邮箱")
+    result = await session.execute(update(User).where(
+        User.id == user.id, User.is_active.is_(True), User.account_deleted_at.is_(None),
+        User.auth_version == user.auth_version
+    ).values(email=email, email_normalized=email, email_verified_at=datetime.now(timezone.utc),
+             auth_version=User.auth_version+1).execution_options(synchronize_session=False))
+    if result.rowcount != 1:
+        raise account_security.error(401, "ACCOUNT_UNAVAILABLE", "账号状态已变化，请重新登录")
+
+
 @router.post("/me/email-change")
 async def change_email(body: EmailChange, client: Client = Depends(authenticated_client),
                        session: AsyncSession = Depends(get_session)):
     user = await account_security.owner(session, client)
     email = email_auth.normalize_email(body.email)
     try:
-        # Wrong OTP attempts remain durable; successful proofs join the change transaction.
         await email_auth.consume_challenge(session, challenge_id=body.challengeId, email=email,
             purpose="change_email", device_id=client.id, code=body.code, user_id=user.id)
         await account_security.consume_grant(session, user, client, body.verificationToken, "change_email")
-        if email == user.email_normalized:
-            raise account_security.error(409, "EMAIL_UNCHANGED", "请输入新的邮箱地址")
-        registered = await session.scalar(select(User.id).where(User.email_normalized == email, User.id != user.id))
-        if registered:
-            raise account_security.error(409, "EMAIL_UNAVAILABLE", "此邮箱无法绑定，请使用其他邮箱")
-        legacy = await client_access.find_user(session, email)
-        if legacy and legacy.id != user.id:
-            raise account_security.error(409, "EMAIL_UNAVAILABLE", "此邮箱无法绑定，请使用其他邮箱")
-        result = await session.execute(update(User).where(
-            User.id == user.id, User.is_active.is_(True), User.account_deleted_at.is_(None),
-            User.auth_version == user.auth_version
-        ).values(email=email, email_normalized=email, email_verified_at=datetime.now(timezone.utc),
-                 auth_version=User.auth_version+1).execution_options(synchronize_session=False))
-        if result.rowcount != 1:
-            raise account_security.error(401, "ACCOUNT_UNAVAILABLE", "账号状态已变化，请重新登录")
+        # A rejected address consumes both valid proofs without changing accounts or devices.
+        try:
+            async with session.begin_nested():
+                await _set_verified_email(session, user, email)
+        except HTTPException:
+            await session.commit()
+            raise
+        except IntegrityError:
+            await session.commit()
+            raise account_security.error(409, "EMAIL_UNAVAILABLE", "此邮箱无法绑定，请使用其他邮箱") from None
         await session.refresh(user)
         ids = await account_security.revoke_devices(session, user)
         session.add(AuditLog(actor_id=user.id, actor_name=user.display_name or user.username,

@@ -9,6 +9,7 @@
 !hub-frontend/public/**
 !hub-backend/
 !hub-backend/requirements.txt
+!hub-backend/requirements-image.txt
 !hub-backend/requirements-runner.txt
 !hub-backend/alembic.ini
 !hub-backend/jiyong-alembic.ini
@@ -28,6 +29,8 @@
 !client/
 !client/core/
 !client/core/connector-brand.js
+!client/core/locales/
+!client/core/locales/builtin-skills.js
 !client/components/
 !client/components/panels/
 !client/components/panels/connector-config.js

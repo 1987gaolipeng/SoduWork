@@ -1,4 +1,7 @@
 const rows = {
+  '与当前客户端生效版本相比，本次发布内容将移除 {0} 个语言版本（{1}）。': ['Compared with the version currently available to clients, this publication omits {0} language versions ({1}).', '現在クライアントで有効な版と比べ、この公開内容では {0} 言語版（{1}）が除かれます。', '현재 클라이언트에 적용된 버전과 비교하면 이번 게시 내용에서 {0}개 언어 버전({1})이 제외됩니다.'],
+  '定时发布生效前，客户端的生效版本可能变化。': ['The active client version may change before the scheduled publication takes effect.', '公開予定時刻までにクライアントで有効な版が変わる場合があります。', '예약한 게시 시각 전에 클라이언트에 적용된 버전이 바뀔 수 있습니다.'],
+  '未能核对客户端当前生效的语言，请在发布前确认。': ['The current client languages could not be checked. Verify them before publishing.', '現在クライアントで有効な言語を照合できませんでした。公開前に確認してください。', '현재 클라이언트에서 제공하는 언어를 확인하지 못했습니다. 게시하기 전에 확인하세요.'],
   '转换正文格式': ['Convert document format', '本文形式を変換', '본문 형식 변환'],
   '转换后将失去 Word 的部分排版。建议保留 HTML，需要修改时重新导入 Word。': ['Conversion loses some Word formatting. Keep HTML and re-import the Word document when changes are needed.', '変換すると Word の一部の書式が失われます。HTML を保持し、変更時に Word を再インポートすることをお勧めします。', '변환하면 Word의 일부 서식이 손실됩니다. HTML을 유지하고 수정 시 Word 문서를 다시 가져오세요.'],
   '确认转换': ['Confirm conversion', '変換を確定', '변환 확인'],
@@ -7,6 +10,8 @@ const rows = {
   '文档': ['Document', '文書', '문서'],
   '请设置默认原文': ['Choose the default document language', '既定の原文言語を設定してください', '기본 원문 언어를 설정하세요'],
   '取消定时发布会重新加载页面，未保存的改动将丢失。历史快照仍会保留。': ['Canceling this scheduled publication reloads the page and discards unsaved changes. Its historical snapshot will be retained.', '公開予定を取り消すとページが再読み込みされ、未保存の変更は失われます。履歴のスナップショットは保持されます。', '예약 게시를 취소하면 페이지가 다시 로드되고 저장하지 않은 변경 사항은 사라집니다. 이력 스냅샷은 유지됩니다.'],
+  '继续编辑': ['Keep editing', '編集を続ける', '계속 편집'],
+  '关闭后，此次未保存的改动将丢失。': ['Closing will discard your unsaved changes.', '閉じると、保存していない変更が失われます。', '닫으면 저장하지 않은 변경 사항이 사라집니다.'],
   '放弃未保存的改动': ['Discard unsaved changes', '未保存の変更を破棄', '저장하지 않은 변경 사항 버리기'],
   '未保存的内容将丢失，已保存的草稿和已发布版本不受影响。': ['Unsaved content will be lost. Saved drafts and published versions will remain unchanged.', '未保存の内容は失われます。保存済みの下書きと公開済みのバージョンには影響しません。', '저장하지 않은 내용은 사라집니다. 저장된 초안과 게시된 버전에는 영향이 없습니다.'],
   '放弃并继续': ['Discard and continue', '破棄して続ける', '버리고 계속'],

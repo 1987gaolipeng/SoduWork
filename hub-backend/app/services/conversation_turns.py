@@ -4,8 +4,13 @@ This is not a second job scheduler. The task row lock prevents duplicate work,
 and the native conversation queue owns the order of sends.
 """
 import hashlib
+import logging
+
 from fastapi import HTTPException
-from . import task_status, task_events
+from starlette.datastructures import UploadFile
+
+from ..config import get_settings
+from . import task_events, task_status
 from .task_access import publish_owner
 
 ACTIVE = {"queued", "running", "waiting"}
@@ -148,13 +153,35 @@ def _delivery_hint(reason: str, files: list[str]) -> str:
 
 async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str,
                             provider: str = "", files: list,
-                            categories: dict | None = None,
+                            categories: dict | None = None, declared_paths: set[str] | None = None,
+                            replacements: dict[str, list[str]] | None = None,
                             outcome: str = "completed") -> dict:
     """Ingest conversation-turn outputs through shared classification, validation, versioning, and
     review. Only completed turns create candidates; incomplete turns retain evidence without
     requesting review. Deduplicate filenames within a turn and create new versions across rework
     turns, respecting the receipt state machine.
     """
+    from . import storage
+
+    written = []
+    try:
+        return await _ingest_artifacts(
+            session, task, conversation_id=conversation_id, turn_id=turn_id, provider=provider,
+            files=files, categories=categories, declared_paths=declared_paths,
+            replacements=replacements, outcome=outcome, written=written)
+    except BaseException:
+        if written:
+            try:
+                await session.rollback()
+                # A commit can have succeeded before a later notification failed.
+                await storage.delete_unreferenced_objects(session, written)
+            except Exception as error:
+                logging.getLogger("uvicorn.error").warning("交付存储清理失败：%s", type(error).__name__)
+        raise
+
+
+async def _ingest_artifacts(session, task, *, conversation_id, turn_id, provider, files,
+                            categories, declared_paths, replacements, outcome, written):
     from datetime import datetime, timezone
     import uuid as _uuid
 
@@ -219,10 +246,19 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
     evidence: set[str] = set()
     ignored: set[str] = set()
     invalid: list[dict] = []
-    for name, data, ctype in files:
+    for name, source, ctype in files:
         fn = delivery_manifest.normalize_name(name)
         if not fn or fn in received:
             continue
+        # HTTP uploads have passed the streaming limits and are backed by
+        # Starlette's spool. Materialize only the current file for validation.
+        if isinstance(source, UploadFile):
+            limit = get_settings().attach_max_mb * 1024 * 1024
+            data = await source.read(limit + 1)
+            if len(data) > limit:
+                raise HTTPException(413, "交付文件超过上传大小上限")
+        else:
+            data = source
         declared = (categories or {}).get(name)
         category = delivery_manifest.classify_name(fn, role="output", meta={"category": declared})
         verification = delivery_manifest.validate_bytes(fn, data, ctype, category=category)
@@ -257,18 +293,24 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
             ignored.add(fn)
             valid.add(fn)
         key = f"ai/{task.id}/{_uuid.uuid4().hex[:8]}-{fn}"
+        # The store may write the object before reporting an I/O error.
+        written.append((key, storage.backend_name()))
+        backend = storage.put(key, data, ctype)
         session.add(Attachment(
             task_id=task.id, filename=fn, content_type=ctype, size=len(data),
-            storage_key=key, backend=storage.put(key, data, ctype), uploaded_by=who,
+            storage_key=key, backend=backend, uploaded_by=who,
             role=role, source_ref=ref,
             evidence_meta={"provider": provider or "conversation",
                            "sha256": hashlib.sha256(data).hexdigest(),
                            "identifier": turn_id, "round": round_no,
                            "conversationId": conversation_id,
-                           "category": category, "verification": verification},
+                           "category": category, "verification": verification,
+                           **({"requestedOutput": True} if declared_paths and fn in declared_paths else {}),
+                           **({"replaces": replacements[fn]} if replacements and replacements.get(fn) else {})},
             created_at=datetime.now(timezone.utc)))
         got.append(fn)
         received.add(fn)
+        del data
     if not got:
         return {"ok": True, "already": True, "files": [],
                 "submissionMode": submission_mode,
@@ -369,10 +411,7 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
             # For transparent encryption failures, changing output format may work where regeneration does not.
             reason = str(error)[:500]
             from . import approval_routing
-            reviewers = await approval_routing.preview_assignments(session, task, "review", {}) if artifact else {"ok": True}
-            missing_reviewer = not reviewers["ok"]
-            if missing_reviewer:
-                reason = "需求创建人缺失或账号不可用，验收受阻；请恢复创建人账号，或联系管理员核实需求归属后处理"
+            missing_reviewer = isinstance(error, approval_routing.ReviewAssignmentUnavailable)
             _delivery_issue(task, "review_unassigned" if missing_reviewer else "invalid_delivery", reason,
                             artifact_version_id=artifact.id if missing_reviewer else "")
             # The generic reason may say no reviewable outputs remain.

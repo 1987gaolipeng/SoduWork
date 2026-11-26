@@ -4,7 +4,7 @@ const fs = require('node:fs'), fsp = fs.promises, path = require('node:path'), c
 const {Readable} = require('node:stream');
 const contract = require('../core/app-files-contract.cjs');
 const settings = require('./app-settings-store.cjs');
-const uploads = new Map(), completed = new Map(),copies=new Map();
+const uploads = new Map(), starting = new Map(), completed = new Map(),copies=new Map();
 const sources=require('./app-local-sources.cjs');
 const hash = text => crypto.createHash('sha256').update(text).digest('hex');
 const projectKey = value => 'p_' + hash(value);
@@ -52,13 +52,21 @@ async function execute(app,binding,method,input,assertCurrent=()=>{},options={})
   const key=scope+':'+p.id;
   if(method==='files.finish' && completed.has(key)){current();return {ok:true,file:completed.get(key)};}
   if(method==='files.begin') {
-    if([...uploads.values()].filter(r=>r.scope===scope).length>=4)throw Error('文件正在保存，请稍后重试');
-    const dir=await directory(app,scope,['uploads'],true);current();
-    const id=uuid('upload_'),temp=path.join(dir,id+'.part'),handle=await fsp.open(temp,'wx',0o600);
-    function expire(){const row=uploads.get(scope+':'+id);if(!row)return;if(row.busy){row.expiry=setTimeout(expire,10000);row.expiry.unref();return;}uploads.delete(scope+':'+id);row.handle.close().then(()=>fsp.rm(row.temp,{force:true})).catch(()=>{});}
-    const expiry=setTimeout(expire,10*60*1000);expiry.unref();
-    uploads.set(scope+':'+id,{expiry,scope,id,temp,handle,projectId:p.projectId,name:p.name.replace(/.*[/\\]/,'')||'file',type:p.type.toLowerCase(),size:p.size,written:0,hash:crypto.createHash('sha256'),busy:false});
-    return {ok:true,id,chunkBytes:contract.CHUNK_BYTES};
+    const pending=starting.get(scope)||0;
+    if([...uploads.values()].filter(r=>r.scope===scope).length+pending>=4)throw Error('文件正在保存，请稍后重试');
+    // Reserve capacity before filesystem awaits, including starts still opening.
+    starting.set(scope,pending+1);
+    try {
+      const dir=await directory(app,scope,['uploads'],true);current();
+      const id=uuid('upload_'),temp=path.join(dir,id+'.part'),handle=await fsp.open(temp,'wx',0o600);
+      function expire(){const row=uploads.get(scope+':'+id);if(!row)return;if(row.busy){row.expiry=setTimeout(expire,10000);row.expiry.unref();return;}uploads.delete(scope+':'+id);row.handle.close().then(()=>fsp.rm(row.temp,{force:true})).catch(()=>{});}
+      const expiry=setTimeout(expire,10*60*1000);expiry.unref();
+      uploads.set(scope+':'+id,{expiry,scope,id,temp,handle,projectId:p.projectId,name:p.name.replace(/.*[/\\]/,'')||'file',type:p.type.toLowerCase(),size:p.size,written:0,hash:crypto.createHash('sha256'),busy:false});
+      return {ok:true,id,chunkBytes:contract.CHUNK_BYTES};
+    } finally {
+      const remaining=starting.get(scope)-1;
+      if(remaining)starting.set(scope,remaining);else starting.delete(scope);
+    }
   }
   const row=uploads.get(key);if(!row||row.scope!==scope)throw Error('文件上传不存在或已取消');
   if(row.busy)throw Error('文件分块正在处理');row.busy=true;
@@ -71,14 +79,29 @@ async function execute(app,binding,method,input,assertCurrent=()=>{},options={})
       row.hash.update(bytes);row.written+=bytes.length;row.expiry.refresh();current();return {ok:true,offset:row.written};
     }
     if(row.written!==row.size)throw Error('文件尚未传输完整');
-    await row.handle.sync();await row.handle.close();current();
-    const file={id:uuid('file_'),projectId:row.projectId,name:row.name,type:row.type,size:row.size,sha256:row.hash.digest('hex'),createdAt:new Date().toISOString()};
-    const dir=await directory(app,scope,['projects',projectKey(row.projectId),'files'],true);current();
-    await fsp.rename(row.temp,path.join(dir,file.id+'.'+extension(file.type)));
-    const meta=await fsp.open(path.join(dir,file.id+'.json'),'wx',0o600);
-    try{await meta.writeFile(JSON.stringify(file));await meta.sync();}finally{await meta.close();}
-    clearTimeout(row.expiry);uploads.delete(key);const result={...file,url:url(binding,file)};completed.set(key,result);
-    if(completed.size>128)completed.delete(completed.keys().next().value);current();return {ok:true,file:result};
+    const published=[];let committed=false;
+    try {
+      await row.handle.sync();await row.handle.close();current();
+      const file={id:uuid('file_'),projectId:row.projectId,name:row.name,type:row.type,size:row.size,sha256:row.hash.digest('hex'),createdAt:new Date().toISOString()};
+      const dir=await directory(app,scope,['projects',projectKey(row.projectId),'files'],true);current();
+      const binary=path.join(dir,file.id+'.'+extension(file.type)),metadataPath=path.join(dir,file.id+'.json');
+      await fsp.rename(row.temp,binary);
+      published.push(binary);
+      const meta=await fsp.open(metadataPath,'wx',0o600);
+      published.push(metadataPath);
+      try{await meta.writeFile(JSON.stringify(file));await meta.sync();}finally{await meta.close();}
+      clearTimeout(row.expiry);uploads.delete(key);const result={...file,url:url(binding,file)};completed.set(key,result);
+      if(completed.size>128)completed.delete(completed.keys().next().value);committed=true;
+      // A lost reply after commit must retain its file and replayable receipt.
+      current();return {ok:true,file:result};
+    } catch(error) {
+      if(!committed){
+        clearTimeout(row.expiry);uploads.delete(key);
+        try{await row.handle.close();}catch(_){}
+        await Promise.allSettled([row.temp,...published].map(file=>fsp.rm(file,{force:true})));
+      }
+      throw error;
+    }
   } finally {row.busy=false;}
 }
 async function handle({item},request,deps) {

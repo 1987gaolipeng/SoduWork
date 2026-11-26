@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from concurrent.futures import ThreadPoolExecutor
+import ast
 import errno
 import io
 import json
 from contextlib import closing, nullcontext, redirect_stderr, redirect_stdout
 import os
 from pathlib import Path
+import secrets
 import socket
 import sqlite3
 import subprocess
@@ -1010,6 +1013,32 @@ class LocalStartupTests(unittest.TestCase):
                 self.assertNotIn('network/proxy', message)
                 self.assertNotIn('private diagnostic fixture', message + console.getvalue())
 
+    def test_portablegit_download_failure_shows_recovery_options_without_echoing_logs(self):
+        self.state.mkdir()
+        log = self.state / 'startup.log'
+        prefix = 'Error: [SoduWork shell runtime] PortableGit download failed: '
+        for reason in ('Runtime download failed: ECONNREFUSED', 'Runtime download exceeded total time limit',
+                       'Runtime download failed: UND_ERR_BODY_TIMEOUT', 'Runtime download failed: HTTP 503'):
+            with self.subTest(reason=reason):
+                log.write_text(prefix + reason + '\nprivate diagnostic fixture', encoding='utf-8')
+                message = str(build.command_failure('Preparing the command runtime failed', log, 0))
+                for option in ('HTTP_PROXY', 'HTTPS_PROXY', 'SODUWORK_PORTABLE_GIT_MIRROR',
+                               'SODUWORK_PORTABLE_GIT_ARCHIVE'):
+                    self.assertIn(option, message)
+                self.assertIn(str(log), message)
+                self.assertNotIn('private diagnostic fixture', message)
+
+        for reason in ('SHA-256 mismatch', 'Runtime download failed: EACCES',
+                       'Runtime download exceeds the expected archive size'):
+            with self.subTest(reason=reason):
+                offset = log.stat().st_size
+                with log.open('ab') as output:
+                    output.write(('\n' + prefix + reason).encode())
+                self.assertNotIn('SODUWORK_PORTABLE_GIT_MIRROR', str(build.command_failure('Failed', log, offset)))
+        with log.open('ab') as output:
+            output.write(b'\nENOSPC')
+        self.assertIsInstance(build.command_failure('Failed', log, 0), build.DiskFullError)
+
     def test_failed_command_does_not_reuse_an_old_disk_full_diagnostic(self):
         self.state.mkdir()
         log = self.state / 'startup.log'
@@ -1436,19 +1465,39 @@ class LocalStartupTests(unittest.TestCase):
     def test_prepare_passes_isolated_caches_to_every_install_command(self):
         state = Path(self.temp.name) / 'prepare-state'
         state.mkdir()
-        with patch.object(build, 'check_dependencies', return_value=('node', 'npm')), \
+        settings = {'PYTHONHOME': '/host/python', 'PYTHONPATH': '/host/site-packages',
+                    'PIP_NO_INDEX': '1', 'PIP_FIND_LINKS': str(state / 'wheels')}
+        with patch.dict(os.environ, settings), \
+                patch.object(build, 'check_dependencies', return_value=('node', 'npm')), \
                 patch.object(build, 'sync_source'), patch.object(build, 'shutil'), \
                 patch.object(build, 'source_files', return_value=[]), \
                 patch.object(build, 'digest_files', return_value='digest'), \
                 patch.object(build, 'read_stamp', return_value=None), \
                 patch.object(build, 'run', side_effect=self.fake_venv_run(state)) as run:
+            cache_env = build.prepare_environment(state)
             build.prepare(state, state / 'startup.log')
         installs = run.call_args_list
         self.assertEqual(len(installs), 5)  # venv, pip, Runner probe, npm ci, build
         self.assertTrue(any('pip' in call.args[0] for call in installs))
         for call in installs:
-            self.assertTrue(call.kwargs.get('env') == build.prepare_environment(state),
-                            'Every preparation child must receive the isolated environment')
+            command = call.args[0]
+            expected = cache_env.copy()
+            if command[0] != 'npm':
+                self.assertEqual(command[1], '-I', command)
+                expected.pop('PYTHONHOME', None)
+                expected.pop('PYTHONPATH', None)
+                for key in ('PIP_FIND_LINKS', 'PIP_NO_INDEX'):
+                    self.assertEqual(call.kwargs['env'].get(key), settings[key])
+            self.assertTrue(call.kwargs['env'] == expected, 'Unexpected environment for ' + str(command[:3]))
+
+    def test_isolated_runner_readiness_imports_native_tls_dependency(self):
+        with patch.object(build, 'run') as run:
+            build.verify_runner_environment(Path(sys.executable), self.state, self.state / 'startup.log', env={})
+        command = run.call_args.args[0]
+        self.assertEqual(command[1:3], ['-I', '-c'])
+        imports = {module.name for statement in ast.parse(command[3]).body
+                   if isinstance(statement, ast.Import) for module in statement.names}
+        self.assertIn('truststore', imports)
 
     def test_cached_runner_disk_full_is_not_retried_as_a_dependency_repair(self):
         with patch.object(build, 'check_dependencies', return_value=('node', 'npm')), \
@@ -1634,6 +1683,35 @@ class LocalStartupTests(unittest.TestCase):
         self.assertEqual(calls[-1][0], ['node', str(client / 'scripts/install-electron.cjs')])
         self.assertFalse((self.state / 'desktop-dependencies.sha256').exists())
 
+    def test_desktop_download_honors_timeout_environment_override(self):
+        client = self.state / 'application/client'
+        client.mkdir(parents=True)
+        (client / 'package-lock.json').write_text('{}')
+        calls = []
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            if command[0] == 'node':
+                raise build.StartupError('Download fixture timed out')
+        with patch.object(build, 'check_dependencies', return_value=('node', 'npm')), \
+                patch.object(build, 'run', side_effect=run), patch.dict(os.environ, {
+                    'DISPLAY': ':fixture', 'ELECTRON_DOWNLOAD_TIMEOUT': '123',
+                }), redirect_stdout(io.StringIO()):
+            with self.assertRaises(build.StartupError):
+                build.prepare_desktop(self.state, self.state / 'startup.log')
+        self.assertEqual(calls[-1][1]['timeout'], 123.0)
+
+    def test_electron_download_timeout_rejects_invalid_values(self):
+        with patch.dict(os.environ, {'ELECTRON_DOWNLOAD_TIMEOUT': 'not-a-number'}):
+            with self.assertRaisesRegex(build.StartupError, 'positive number'):
+                build.electron_download_timeout()
+        for invalid in ('0', '-5', 'nan', 'inf'):
+            with self.subTest(invalid=invalid), \
+                    patch.dict(os.environ, {'ELECTRON_DOWNLOAD_TIMEOUT': invalid}):
+                with self.assertRaisesRegex(build.StartupError, 'positive, finite'):
+                    build.electron_download_timeout()
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(build.electron_download_timeout(), build.ELECTRON_DOWNLOAD_TIMEOUT)
+
     def test_desktop_failure_is_reported_and_a_normal_quit_returns(self):
         from unittest.mock import Mock
         server = Mock(); server.poll.return_value = None
@@ -1666,6 +1744,88 @@ class LocalStartupTests(unittest.TestCase):
         with start.exclusive(self.state):
             self.assertTrue(True)
 
+    def run_locked_launcher(self, *options, stderr=None):
+        with start.exclusive(self.state), patch.object(start, 'check_dependencies'), \
+                patch.object(start, 'check_desktop_session'), patch.object(start, 'serve') as serve, \
+                patch.object(start, 'prepare') as prepare, patch.object(start, 'launch_desktop') as launch, \
+                redirect_stdout(io.StringIO()), redirect_stderr(stderr or io.StringIO()):
+            code = start.main(['--data-dir', str(self.state), *options])
+        serve.assert_not_called()
+        prepare.assert_not_called()
+        launch.assert_not_called()
+        return code
+
+    def test_repeat_desktop_reopens_the_current_workspace_under_the_existing_lock(self):
+        start.initialize(self.state, 'fixture')
+        profile = start.desktop_profile(self.state)
+        profile.mkdir()
+        endpoint = profile / 'hub-endpoint.json'
+        endpoint.write_text('{"hub":"http://127.0.0.1:23456"}', encoding='utf-8')
+        record = profile / 'source-workspace-activation.json'
+        token = secrets.token_hex(32)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as owner, ThreadPoolExecutor(1) as pool:
+            owner.bind(('127.0.0.1', 0))
+            owner.settimeout(4)
+            record.write_text(json.dumps({'port': owner.getsockname()[1], 'token': token}), encoding='ascii')
+            files = [record, endpoint, self.state / 'local-service.json']
+            before = [file.read_bytes() for file in files]
+
+            def receive():
+                message, peer = owner.recvfrom(512)
+                owner.sendto(b'opened', peer)
+                return message
+
+            for _ in range(2):
+                request = pool.submit(receive)
+                self.assertEqual(self.run_locked_launcher('--desktop'), 0)
+                self.assertEqual(request.result(), b'open-workspace ' + token.encode('ascii'))
+        self.assertEqual([file.read_bytes() for file in files], before)
+
+    def test_locked_prepare_and_web_only_requests_do_not_activate_the_desktop(self):
+        start.initialize(self.state, 'fixture')
+        for options in ((), ('--prepare-only',), ('--prepare-only', '--desktop')):
+            with self.subTest(options=options), patch.object(start, 'request_workspace_activation') as request:
+                self.assertEqual(self.run_locked_launcher(*options), 1)
+                request.assert_not_called()
+
+    def test_locked_session_without_a_desktop_reports_failure(self):
+        start.initialize(self.state, 'fixture')
+        stderr = io.StringIO()
+        self.assertEqual(self.run_locked_launcher('--desktop', stderr=stderr), 1)
+        self.assertIn('wait for it to finish in the original terminal', stderr.getvalue())
+        self.assertFalse(start.desktop_profile(self.state).exists())
+
+    def test_invalid_activation_record_never_contacts_a_service(self):
+        profile = start.desktop_profile(self.state)
+        profile.mkdir(parents=True)
+        token = secrets.token_hex(32)
+        record = profile / 'source-workspace-activation.json'
+        for value in ('{', '[]', '{}', json.dumps({'port': 12345, 'token': 'invalid'}),
+                      *(json.dumps({'port': port, 'token': token}) for port in (0, 65536, True, '12345'))):
+            with self.subTest(value=value), patch.object(start.socket, 'socket') as connection:
+                record.write_text(value, encoding='ascii')
+                self.assertFalse(start.request_workspace_activation(self.state))
+                connection.assert_not_called()
+
+    def test_unresponsive_or_incorrect_activation_reply_is_not_success(self):
+        profile = start.desktop_profile(self.state)
+        profile.mkdir(parents=True)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as owner, ThreadPoolExecutor(1) as pool:
+            owner.bind(('127.0.0.1', 0))
+            owner.settimeout(4)
+            (profile / 'source-workspace-activation.json').write_text(json.dumps({
+                'port': owner.getsockname()[1], 'token': secrets.token_hex(32)}), encoding='ascii')
+
+            def reject():
+                _, peer = owner.recvfrom(512)
+                owner.sendto(b'opened-extra', peer)
+
+            response = pool.submit(reject)
+            self.assertFalse(start.request_workspace_activation(self.state))
+            response.result()
+            # A stale record can point to a port that never acknowledges the request.
+            self.assertFalse(start.request_workspace_activation(self.state))
+
     def test_server_image_does_not_install_optional_opencode(self):
         dockerfile = (build.ROOT / "ops/self-host/Dockerfile").read_text(encoding="utf-8")
         self.assertNotIn("opencode-ai@", dockerfile)
@@ -1681,7 +1841,7 @@ class LocalStartupTests(unittest.TestCase):
         for name in build.BACKEND_FILES:
             put("hub-backend/" + name)
         for name in ("hub-backend/app/api.py", "tools/dev/local_server.py", "skills/example/SKILL.md",
-                     "client/core/connector-brand.js", "client/components/panels/connector-config.js",
+                     "client/core/connector-brand.js", "client/core/locales/builtin-skills.js", "client/components/panels/connector-config.js",
                      "client/components/client-auth/legal-html.js", "client/components/client-auth/legal-html.css",
                      "client/assets/connector-brands/fixture.svg", "third-party/manifest.json", "LICENSE",
                      "hub-frontend/src/index.jsx", "hub-frontend/package.json", "hub-frontend/package-lock.json",
@@ -1727,26 +1887,28 @@ class LocalStartupTests(unittest.TestCase):
             self.assertEqual((self.state / "application/client/assets/connector-brands/fixture.svg").read_text(), "updated artwork")
             for file in generated:
                 self.assertEqual(file.read_bytes(), b'generated runtime fixture')
-            for relative in ('client/components/client-auth/legal-html.js',
+            for relative in ('client/core/locales/builtin-skills.js',
+                             'client/components/client-auth/legal-html.js',
                              'client/components/client-auth/legal-html.css'):
                 with self.subTest(shared_frontend_source=relative):
                     calls.clear()
-                    put(relative, 'updated shared legal document resource')
+                    put(relative, 'updated shared frontend resource')
                     build.prepare(self.state, self.state / 'startup.log')
                     self.assertEqual(calls, [
                         '[Runner] 检查本地运行环境 / Checking the local Runner environment',
                         '[4/4] 构建管理页面 / Building the management UI'])
                     self.assertEqual((self.state / 'application' / relative).read_text(),
-                                     'updated shared legal document resource')
+                                     'updated shared frontend resource')
             calls.clear()
             build.prepare(self.state, self.state / 'startup.log')
             self.assertEqual(calls, ['[Runner] 检查本地运行环境 / Checking the local Runner environment'])
-            before = (self.state / 'python-dependencies.sha256').read_text()
-            put('hub-backend/requirements-runner.txt', 'updated Runner dependencies')
-            commands.clear()
-            build.prepare(self.state, self.state / 'startup.log')
-            self.assertTrue(any('pip' in command for command in commands))
-            self.assertNotEqual((self.state / 'python-dependencies.sha256').read_text(), before)
+            for manifest in ('requirements-runner.txt', 'requirements-image.txt'):
+                before = (self.state / 'python-dependencies.sha256').read_text()
+                put('hub-backend/' + manifest, 'updated dependencies')
+                commands.clear()
+                build.prepare(self.state, self.state / 'startup.log')
+                self.assertTrue(any('pip' in command for command in commands))
+                self.assertNotEqual((self.state / 'python-dependencies.sha256').read_text(), before)
             commands.clear()
             fault['probe_failures'] = 1
             build.prepare(self.state, self.state / 'startup.log')

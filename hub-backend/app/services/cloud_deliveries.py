@@ -15,6 +15,7 @@ from sqlalchemy import func, literal, select, update
 from ..automation_models import ExecutionSession
 from ..conversation_handoff_models import ConversationHandoff
 from ..models import Attachment, Task
+from ..schemas import attachment_to_api
 from . import delivery_bundle, delivery_collections as collections, delivery_manifest, task_requirements
 
 
@@ -101,6 +102,11 @@ async def status(session, client, task_id):
         return _response({"state": "running"}, artifact_url=artifact_url, execution=execution)
     if execution.state != "done":
         return _response({"state": "incomplete", "error": "本轮未完成，已保留的过程文件不作为最终成果同步"}, artifact_url=artifact_url, execution=execution)
+    if (not mark and handoff.source.get("entryKind") == "requirement"
+            and task.status == "done" and task.reviewed_at):
+        accepted = await _accepted_files(session, task, execution)
+        if accepted:
+            return accepted
     delivery = None
     if mark.get("deliveryId"):
         try:
@@ -109,6 +115,36 @@ async def status(session, client, task_id):
         except HTTPException:
             mark = {"state": "removed", "error": "成果已从资料库删除，可在回收站恢复"}
     return _response(mark, delivery, artifact_url=artifact_url, execution=execution)
+
+
+async def _accepted_files(session, task, execution):
+    from . import release_control
+
+    version = await release_control.latest_artifact(session, task.id)
+    if version is None or version.kind != "files" or version.state != "reviewed":
+        return None
+    manifest = version.manifest or {}
+    frozen = manifest.get("files") or []
+    round_no = int((execution.metadata_ or {}).get("round") or 1)
+    if not manifest.get("complete") or not frozen or any(
+            not isinstance(item, dict) or not item.get("id") or item.get("sourceRef") != execution.ref
+            or (item.get("round") or 1) != round_no
+            for item in frozen):
+        return None
+    rows = (await session.scalars(select(Attachment).where(
+        Attachment.task_id == task.id, Attachment.source_ref == execution.ref,
+        Attachment.id.in_([item["id"] for item in frozen])))).all()
+    try:
+        files = [attachment_to_api(row) for row in delivery_bundle.select_artifact(rows, version)]
+    except HTTPException as exc:
+        return _response({"state": "failed", "error": exc.detail}, execution=execution)
+    if not files:
+        return None
+    # The accepted version is already downloadable. Its optional library copy
+    # can still be requested through POST by clients that check retryable.
+    return {**_response({"state": "delivered"}, execution=execution),
+            "artifactVersionId": version.id, "files": files,
+            "artifactUrl": version.url or (files[0]["url"] if len(files) == 1 else ""), "retryable": True}
 
 
 async def _collect(session, task, handoff, execution):

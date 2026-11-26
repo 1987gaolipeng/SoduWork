@@ -34,10 +34,28 @@ test('an old Runner cannot silently execute a new access policy',async()=>{
  const adapter=createRunnerRuntimeAdapter({runnerRuntime:{rpc:async()=>({ok:true,data:{installed:true,state:'ready'}})}});
  await assert.rejects(adapter.createSession({native:{runner:{openOptions:{cwd:os.tmpdir(),accessPolicy:policy.create('standard',os.tmpdir())}}}}),/权限模式/);
 });
-test('approval IPC rejects a different window and forwards exact request only for owner',async()=>{
- let called=0;const handler=require('../main/access-control/ipc').answerHandler({get:()=>({attachedWindow:{webContents:{id:2}},answerUi:()=>{called++;return{ok:true}}})});
- assert.equal((await handler({sender:{id:3}},'chat',{requestId:'a'})).ok,false);assert.equal(called,0);
- assert.equal((await handler({sender:{id:2}},'chat',{requestId:'a'})).ok,true);assert.equal(called,1);
+test('Runner detection failures are reported separately from unsupported access modes',async()=>{
+ const adapter=createRunnerRuntimeAdapter({runnerRuntime:{rpc:async()=>({ok:false,error:'不认识的执行底座'})}});
+ await assert.rejects(
+  adapter.createSession({native:{runner:{openOptions:{cwd:os.tmpdir(),accessPolicy:policy.create('standard',os.tmpdir())}}}}),
+  error=>error.code==='RUNNER_PROBE_FAILED' && /探测失败/.test(error.message) && !/权限模式/.test(error.message));
+});
+test('approval IPC forwards modern and legacy answers only from the currently attached window', async () => {
+  const first = { id: 2 }, second = { id: 3 }, accepted = [];
+  const handle = { attachedWindow: { webContents: first },
+    answerUi(value) { accepted.push(value); return { ok: true }; } };
+  const answer = require('../main/access-control/ipc').answerHandler({ get: () => handle });
+  for (const value of [{ requestId: 'a', decision: 'deny' }, { cancelled: true }]) {
+    assert.equal((await answer({ sender: second }, 'chat', value)).ok, false);
+    assert.equal((await answer({ sender: first }, 'chat', value)).ok, true);
+  }
+  handle.attachedWindow = { webContents: second };
+  const legacy = { cancelled: true };
+  assert.equal((await answer({ sender: first }, 'chat', legacy)).ok, false);
+  assert.equal((await answer({ sender: second }, 'chat', legacy)).ok, true);
+  handle.attachedWindow = null;
+  assert.equal((await answer({ sender: second }, 'chat', legacy)).ok, false);
+  assert.deepEqual(accepted, [{ requestId: 'a', decision: 'deny' }, { cancelled: true }, legacy]);
 });
 
 for (const mode of ['standard', 'full', 'readonly']) test(`Runner questions require an explicit matching choice in ${mode} mode`, async t => {

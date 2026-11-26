@@ -1,4 +1,4 @@
-import { translateText as tx, localeMap, useLocale } from '../i18n.js'
+import { translateText as tx, useLocale } from '../i18n.js'
 import React, { useState } from 'react'
 import { api } from '../api.js'
 import { useViewportHeight } from '../viewport-height.js'
@@ -8,7 +8,7 @@ import './role-card-actions.css'
 
 export default function Roles() {
   const listRef = useViewportHeight(180)
-  const uiLocale = useLocale();
+  useLocale()
   const roles = useAsync(() => api.roles())
   const perms = useAsync(() => api.permissions())
   const users = useAsync(() => api.users().catch(() => []))
@@ -32,7 +32,7 @@ export default function Roles() {
         <div className="stat"><div className="sv">{list.filter((r) => !r.isSystem).length}</div><div className="sl"><span className="sd" style={{ background: 'var(--c-orange)' }} />{tx("自定义角色")}</div></div>
       </div>
       <div className="admin-filterbar">
-        <span className="admin-access-note">{tx("分配角色即授予对应权限；系统内置角色不可删除。")}</span>
+        <span className="admin-access-note">{tx("内置角色的名称和权限只读。可通过自定义角色授予其他权限。")}</span>
         <div className="admin-filter-actions"><button className="btn btn-primary" onClick={() => setEdit({ role: null })}><Icon name="plus" />{tx("新建角色")}</button></div>
       </div>
       <div ref={listRef} className="intgrid admin-viewport-list" tabIndex={0} role="region" aria-label={tx("角色权限")}>
@@ -47,13 +47,9 @@ export default function Roles() {
                   <div className="int-type">{r.permissions.length}{tx(" 项权限 · ")}{mc}{tx(" 名成员")}</div>
                 </div>
               </div>
-              <div className="role-card-perms">
-                {r.permissions.length === 0 && <span className="muted" style={{ fontSize: 14.5 }}>{tx("无权限")}</span>}
-                {r.permissions.slice(0, 6).map((k) => { const p = catalog.find((c) => c.key === k); return <span key={k} className="chip src-ext" style={{ fontSize: 14.5 }}>{p ? tx(p.label) : k}</span> })}
-                {r.permissions.length > 6 && <span className="chip" style={{ fontSize: 14.5, background: 'var(--surface-2)', color: 'var(--ink-3)' }}>+{r.permissions.length - 6}</span>}
-              </div>
+              <RolePermissions role={r} catalog={catalog} />
               <footer className="role-card-actions admin-card-actions">
-                <button type="button" className="admin-card-action is-primary" onClick={() => setEdit({ role: r })}><Icon name="pencil" />{tx("编辑权限")}</button>
+                <button type="button" className="admin-card-action is-primary" onClick={() => setEdit({ role: r })}><Icon name={r.isSystem ? "shield" : "pencil"} />{r.isSystem ? tx("查看权限") : tx("编辑权限")}</button>
                 {!r.isSystem && <div className="role-card-danger-group"><button type="button" className="admin-card-action is-danger" onClick={() => (mc ? toast(tx("仍有 ") + mc + tx(" 名成员在用，不能删")) : setDel(r))}><Icon name="trash" />{tx("删除角色")}</button></div>}
               </footer>
             </div>
@@ -66,12 +62,39 @@ export default function Roles() {
   )
 }
 
+function PermissionInfo({ permission }) {
+  const risk = { low: tx("低风险"), medium: tx("中风险"), high: tx("高风险") }[permission.risk]
+  return <>
+    <b>{tx(permission.label || permission.key)}</b>
+    {risk && <small>{risk}</small>}
+    {permission.description && <span>{tx(permission.description)}</span>}
+  </>
+}
+
+function RolePermissions({ role, catalog }) {
+  const [expanded, setExpanded] = useState(false)
+  const keys = role.permissions || []
+  return <div className="role-card-perms">
+    {!keys.length && <span className="muted">{tx("无权限")}</span>}
+    {(expanded ? keys : keys.slice(0, 6)).map(key => {
+      const permission = catalog.find(item => item.key === key) || { key }
+      return expanded
+        ? <div key={key} className="role-permission-info"><PermissionInfo permission={permission} /></div>
+        : <span key={key} className="chip src-ext">{tx(permission.label || key)}</span>
+    })}
+    {keys.length > 0 && <button type="button" className="chip" aria-expanded={expanded}
+      onClick={() => setExpanded(!expanded)}>{expanded ? tx("收起权限") : keys.length > 6 ? tx("展开其余 {0} 项权限", [keys.length - 6]) : tx("查看权限")}</button>}
+  </div>
+}
+
 function RoleEditor({ role, catalog, onClose, onDone }) {
-  const uiLocale = useLocale();
+  useLocale()
+  const readOnly = Boolean(role?.isSystem)
   const [name, setName] = useState(role ? role.name : '')
   const [keys, setKeys] = useState(new Set(role ? role.permissions : []))
   const [busy, setBusy] = useState(false)
-  const groups = [...new Set(catalog.map((c) => c.group))]
+  const visible = readOnly ? catalog.filter(permission => keys.has(permission.key)) : catalog
+  const groups = [...new Set(visible.map((c) => c.group))]
   const toggle = (k) => setKeys((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
   const groupKeys = (g) => catalog.filter((c) => c.group === g).map((c) => c.key)
   const allOn = (g) => groupKeys(g).every((k) => keys.has(k))
@@ -89,25 +112,29 @@ function RoleEditor({ role, catalog, onClose, onDone }) {
   }
 
   return (
-    <Modal title={role ? tx("编辑角色") : tx("新建角色")} icon="shield" wide onClose={onClose}
-      foot={<>
+    <Modal title={readOnly ? tx("查看权限") : role ? tx("编辑角色") : tx("新建角色")} icon="shield" wide draft={readOnly ? undefined : [name, [...keys].sort()]} busy={busy} onClose={onClose}
+      foot={dismiss => <>
         <span className="muted" style={{ fontSize: 14.5, marginRight: 'auto' }}>{tx("已选 ")}{keys.size} / {catalog.length}{tx(" 项权限")}</span>
-        <button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
-        <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : tx("保存")}</button>
+        <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{readOnly ? tx("关闭") : tx("取消")}</button>
+        {!readOnly && <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : tx("保存")}</button>}
       </>}>
-      <div><label className="f-lbl">{tx("角色名")}</label><input className="f-in" value={name} onChange={(e) => setName(e.target.value)} placeholder={tx("例：部门管理员 / 只读观察员")} autoFocus /></div>
+      {readOnly ? <div><b>{role.name}</b><p>{tx("内置角色的名称和权限只读。可通过自定义角色授予其他权限。")}</p></div>
+        : <div><label className="f-lbl">{tx("角色名")}</label><input className="f-in" value={name} onChange={(e) => setName(e.target.value)} placeholder={tx("例：部门管理员 / 只读观察员")} autoFocus /></div>}
       <div>
-        <label className="f-lbl">{tx("权限点（按分组勾选）")}</label>
+        <label className="f-lbl">{readOnly ? tx("查看权限") : tx("权限点（按分组勾选）")}</label>
         {groups.map((g) => (
           <div key={g} className="permgroup">
             <div className="permgroup-head">
               <span className="pg-name">{tx(g)}</span>
-              <span className="pg-all" onClick={() => toggleGroup(g)}>{allOn(g) ? tx("取消全选") : tx("全选")}</span>
+              {!readOnly && <button type="button" className="pg-all" onClick={() => toggleGroup(g)}>{allOn(g) ? tx("取消全选") : tx("全选")}</button>}
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {catalog.filter((c) => c.group === g).map((c) => (
-                <span key={c.key} className={'bp' + (keys.has(c.key) ? ' on' : '')} onClick={() => toggle(c.key)} style={{ cursor: 'pointer' }}>{keys.has(c.key) ? '✓ ' : ''}{tx(c.label)}</span>
-              ))}
+            <div className="role-permission-list">
+              {visible.filter(c => c.group === g).map(c => readOnly
+                ? <div key={c.key} className="role-permission-info"><PermissionInfo permission={c} /></div>
+                : <label key={c.key} className="role-permission-choice">
+                    <input type="checkbox" checked={keys.has(c.key)} onChange={() => toggle(c.key)} />
+                    <span className="role-permission-info"><PermissionInfo permission={c} /></span>
+                  </label>)}
             </div>
           </div>
         ))}

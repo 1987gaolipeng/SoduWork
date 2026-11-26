@@ -227,6 +227,45 @@ test('serialized task attachments keep their own route despite task and artifact
   }
 });
 
+test('native save resolves legacy attachment IDs with the current account after picking a path', async t => {
+  const h = harness(t);
+  const attachmentId = 'f107e0de-42d1-4925-bcd4-029de473df0d';
+  const signed = url.replace('12345678', attachmentId);
+  const access = signed.split('?')[0] + '/access';
+  h.state.response = () => Response.json({ attachmentId, url: signed });
+  const link = { attachmentId, filename: 'legacy.md' };
+  for (const payload of [link, { ...link, url: '' }, { ...link, url: null }]) {
+    h.state.fetched.length = 0;
+    assert.deepEqual(await h.api.downloadAttachment(payload), { ok: true });
+    assert.deepEqual(fs.readFileSync(path.join(h.root, 'saved.bin')), h.state.data);
+    assert.deepEqual(h.state.fetched.map(request => request.target), [access, signed]);
+    assert.equal(h.state.fetched[0].options.method, 'POST');
+    assert.equal(h.state.fetched[0].identity.session, 'current-account-session');
+    assert.equal(h.state.fetched[1].identity, undefined);
+  }
+  h.state.fetched.length = 0;
+  h.state.cancel = true;
+  assert.deepEqual(await h.api.downloadAttachment(link), { ok: false, canceled: true });
+  assert.equal(h.state.fetched.length, 0);
+});
+
+test('ID-only saves preserve the destination on denial and leave other URL routes unchanged', async t => {
+  const h = harness(t);
+  const link = { attachmentId: '2891d663-4916-44c5-9860-f8df54a0f702', filename: 'legacy.txt' };
+  const destination = path.join(h.root, 'saved.bin');
+  fs.writeFileSync(destination, 'previous bytes');
+  h.state.response = () => new Response(null, { status: 404 });
+  await assert.rejects(h.api.downloadAttachment(link), /附件不存在或你没有查看权限/);
+  assert.equal(fs.readFileSync(destination, 'utf8'), 'previous bytes');
+  assert.equal(h.state.fetched.length, 1);
+  h.state.fetched.length = 0;
+  await assert.rejects(h.api.downloadAttachment({ ...link, attachmentId: 'not-a-uuid' }));
+  await assert.rejects(h.api.downloadAttachment({ ...link, url: ' ' }));
+  await assert.rejects(h.api.downloadAttachment({ ...link, url: url.replace('127.0.0.1', 'external.invalid') }));
+  await assert.rejects(h.api.readAttachmentBinary(link));
+  assert.equal(h.state.fetched.length, 0);
+});
+
 test('expired attachment tickets renew through the signed account for previews, downloads and library reads', async t => {
   const h = harness(t), refreshed = url.replace('abcdefghijklmnopqrstuvwx', 'renewedabcdefghijklmnopq');
   h.state.type = 'text/markdown';

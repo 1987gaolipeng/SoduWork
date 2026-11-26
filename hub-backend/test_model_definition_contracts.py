@@ -36,7 +36,6 @@ class ModelDefinitionContractsTests(unittest.TestCase):
 
     def test_invalid_edits_raise_but_legacy_reads_fall_back_per_modality(self):
         cases = [("chat", {"thinkingMode": "unsupported"}),
-                 ("chat", {"imageRouting": "native", "capabilities": {"imageInput": "unsupported"}}),
                  ("video", {"statusPath": "/jobs/no-id"}),
                  ("image", {"endpointPath": "https://another.invalid/generate"}),
                  ("video", {"defaults": {"large": "x" * 13000}})]
@@ -47,6 +46,71 @@ class ModelDefinitionContractsTests(unittest.TestCase):
                 self.assertEqual(contracts.model_config(raw, modality),
                                  contracts.clean_model_config({}, modality))
         self.assertEqual(contracts.normalize_image_routing("native-first"), "vision-fallback")
+
+    def test_invalid_config_types_are_rejected_but_legacy_reads_stay_available(self):
+        for value in ([], ["config"], "not-an-object", True, False, 123, 0):
+            for modality in ("chat", "image", "video"):
+                with self.subTest(value=value, modality=modality):
+                    with self.assertRaisesRegex(ValueError, "JSON"):
+                        contracts.clean_model_config(value, modality)
+                    self.assertEqual(contracts.model_config(value, modality),
+                                     contracts.clean_model_config({}, modality))
+        # Existing explicit empty/null configurations keep their reset semantics.
+        self.assertEqual(contracts.clean_model_config(None), {})
+        self.assertEqual(contracts.clean_model_config({}), {})
+
+    def test_legacy_bad_field_does_not_erase_valid_manual_capabilities(self):
+        declared = {"imageInput": "unknown", "toolCalling": "supported", "streaming": "unsupported"}
+        valid = {"capabilities": declared, "imageRouting": "auto", "thinkingMode": "always",
+                 "thinkingLevelMap": {"off": None, "high": "high"}, "maxOutputTokens": 4096}
+        for invalid in ({"thinkingFormat": "unrecognized-format"}, {"maxOutputTokens": 512},
+                        {"defaults": []}, {"statusPath": "/jobs/{id}"}):
+            raw = {**valid, **invalid}
+            before = copy.deepcopy(raw)
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    contracts.clean_model_config(raw)
+                result = contracts.model_config(raw)
+                self.assertEqual(result["capabilities"], declared)
+                self.assertEqual(result["thinkingMode"], "always")
+                self.assertTrue(result["reasoning"])
+                self.assertEqual(result["thinkingLevelMap"], {"off": None, "high": "high"})
+                self.assertEqual(contracts.clean_model_config(result), result)
+                self.assertEqual(contracts.model_config(result), result)
+                self.assertEqual(raw, before)
+
+    def test_partial_legacy_capabilities_preserve_only_explicit_valid_states(self):
+        raw = {"capabilities": {"imageInput": "unsupported", "toolCalling": "unknown",
+                                "streaming": "yes", "futureCapability": "supported"},
+               "maxOutputTokens": 4096, "imageRouting": "auto"}
+        with self.assertRaises(ValueError):
+            contracts.clean_model_config(raw)
+        result = contracts.model_config(raw)
+        self.assertEqual(result["capabilities"], {"imageInput": "unsupported", "toolCalling": "unknown"})
+        self.assertEqual(result["maxOutputTokens"], 4096)
+        self.assertNotIn("supported", result["capabilities"].values())
+
+    def test_native_conflict_keeps_explicit_rejection_independent_of_key_order(self):
+        for routing in ("native", " Native "):
+            raw = {"imageRouting": routing, "capabilities": {"imageInput": "unsupported",
+                                                                      "streaming": "supported"}}
+            for config in (raw, dict(reversed(list(raw.items())))):
+                with self.subTest(routing=routing, keys=list(config)):
+                    with self.assertRaises(ValueError):
+                        contracts.clean_model_config(config)
+                    result = contracts.model_config(config)
+                    self.assertEqual(result["capabilities"], raw["capabilities"])
+                    self.assertEqual(result["imageRouting"], "vision-fallback")
+                    self.assertEqual(contracts.clean_model_config(result), result)
+
+    def test_legacy_media_recovery_keeps_safe_paths_without_chat_capabilities(self):
+        raw = {"endpointPath": "/jobs", "statusPath": "https://other.invalid/{id}",
+               "resultPath": "/jobs/{id}/result", "defaults": {"duration": 5},
+               "capabilities": {"toolCalling": "supported"}}
+        result = contracts.model_config(raw, "video")
+        self.assertEqual(result, {"endpointPath": "/jobs", "resultPath": "/jobs/{id}/result",
+                                  "defaults": {"duration": 5}})
+        self.assertEqual(contracts.clean_model_config(result, "video"), result)
 
 
 class CatalogInitializationTests(IsolatedDatabase):

@@ -5,6 +5,28 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 _QUALITY_RANK = {"unknown": 0, "estimated": 1, "reported": 2, "reconciled": 3}
+MAX_REPORTED_COUNTER = 1_000_000_000
+
+
+def validate_reported_usage(usage: dict | None) -> None:
+    """Reject implausible client-reported counters before they enter the ledger."""
+    data = dict(usage or {})
+    aliases = (
+        "input_tokens", "input", "prompt_tokens", "output_tokens", "output",
+        "completion_tokens", "cache_read_tokens", "cacheRead", "cache_read_input_tokens",
+        "cached_input_tokens", "cache_write_tokens", "cacheWrite",
+        "cache_creation_input_tokens", "cache_write_input_tokens", "reasoning_tokens",
+        "reasoningTokens", "output_reasoning_tokens", "total_tokens", "total",
+    )
+    for name in aliases:
+        if name not in data or isinstance(data[name], bool) or data[name] is None:
+            continue
+        try:
+            value = Decimal(str(data[name]))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+        if not value.is_finite() or value < 0 or value > MAX_REPORTED_COUNTER:
+            raise ValueError(f"usage.{name} exceeds the supported per-event limit")
 
 
 def _number(value: Any) -> int:

@@ -36,10 +36,14 @@ if (typeof electron !== 'string') {
     const end = source.indexOf('\n  });', start);
     assert.ok(start >= 0 && end > start, 'Production second-instance listener must be present');
     const listener = source.slice(start, end + '\n  });'.length);
-    require('node:vm').runInNewContext(listener, {
+    const openSettings = source.slice(source.indexOf('function openFirstChatSettings(link) {'), source.indexOf('const _workWindows'));
+    require('node:vm').runInNewContext(openSettings + '\n' + listener, {
       app, process, console,
       _linuxStartup: { focusRecovery: () => false },
       _fileOpenModule: fileOpen,
+      _firstChatLinks: require('../main/first-chat-links.cjs'),
+      _quitRelaunch: require('../main/quit-relaunch.cjs').create(app),
+      desktopStarted: true,
       _fileOpen: { enqueue: files => { state.files = files; return files.length > 0; } },
       _desktopOverlay: overlay,
       _flags: { get: () => flags, merge: () => { throw Error('Relaunch must preserve entry preferences'); } },
@@ -75,8 +79,8 @@ if (typeof electron !== 'string') {
   const report = { ok: false, platform: process.platform, packaged: false, cases: [],
     boundary: 'Real unbundled Electron requestSingleInstanceLock/second-instance and the production listener. Isolated temporary profile, no windows or UI automation, window operations stubbed. Does not verify installed shortcuts, native foreground focus or visible window recovery.' };
 
-  function launch(role) {
-    const child = spawn(electron, [__filename], { env: { ...env, SODUWORK_RELAUNCH_ROLE: role },
+  function launch(role, args = []) {
+    const child = spawn(electron, [__filename, ...args], { env: { ...env, SODUWORK_RELAUNCH_ROLE: role },
       windowsHide: true, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
     let stderr = '', exited = false, spawnError;
     const messages = [], waiters = [];
@@ -152,6 +156,16 @@ if (typeof electron !== 'string') {
         assert.deepEqual(result.overlayCalls, [], 'Relaunch must not restore disabled overlay entries');
         assert.deepEqual(result.flags, { dock: false, pet: false, tray: false });
         assert.deepEqual(result.files, []);
+      }
+      for (const [step, view] of [['runtime', 'agents'], ['model', 'models']]) {
+        primary.child.send({ kind: 'prepare', name: step });
+        await primary.wait('prepared');
+        const secondary = launch('secondary', ['soduwork://first-chat/' + step]);
+        assert.equal((await secondary.wait('lock')).locked, false);
+        const result = await primary.wait('relaunch');
+        assert.equal((await secondary.waitForExit()).code, 0);
+        assert.deepEqual(result.workspaces, [{ options: { panel: 'workspace', view }, anchor: null }]);
+        report.cases.push(result);
       }
       report.ok = true;
     } catch (error) {

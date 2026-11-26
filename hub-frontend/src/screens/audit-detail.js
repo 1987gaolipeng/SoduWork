@@ -6,7 +6,7 @@ const DETAIL_LABELS = localeMap(() => ({
   chars: '文字', files: '附件', mode: '模式', permissions: '权限', fields: '字段',
   name: '名称', setupFields: '配置', setupState: '状态', mcpServers: '连接器', personalMcpServers: '个人连接',
   count: '数量', status: '状态', state: '状态', date: '日期', provider: '平台',
-  environment: '环境', channel: '渠道',
+  environment: '环境', channel: '渠道', sort: '排序',
 }))
 /* Generic fallback for actions without a curated branch, so the details column
    shows the recorded facts instead of an em dash. Identifier or credential keys
@@ -21,20 +21,31 @@ function summarizeDetail(d) {
     else if (typeof value === 'string') text = value.slice(0, 48)
     else if (Array.isArray(value) && value.length) text = '×' + value.length
     if (!text) continue
-    parts.push(`${DETAIL_LABELS[key] || key} ${text}`)
+    parts.push(`${Object.hasOwn(DETAIL_LABELS, key) ? DETAIL_LABELS[key] : key} ${text}`)
     if (parts.length >= 4) break
   }
   return parts.join(' · ')
 }
 export function detailText(a) {
-  const d = a.detail || {}
+  const d = a.detail
+  if (d == null) return tx('无附加信息')
+  if (typeof d !== 'object' || Array.isArray(d)) return tx('详情格式异常')
+  if (!Object.keys(d).length) return tx('无附加信息')
   const bits = []
-  if (a.action === 'task.dispatch') bits.push(tx("下发 {0} 个 SoduWork", [d.dispatched ?? 0]))
+  if (['org.create', 'org.update'].includes(a.action) && Object.hasOwn(d, 'parentId')) {
+    if (d.parentId !== null && typeof d.parentId !== 'string') return tx('详情格式异常')
+    bits.push(d.parentId ? tx('上级部门 ID：{0}', [d.parentId]) : tx('上级部门：无'))
+    bits.push(summarizeDetail(d))
+  }
+  else if (a.action === 'task.dispatch') bits.push(tx("下发 {0} 个 SoduWork", [d.dispatched ?? 0]))
   else if (a.action === 'task.dispatch.sub') bits.push(tx("「{0}」→ {1} 盒", [d.title || '', d.boxes ?? 0]))
   else if (a.action === 'task.advance') bits.push('→ ' + (d.toStage || '') + (d.via === 'admin' ? tx(" · 管理端") : tx(" · 桌宠")))
   else if (a.action === 'task.reject') bits.push(tx("打回 → ") + (d.toStage || '') + (d.note ? ' · ' + d.note : ''))
   else if (a.action === 'client.assign') bits.push(d.ownerUserId ? tx("归属到用户") : tx("解除归属"))
-  else if (a.action === 'user.update') bits.push((d.fields || []).join('/') + (d.pwChanged ? tx(" +改密码") : ''))
+  else if (a.action === 'user.update') {
+    if (d.fields != null && !Array.isArray(d.fields)) return tx('详情格式异常')
+    bits.push((d.fields || []).filter(field => typeof field === 'string').join('/') + (d.pwChanged ? tx(" +改密码") : ''))
+  }
   else if (a.action === 'role.update') bits.push(tx("权限 {0} 项", [(d.permissions || []).length]))
   else if (a.action === 'report.generate') bits.push(tx("{0} · 生成 {1} 份", [d.date || '', d.made ?? 0]) + (d.skipped ? tx("，跳过 {0} 人", [d.skipped]) : ''))
   else if (a.action === 'plugin.install' || a.action === 'plugin.upgrade' || a.action === 'plugin.enable') {
@@ -47,5 +58,5 @@ export function detailText(a) {
   else if (a.action === 'plugin.conversation_use') bits.push(tx("调用 {0} 个插件", [(d.pluginIds || []).length]))
   else if (a.action === 'team.message') bits.push(tx("文字 {0} 字 · 附件 {1} 个", [d.chars ?? 0, d.files ?? 0]))
   if (!bits.length) bits.push(summarizeDetail(d))
-  return bits.filter(Boolean).join(' · ')
+  return bits.filter(Boolean).join(' · ') || tx('无可显示的附加信息')
 }

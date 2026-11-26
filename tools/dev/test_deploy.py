@@ -1,6 +1,7 @@
 """Safety and restart contracts of the public single-host entry."""
 import base64
 import io
+import json
 import subprocess
 import os
 from pathlib import Path
@@ -37,6 +38,23 @@ class DeployTests(unittest.TestCase):
         with self.assertRaisesRegex(deploy.StartupError, "restore"):
             deploy.initialize(self.state, create=True, port=None, origin=None)
         self.assertEqual((self.state / "deployment.json").read_text(), "{}")
+
+    def test_remote_chat_is_opt_in_per_instance_and_reaches_compose(self):
+        config = deploy.initialize(self.state, create=True, port=None, origin="https://hub.example")
+        config.pop("imEnabled", None)
+        file = self.state / "deployment.json"
+        for value in (None, True, False):
+            if value is not None:
+                config["imEnabled"] = value
+            file.write_text(json.dumps(config), encoding="utf8")
+            saved = deploy.initialize(self.state, create=False, port=None, origin=None)
+            with patch.dict(os.environ, {"SODUWORK_IM_ENABLED": "true"}):
+                self.assertEqual(deploy.environment(saved)["SODUWORK_IM_ENABLED"], "true" if value else "false")
+        self.assertIn("IM_ENABLED: \"${SODUWORK_IM_ENABLED:-false}\"", deploy.COMPOSE.read_text(encoding="utf8"))
+        config["imEnabled"] = "false"
+        file.write_text(json.dumps(config), encoding="utf8")
+        with self.assertRaises(deploy.StartupError):
+            deploy.initialize(self.state, create=False, port=None, origin=None)
 
     def test_existing_settings_cannot_silently_switch_endpoint(self):
         deploy.initialize(self.state, create=True, port=None, origin=None)

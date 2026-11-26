@@ -6,21 +6,32 @@ separately authorized operator recorded in audit and workflow receipts.
 """
 import logging
 from types import SimpleNamespace
+
 from fastapi import HTTPException
+from sqlalchemy import select
+
+from ..automation_models import ExecutionSession
 from ..models import Task
 from ..schemas import task_to_api
-from . import audit, task_access, task_requirements, tasks as svc
+from . import audit, task_access, task_requirements
+from . import tasks as svc
 from .task_dispatch_context import (
-    _ext_project_id, _repo_ctx, _resolve_repo, _attach_dev_flow, _attach_skills,
-    _settle_work_dir, _link_task_repo, _stale_runner_hint, _push_task,
+    _attach_dev_flow,
+    _attach_skills,
+    _ext_project_id,
+    _link_task_repo,
+    _push_task,
     _remote_execution_context,
+    _repo_ctx,
+    _resolve_repo,
+    _settle_work_dir,
+    _stale_runner_hint,
 )
 
 log = logging.getLogger("uvicorn.error")
 
 
 async def _active_workflow(session, tid):
-    from sqlalchemy import select
     from ..automation_models import WorkflowRun
     from .workflow_runs import _ACTIVE_RUN_STATES
     return (await session.execute(select(WorkflowRun).where(
@@ -31,9 +42,8 @@ async def _active_workflow(session, tid):
 async def dispatch(tid, body, client, session, *, actor=None):
     import asyncio as _aio
 
-    from ..services import ai_exec, dispatch_attempts
+    from ..services import ai_exec, dispatch_attempts, dispatch_identity
     from ..services import task_events as ev
-    from ..services import task_access
     await task_access.reserve_task_write(session, tid, client.id)
     t = await session.get(Task, tid, with_for_update=True, populate_existing=True)
     if t is None or not task_access.is_owner(t, client):
@@ -217,6 +227,10 @@ async def dispatch(tid, body, client, session, *, actor=None):
         confirmed_ref = await _es.confirm_uncertain_dispatch(
             session, t, detail["expectedRef"],
             str(detail.get("runnerId") or ""))
+        state = "confirming"
+        if confirmed_ref:
+            state = await session.scalar(select(ExecutionSession.state).where(
+                ExecutionSession.task_id == tid, ExecutionSession.ref == confirmed_ref))
         final_ref = confirmed_ref or detail["expectedRef"]
         if me:
             await audit.log(
@@ -233,7 +247,7 @@ async def dispatch(tid, body, client, session, *, actor=None):
         out.update({
             "ok": True, "pending": not bool(confirmed_ref),
             "uncertain": not bool(confirmed_ref),
-            "state": "running" if confirmed_ref else "confirming",
+            "state": state,
             "retryable": False, "attemptId": attempt_id,
             "issueId": final_ref, "expectedRef": detail["expectedRef"],
             "task": task_api or task_to_api(t),
@@ -335,14 +349,54 @@ async def dispatch(tid, body, client, session, *, actor=None):
     try:
         if handoff:
             files, extra = await conversation_handoffs.dispatch_inputs(session, handoff, extra)
+        if _remote and not handoff:
+            await task_access.reserve_task_write(session, tid, client.id)
+            if not await dispatch_attempts.pin_runner_route(session, tid, attempt_id, picked):
+                raise HTTPException(409, "派活请求已被更新，请刷新需求状态")
         # Content reads can retain the personal Runner policy lock in this
         # transaction. Release preparation locks before transport authorization
         # acquires its own lock; the durable attempt above still fences retries.
         # The transport rechecks current ownership and policy before sending.
         await session.commit()
-        r = await _aio.to_thread(ai_exec.dispatch_sync, ctx, t, files, picked, extra)
+    except HTTPException:
+        raise
     except Exception as error:  # noqa: BLE001
-        await _fail("dispatch", "Runner 启动 Agent 失败：" + str(error), 502)
+        await session.rollback()
+        await _fail("dispatch", "准备派活失败：" + str(error), 502)
+    try:
+        r = await _aio.to_thread(ai_exec.dispatch_sync, ctx, t, files, picked, extra)
+    except Exception as error:  # An adapter can fail after the Runner accepted the request.
+        if not picked.get("dispatchIntentAt"):
+            if isinstance(error, HTTPException):
+                raise
+            await _fail("dispatch", "Runner 启动 Agent 失败：" + str(error), 502)
+        r = {"ok": False, "uncertain": True, "code": "RUNNER_ACK_UNKNOWN",
+             "error": "执行机回执处理异常：" + type(error).__name__}
+    confirmed_event = None
+    if picked.get("dispatchIntentAt"):
+        # A read-only probe or heartbeat can confirm this attempt while the HTTP
+        # caller waits for the original RPC. Serialize its reply with the sweep.
+        from . import dispatch_reconcile
+        await task_access.reserve_task_write(session, tid, client.id)
+        t = await session.get(Task, tid, with_for_update=True, populate_existing=True)
+        latest = await dispatch_reconcile._latest_state(session, tid)
+        fact = dict(latest.detail or {}) if latest else {}
+        expected = dispatch_identity.execution_ref(attempt_id)
+        if latest and latest.kind in ai_exec.KINDS_DISPATCHED and fact.get("ref") == expected:
+            confirmed_event = latest
+        if confirmed_event and not r.get("ok"):
+            row = await session.scalar(select(ExecutionSession).where(
+                ExecutionSession.task_id == tid, ExecutionSession.ref == expected))
+            if row:
+                meta = row.metadata_ or {}
+                return {**(r if r.get("ok") else {}), "ok": True, "uncertain": False, "pending": False,
+                        "attemptId": attempt_id, "issueId": expected, "state": row.state, "queued": row.state == "queued",
+                        "queuePosition": meta.get("queuePosition", 0), "queueClass": meta.get("queueClass", ""),
+                        "runnerId": row.runner_id, "provider": "runner", "task": await svc.task_to_api_live(session, t)}
+        if fact.get("attemptId") and fact["attemptId"] != attempt_id:
+            raise HTTPException(409, "派活请求已被更新，请刷新需求状态")
+        if fact.get("lastRunnerReplyAt"):
+            picked["lastRunnerReplyAt"] = fact["lastRunnerReplyAt"]
     if not r.get("ok"):
         if r.get("uncertain"):
             return await _pending(r.get("error") or "执行机回执暂未确认", r)
@@ -355,8 +409,7 @@ async def dispatch(tid, body, client, session, *, actor=None):
     # This supports later diagnosis of incorrect or incomplete outputs.
     _prog = [p for p in (getattr(t, "progress", None) or [])
              if isinstance(p, dict) and (p.get("text") or "").strip()]
-    ev.record(session, tid, ai_exec.EV_DISPATCHED,
-               {**dispatch_attempts.success_detail(attempt_id, aid, picked),
+    dispatch_detail = {**dispatch_attempts.success_detail(attempt_id, aid, picked),
                 **({"conversationTurn": instruction_scope} if instruction_scope else {}),
                 "ref": r.get("issueId", ""), "issueId": r.get("issueId", ""),
                 "identifier": r.get("identifier", ""),
@@ -371,9 +424,17 @@ async def dispatch(tid, body, client, session, *, actor=None):
                            "tags": len(getattr(t, "tags", None) or []),
                            "progress": len(_prog), "comments": len(extra.get("comments") or []),
                            "files": [f[0] for f in files][:r.get("files", 0)],
-                           "brief": "" if handoff and handoff.options.get("contentRef") else extra["brief"].strip()[:300]}}, actor=who)
+                           "brief": "" if handoff and handoff.options.get("contentRef") else extra["brief"].strip()[:300]}}
+    if confirmed_event is None:
+        ev.record(session, tid, ai_exec.EV_DISPATCHED, dispatch_detail, actor=who)
+    else:
+        confirmed_event.detail = {**confirmed_event.detail, **dispatch_detail}
     from ..services import execution_sessions as _es
-    await _es.record_dispatch(session, t, r)   # Persist the execution at dispatch so routing does not depend on event details alone.
+    row = await _es.record_dispatch(session, t, r)
+    if row is not None and confirmed_event is not None:
+        meta = row.metadata_ or {}
+        r.update(state=row.state, queued=row.state == "queued",
+                 queuePosition=meta.get("queuePosition", 0), queueClass=meta.get("queueClass", ""))
     await audit.log(session, me, "task.ai_dispatch", "task", tid, t.title,
                     {"identifier": r.get("identifier", "")}) if me else None
     await session.commit()

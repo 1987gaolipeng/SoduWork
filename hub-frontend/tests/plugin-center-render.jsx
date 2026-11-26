@@ -44,13 +44,13 @@ const rows = [
 ]
 const plugins = rows.map(([id, name, description, kind, ready], index) => {
   const version = {
-    manifest: {},
+    manifest: {}, reviewedEvaluations: { passed: 2, total: 3 },
     id: id + '-v1', version: '1.2.0', trustState: ready ? 'approved' : 'quarantined', enabled: ready,
     visibility: 'org', createdAt: 1788314400000, provenance: { signatureState: id === 'contracts' ? 'unknown-key' : 'verified', publisherName: index % 2 ? '产品团队' : 'SoduWork 团队' },
-    capabilities: { hasWorkflow: kind === 'workflow', executionMode: kind === 'workflow' ? 'workflow' : 'direct', skills: kind === 'connector' ? [] : ['frontend-design', 'delivery-check'], mcpServers: kind === 'connector' ? ['hr-service'] : [], runtime: ['files'], agentKinds: ['local:codex'], entrypoints: { conversation: true, task: true, automation: kind === 'workflow' } },
+    capabilities: { permissionSummary: { runtime: ['files'] }, hasWorkflow: kind === 'workflow', executionMode: kind === 'workflow' ? 'workflow' : 'direct', skills: kind === 'connector' ? [] : ['frontend-design', 'delivery-check'], mcpServers: kind === 'connector' ? ['hr-service'] : [], runtime: ['files'], agentKinds: ['local:codex'], entrypoints: { conversation: true, task: true, automation: kind === 'workflow' } },
     workflow: { nodes: kind === 'workflow' ? [{ key: 'understand', name: '明确需求', type: 'ai' }, { key: 'deliver', name: '完成交付', type: 'ai' }, { key: 'verify', name: '检查成果', type: 'ai_review' }] : [] },
   }
-  return { id, key: id, qualifiedKey: 'soduwork/' + id, name, description, orgId: index % 3 ? 'fixture-org' : null, sourceKind: index % 3 ? 'soduwork' : 'builtin', enabled: ready, updatedAt: 1788314400000 - index, latestVersion: version, versions: [version], bindings: [], catalogPolicy: { installation: 'available' } }
+  return { id, activeInstallCount: 7, key: id, qualifiedKey: 'soduwork/' + id, name, description, orgId: index % 3 ? 'fixture-org' : null, sourceKind: index % 3 ? 'soduwork' : 'builtin', enabled: ready, updatedAt: 1788314400000 - index, latestVersion: version, versions: [version], bindings: [], catalogPolicy: { installation: 'available' } }
 })
 plugins.find((item) => item.id === 'contracts').latestVersion.manifest.setup = {
   title: '合同审核的安装偏好', description: '所选插件版本的配置定义。', preferences: [
@@ -84,7 +84,11 @@ if (params.get('view') === 'locale-review') {
     'en-US': { name: 'Old Operations Plugin', description: 'Old version' },
   }
 }
-const queues = { issues: [{ id: 'missing-identity', pluginId: 'contracts', versionId: 'contracts-v1', target: 'versions', title: '核对发布身份' }, { id: 'runtime', pluginId: 'prototype', target: 'runs', title: '上次运行需要检查' }] }
+const reviewDetail = 'Compare invoice totals <draft> & currency changes'
+const queues = {
+  review: [{ id: 'missing-identity', kind: 'review', pluginId: 'contracts', versionId: 'contracts-v1', target: 'versions', title: '核对发布身份', detail: reviewDetail }],
+  runtime: [{ id: 'runtime', kind: 'runtime', pluginId: 'prototype', target: 'runs', title: '上次运行需要检查' }],
+}
 for (const key of Object.keys(api)) api[key] = async () => { failures.push('Unexpected API: ' + key); throw new Error('Unmocked API: ' + key) }
 // HTTP responses are immutable snapshots, not shared references to server state.
 api.pluginGovernance = async () => structuredClone({ items: plugins, queues })
@@ -100,7 +104,7 @@ api.pluginRecommendation = async (id) => {
 }
 api.pluginRollout = async () => ({ items: [], summary: { active: 0, eligible: 0, breaking: 0, blocked: 0 } })
 api.pluginEvaluations = async (id) => { calls.push(['evaluation', id]); return { items: [], gate: { caseCount: 0 } } }
-api.projects = async () => ({ items: [] })
+api.projects = async () => []
 api.pluginCategories = async () => ({ items: [{ key: 'general', name: '通用能力', enabled: true }] })
 api.updatePluginCatalogPolicy = async (id, patch) => {
   calls.push(['recommend', id, patch])
@@ -184,6 +188,10 @@ try {
   await until(() => all('.plugin-card').length === plugins.length - 1)
   check(!q('.plugin-catalog-hero') && !q('.plugin-governance-overview'), 'directory has no overview or stats hero')
   check(calls.length === 0, 'directory does not fetch invisible detail/evaluation')
+  const evidence = q('.plugin-card-evidence').textContent
+  for (const fact of [tx('本地文件读写'), tx('评测通过：{0}/{1}', [2, 3]), tx('当前安装：{0}', [7])]) {
+    check(evidence.includes(fact), 'catalog shows version evidence before opening details: ' + fact)
+  }
   const catalogWidth = q('.plugin-catalog').getBoundingClientRect().width
   const columns = getComputedStyle(q('.plugin-card-grid')).gridTemplateColumns.split(' ').length
   check(catalogWidth < 900 || columns === (catalogWidth >= 1240 ? 4 : 3), 'catalog columns adapt to the actual container width')
@@ -263,6 +271,84 @@ try {
     await click(q('#plugin-catalog-tab-app'))
     check(all('.plugin-card').length === 1, 'application matches combined search and recommendation filters')
     await click(q('.filter-clear[aria-label="清空搜索插件"]'))
+  } else if (view === 'simulation') {
+    await open(plugins[0].id)
+    await click(button('审核与版本'))
+    const preflight = button('预检')
+    await click(preflight.closest('details').querySelector('summary'))
+    await click(preflight)
+    let finish
+    api.simulatePluginVersion = () => new Promise(resolve => { finish = resolve })
+    await click(button('开始模拟'))
+    await until(() => Boolean(finish))
+    const modal = q('.plugin-page.modal')
+    const close = button('关闭', modal)
+    const mask = modal.closest('.modal-mask')
+    check(close.disabled, 'Footer close is disabled during preflight')
+    check(modal.querySelector('.mx').disabled, 'Header close is disabled during preflight')
+    await click(close)
+    check(modal.isConnected, 'The footer keeps the pending report open')
+    await click(modal.querySelector('.mx'))
+    mask.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    await click(mask)
+    await escape()
+    check(modal.isConnected, 'Header, backdrop and Escape retain the pending report')
+    finish({ ok: true, checks: [], plan: [] })
+    await until(() => q('.plugin-sim-verdict.ok'))
+    await click(button('关闭', modal))
+    check(!modal.isConnected, 'The finished report can be closed')
+    await click(preflight)
+    api.simulatePluginVersion = async () => { throw new Error('Fixture failure') }
+    await click(button('开始模拟'))
+    await until(() => button('开始模拟') && !button('开始模拟').disabled)
+    await escape()
+    check(!q('.plugin-sim-empty'), 'A failed preflight can be dismissed with Escape')
+  } else if (view === 'bulk-import') {
+    const files = ['正常包.zip', '待检查.zip'].map(name => new File(['样本文本'], name))
+    let rejectSingle
+    api.importPlugin = () => new Promise((resolve, reject) => { rejectSingle = reject })
+    const nativeClick = HTMLInputElement.prototype.click
+    try {
+      HTMLInputElement.prototype.click = function () {
+        if (this.type !== 'file') return nativeClick.call(this)
+        const transfer = new DataTransfer()
+        for (const file of files) transfer.items.add(file)
+        this.files = transfer.files
+        this.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      await click(button('导入并送审'))
+      await until(() => Boolean(rejectSingle))
+      await click(q('.plugin-admin-more summary'))
+      await click(all('.plugin-admin-more button').find(item => item.textContent.includes('批量导入')))
+    } finally {
+      HTMLInputElement.prototype.click = nativeClick
+    }
+    let finishImport
+    api.bulkImportPlugins = () => new Promise(resolve => { finishImport = resolve })
+    await click(q('.plugin-bulk-rights input'))
+    await click(button('提交 2 个包审核'))
+    await until(() => Boolean(finishImport))
+    rejectSingle(new Error('测试单包未通过校验'))
+    await until(() => button('导入并送审'))
+    check(Boolean(button('正在校验并导入…')), 'The bulk import still shows validation in progress after the single import finishes')
+    const modal = q('.plugin-bulk-import').closest('.modal')
+    const cancel = button('取消', modal)
+    check(cancel.disabled && modal.querySelector('.mx').disabled, 'Both close buttons are disabled while importing')
+    await click(cancel)
+    await escape()
+    const mask = modal.closest('.modal-mask')
+    mask.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    await click(mask)
+    check(modal.isConnected && !button('放弃改动'), 'A pending import retains its draft without offering to discard it')
+    finishImport({ imported: 1, failed: 1, items: [
+      { filename: files[0].name, ok: true }, { filename: files[1].name, ok: false, error: '样本未通过校验' },
+    ] })
+    await until(() => q('.plugin-bulk-result .bad'))
+    check(q('.plugin-bulk-result .bad').textContent.includes('样本未通过校验'), 'The report retains the failed file and its validation error')
+    check(q('.plugin-bulk-rights input').checked, 'The report keeps the authorization choice submitted with the batch')
+    await click(button('关闭', q('.plugin-page .modal-foot')))
+    check(!q('.plugin-bulk-import'), 'The completed report can be closed')
+    await until(() => document.activeElement === q('.plugin-admin-more summary'))
   } else if (view === 'recommend') {
     const card=q('.plugin-card-shell')
     await open(plugins[0].id)
@@ -474,7 +560,10 @@ try {
   } else if (view === 'app-review') {
     await open('contracts'); const drawer = q('.plugin-detail-drawer')
     check(q('.plugin-title-copy .plugin-app-tag')?.textContent === '应用', 'selected application version has a detail tag')
-    await click(button('审核与版本', drawer))
+    await click(q('.plugin-issue-list').closest('details').querySelector('summary'))
+    const reviewRow = q('.plugin-issue-list button')
+    check(reviewRow.textContent.includes('核对发布身份') && reviewRow.textContent.includes(reviewDetail), 'review row shows the target and literal version summary')
+    await click(reviewRow)
     check(q('.plugin-review-callout .plugin-app-tag')?.textContent === '应用', 'application review reuses the plugin review callout with a tag')
     const disclosure = all('details').find(item => item.querySelector('summary')?.textContent.includes('版本记录与回退'))
     await click(disclosure.querySelector('summary'))

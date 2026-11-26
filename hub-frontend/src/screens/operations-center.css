@@ -70,6 +70,18 @@
   box-shadow: var(--shadow-sm);
 }
 .ops-ledger article:last-child { border-right: 1px solid var(--line) !important; }
+.ops-approval-trigger { width: 100%; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.ops-approval-trigger::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.ops-approval-trigger:hover small { text-decoration: underline; }
+.ops-ledger .ops-approval-overdue, .ops-approval-overdue { color: var(--danger); }
+.ops-approval-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.ops-approval-list li { display: grid; gap: 4px; padding: 14px 0; overflow-wrap: anywhere; border-bottom: 1px solid var(--line); }
+.ops-approval-list li:first-child { padding-top: 0; }
+.ops-approval-list li:last-child { border-bottom: 0; }
+.ops-approval-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ops-approval-actions:not(:empty) { margin-top: 4px; }
+.ops-approval-editor, .ops-approval-editor label { display: grid; gap: 8px; }
+.ops-approval-editor { gap: 16px; overflow-wrap: anywhere; }
 .ops-grid {
   grid-template-columns: minmax(0, 1.42fr) minmax(320px, .88fr);
   gap: 16px;
@@ -128,3 +140,5 @@
   .ops-runner-head { grid-template-columns: minmax(0, 1fr) 54px 80px; gap: 8px; }
   .ops-runner-list article > .ops-state { min-width: 72px; }
 }
+.ops-failure-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.ops-task-detail p, .ops-task-detail li { white-space: pre-wrap; overflow-wrap: anywhere; }

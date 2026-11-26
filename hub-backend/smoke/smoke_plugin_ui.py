@@ -73,7 +73,7 @@ ok("importPlugin: (file) => upload('/admin/plugins/import', file)" in client
    and import_flow.count("api.importPlugin(file)") == 1 and "preflight" not in import_flow
    and '@router.post("/import")' in routes and "source_channel=\"admin-import\"" in routes
    and install_flow.index("plugin_packages.parse(data)") < install_flow.index("plugin_signatures.inspect(")
-       < install_flow.index("plugin_signatures.assert_importable(") < install_flow.index("plugin_packages.store(parsed)")
+       < install_flow.index("plugin_signatures.assert_importable(") < install_flow.index("plugin_packages.store(parsed,")
    and 'trust_state="quarantined", visibility=mode, enabled=False' in install_flow,
    "one-step import must validate package/signature before storing an immutable disabled review version")
 ok("导入并送审" in screen and "已提交企业审核，管理员通过后即可上架" in screen
@@ -101,7 +101,7 @@ ok("plugin-secret-section" in screen and "secretRefs" in screen
    and "api.secretReferences()" in screen and "runtimeSecrets" in read(BACK / "services" / "ai_local.py"),
    "plugin bindings must map logical secrets to runner-only references")
 ok("node.diagnosis" in screen
-   and "api.retryRunGate(run.id, node.key, { resumeRework })" in run_dialogs
+   and re.search(r"api\.retryRunGate\(run\.id, node\.key, \{\s*sourceNodeId: node\.id, resumeRework\b", run_dialogs)
    and "diagnosis.retryable" in run_dialogs
    and "node-failure" in style + dialogs_style,
    "run drawer must explain failures and retry only the selected latest gate")
@@ -195,7 +195,8 @@ ok("id: 'plugins'" in app_shell and "perm: 'plugin.manage'" in app_shell
 ok("pluginIssues" in center_screen and "pluginGovernance" in client
    and '@router.get("/governance")' in routes
    and "issues={pluginIssues(governance?.queues)[selected] || []}" in plugin_center
-   and "issues.length" in plugin_catalog and "待处理事项" in plugin_workspace,
+   and "issueCount" in plugin_catalog and "issueCount" in plugin_workspace
+   and "actions.openIssue(item)" in plugin_workspace and "待处理事项" in plugin_workspace,
    "plugin cards and detail actions must retain the real governance read model")
 ok(all(label in center_screen for label in (
        "企业插件", "插件说明", "审核与版本", "使用配置", "运行记录"))

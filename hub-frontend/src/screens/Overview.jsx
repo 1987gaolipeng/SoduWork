@@ -5,6 +5,7 @@ import { useViewportHeight } from '../viewport-height.js'
 import { useAsync, Loading, ErrorState, AUTO, Icon, navTo } from '../ui.jsx'
 import './overview.css'
 import { requirementSummary, requirementStage, hasExecutionIssue, isOverdue } from './requirement-governance.js'
+import FirstChatChecklist from './FirstChatChecklist.jsx'
 
 const COLORS = ['var(--c-blue)', 'var(--c-green)', 'var(--c-orange)', 'var(--c-rose)', 'var(--offline)']
 
@@ -29,15 +30,15 @@ function Metric({ label, value, note, tone = '' }) {
   </article>
 }
 
-function AttentionRow({ tone, label, value, note }) {
+function AttentionRow({ tone, label, value, note, children }) {
   const uiLocale = useLocale();
   return <article className={'gov-attention-row ' + tone}>
     <span className="gov-attention-dot" />
     <div><b>{label}</b><small>{note}</small></div>
-    <strong>{value}</strong>
+    <strong>{value}</strong>{children}
   </article>
 }
-export default function Overview() {
+export default function Overview({ me }) {
   // Keep department and attention sections tall enough for their primary rows.
   // Scroll the page on short windows rather than compressing these sections.
   const mainGridRef = useViewportHeight(460)
@@ -46,6 +47,7 @@ export default function Overview() {
   const mayViewTasks = can('task.view')
   const mayManageIntegrations = can('integration.manage')
   const mayManageBindings = can('binding.manage')
+  const mayViewOperations = can('operations.view')
   const hasDepartmentScope = mayViewClients && can('org.manage') && can('user.manage')
 
   // Skip unauthorized dimensions and report authorized request failures instead of substituting zero data.
@@ -55,10 +57,12 @@ export default function Overview() {
   const unassigned = useAsync(() => mayManageBindings ? api.unassigned() : Promise.resolve([]), AUTO)
   const orgs = useAsync(() => hasDepartmentScope ? api.orgs() : Promise.resolve([]))
   const users = useAsync(() => hasDepartmentScope ? api.users() : Promise.resolve([]))
-  const sources = [clients, tasks, ints, unassigned, orgs, users]
-  if (sources.some((source) => source.loading)) return <Loading />
+  const operations = useAsync(() => mayViewOperations ? api.operationsOverview() : Promise.resolve(null), AUTO)
+  const sources = [clients, tasks, ints, unassigned, orgs, users, operations]
+  const checklist = mayManageIntegrations && me?.id && <FirstChatChecklist key={me.id} accountId={me.id} />
+  if (sources.some((source) => source.loading)) return <section className="gov-page">{checklist}<Loading /></section>
   const failed = sources.find((source) => source.error)
-  if (failed) return <ErrorState msg={failed.error.message} onRetry={() => sources.forEach((source) => source.reload())} />
+  if (failed) return <section className="gov-page">{checklist}<ErrorState msg={failed.error.message} onRetry={() => sources.forEach(source => source.reload())} /></section>
 
   // Explain missing operational permissions rather than rendering an all-zero dashboard.
   if (!can('task.view') && !can('client.view')) {
@@ -116,14 +120,15 @@ export default function Overview() {
   })
   const rows = [...by.values()].sort((a, b) => b.count - a.count)
   const max = Math.max(1, ...rows.map((row) => row.count))
-  const attention = summary.risk
+  const pendingApprovals = operations.data?.work?.pendingApprovals ?? 0
   const onlineRate = cl.length ? Math.round(online / cl.length * 100) : 0
   return (
     <section className="gov-page">
+      {checklist}
       <div className="gov-ledger" aria-label={tx("核心治理指标")}>
         <Metric label={tx("需求池")} value={tk.length} note={tx("待整理与澄清 {0} · 已关闭 {1}", [summary.preparing, summary.closed])} />
         <Metric label={tx("需求交付率")} value={rate + '%'} note={tx("{0} / {1} 已交付，不含已关闭", [done, tk.length])} tone="good" />
-        <Metric label={tx("待处理风险")} value={attention} note={tx("逾期 {0} · 执行异常 {1}", [overdue, stuck])} tone={attention ? 'risk' : 'good'} />
+        <Metric label={tx("需求风险")} value={summary.risk} note={tx("逾期 {0} · 执行异常 {1}", [overdue, stuck])} tone={summary.risk ? 'risk' : 'good'} />
         <Metric label={tx("SoduWork 在线率")} value={onlineRate + '%'} note={tx("{0} / {1} 台在线", [online, cl.length])} tone={onlineRate < 60 && cl.length ? 'warn' : ''} />
       </div>
 
@@ -144,8 +149,12 @@ export default function Overview() {
         </section>
 
         <aside className="gov-section gov-attention">
-          <header><div><h3>{tx("现在先处理什么")}</h3></div><small>{tx("{0} 项", [attention])}</small></header>
+          <header><div><h3>{tx("现在先处理什么")}</h3></div><small>{mayViewOperations ? tx("{0} 项", [summary.risk + pendingApprovals]) : tx("需求风险 {0}", [summary.risk])}</small></header>
           <div className="gov-attention-list" tabIndex={0} role="region" aria-label={tx("现在先处理什么")}>
+            {mayViewOperations && <AttentionRow tone={pendingApprovals ? 'warning' : 'quiet'} label={tx("等待人审")} value={pendingApprovals}
+              note={tx("运行监控中处于待审状态的审批请求")}>
+              <button type="button" onClick={() => navTo('operations')}>{tx("查看运行监控")}<Icon name="external" /></button>
+            </AttentionRow>}
             <AttentionRow tone={overdue ? 'warning' : 'quiet'} label={tx("逾期需求")} value={overdue} note={overdue ? tx("已超过计划截止时间") : tx("没有逾期需求")} />
             <AttentionRow tone={stuck ? 'critical' : 'quiet'} label={tx("执行异常")} value={stuck} note={stuck ? tx("执行失败或回执待核实，需负责人跟进") : tx("没有执行异常")} />
           </div>

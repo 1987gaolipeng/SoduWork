@@ -4,6 +4,7 @@ import test from 'node:test'
 import React from 'react'
 import { createComponentHarness } from './helpers/react-harness.mjs'
 import * as capabilityCatalogModel from '../src/screens/capability-catalog-model.js'
+import skillMessages from '../../client/core/locales/builtin-skills.js'
 
 // Exercise the real JSX and handlers. These checks cover the viewport-owner
 // contract and accessibility, not computed CSS or physical monitor switching.
@@ -29,7 +30,7 @@ const catalog = {
   mcpTemplates: [], summary: { skills: 2, personalSubmissions: 1 },
 }
 async function mount(t, options = {}) {
-  const { catalog: fixture = catalog, ...harnessOptions } = options
+  const { catalog: fixture = catalog, concurrentPolicy, ...harnessOptions } = options
   const viewportRef = () => {}
   const saved = []
   const lifecycle = { reloads: 0 }
@@ -39,7 +40,16 @@ async function mount(t, options = {}) {
     ...harnessOptions,
     dependencies: {
       '../api.js': { api: { capabilityCatalog: () => loadedCatalog,
+        previewCapabilityPolicy: async (value) => ({
+          added: value.allowed.filter((name) => !loadedCatalog.cfg.allowed.includes(name)),
+          removed: loadedCatalog.cfg.allowed.filter((name) => !value.allowed.includes(name)),
+          affectedClients: 2, affectedDepartments: 1,
+        }),
         saveCapabilityPolicy: async (value) => {
+          if (concurrentPolicy && value.policyRevision !== concurrentPolicy.policyRevision) {
+            persistedCatalog = { ...loadedCatalog, cfg: concurrentPolicy }
+            throw Object.assign(new Error('Policy changed'), { status: 409 })
+          }
           saved.push(structuredClone(value))
           persistedCatalog = { ...loadedCatalog, cfg: structuredClone(value) }
         } }, can: () => true },
@@ -47,6 +57,7 @@ async function mount(t, options = {}) {
         useAsync: (read) => ({ data: read(), reload() {
           lifecycle.reloads += 1
           loadedCatalog = persistedCatalog
+          return true
         }, loading: false, error: null }) },
       '../FilterControls.jsx': { FilterInput: 'FilterInput' },
       '../viewport-height.js': { useViewportHeight: () => viewportRef },
@@ -95,7 +106,37 @@ test('switching capability tabs preserves an unsaved policy and saves the existi
   assert.deepEqual([...skillView().props.allowed], ['company-skill', 'local-skill'])
   await byText(page, '保存开放策略').props.onClick()
   await page.flush()
+  const review = () => page.nodes((node) => node.type?.name === 'PolicyPreview')[0]
+  assert.deepEqual(review().props.impact.added, ['local-skill'])
+  assert.deepEqual(saved, [], 'opening the preview must not write')
+  page.act(review().props.onClose)
+  assert.equal(review(), undefined)
+  assert.deepEqual(saved, [], 'cancelling the preview must not write')
+  await byText(page, '保存开放策略').props.onClick()
+  await page.flush()
+  await review().props.onSave()
+  await page.flush()
   assert.deepEqual(saved, [{ allowed: ['company-skill', 'local-skill'], policyVersion: 7 }])
+})
+
+test('a stale confirmation preserves both administrators’ independent changes for a fresh preview', async (t) => {
+  const concurrentPolicy = { ...catalog.cfg, allowed: [], policyRevision: 'new-revision' }
+  const { page, saved } = await mount(t, { concurrentPolicy })
+  page.act(() => skillView(page).props.onToggle('local-skill'))
+  const review = () => page.nodes((node) => node.type?.name === 'PolicyPreview')[0]
+  await byText(page, '保存开放策略').props.onClick()
+  await page.flush()
+  await review().props.onSave()
+  await page.flush()
+  assert.equal(review(), undefined)
+  assert.deepEqual(saved, [], 'a stale confirmation must not write or retry automatically')
+  assert.deepEqual([...skillView(page).props.allowed], ['local-skill'])
+  await byText(page, '保存开放策略').props.onClick()
+  await page.flush()
+  assert.deepEqual(review().props.impact.added, ['local-skill'])
+  assert.deepEqual(review().props.impact.removed, [])
+  await review().props.onSave()
+  assert.deepEqual(saved, [{ ...concurrentPolicy, allowed: ['local-skill'] }])
 })
 
 test('empty search results keep personal submissions reachable in their own scroll region', async (t) => {
@@ -169,6 +210,11 @@ test('removing unmatched entries only stages a policy change until save, preserv
 
   await byText(page, '保存开放策略').props.onClick()
   await page.flush()
+  const review = page.nodes((node) => node.type?.name === 'PolicyPreview')[0]
+  assert.deepEqual(review.props.impact.removed, ['officecli'])
+  assert.deepEqual(saved, [])
+  await review.props.onSave()
+  await page.flush()
   assert.deepEqual(saved, [{ ...config, allowed: ['company-skill'] }])
   assert.equal(lifecycle.reloads, 1)
   assert.equal(policyMetric(page).props.label, '已开放')
@@ -222,4 +268,40 @@ test('discarding cleanup and switch changes restores the saved policy without wr
   assert.equal(byText(page, '放弃改动'), undefined)
   assert.deepEqual(saved, [])
   assert.equal(lifecycle.reloads, 0)
+})
+
+test('catalog descriptions follow the UI locale and keep original text independent of the access switch', async (t) => {
+  // The desktop locale script exposes its browser registry globally and exports the same packs in Node.
+  globalThis.SoduWorkLocaleMessages = skillMessages
+  t.after(() => { delete globalThis.SoduWorkLocaleMessages })
+  const original = 'Design enterprise agent products and interactive prototypes.'
+  const name = 'agent-product-design'
+  const builtin = { name, builtIn: true, sourceKey: 'builtin', description: original }
+  const custom = { ...builtin, name: 'browser-use', sourceKey: 'company', description: 'Private browser workflow.' }
+  const locked = { ...builtin, name: 'office', policyLocked: true }
+  const toggles = []
+  const { page } = await mount(t, {
+    privateExports: ['SkillCatalog'], exportName: 'SkillCatalog',
+    props: { rows: [builtin, custom, locked], legacy: catalog, submissions: [], allowed: new Set(['office']),
+      onToggle: name => toggles.push(name) },
+  })
+  const [card, imported, baseline] = page.nodes(node => hasClass(node, 'cap-admin-card'))
+  const translated = skillMessages['zh-CN']['builtin.skill.' + name + '.description']
+  assert.equal(textOf(descendants(card, node => hasClass(node, 'cap-admin-card-desc'))[0]), translated)
+  assert.equal(textOf(descendants(card, node => node.type === 'summary')[0]), '查看原文')
+  assert.match(textOf(descendants(card, node => node.type === 'details')[0]), /Design enterprise agent products/)
+  assert.equal(card.props.onClick, undefined)
+  assert.deepEqual(toggles, [])
+  descendants(card, node => node.type === 'button')[0].props.onClick()
+  assert.deepEqual(toggles, [name])
+  assert.match(textOf(imported), /原文.*Private browser workflow/)
+  assert.equal(descendants(imported, node => node.type === 'details').length, 0)
+  assert.equal(descendants(baseline, node => node.type === 'button')[0].props.disabled, true)
+
+  const { page: searchPage } = await mount(t, { catalog: { ...catalog, skills: [builtin, custom] } })
+  const search = searchPage.nodes(node => node.type === 'FilterInput')[0]
+  for (const query of [translated, original]) {
+    searchPage.act(() => search.props.onChange({ target: { value: query } }))
+    assert.deepEqual(skillView(searchPage).props.rows.map(item => item.name), [name])
+  }
 })

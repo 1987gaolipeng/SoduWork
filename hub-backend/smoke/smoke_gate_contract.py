@@ -42,13 +42,15 @@ async def main():
         task = models.Task(id="gate-task", title="Release candidate",
                            owner_client_id=client.id, repo_id="gate-repo")
         env = am.Environment(id="gate-env", key="trial", name="Trial", tier="trial")
+        target = am.DeploymentTarget(id="gate-target", repo_id=task.repo_id,
+                                     environment_id=env.id, name="Trial target")
         artifact = am.ArtifactVersion(
             id="gate-artifact", task_id=task.id, seq=3, kind="code",
             source_ref="runner:gate", commit_sha="abc123def456", checksum="sha256-gate",
             manifest={"acceptanceCriteria": ["Homepage opens", "Sharing works"]},
             created_by_name="SoduWork",
         )
-        session.add_all([client, user, task, env, artifact])
+        session.add_all([client, user, task, env, target, artifact])
         await session.flush()
         context = await gate_contract.prepare_context(
             session, task, artifact, "uat", env.id, {"workflowRunId": "gate-run"})
@@ -59,7 +61,7 @@ async def main():
         )
         deployment = am.DeploymentRun(
             id="gate-deploy", task_id=task.id, artifact_version_id=artifact.id,
-            environment_id=env.id, target_id="gate-target", state="succeeded", attempt=1,
+            environment_id=env.id, target_id=target.id, state="succeeded", attempt=1,
             idempotency_key="gate-attempt", runner_id="runner-trial", commit_sha=artifact.commit_sha,
             result={"checks": [{"name": "HTTP health", "ok": True, "detail": "200 OK"}]},
         )

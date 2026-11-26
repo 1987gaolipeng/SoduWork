@@ -9,13 +9,15 @@ function epoch(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 function project(remote, now = Date.now()) {
-  const start = epoch(remote?.startedAt) || epoch(remote?.started);
+  const queued = remote?.status === 'queued';
+  // A queued follow-up can still carry the previous turn's timestamps.
+  const start = queued ? 0 : epoch(remote?.startedAt) || epoch(remote?.started);
   const end = epoch(remote?.finishedAt) || epoch(remote?.ended);
-  const running = ['running', 'queued', 'dispatching'].includes(remote?.status);
+  const active = queued || ['running', 'dispatching'].includes(remote?.status);
   // A missing or inconsistent receipt is unknown, never a local executor's age.
-  const stop = running ? now : end;
+  const stop = active ? now : end;
   return { elapsedMs: start && stop >= start ? stop - start : null,
-    startedAt: start, completedAt: running ? 0 : end,
+    startedAt: start, completedAt: active ? 0 : end,
     timingTurn: remote ? [remote.ref || '', remote.round || 1, start].join(':') : '' };
 }
 module.exports = { epoch, project };

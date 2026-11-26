@@ -1,3 +1,11 @@
+import '../../../client/core/locales/builtin-skills.js'
+
+export function localizedSkillDescription(item, locale) {
+  const builtin = item.sourceKey ? item.sourceKey === 'builtin' : item.builtIn === true
+  if (!builtin || item.scope === 'personal') return ''
+  return globalThis.SoduWorkLocaleMessages?.[locale]?.['builtin.skill.' + item.name + '.description'] || ''
+}
+
 // Derive presentation state from the catalog without changing the saved policy.
 function namesOf(values) {
   const list = Array.isArray(values) || values instanceof Set ? values : []

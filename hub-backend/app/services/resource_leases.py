@@ -77,16 +77,19 @@ async def acquire(session: AsyncSession, kind: str, key: str, *,
 
 
 async def heartbeat(session: AsyncSession, lease: LeaseHandle,
-                    ttl_seconds: int = 90) -> bool:
+                    ttl_seconds: int = 90, *, detail: dict | None = None) -> bool:
     now = _now()
     until = now + timedelta(seconds=max(10, min(3600, int(ttl_seconds or 90))))
+    values = {"heartbeat_at": now, "lease_until": until}
+    if detail is not None:
+        values["detail"] = detail
     result = await session.execute(
         update(am.ResourceLease).where(
             am.ResourceLease.resource_kind == lease.kind,
             am.ResourceLease.resource_key == lease.key,
             am.ResourceLease.token == lease.token,
             am.ResourceLease.lease_until > now,
-        ).values(heartbeat_at=now, lease_until=until))
+        ).values(**values))
     await session.commit()
     return int(result.rowcount or 0) == 1
 

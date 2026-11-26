@@ -11,9 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_session
 from ..deps import require_perm
 from ..models import Task, User
-from ..schemas import task_to_api
-from ..services import audit, rbac
+from ..schemas import task_to_api, validate_name_characters
+from ..services import audit, catalog_names, rbac
 from ..services import tasks as svc
+from ..services.business_records import business_visible, creation_source, record_fields
 from ..services.repository_catalog import lock_mapping_project
 
 router = APIRouter()
@@ -22,18 +23,25 @@ router = APIRouter()
 # Projects organize tasks into sequential or parallel dependency graphs.
 
 @router.get("/projects")
-async def list_projects(user: User = Depends(require_perm("task.view")), session: AsyncSession = Depends(get_session)):
+async def list_projects(user: User = Depends(require_perm("task.view")), session: AsyncSession = Depends(get_session),
+                        includeManaged: bool = False):
     """List scoped projects with completed and total task counts."""
-    from ..models import Project
+    from ..models import OrgUnit, Project
     from ..schemas import _ms
     scope = await rbac.scope_org_ids(session, user)   # None leaves superusers unrestricted.
     query = select(Project)
+    if not includeManaged:
+        query = query.where(business_visible(Project))
     if scope is not None:
         query = query.where(or_(Project.org_id.is_(None), Project.org_id.in_(scope)))
     projs = (await session.execute(query.order_by(Project.created_at.desc()))).scalars().all()
     owner_ids = {str(p.owner_user_id) for p in projs if p.owner_user_id}
     owners = {u.id: u for u in (await session.execute(select(User).where(
         User.id.in_(owner_ids or {"__none__"})
+    ))).scalars().all()}
+    org_ids = {p.org_id for p in projs if p.org_id}
+    org_names = {o.id: o.name for o in (await session.execute(select(OrgUnit).where(
+        OrgUnit.id.in_(org_ids or {"__none__"})
     ))).scalars().all()}
     active = Task.archived_at.is_(None) & (Task.status != "cancel")
     counts = {pid: (int(total), int(done), int(closed)) for pid, total, done, closed in
@@ -47,10 +55,11 @@ async def list_projects(user: User = Depends(require_perm("task.view")), session
     out = []
     for p in projs:
         total, done, closed = counts.get(p.id, (0, 0, 0))
-        out.append({"id": p.id, "name": p.name, "desc": p.desc, "status": p.status,
+        out.append({"id": p.id, "name": p.name, "desc": p.desc, "status": p.status, **record_fields(p),
                     "group": getattr(p, "group", "") or "", "repoUrl": getattr(p, "repo_url", "") or "",
                     "extProjectId": getattr(p, "ext_project_id", "") or "",
                     "ownerUserId": p.owner_user_id or "",
+                    "orgId": p.org_id or "", "orgName": org_names.get(p.org_id or "", ""),
                     "ownerName": ((owners[p.owner_user_id].display_name or
                                    owners[p.owner_user_id].username)
                                   if p.owner_user_id in owners else ""),
@@ -88,21 +97,58 @@ async def _project_owner(session: AsyncSession, actor: User, owner_id: str) -> U
     return owner
 
 
+def _project_name(value):
+    if value is None:
+        value = ""
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail="Project name must be a string")
+    try:
+        name = validate_name_characters(value.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not name:
+        raise HTTPException(status_code=400, detail="请填工程名")
+    return name
+
+
+async def _available_project_name(session, name, org_id, exclude_id=None):
+    from ..models import Project
+    try:
+        await catalog_names.require_available(
+            session, Project, name, "同名项目已经存在", Project.org_id == org_id, exclude_id=exclude_id)
+    except catalog_names.DuplicateName as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/projects")
 async def create_project(body: dict = Body(default_factory=dict),
                          user: User = Depends(require_perm("task.dispatch")),
                          session: AsyncSession = Depends(get_session)):
-    from ..models import Project
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="请填工程名")
+    from ..models import OrgUnit, Project
+    unknown = sorted(set(body) - {"name", "desc", "group", "repoUrl", "ownerUserId", "orgId", "dataSource"})
+    if unknown:
+        raise HTTPException(status_code=422, detail="未知字段：" + ", ".join(unknown))
+    name = _project_name(body.get("name"))
     owner = await _project_owner(session, user, str(body.get("ownerUserId") or ""))
-    p = Project(name=name, desc=body.get("desc") or "", org_id=owner.org_id or user.org_id,
+    # Optional org adoption: explicit orgId wins (validated), otherwise keep the
+    # legacy default of owner's org falling back to the creator's org.
+    offered_org = str(body.get("orgId") or "").strip()
+    if offered_org:
+        from .admin import _assert_org_in_scope, _require_existing_org
+        await _require_existing_org(session, offered_org)
+        await _assert_org_in_scope(session, user, offered_org)
+        org_id = offered_org
+    else:
+        org_id = owner.org_id or user.org_id
+    parent = await session.get(OrgUnit, org_id) if org_id else None
+    await _available_project_name(session, name, org_id)
+    p = Project(name=name, desc=body.get("desc") or "", org_id=org_id,
+                data_source=creation_source(user, body.get("dataSource"), parent=parent),
                 owner_user_id=owner.id, created_by=user.id,
                 group=(body.get("group") or "").strip(), repo_url=(body.get("repoUrl") or "").strip())
     session.add(p); await session.commit(); await session.refresh(p)
     await audit.log(session, user, "project.create", "project", p.id, name, {})
-    return {"id": p.id, "name": p.name, "group": p.group, "repoUrl": p.repo_url,
+    return {"id": p.id, "name": p.name, "group": p.group, "repoUrl": p.repo_url, **record_fields(p),
             "ownerUserId": owner.id, "ownerName": owner.display_name or owner.username}
 
 
@@ -142,6 +188,22 @@ async def update_project(pid: str, body: dict = Body(default_factory=dict),
     owner = None
     if "ownerUserId" in body:
         owner = await _project_owner(session, user, str(body.get("ownerUserId") or ""))
+    next_org = old_org or (owner.org_id if owner else None)
+    repos_moved = 0
+    explicit_org = "orgId" in body
+    if explicit_org:
+        from .admin import _require_existing_org
+        next_org = str(body.get("orgId") or "").strip()
+        if not next_org:
+            raise HTTPException(status_code=400, detail="请选择项目所属组织")
+        await _require_existing_org(session, next_org)
+        await _assert_org_in_scope(session, user, next_org)
+    name = _project_name(body["name"]) if "name" in body else p.name
+    if name != p.name or next_org != old_org:
+        if not name:
+            raise HTTPException(status_code=400, detail="请填工程名")
+        await _available_project_name(session, name, next_org, p.id)
+    if owner is not None:
         p.owner_user_id = owner.id
         if not p.org_id:
             p.org_id = owner.org_id
@@ -152,26 +214,42 @@ async def update_project(pid: str, body: dict = Body(default_factory=dict),
                 for repo in legacy_repos:
                     repo.org_id = p.org_id
                 migrated_repos = len(legacy_repos)
-    for k, f in (("name", "name"), ("desc", "desc"), ("group", "group"),
+    p.name = name
+    for k, f in (("desc", "desc"), ("group", "group"),
                  ("repoUrl", "repo_url"), ("extProjectId", "ext_project_id")):
         if k in body:
             setattr(p, f, str(body.get(k) or "").strip())
     if not p.name:
         raise HTTPException(status_code=400, detail="请填工程名")
+    # Explicit org change: repos follow their project so the permission boundary
+    # (org-scoped repo access) stays consistent.
+    if explicit_org and next_org != old_org:
+        p.org_id = next_org
+        moved = list((await session.execute(select(Repo).where(
+            Repo.project_id == p.id,
+            or_(Repo.org_id.is_(None), Repo.org_id != next_org)
+        ))).scalars().all())
+        for repo in moved:
+            repo.org_id = next_org
+        repos_moved = len(moved)
     rerouted = {"requests": 0, "assignments": 0, "skipped": 0}
     if owner is not None and owner.id != old_owner:
         from ..services import approval_routing
-        rerouted = await approval_routing.reroute_pending_for_project(
-            session, p.id, user.display_name or user.username)
+        try:
+            rerouted = await approval_routing.reroute_pending_for_project(
+                session, p.id, user.display_name or user.username)
+        except approval_routing.ApprovalRerouteConflict as exc:
+            await session.rollback()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
     await session.refresh(p)
     await audit.log(session, user, "project.update", "project", p.id, p.name,
                     {"extProjectId": p.ext_project_id, "ownerUserId": p.owner_user_id,
                      "previousOwnerUserId": old_owner, "pendingRerouted": rerouted,
                      "previousOrgId": old_org or "", "orgId": p.org_id or "",
-                     "migratedRepos": migrated_repos})
+                     "migratedRepos": migrated_repos, "reposMoved": repos_moved})
     current_owner = owner or (await session.get(User, p.owner_user_id) if p.owner_user_id else None)
-    return {"id": p.id, "name": p.name, "desc": p.desc, "group": p.group,
+    return {"id": p.id, "name": p.name, "desc": p.desc, "group": p.group, **record_fields(p),
             "repoUrl": p.repo_url, "extProjectId": p.ext_project_id,
             "ownerUserId": p.owner_user_id or "",
             "ownerName": ((current_owner.display_name or current_owner.username)
@@ -180,7 +258,7 @@ async def update_project(pid: str, body: dict = Body(default_factory=dict),
 
 
 def _repo_api(r) -> dict:
-    return {"id": r.id, "projectId": r.project_id,
+    return {"id": r.id, "projectId": r.project_id, **record_fields(r),
             "sourceRepositoryId": getattr(r, "source_repository_id", "") or "",
             "name": r.name, "kind": r.kind,
             "gitUrl": r.git_url, "branch": r.default_branch, "localDir": r.local_dir,
@@ -205,7 +283,7 @@ def _repo_api(r) -> dict:
 
 @router.get("/projects/{pid}/repos")
 async def list_repos(pid: str, user: User = Depends(require_perm("task.view")),
-                     session: AsyncSession = Depends(get_session)):
+                     session: AsyncSession = Depends(get_session), includeManaged: bool = False):
     """List repositories associated with a project."""
     from ..models import Project, Repo
     from ..services import rbac
@@ -215,8 +293,12 @@ async def list_repos(pid: str, user: User = Depends(require_perm("task.view")),
     scope = await rbac.scope_org_ids(session, user)
     if scope is not None and project.org_id is not None and project.org_id not in scope:
         raise HTTPException(status_code=403, detail="这个项目不在你的组织范围内")
-    rows = (await session.execute(
-        select(Repo).where(Repo.project_id == pid).order_by(Repo.created_at))).scalars().all()
+    query = select(Repo).where(Repo.project_id == pid)
+    if not includeManaged:
+        if project.is_archived or project.data_source == "test":
+            return []
+        query = query.where(business_visible(Repo))
+    rows = (await session.execute(query.order_by(Repo.created_at))).scalars().all()
     return [_repo_api(r) for r in rows]
 
 
@@ -231,6 +313,10 @@ async def add_repo(pid: str, body: dict = Body(default_factory=dict),
     p = await lock_mapping_project(session, pid)
     if p is None:
         raise HTTPException(status_code=404, detail="工程所属项目不存在")
+    from .admin import _assert_org_in_scope
+    await _assert_org_in_scope(session, user, p.org_id)
+    if p.is_archived:
+        raise HTTPException(409, "请先恢复项目再登记仓库")
     name = (body.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="请填工程名")
@@ -242,8 +328,14 @@ async def add_repo(pid: str, body: dict = Body(default_factory=dict),
         local = validate_repo_local_dir(body.get("localDir"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from ..services.repo_urls import validate_git_url
+    try:
+        git_url = validate_git_url(body.get("gitUrl"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     r = Repo(project_id=pid, name=name, kind=kind,
-             git_url=(body.get("gitUrl") or "").strip(),
+             data_source=creation_source(user, body.get("dataSource"), parent=p),
+             git_url=git_url,
              default_branch=(body.get("branch") or "main").strip() or "main",
              local_dir=local, note=(body.get("note") or "").strip()[:2000],
              # Accept automatic merge and dispatch settings during creation as well as updates.
@@ -285,11 +377,17 @@ async def update_repo(rid: str, body: dict = Body(default_factory=dict),
         if scm not in ("git", "gitlab"):
             raise HTTPException(status_code=400, detail=scm_support.GERRIT_RETIRED if scm == "gerrit" else "scm 只能是 git 或 gitlab")
         r.scm = "git"
-    for k, f in (("name", "name"), ("gitUrl", "git_url"), ("branch", "default_branch"),
+    from ..services.repo_urls import validate_git_url
+    for k, f in (("name", "name"), ("branch", "default_branch"),
                  ("note", "note"), ("serverDir", "server_dir"), ("mergeBranch", "merge_branch"),
                  ("aiWorkDir", "ai_work_dir")):
         if k in body:
             setattr(r, f, str(body.get(k) or "").strip())
+    if "gitUrl" in body:
+        try:
+            r.git_url = validate_git_url(body.get("gitUrl"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if "routeKeywords" in body:
         kws = body.get("routeKeywords")
         if not isinstance(kws, list):
@@ -315,8 +413,14 @@ async def update_repo(rid: str, body: dict = Body(default_factory=dict),
             raise HTTPException(status_code=400, detail=err)
         kept = {}
         for key in ai_prompts.DEFAULTS:
-            raw = str(v.get(key) or "").strip()
-            if not raw:
+            raw = v.get(key)
+            if key == "steps":
+                # Steps are a list of {key, title, detail}; pass the raw value through so
+                # normalize() can clean it. str() here would stringify the list and
+                # silently discard every customized step on save.
+                if not (isinstance(raw, list) and raw):
+                    continue                               # An empty or absent list inherits the default steps.
+            elif not str(raw or "").strip():
                 continue                                   # An omitted value inherits the global default.
             kept[key] = ai_prompts.normalize({key: raw})[key]   # Normalize each field and apply its fallback.
         r.dev_flow = kept
@@ -348,10 +452,13 @@ async def update_repo(rid: str, body: dict = Body(default_factory=dict),
 @router.delete("/repos/{rid}")
 async def delete_repo(rid: str, user: User = Depends(require_perm("task.dispatch")),
                       session: AsyncSession = Depends(get_session)):
-    from ..models import Repo
-    r = await session.get(Repo, rid)
+    from ..automation_models import DeploymentTarget
+    from ..services.repository_catalog import lock_deployment_repository
+    r = await lock_deployment_repository(session, rid)
     if r is None:
         return {"ok": True}
+    if await session.scalar(select(DeploymentTarget.id).where(DeploymentTarget.repo_id == rid).limit(1)):
+        raise HTTPException(status_code=409, detail="该仓库仍有关联的部署目标，请先改绑或移除部署目标。")
     name = r.name
     await session.delete(r)
     await session.commit()
@@ -363,14 +470,14 @@ async def delete_repo(rid: str, user: User = Depends(require_perm("task.dispatch
 async def project_detail(pid: str, user: User = Depends(require_perm("task.view")),
                          session: AsyncSession = Depends(get_session)):
     """Return project details and task dependencies, status, and owners for the dependency graph."""
-    from .admin import _assert_org_in_scope
-
-    from ..models import Project
+    from ..models import OrgUnit, Project
     from ..services.boxes import box_owner_names
+    from .admin import _assert_org_in_scope
     p = await session.get(Project, pid)
     if p is None:
         raise HTTPException(status_code=404, detail="工程不存在")
     await _assert_org_in_scope(session, user, p.org_id)
+    org_row = await session.get(OrgUnit, p.org_id) if p.org_id else None
     ts = (await session.execute(select(Task).where(Task.project_id == pid).order_by(Task.created_at))).scalars().all()
     box_names = await box_owner_names(session, [t.owner_client_id for t in ts])
     tasks_out = []
@@ -381,10 +488,11 @@ async def project_detail(pid: str, user: User = Depends(require_perm("task.view"
     from ..services import task_requirement_projection
     await task_requirement_projection.decorate_many(session, ts, tasks_out)
     owner = await session.get(User, p.owner_user_id) if p.owner_user_id else None
-    return {"id": p.id, "name": p.name, "desc": p.desc, "status": p.status,
+    return {"id": p.id, "name": p.name, "desc": p.desc, "status": p.status, **record_fields(p),
             "group": getattr(p, "group", "") or "", "repoUrl": getattr(p, "repo_url", "") or "",
             "extProjectId": getattr(p, "ext_project_id", "") or "",
             "ownerUserId": p.owner_user_id or "",
+            "orgId": p.org_id or "", "orgName": (org_row.name if org_row else ""),
             "ownerName": ((owner.display_name or owner.username) if owner else ""),
             "tasks": tasks_out}
 
@@ -437,6 +545,11 @@ async def delete_project(pid: str, user: User = Depends(require_perm("task.dispa
     ts = (await session.execute(select(Task).where(Task.project_id == pid))).scalars().all()
     for t in ts:
         t.project_id = None
+    # Clear project reference on sub-repos to avoid dangling links.
+    from ..models import Repo
+    repos = (await session.execute(select(Repo).where(Repo.project_id == pid))).scalars().all()
+    for r in repos:
+        r.project_id = None
     name = p.name
     await session.delete(p); await session.commit()
     await audit.log(session, user, "project.delete", "project", pid, name, {})

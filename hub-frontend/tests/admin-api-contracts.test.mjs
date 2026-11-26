@@ -60,9 +60,72 @@ async function fixture(t) {
 const authenticatedOperations = {
   json: api => api.orgs(),
   upload: api => api.importPlugin(new Blob(['synthetic package'])),
-  form: api => api.uploadClientRelease(new Blob(['synthetic bundle']), new Blob(['synthetic installer'])),
+  form: api => api.uploadClientRelease(new Blob(['synthetic installer']), { channel: 'beta' }),
   download: api => api.downloadClientRelease('synthetic-release', 'fixture.bin'),
 }
+
+test('client release upload sends one installer and channel without a signing manifest', async t => {
+  const f = await fixture(t)
+  f.respond(200, { ok: true, created: true })
+  await f.api.uploadClientRelease(new Blob(['synthetic installer']), { channel: 'beta' })
+  assert.equal(f.requests[0].path, '/api/v1/admin/client-releases/upload')
+  assert.match(f.requests[0].body, /name="installer"/)
+  assert.match(f.requests[0].body, /name="channel"\r\n\r\nbeta/)
+  assert.doesNotMatch(f.requests[0].body, /name="bundle"/)
+})
+
+test('promotion policy validation identifies the requires field in every admin locale', async t => {
+  const f = await fixture(t)
+  const previous = getLocale()
+  t.after(() => setLocale(previous))
+  const code = 'hub.input.promotion_requires'
+  f.respond(400, { detail: 'requires 必须是环境标识数组' }, { 'X-Error-Code': code })
+  for (const [locale, message] of [
+    ['zh-CN', 'requires 必须是环境标识数组'],
+    ['en-US', 'requires must be an array of environment keys.'],
+    ['ja-JP', 'requires には環境キーの配列を指定してください。'],
+    ['ko-KR', 'requires에는 환경 키 배열을 지정해야 합니다.'],
+  ]) {
+    setLocale(locale)
+    await assert.rejects(f.api.me(), { status: 400, code, message })
+  }
+})
+
+test('release environment conflict is displayed in each selected language', async t => {
+  const f = await fixture(t)
+  const previous = getLocale()
+  t.after(() => setLocale(previous))
+  const code = 'hub.input.release_environment'
+  f.respond(409, { detail: 'original Hub diagnostic' }, { 'X-Error-Code': code })
+  for (const [locale, message] of [
+    ['zh-CN', '当前任务在所选环境中没有可用的部署目标，请检查发布链配置'],
+    ['en-US', 'This task has no available deployment target in the selected environment. Check the release pipeline configuration.'],
+    ['ja-JP', '選択した環境には、このタスクで使用できるデプロイ先がありません。リリースパイプラインの設定を確認してください。'],
+    ['ko-KR', '선택한 환경에서 이 작업에 사용할 수 있는 배포 대상이 없습니다. 릴리스 파이프라인 설정을 확인하세요.'],
+  ]) {
+    setLocale(locale)
+    await assert.rejects(f.api.me(), { status: 409, code, message })
+  }
+})
+
+test('invalid model configuration is rejected in each selected language', async t => {
+  const f = await fixture(t)
+  const previous = getLocale()
+  t.after(() => setLocale(previous))
+  const code = 'model.config.invalid-object'
+  f.respond(400, { detail: '模型配置必须是 JSON 对象' }, { 'X-Error-Code': code })
+  for (const [locale, message] of [
+    ['zh-CN', '模型配置必须是 JSON 对象'],
+    ['en-US', 'Model configuration must be a JSON object.'],
+    ['ja-JP', 'モデル設定は JSON オブジェクトで指定してください。'],
+    ['ko-KR', '모델 설정은 JSON 객체여야 합니다.'],
+  ]) {
+    setLocale(locale)
+    await assert.rejects(f.api.saveModelDef({ providerId: 'fixture', name: 'model', config: [] }),
+      { status: 400, code, message })
+  }
+  assert.ok(f.requests.every(request => request.method === 'PUT' && request.path === '/api/v1/admin/model-defs'))
+})
 
 for (const [kind, operation] of Object.entries(authenticatedOperations)) {
   test(`${kind}: a previous session's 401 preserves the new session`, async t => {
@@ -185,7 +248,7 @@ test('department and role deletion errors use the selected locale and preserve u
   const previous = getLocale()
   t.after(() => setLocale(previous))
   const cases = [
-    [f.api.deleteOrg, 'org.delete.has_children', '该部门下还有子部门', 'This department still has subdepartments.'],
+    [f.api.deleteOrg, 'org.delete.has_children', '该部门下还有子部门，请先删除或移动子部门后再删除该部门', 'This department still has subdepartments. Move or delete them before deleting this department.'],
     [f.api.deleteRole, 'role.delete.in_use', '仍有用户在用该角色', 'This role is still assigned to users.'],
   ]
   for (const [remove, code, detail, english] of cases) {
@@ -198,4 +261,25 @@ test('department and role deletion errors use the selected locale and preserve u
   }
   f.respond(400, { detail: 'Diagnostic from a newer Hub' }, { 'X-Error-Code': 'future.unknown' })
   await assert.rejects(f.api.deleteOrg('fixture'), { message: 'Diagnostic from a newer Hub' })
+})
+
+test('Hub input errors use each selected language and preserve unknown validation details', async t => {
+  const f = await fixture(t)
+  const previous = getLocale()
+  t.after(() => setLocale(previous))
+  for (const [locale, hostname, minimum] of [
+    ['zh-CN', '主机名必须是字符串', 'days 不能小于 1'],
+    ['en-US', 'The hostname must be text.', 'days must be at least 1.'],
+    ['ja-JP', 'ホスト名を文字列で指定してください。', 'days には 1 以上の値を指定してください。'],
+    ['ko-KR', '호스트 이름은 문자열이어야 합니다.', 'days 값은 1 이상이어야 합니다.'],
+  ]) {
+    setLocale(locale)
+    f.respond(422, { detail: 'fixture' }, { 'X-Error-Code': 'hub.input.host_type' })
+    await assert.rejects(f.api.me(), { message: hostname })
+    f.respond(422, { detail: [
+      { type: 'greater_than_equal', loc: ['query', 'days'], ctx: { ge: 1 }, msg: 'out of range' },
+      { type: 'other', msg: 'original diagnostic' },
+    ] })
+    await assert.rejects(f.api.me(), { message: minimum + '；original diagnostic' })
+  }
 })

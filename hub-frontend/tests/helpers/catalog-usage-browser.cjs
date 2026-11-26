@@ -91,7 +91,7 @@ async function checkCatalogUsage({ win, js, waitFor, sleep, screenshot, changeLo
       record('model dimension labels match the selected language ' + locale, JSON.stringify(overview.groups.map(group => group.label)) === JSON.stringify(groupLabels[locale]), overview.groups)
       if (locale === 'zh-CN') {
         record('Chinese model groups explain their dimensions', JSON.stringify(overview.groups.map(group => group.label)) === JSON.stringify(['目录配置', '实时负载', '近一小时请求情况']), overview.groups)
-        record('configured provider does not imply a live health probe', overview.statuses.find(item => item.name === 'Customer gateway 客户网关').status === '已配置' && overview.groups[0].text.includes('配置完整'), overview)
+        record('provider card counts catalog chat models alongside the configuration summary', overview.statuses.find(item => item.name === 'Customer gateway 客户网关').status === '可对话（3）' && overview.groups[0].text.includes('配置完整'), overview)
       }
       if (locale === 'en-US') record('model group labels have no untranslated Chinese', !/[\u3400-\u9fff]/.test(languageSnapshots[locale]), languageSnapshots[locale])
       if (locale === 'ja-JP') record('model group labels use Japanese', /[\u3040-\u30ff]/.test(languageSnapshots[locale]), languageSnapshots[locale])

@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import os
 import sys
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
+
+import httpx
+from fastapi import FastAPI
 
 
 DB = os.path.abspath(".smoke-audit-scope.db")
@@ -18,6 +23,8 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///" + DB.replace("\\", "/")
 sys.path.insert(0, ".")
 
 from app import models  # noqa: E402
+from app.api import admin  # noqa: E402
+from app.auth import sign_token  # noqa: E402
 from app.db import SessionLocal, engine, init_db  # noqa: E402
 from app.services import audit  # noqa: E402
 
@@ -47,9 +54,9 @@ async def main() -> None:
                              org_id=root.id, role_id=audit_role.id, is_active=True)
         root_actor = models.User(id="u-audit-root", username="root-actor",
                                  display_name="总部管理员", org_id=root.id, is_active=True)
-        child_actor = models.User(id="u-audit-child", username="child-actor",
+        child_actor = models.User(username="child-actor",
                                   display_name="研发管理员", org_id=child.id, is_active=True)
-        other_actor = models.User(id="u-audit-other", username="other-actor",
+        other_actor = models.User(username="other-actor",
                                   display_name="外地管理员", org_id=sibling.id, is_active=True)
         super_user = models.User(id="u-audit-super", username="super-auditor",
                                  display_name="超级管理员", org_id=root.id,
@@ -57,6 +64,8 @@ async def main() -> None:
         session.add_all([root, child, sibling, audit_role, viewer, root_actor,
                          child_actor, other_actor, super_user])
         await session.commit()
+        # An actor's display name can contain a different actor's exact ID.
+        root_actor.display_name = f"总部管理员 {child_actor.id}"
         await audit.log(session, root_actor, "project.update", "project", "p-root", "总部项目")
         await audit.log(session, child_actor, "task.dispatch", "task", "t-child", "研发任务")
         await audit.log(session, other_actor, "client.assign", "client", "c-other", "外地终端")
@@ -76,10 +85,112 @@ async def main() -> None:
         check("审计角色保持只读最小权限",
               audit_role.permissions == ["audit.view"], audit_role.permissions)
 
-        source = Path("app/api/admin.py").read_text(encoding="utf-8")
-        endpoint = source[source.index('@router.get("/audit")'):]
-        check("审计接口强制校验 audit.view 权限",
-              'Depends(require_perm("audit.view"))' in endpoint[:500])
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        end = start + timedelta(days=1)
+        matching = 405  # Cross both the list cap and a streamed CSV batch.
+        label = '=部门,"A"\nB'
+        for idx in range(matching):
+            row = audit.add(session, child_actor, "org.create", "org", str(idx),
+                            label, {"parentId": None})
+            row.at, row.id = start, f"fixture-{idx:03}"
+        for actor, at in [(child_actor, end), (child_actor, start - timedelta(seconds=1)),
+                          (other_actor, start)]:
+            row = audit.add(session, actor, "org.create")
+            row.at = at
+        await session.commit()
+
+    app = FastAPI()
+    app.include_router(admin.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://fixture/api/v1/admin/") as client:
+        headers = {"Authorization": "Bearer " + sign_token(viewer.id)}
+        params = {"action": "org.create", "since": "2026-01-01T08:00:00+08:00",
+                  "until": end.isoformat(), "actor": "管理员"}
+        response = await client.get("audit", params={**params, "offset": 400, "limit": 2},
+                                    headers=headers)
+        listing = response.json()
+        check("日期、操作者及范围共同决定总数；同一时间按 ID 稳定排序",
+              listing.get("total") == matching and
+              [r["id"] for r in listing.get("items", [])] == ["fixture-004", "fixture-003"])
+        check("列表注明当前 Hub 环境", listing.get("environment") == admin.settings.soduwork_env.strip().lower())
+        for invalid_offset in (-1, 2**63):
+            invalid = await client.get("audit", params={**params, "offset": invalid_offset}, headers=headers)
+            check(f"The audit list rejects offset {invalid_offset} at the query field",
+                  invalid.status_code == 422 and
+                  any(error["loc"] == ["query", "offset"] for error in invalid.json()["detail"]))
+        response = await client.get("audit", params={**params, "actor": child_actor.id}, headers=headers)
+        check("可按操作者 ID 查询", response.json().get("total") == matching)
+        response = await client.get("audit", params={**params, "actor": "%"}, headers=headers)
+        check("操作者筛选按字面量匹配", response.json().get("total") == 0)
+        count_only = await client.get("audit", params={**params, "limit": 0}, headers=headers)
+        check("保留只取总数的查询", count_only.json().get("total") == matching and not count_only.json()["items"])
+        invalid_offset = await client.get("audit", params={"offset": 2**63}, headers=headers)
+        check("拒绝超出数据库范围的偏移量", invalid_offset.status_code == 422)
+
+        response = await client.get("audit/export.csv", params=params, headers=headers)
+        check("导出 UTF-8 CSV 附件", response.status_code == 200 and
+              response.content.startswith(b"\xef\xbb\xbf") and "attachment" in response.headers.get("content-disposition", ""))
+        exported = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+        check("导出全部匹配记录且与列表排序一致",
+              [r["id"] for r in exported] == [f"fixture-{i:03}" for i in reversed(range(matching))])
+        check("导出保留标点换行并中和表格公式", bool(exported) and
+              exported[0]["targetLabel"] == "'" + label)
+        response = await client.get("audit/export.csv", params={**params, "actor": "不存在"}, headers=headers)
+        empty = csv.DictReader(io.StringIO(response.content.decode("utf-8-sig")))
+        check("无匹配时仍返回 CSV 表头", empty.fieldnames and "id" in empty.fieldnames and not list(empty))
+        async def get_ids(path, query):
+            result = await client.get(path, params=query, headers=headers)
+            result.raise_for_status()
+            if path.endswith(".csv"):
+                return [row["id"] for row in csv.DictReader(io.StringIO(result.content.decode("utf-8-sig")))]
+            return [row["id"] for row in result.json()["items"]]
+
+        for path in ("audit", "audit/export.csv"):
+            aliases = {"action": params["action"], "actorId": child_actor.id,
+                       "from": params["since"], "to": params["until"]}
+            check(f"{path} limits the ordered results after filtering and offset",
+                  await get_ids(path, {**aliases, "offset": 400, "limit": 2}) == ["fixture-004", "fixture-003"])
+            check(f"{path} returns no records for an explicit zero limit",
+                  await get_ids(path, {**aliases, "limit": 0}) == [])
+            check(f"{path} applies the inclusive start, exclusive end, exact ID and offset",
+                  await get_ids(path, {**aliases, "offset": 404}) == ["fixture-000"])
+            check(f"{path} returns no records at the end of the matching range",
+                  await get_ids(path, {**aliases, "offset": matching}) == [])
+            check(f"{path} accepts matching date aliases in different time zones",
+                  await get_ids(path, {**aliases, "since": start.isoformat(), "offset": 404}) == ["fixture-000"])
+            check(f"{path} never treats an actor name as an exact actor ID",
+                  await get_ids(path, {"actorId": child_actor.id, "action": "project.update"}) == [])
+            check(f"{path} retains the department scope for exact ID searches",
+                  await get_ids(path, {"actorId": other_actor.id}) == [])
+            check(f"{path} intersects actor name and exact actor ID filters",
+                  await get_ids(path, {**aliases, "actor": "no such actor"}) == [])
+            for field, value in (("actorId", "not-a-uuid"), ("from", "bad"), ("to", "bad"),
+                                 ("offset", -1), ("offset", 2**63), ("limit", -1)):
+                invalid = await client.get(path, params={field: value}, headers=headers)
+                check(f"{path} rejects {field}={value} with its field name",
+                      invalid.status_code == 422 and any(error["loc"] == ["query", field]
+                                                         for error in invalid.json()["detail"]))
+            for alias, name in (("from", "since"), ("to", "until")):
+                conflict = await client.get(path, params={alias: start.isoformat(), name: end.isoformat()},
+                                            headers=headers)
+                check(f"{path} rejects conflicting {alias} and {name} values",
+                      conflict.status_code == 422 and conflict.json()["detail"][0]["loc"] == ["query", alias])
+            unauthorized = await client.get(path)
+            forbidden = await client.get(path, headers={"Authorization": "Bearer " + sign_token(root_actor.id)})
+            check(f"{path} 校验登录和 audit.view 权限",
+                  unauthorized.status_code == 401 and forbidden.status_code == 403)
+            invalid = await client.get(path, params={"since": end.isoformat(), "until": start.isoformat()},
+                                       headers=headers)
+            check(f"{path} 拒绝反向时间区间", invalid.status_code == 422)
+            overflow = await client.get(path, params={"since": "0001-01-01T00:00:00+01:00"}, headers=headers)
+            check(f"{path} 拒绝无法表示的 UTC 时间", overflow.status_code == 422)
+
+        check("CSV honors an explicit limit across streaming batches",
+              await get_ids("audit/export.csv", {**params, "limit": 401}) ==
+              [row["id"] for row in exported[:401]])
+        oversized = await client.get("audit/export.csv", params={"limit": 2**63}, headers=headers)
+        check("CSV rejects limits outside the database integer range",
+              oversized.status_code == 422 and oversized.json()["detail"][0]["loc"] == ["query", "limit"])
 
 
 async def run() -> None:

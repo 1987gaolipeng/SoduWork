@@ -69,6 +69,7 @@ function fixture({ artifact, input, cleanup, location, app } = {}) {
 test('canonical application entry focuses an existing composer and reopens a closed window with the same session', async t => {
   const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'soduwork-app-window-entry-'));
   const app = { getPath: () => root }, f = fixture({ app });
+  assert.equal(f.handlers['work-preview-composer-state'], undefined, 'app session navigation is owned by the main process');
   const store = require('../main/app-settings-store.cjs');
   store.configure({ app, ownerOf: () => 'isolated-account' });
   t.after(() => { f.call('destroy', ''); store.configure(undefined); fs.rmSync(root, { recursive: true, force: true }); });

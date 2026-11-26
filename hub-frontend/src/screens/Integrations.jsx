@@ -1,8 +1,8 @@
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
 import React, { useState } from 'react'
-import { api } from '../api.js'
+import { api, can } from '../api.js'
 import { useViewportHeight } from '../viewport-height.js'
-import { useAsync, Loading, ErrorState, Icon, Modal, Confirm, toast, LiveDot, AUTO } from '../ui.jsx'
+import { useAsync, Loading, ErrorState, Icon, Modal, Confirm, navTo, toast, LiveDot, AUTO } from '../ui.jsx'
 
 function ago(ms) {
   if (!ms) return '—'
@@ -88,10 +88,16 @@ export default function Integrations() {
   return (
     <>
       <div className="toolbar integration-toolbar">
-        <span className="hintline">{tx("接入企业系统与代码源：")}<b>GitHub / GitLab</b>{tx(" 的固定拉取账号在「仓库目录」配置并测试连接；同步目录后，可按仓库开启 Issue 自动同步并关联成员账号。")}</span>
+        <ol className="hintline integration-setup">
+          <li>{tx("新建 GitHub 或 GitLab 集成源。")}</li>
+          <li>{tx("在仓库目录填写拉取账号，保存并测试连接。")}</li>
+          <li>{tx("点击「立即同步」，在代码源卡片查看结果。")}</li>
+        </ol>
         <div className="integration-toolbar-actions">
           <LiveDot />
           <button className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" />{tx("新建集成源")}</button>
+          {can('task.view') && list.some((item) => item.enabled && typeInfo(item.type).catalog) &&
+            <button className="btn btn-ghost" onClick={() => navTo('repositories')}>{tx("下一步：打开仓库目录")}</button>}
         </div>
       </div>
       {list.length === 0 && <div className="card"><div className="empty">{tx("还没有集成源。点右上「新建集成源」，选类型（通用/GitHub/GitLab/工单）并拿到接入令牌。")}</div></div>}
@@ -157,7 +163,7 @@ function IntCard({ i, onChanged, onEdit, onDelete, onRotate }) {
   const endpointPath = repositoryOnly ? tx('仓库目录 · 按仓库同步 Issue') : info.pull ? tx("/api/v4/…/issues（增量）")
     : info.webhook ? '/api/v1/webhooks/' + i.id : '/api/v1/ingest'
   const syncSummary = ago(syncAt)
-    + (info.catalog && i.repositorySyncOk && i.repositorySyncCount ? tx(" · {0} 个仓库", [i.repositorySyncCount])
+    + (info.catalog && i.repositorySyncOk && i.repositorySyncCount != null ? tx(" · {0} 个仓库", [i.repositorySyncCount])
       : info.pull && i.lastPullOk && i.lastPullCount ? tx(" · {0} 条", [i.lastPullCount]) : '')
 
   return (
@@ -260,8 +266,8 @@ function IntForm({ initial, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={editing ? tx("编辑集成源") : tx("新建集成源")} icon="plug" onClose={onClose}
-      foot={<><button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : (editing ? tx("保存配置") : tx("创建"))}</button></>}>
+    <Modal draft={{ name, type, config }} title={editing ? tx("编辑集成源") : tx("新建集成源")} icon="plug" busy={busy} onClose={onClose}
+      foot={dismiss => <><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : (editing ? tx("保存配置") : tx("创建"))}</button></>}>
       <div><label className="f-lbl">{tx("名称")}</label>
         <input className="f-in" value={name} onChange={(e) => setName(e.target.value)} disabled={editing} placeholder={tx("如：研发工单 / 产品需求池 / 客服工单")} autoFocus /></div>
       <div><label className="f-lbl">{tx("类型")}{editing && <span className="muted">{tx(" · 已创建不可改")}</span>}</label>

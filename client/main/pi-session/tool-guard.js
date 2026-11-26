@@ -127,6 +127,12 @@ function createGuardedBash(sdk, cwd, settingsManager, runtimeOptions) {
     ? runtimeOptions.resolve : shellRuntime.resolve;
   const resolvedShell = runtimeOptions?.resolvedShell || resolver({ ...(runtimeOptions || {}), configuredPath });
   options.shellPath = resolvedShell.shellPath;
+  if ((runtimeOptions?.platform || process.platform) === 'win32') {
+    // Pi decodes its output pipes as UTF-8. Windows Python otherwise uses the ANSI code page.
+    options.spawnHook = context => ({
+      ...context, env: { ...context.env, PYTHONIOENCODING: 'utf-8' },
+    });
+  }
   const base = sdk.createBashTool(cwd, options);
   const guidelines = Array.isArray(base.promptGuidelines) ? base.promptGuidelines.slice() : [];
   guidelines.push('Search only the current workspace or an explicit bounded directory; never scan filesystem roots.');

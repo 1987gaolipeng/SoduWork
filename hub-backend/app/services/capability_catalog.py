@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import os
 import asyncio
+from collections import Counter, defaultdict
 
 from . import skills
 from . import connector_catalog
+from . import skill_packages, skill_policy, skill_preferences
 
 
 MCP_TEMPLATES: tuple[dict, ...] = (
@@ -125,7 +127,6 @@ def skill_entry(item: dict, allowed: set[str], selected: set[str]) -> dict:
 async def client_catalog(session, client) -> dict:
     cfg, rows = await skills.catalog_with_policy(session, client)
     allowed = set(cfg.get("allowed") or [])
-    from . import skill_preferences
     selected = skill_preferences.selected_names(client, rows)
     entries = [skill_entry(item, allowed, selected) for item in rows]
     personal_mcp = list(getattr(client, "mcp_servers", None) or [])
@@ -145,24 +146,62 @@ async def client_catalog(session, client) -> dict:
     }
 
 
-async def admin_catalog(session) -> dict:
-    from . import skill_packages
-    from ..models import Client
+async def _personal_submissions():
+    return await asyncio.to_thread(skill_packages.active, include_all_personal=True, include_company=False)
+
+
+async def _device_selections(session, rows, personal):
+    """Yield one active device's company selections, excluding same-name personal packages."""
+    from ..models import Client, User
     from sqlalchemy import select
 
+    names = {row["name"] for row in rows}
+    if not names:
+        return
+    personal_names = defaultdict(set)
+    for item in personal:
+        if owner := item.get("ownerClientId"):
+            personal_names[owner].add(item["name"])
+    query = (select(Client.id, Client.skills, Client.config, User.org_id)
+             .join(User, Client.user_ref == User.id)
+             .where(Client.auth_state == "active", User.is_active.is_(True),
+                    User.account_deleted_at.is_(None)))
+    for device in await session.execute(query):
+        selected = skill_preferences.selected_names(device, rows) & names
+        yield selected.difference(personal_names.get(device.id, ())), device.org_id
+
+
+async def policy_preview(session, cfg: dict) -> dict:
+    current, clean, rows = await skills.prepare_policy_change(session, cfg)
+    before = set(current["allowed"])
+    after = set(skill_policy.effective(clean, rows, skills.bundled_root(), skills.BASELINE_SKILLS)["allowed"])
+    changed = before ^ after
+    affected_clients = 0
+    departments = set()
+    affected_rows = [row for row in rows if row["name"] in changed]
+    async for selected, department in _device_selections(session, affected_rows, await _personal_submissions()):
+        if selected:
+            affected_clients += 1
+            if department:
+                departments.add(department)
+    return {"added": sorted(after - before), "removed": sorted(before - after),
+            "affectedClients": affected_clients, "affectedDepartments": len(departments)}
+
+
+async def admin_catalog(session) -> dict:
     cfg, rows = await skills.catalog_with_policy(session)
     allowed = set(cfg.get("allowed") or [])
+    locked = set(cfg["builtinCatalog"]) & skills.BASELINE_SKILLS
     company = [skill_entry(item, allowed, set()) for item in rows]
-    usage: dict[str, int] = {}
-    for client in (await session.execute(select(Client))).scalars().all():
-        for name in (client.skills or []):
-            usage[str(name)] = usage.get(str(name), 0) + 1
+    submissions = await _personal_submissions()
+    usage = Counter()
+    async for selected, _ in _device_selections(session, rows, submissions):
+        usage.update(selected & allowed)
     for item in company:
         item["allowed"] = item["name"] in allowed
+        item["policyLocked"] = item["name"] in locked
         item["inUse"] = usage.get(item["name"], 0)
-    personal = []
-    for item in await asyncio.to_thread(skill_packages.active, include_all_personal=True, include_company=False):
-        personal.append(skill_entry(item, allowed, set()))
+    personal = [skill_entry(item, allowed, set()) for item in submissions]
     return {
         "skills": company, "personalSubmissions": personal,
         "mcpTemplates": [{**item, "builtIn": True, "canDelete": False} for item in MCP_TEMPLATES],

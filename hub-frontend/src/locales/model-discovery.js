@@ -1,4 +1,8 @@
 export default {
+  'Anthropic 服务根地址': 'Anthropic service root URL',
+  '连接成功，本次读取到 {0} 个模型。': 'Connected. Retrieved {0} models. ',
+  '示例：{0}。': 'Examples: {0}. ',
+  '发消息前还需添加模型并确认额度。': 'Add a model and check its quota before sending messages.',
   '发现模型': 'Discover models',
   '从服务发现模型': 'Discover models from service',
   '列出「{0}」上游提供的模型标识，勾选后加入目录；已存在的不会重复出现。': 'Lists the model identifiers the upstream of “{0}” provides. Select the ones to add to the catalog; existing models are never duplicated.',

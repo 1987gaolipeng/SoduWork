@@ -147,8 +147,14 @@ def main(unsupported_type="unregistered-fixture"):
             body = {"external_id": "record-1", "title": "First isolated record"}
             request("POST", "/ingest", status=401, json=body)
             request("POST", "/ingest", json=body, headers={"X-Ingest-Token": ingest_token})
-            request("POST", "/webhooks/" + generic["id"], json={**body, "title": "Updated record"},
-                    headers={"X-Ingest-Token": ingest_token})
+            missing_route = "/webhooks/" + str(uuid.uuid4())
+            for header in ("X-Ingest-Token", "X-Gitlab-Token"):
+                headers = {header: ingest_token}
+                request("POST", missing_route, json={}, headers=headers, status=404)
+                updated = request("POST", "/webhooks/" + generic["id"],
+                                  json={**body, "title": "Updated record"}, headers=headers)
+                assert updated["count"] == 1
+            checks.append("webhook route binding with both supported token headers")
             listed = request("GET", "/admin/integrations")
             row = next(row for row in listed if row["id"] == generic["id"])
             assert row["taskCount"] == 1 and "ingestToken" not in row
@@ -159,24 +165,11 @@ def main(unsupported_type="unregistered-fixture"):
             request("POST", "/ingest", json=body, headers={"X-Ingest-Token": rotated["ingestToken"]})
             checks.append("generic webhook ingestion, deduplication, credential masks and token rotation")
 
-            unsupported = request("POST", "/admin/integrations", json={"name": "Custom fixture",
-                "type": unsupported_type, "config": {"mcpUrl": peer_url + "/mcp"}})
-            refused = request("POST", "/admin/integrations/" + unsupported["id"] + "/pull", status=400)
-            assert refused["detail"] == "该类型不支持拉取"
-            request("POST", "/ingest", json={"external_id": "custom-1", "title": "Custom envelope"},
-                    headers={"X-Ingest-Token": unsupported["ingestToken"]})
-            # Exercise the production scheduler against the same fresh, persisted database.
-            code = ("import asyncio,json; from app.db import SessionLocal,engine; "
-                    "from app.services.poller import run_all\n"
-                    "async def main():\n async with SessionLocal() as s:\n"
-                    "  print(json.dumps(await run_all(s)))\n await engine.dispose()\nasyncio.run(main())")
-            polled = subprocess.check_output([sys.executable, "-c", code], cwd=output,
-                                            env=env, text=True, encoding="utf-8", timeout=60)
-            assert json.loads(polled)["integrations"] == 0, polled
-            assert not seen, seen
-            row = next(row for row in request("GET", "/admin/integrations") if row["id"] == unsupported["id"])
-            assert row["lastPullAt"] is None and row["taskCount"] == 1
-            checks.append("unregistered adapters reject manual pull and skip scheduling without outbound calls")
+            refused = request("POST", "/admin/integrations", status=400, json={
+                "name": "Custom fixture", "type": unsupported_type,
+                "config": {"mcpUrl": peer_url + "/mcp"}})
+            assert refused["detail"]
+            checks.append("unregistered integration types are rejected before persistence")
 
             server = {"id": str(uuid.uuid4()), "name": "fixture-business", "type": "http",
                 "url": peer_url + "/mcp", "enabled": True,

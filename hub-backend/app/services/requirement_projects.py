@@ -3,44 +3,52 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select, update
 
 from .. import models
+from .business_records import business_visible
 
 
-async def visible_query(session, client):
+async def visible_query(session, client, *, repo_id=None):
     from . import inbox
-    _, scope = await inbox._me_scope(session, client)
-    query = select(models.Project).where(models.Project.status == "active")
-    return query.where(or_(models.Project.org_id.in_(scope), models.Project.org_id.is_(None))) \
-        if scope else query.where(models.Project.org_id.is_(None))
+    _, scope = await inbox._me_scope(session, client) if client is not None else (None, set())
+    query = select(models.Project).where(models.Project.status == "active", business_visible(models.Project),
+        or_(models.Project.org_id.in_(scope), models.Project.org_id.is_(None)))
+    if repo_id:
+        query = query.join(models.Repo, models.Repo.project_id == models.Project.id).where(
+            models.Repo.id == repo_id, business_visible(models.Repo),
+            or_(models.Repo.org_id.in_(scope), models.Repo.org_id.is_(None)))
+    return query
 
 
 async def _validate_selection(session, client, project_id, repo_id):
-    if not project_id:
+    if not project_id and not repo_id:
         return
     if session.get_bind().dialect.name == "sqlite":
         # SQLite ignores FOR UPDATE. Reserve its writer before reading catalog
         # authority, preserving all stored values until this task write commits.
-        await session.execute(update(models.Project).where(models.Project.id == project_id)
-            .values(status=models.Project.status).execution_options(synchronize_session=False))
-    query = await visible_query(session, client)
-    project = await session.scalar(query.where(models.Project.id == project_id)
-        .with_for_update().execution_options(populate_existing=True))
-    if project is None:
-        raise HTTPException(404, "项目不存在、已停用或当前账号不可见，请重新选择")
+        model = models.Project if project_id else models.Repo
+        await session.execute(update(model).where(model.id == (project_id or repo_id))
+            .values(name=model.name).execution_options(synchronize_session=False))
+    query = await visible_query(session, client, repo_id=repo_id)
+    if project_id:
+        query = query.where(models.Project.id == project_id)
+    if await session.scalar(query.with_for_update()) is not None:
+        return
+    if not project_id:
+        raise HTTPException(404, "代码仓库不存在或当前账号不可见，请重新选择")
     if repo_id:
-        repo = await session.scalar(select(models.Repo).where(models.Repo.id == repo_id)
-            .with_for_update().execution_options(populate_existing=True))
-        if repo is None or str(repo.project_id or "") != project_id:
+        # A valid project paired with the wrong repository is a selection conflict.
+        projects = await visible_query(session, client)
+        if await session.scalar(projects.where(models.Project.id == project_id).with_for_update()) is not None:
             raise HTTPException(409, "关联仓库与所选项目不一致，请重新选择")
+    raise HTTPException(404, "项目不存在、已停用或当前账号不可见，请重新选择")
 
 
 async def prepare_create(session, client, data):
     # Repo-only legacy callers retain their established association behavior.
     project_id = str(data.get("projectId") or "").strip()
-    if not project_id:
-        return
     repo_id = str(data.get("repoId") or "").strip()
     await _validate_selection(session, client, project_id, repo_id)
-    data["projectId"] = project_id
+    if project_id:
+        data["projectId"] = project_id
     if "repoId" in data:
         data["repoId"] = repo_id
 

@@ -3,6 +3,11 @@
  * cli_account_auth.py, codex_runtime_home.py) and the client panel compose. */
 (function (global) {
   const messages = {
+    "已检测到 DeepSeek Harness App。安装 dsh-acp 适配器后即可配置执行。": "DeepSeek Harness App detected. Install the dsh-acp adapter to configure it for tasks.",
+    "缺少适配器": "Adapter missing",
+    "安装适配器": "Install adapter",
+    "未找到命令行适配器 dsh-acp。": "The dsh-acp command-line adapter was not found.",
+    "如果你已安装 DeepSeek Harness App，还需安装命令行适配器，SoduWork 才能调用它。": "If you already have the DeepSeek Harness App, install the command-line adapter so SoduWork can run DeepSeek Harness.",
     "无法确认 DeepSeek Harness 所选 Node 的平台和架构": "Unable to verify the platform and architecture of the Node runtime selected for DeepSeek Harness.",
     "无法确认 DeepSeek Harness 所选 Node 的 Linux libc": "Unable to verify the Linux libc of the Node runtime selected for DeepSeek Harness.",
     "DeepSeek Harness 运行时清单不完整：无法确认 DeepSeek Harness 所选 Node 的平台和架构": "The DeepSeek Harness runtime manifest is incomplete: Unable to verify the platform and architecture of the Node runtime selected for DeepSeek Harness.",

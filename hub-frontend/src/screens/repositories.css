@@ -42,6 +42,9 @@
 .rc-source-nums b i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .rc-source-nums span { color: var(--ink-4); font-size: max(var(--font-min-readable, 14.5px), 12px); }
 .rc-source-act { display: flex; align-items: center; gap: 7px; }
+.rc-sync-scope { margin: 0; padding: 0 14px 12px; color: var(--ink-3); font-size: var(--font-min-readable, 14.5px); }
+.rc-sync-progress { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 8px 14px;
+  border-top: 1px solid var(--line-2); background: var(--surface-1); font-variant-numeric: tabular-nums; }
 
 /* Summarize account configuration and identity in a chip before expanding its form. */
 .rc-acct { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;

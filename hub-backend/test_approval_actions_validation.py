@@ -13,7 +13,7 @@ from app import automation_models as am, models
 from app.api import environments
 from app.auth import sign_token
 from app.db import Base, get_session
-from app.services import approval_policies
+from app.services import approval_policies, approval_routing
 
 for model_file in (Path(__file__).parent / "app").glob("*models.py"):
     importlib.import_module("app." + model_file.stem)
@@ -42,9 +42,11 @@ class ApprovalActionsValidationTests(unittest.IsolatedAsyncioTestCase):
                 models.User(id="manager", username="manager", org_id="own-org",
                             role_id="actions-manager-role", is_active=True, auth_version=1),
                 models.User(id="reader", username="reader", is_active=True, auth_version=1),
+                models.User(id="super", username="super", is_super=True, is_active=True, auth_version=1),
             ])
             session.add_all([
-                am.ApprovalPolicy(id=key, key=key, name=name, org_id=org, rules=ORIGINAL_RULES)
+                am.ApprovalPolicy(id=key, key=key, name=name, org_id=org, rules=ORIGINAL_RULES,
+                                  is_system=(key == "system"))
                 for key, name, org in (("existing", "Original", "own-org"),
                                        ("peer", "Peer", "own-org"),
                                        ("other", "Other", "other-org"),
@@ -153,6 +155,32 @@ class ApprovalActionsValidationTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             row = await session.get(am.ApprovalPolicy, "existing")
             self.assertEqual((row.name, row.rules), ("Renamed", ORIGINAL_RULES))
+
+    async def test_superuser_can_rename_a_builtin_without_rewriting_its_rules(self):
+        rules = approval_routing.default_rules("baseline")
+        async with self.sessions() as session:
+            row = await session.get(am.ApprovalPolicy, "system")
+            row.rules = rules
+            await session.commit()
+
+        response = await self.request("PATCH", "/system", who="super", json={"name": "新的基线审批"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["name"], "新的基线审批")
+        listed = await self.request("GET", who="super")
+        self.assertEqual(listed.status_code, 200, listed.text)
+        saved = next(item for item in listed.json()["items"] if item["id"] == "system")
+        self.assertTrue(saved["isSystem"])
+        self.assertEqual((saved["name"], saved["rules"]), ("新的基线审批", rules))
+
+    async def test_invalid_rename_rejects_the_entire_patch_without_a_success_audit(self):
+        for name in ("", "  ", None, ["invalid"]):
+            for suffix, who in (("/system", "super"), ("/existing", "manager")):
+                with self.subTest(name=name, suffix=suffix):
+                    response = await self.request("PATCH", suffix, who=who, json={
+                        "name": name, "key": "must-not-persist", "rules": {**ORIGINAL_RULES, "required": 3},
+                    })
+                    self.assertEqual(response.status_code, 400, response.text)
+        await self.assert_unchanged()
 
     async def test_authentication_scope_and_duplicate_checks_keep_precedence(self):
         body = {"key": "changed", "name": "Changed", "rules": {**ORIGINAL_RULES, "actions": 5}}

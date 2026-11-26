@@ -70,6 +70,37 @@ class ContractNormalizationTests(unittest.IsolatedAsyncioTestCase):
 class DeliveryGateDefenseTests(unittest.IsolatedAsyncioTestCase):
     """Require the project workflow completion gate only for tasks with actual code projects."""
 
+    async def test_direct_code_requires_merge_and_only_configured_environment_boundaries(self):
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        self.addAsyncCleanup(engine.dispose)
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            task = models.Task(id="direct-code", title="Direct code", status="doing", repo_id="repo",
+                               work_routing={"executionContext": {"strategy": "direct"}})
+            artifact = am.ArtifactVersion(id="candidate", task_id=task.id, kind="code", seq=1,
+                source_ref="run", commit_sha="abc", checksum="abc", state="reviewed")
+            session.add_all([task, artifact, am.ExecutionSession(task_id=task.id, ref="run", state="done")])
+            await session.flush()
+            truth = await delivery_truth.evaluate(session, task)
+            self.assertFalse(truth["canComplete"])
+            self.assertEqual([b["code"] for b in truth["blockers"]], ["merge_pending"])
+
+            artifact.state = "merged"
+            self.assertTrue((await delivery_truth.evaluate(session, task))["canComplete"])
+            env = am.Environment(id="prod", key="prod", name="Production", promotion_policy={"marksDelivery": True})
+            target = am.DeploymentTarget(id="target", name="Release", repo_id=task.repo_id, environment_id=env.id)
+            session.add_all([env, target])
+            await session.flush()
+            truth = await delivery_truth.evaluate(session, task)
+            self.assertFalse(truth["canComplete"])
+            self.assertEqual([b["code"] for b in truth["blockers"]], ["delivery_pending"])
+
+            session.add(am.DeploymentRun(task_id=task.id, artifact_version_id=artifact.id, environment_id=env.id,
+                                         target_id=target.id, state="succeeded", idempotency_key="run-prod"))
+            await session.flush()
+            self.assertTrue((await delivery_truth.evaluate(session, task))["canComplete"])
+
     async def test_mislabeled_contract_does_not_block_completion(self):
         engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         sessions = async_sessionmaker(engine, expire_on_commit=False)

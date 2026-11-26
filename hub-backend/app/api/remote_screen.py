@@ -517,7 +517,11 @@ async def screen_media(websocket: WebSocket):
         return
     grant_id = ""
     try:
-        message = await websocket.receive_json()
+        try:
+            message = await asyncio.wait_for(websocket.receive_json(), timeout=device_auth.WS_AUTH_FRAME_TIMEOUT)
+        except TimeoutError:
+            await websocket.close(code=4403)
+            return
         if not isinstance(message, dict):
             await websocket.close(code=4403)
             return

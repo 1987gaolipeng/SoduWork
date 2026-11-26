@@ -28,7 +28,7 @@ const OCCLUSION = new WeakMap();
 const WATCHED_DOCUMENTS = new WeakSet();
 let DEPS = null;
 let SESSION_POOL = null;
-const { appConversationOrigin, openAppConversation, composerNavigationResult, composerActivity, showDetached, showEmbedded, embeddedBounds, windowDisplay, appContextFor, appContextForPlugin, isAppComposer, composerTurnSettled, composerControl, composerSend, composerHello, composerWidth, composerModeSet, chromeAction, composerDock, composerStep, composerState, composerSent } = require('./work-preview-app-window.cjs').create({
+const { appConversationOrigin, openAppConversation, composerNavigationResult, composerActivity, showDetached, showEmbedded, embeddedBounds, windowDisplay, appContextFor, appContextForPlugin, isAppComposer, composerTurnSettled, composerControl, composerSend, composerHello, composerWidth, composerModeSet, chromeAction, composerDock, composerStep, composerSent } = require('./work-preview-app-window.cjs').create({
   owners: OWNERS, getDeps: () => DEPS, ownerFor, ownerSession, safeWebUrl,
   normalizeAppBridge, cleanTabId, createView, destroyTab, liveContents, loadTarget, syncVisibility, clampBounds,
 });
@@ -822,9 +822,6 @@ function install(deps) {
   });
   deps.ipcMain.handle('work-preview-composer-step', (event, payload) => {
     try { return composerStep(event, payload); } catch (_) { return { ok: false }; }
-  });
-  deps.ipcMain.handle('work-preview-composer-state', (event, payload) => {
-    try { return composerState(payload); } catch (_) { return { ok: false }; }
   });
   deps.ipcMain.handle('work-preview-composer-sent', (event) => {
     try { return composerSent(event); } catch (_) { return { ok: false }; }

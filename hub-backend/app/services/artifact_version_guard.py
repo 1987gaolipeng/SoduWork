@@ -1,14 +1,71 @@
 """Transaction-scoped version serialization and conservative duplicate repair."""
+import re
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 
 from sqlalchemy import select, update
 
-from .. import automation_models as am, models
+from .. import automation_models as am
+from .. import models
 from . import task_events, task_requirements
 
 
 class OutputAwaitingRework(ValueError):
     """An automatic receipt cannot supersede a rejected delivery."""
+
+
+_DOCUMENT_FORMATS = {".md", ".txt", ".html", ".htm", ".pdf", ".doc", ".docx", ".odt", ".rtf"}
+
+
+def _same_deliverable(original, candidate):
+    # Keep versioned filenames and ordinary document renditions in the same directory
+    # associated with the original. A different file type (e.g. code to prose)
+    # otherwise needs an explicit replacement or a requested output path.
+    old, new = PurePosixPath(original), PurePosixPath(candidate)
+    if old.parent != new.parent:
+        return False
+    suffixes = {old.suffix.lower(), new.suffix.lower()}
+    if len(suffixes) > 1 and not suffixes <= _DOCUMENT_FORMATS:
+        return False
+    version = r"[-_. ]v\d+(?:\.\d+)*$"
+    return re.sub(version, "", old.stem, flags=re.I) == re.sub(version, "", new.stem, flags=re.I)
+
+
+def require_revised_files(rejected, candidate):
+    """Compare immutable output bytes before creating a new review of a rejected file version."""
+    previous = {file["name"]: file for file in (rejected.manifest or {}).get("files") or []
+                if isinstance(file, dict) and file.get("name") and (file.get("sha256") or file.get("id"))}
+    if not previous:
+        # Some historical versions contain no file identities to compare.
+        return
+    primary = {name for name, file in previous.items() if file.get("category", "primary") == "primary"}
+    original_digests = {file["sha256"] for file in previous.values() if file.get("sha256")}
+    files = candidate.get("files") or []
+    retained_primary = any(file.get("name") in primary and file.get("category", "primary") == "primary"
+                           for file in files)
+    for file in files:
+        name = file.get("name")
+        if not name:
+            continue
+        old = previous.get(name)
+        digest = file.get("sha256")
+        if old:
+            # A package may keep its page while correcting its stylesheet. Its
+            # stylesheet alone cannot carry a different primary into review.
+            if retained_primary:
+                if old.get("sha256") and digest:
+                    if old["sha256"] != digest:
+                        return
+                elif old.get("id") and file.get("id") and old["id"] != file["id"]:
+                    # Older uploads may only have an immutable attachment identity.
+                    return
+            continue
+        if file.get("category", "primary") != "primary" or not digest or digest in original_digests:
+            continue
+        if (file.get("requestedOutput") is True or primary.intersection(file.get("replaces") or [])
+                or any(_same_deliverable(original, name) for original in primary)):
+            return
+    raise ValueError("上一版交付已退回，请修改原交付文件后重新送审；如以新文件替换，请在交付清单中声明 replaces。")
 
 
 def _round(value):

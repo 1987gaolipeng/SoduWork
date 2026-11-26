@@ -31,7 +31,7 @@ const fmt = (ms) => ms ? new Date(ms).toLocaleString(getLocale(), { hour12: fals
 
 export default function PluginDetailWorkspace({
   plugin, version, section, runs = [], evaluationData, audienceData,
-  busy, evaluationBusy, actions, issues = [], categoryRevision = 0,
+  busy, evaluationBusy, actions, issues = [], issueCount = issues.length, categoryRevision = 0,
 }) {
   const uiLocale = useLocale();
   plugin = catalogPlugin(plugin, uiLocale, version);
@@ -95,11 +95,14 @@ export default function PluginDetailWorkspace({
 
     {section === 'overview' && <div className="plugin-detail-panel plugin-overview-panel">
       <PluginDescription plugin={plugin} version={version} entrypoints={entrypoints} approved={approved} />
-      {issues.length > 0 && <details className="plugin-contract-disclosure">
-        <summary>{tx("待处理事项 · ")}{issues.length}</summary>
+      {issueCount > 0 && <details className="plugin-contract-disclosure">
+        <summary>{tx("待处理事项 · ")}{issueCount}</summary>
+        {issues.length < issueCount && <p>{tx("当前预览显示 {0} 项待处理事项。", [issues.length])}</p>}
         <div className="plugin-contract-disclosure-body plugin-issue-list">{issues.map((item, index) =>
           <button key={item.id || index} type="button" onClick={() => actions.openIssue(item)}><Icon name="alert" />
-            <span>{[item.title, item.reason, item.label].find((value) => typeof value === 'string' && value) || tx("查看待处理事项")}</span><Icon name="chevron" /></button>)}</div>
+            <span>{[item.title, item.reason, item.label].find((value) => typeof value === 'string' && value) || tx("查看待处理事项")}
+              {item.kind === 'review' && typeof item.detail === 'string' && item.detail.trim() && <small>{item.detail}</small>}
+            </span><Icon name="chevron" /></button>)}</div>
       </details>}
       <details className="plugin-contract-disclosure"><summary>{tx("技能、连接与权限清单")}</summary>
         <div className="plugin-contract-disclosure-body"><CapabilitySummary version={version} hasWorkflow={hasWorkflow} /></div>
@@ -256,7 +259,7 @@ function CapabilitySummary({ version, hasWorkflow }) {
       <Capability icon="sparkle" label="AI" value={(cap.agentKinds || []).join('、') || ((cap.nodeTypes || []).includes('ai') ? tx("自动选择") : tx("不需要"))} />
       <Capability icon="plug" label={tx("技能")} value={(cap.skills || []).join('、') || tx("无")} />
       <Capability icon="link" label={tx("连接器")} value={(cap.mcpServers || []).join('、') || tx("无")} />
-      <Capability icon="desktop" label={tx("执行能力")} value={(cap.runtime || []).join('、') || tx("基础执行")} />
+      <Capability icon="monitor" label={tx("执行能力")} value={(cap.runtime || []).join('、') || tx("基础执行")} />
       <Capability icon="key" label={tx("密钥")} value={(cap.secrets || []).join('、') || tx("无")} />
     </div>
   </section>

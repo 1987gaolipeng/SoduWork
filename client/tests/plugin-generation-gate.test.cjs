@@ -74,6 +74,38 @@ test('unchanged invalid old draft is not repaired by an unrelated turn',async t=
   const turn=await gate.begin({handle:f.handle,repair:async()=>{calls++;}});
   assert.equal((await turn.finish({ok:true})).ok,true);assert.equal(calls,0);
 });
+test('a generated draft still requires the original validation permissions', async t => {
+  const f = fixture(t);
+  const preflight = t.mock.fn();
+  const repair = t.mock.fn();
+  let revision = 1;
+  const turn = await gate.begin({handle: f.handle, validationAllowed: () => revision === 1, preflight, repair});
+  assert.equal(turn.canStart(), true);
+  f.write();
+  revision++;
+
+  const result = await turn.finish({ok: true});
+  assert.equal(result.cancelled, true);
+  assert.equal(preflight.mock.callCount(), 0);
+  assert.equal(repair.mock.callCount(), 0);
+  assert.deepEqual(gate.records(f.handle), []);
+});
+
+test('an empty final scan cannot complete after a stop or change of owner', async t => {
+  for (const cause of ['stop', 'owner']) {
+    const f = fixture(t);
+    let stopped = false;
+    const turn = await gate.begin({handle: f.handle, cancelled: () => stopped});
+    f.handle.outputSnapshotAsync = async () => {
+      if (cause === 'stop') stopped = true;
+      else f.handle.deliveryOwner = {account: 'other'};
+      return f.handle.outputSnapshot();
+    };
+    const result = await turn.finish({ok: true});
+    assert.equal(result.cancelled, true, cause);
+  }
+});
+
 test('two failed repairs block completion and retain privacy-safe diagnostics',async t=>{
   const f=fixture(t);let calls=0;
   const turn=await gate.begin({handle:f.handle,repair:async()=>{calls++;return {ok:true};}});

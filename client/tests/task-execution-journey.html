@@ -32,7 +32,10 @@ const session={id:'session-1',status:'done',assignee:'Codex',host:'办公电脑'
     {kind:'do',tool:'browser',text:'验证分享经验可以打开',at:new Date(now-260000).toISOString()}]};
 const stages=[
   stage('spec','spec','understand','spec','确认需求边界','succeeded',{evidence:[{kind:'text',title:'验收口径',summary:'详情可以打开'}]}),
-  stage('code','code','execute','ai','实现论坛','succeeded',{sessions:[session],evidence:[{kind:'commit',title:'代码提交',summary:'8a44158f'}]}),
+  stage('code','code','execute','ai','实现论坛','succeeded',{
+    startedAt:session.startedAt,finishedAt:session.finishedAt,
+    sessions:[session],evidence:[{kind:'commit',title:'代码提交',summary:'8a44158f'}]}),
+  stage('legacy','legacy','execute','ai','历史任务','succeeded',{finishedAt:'invalid'}),
   stage('quality','quality','verify','quality','工程质量门禁','succeeded',{evidence:[{kind:'check',title:'自动化测试',summary:'42 项通过',producer:{name:'质量 Runner'},verification:{state:'passed'}}]}),
   stage('publish','publish','deliver','publish','发布到 staging','running',{evidence:[
     {kind:'image',isImage:true,title:'staging 页面验证截图',size:43,producer:{name:'Browser Use'},
@@ -42,9 +45,9 @@ const stages=[
       passed:1,failed:0,checks:[{name:'首页可访问',type:'http',ok:true,detail:'GET → HTTP 200'}]}}]})];
 const trace={schemaVersion:'1.0',task:{id:'task-1',title:'示例社区增加经验分享论坛',status:'doing'},runs:[],stages,
   phases:[phase('understand','理解工作','succeeded',1,1),phase('organize','组织协作','succeeded',0,0),
-    phase('execute','执行工作','succeeded',1,1),phase('verify','确认结果','succeeded',1,1),
+    phase('execute','执行工作','succeeded',2,1),phase('verify','确认结果','succeeded',1,1),
     phase('deliver','交付发布','running',1,0),phase('evolve','评价沉淀','planned',0,0)],
-  summary:{totalStages:4,completedStages:3,currentStageId:'publish',currentStageName:'发布到 staging',
+  summary:{totalStages:5,completedStages:4,currentStageId:'publish',currentStageName:'发布到 staging',
     currentState:'running',nextAction:'等待 staging 健康检查返回'},
   card:{taskId:'task-1',projectName:'示例社区',pluginName:'示例独立发布流程',stage:{state:'running'},
     executor:{assignee:'staging Runner',host:'192.0.2.10'}},
@@ -73,12 +76,20 @@ Promise.all([
     live.textContent.includes('company/code')&&live.textContent.includes('任务归属人的在线客户端优先')&&
     [...live.querySelectorAll('[data-tfd-copy]')].some(button=>button.getAttribute('data-tfd-copy')==='thread-soduwork-001'));
   task.querySelector('.tfd-loop [data-tfd-stage="publish"]').click();
+  chk('没有结束时间的进行中阶段保留进行中提示',
+    [...task.querySelectorAll('.tfd-node[open] summary em:not(.tfd-state)')].some(el=>el.textContent==='进行中'));
   chk('发布阶段展示上线后验证结果且图片证据可直接预览',
     task.textContent.includes('上线后验证')&&task.textContent.includes('首页可访问')&&
     task.textContent.includes('GET → HTTP 200')&&task.textContent.includes('取证 Runner runner-staging')&&
     task.textContent.includes('Browser Use')&&task.querySelectorAll('.tfd-evidence-gallery img').length===1);
   task.querySelector('.tfd-loop [data-tfd-stage="quality"]').click();
   chk('普通检查标明取证执行者',task.textContent.includes('取证 · 质量 Runner'));
+  chk('毫秒时间戳的阶段仍显示耗时',task.querySelector('.tfd-node[open] summary')?.textContent.includes('8 分钟'));
+  chk('ISO 时间戳的阶段显示实际耗时',live.querySelector('.tfd-node[open] summary')?.textContent.includes('6 分钟'));
+  task.querySelector('.tfd-route [data-tfd-stage="legacy"]').click();
+  const legacySummary=task.querySelector('.tfd-node[open] summary');
+  chk('无效的结束时间不显示耗时',legacySummary?.textContent.includes('历史任务')&&
+    legacySummary.querySelectorAll('em').length===2);
   chk('工作目录仍可复制而不是只展示截断文本',[...live.querySelectorAll('[data-tfd-copy]')]
     .some(button=>button.getAttribute('data-tfd-copy')==='D:\\SoduWork\\forum'));
   document.getElementById('out').textContent=lines.join('\n')+'\n\ntask execution journey: '+ok+' passed, '+fail+' failed';

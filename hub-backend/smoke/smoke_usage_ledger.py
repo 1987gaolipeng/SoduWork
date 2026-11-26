@@ -8,6 +8,7 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 from sqlalchemy import func, select
 
 from app import automation_models as am, models
+from app.account_conversation_models import AccountConversation
 from app.db import Base, SessionLocal, engine
 from app.services import usage_analytics, usage_ledger
 
@@ -62,6 +63,8 @@ async def main():
             }})
         session.add_all([
             user, client, task, execution, foreign_user, foreign_client, foreign_task,
+            AccountConversation(owner_user_id=user.id, source_client_id=client.id,
+                                source_session_id="chat-1", title="周报整理与今日同步"),
         ])
         await session.flush()
         await usage_ledger.from_execution(
@@ -76,11 +79,19 @@ async def main():
             "sourceTitle": "  周报整理与今日同步  ",
             "model": "office-model", "occurredAt": chat_start.isoformat(),
             "usage": {"input": 80, "output": 20}})
+        try:
+            await usage_ledger.from_client(session, client, {
+                "idempotencyKey": "chat-1", "sourceId": "chat-1",
+                "conversationId": "chat-1", "agent": "pi", "sourceType": "task",
+                "taskId": foreign_task.id,
+                "model": "office-model", "occurredAt": chat_retry.isoformat(),
+                "usage": {"input": 40, "output": 10}})
+        except usage_ledger.InvalidUsageSource:
+            pass
+        else:
+            raise AssertionError("Task reports require a task visible to the reporting device")
         await usage_ledger.from_client(session, client, {
-            "idempotencyKey": "chat-1", "sourceId": "chat-1",
-            "conversationId": "chat-1", "agent": "pi", "sourceType": "task",
-            "taskId": foreign_task.id,
-            "model": "office-model", "occurredAt": chat_retry.isoformat(),
+            "sourceId": "chat-1", "model": "office-model", "occurredAt": chat_retry.isoformat(),
             "usage": {"input": 40, "output": 10}})
         beijing = timezone(timedelta(hours=8))
         today_report = datetime.now(beijing).astimezone(timezone.utc)
@@ -106,11 +117,11 @@ async def main():
             select(func.count(models.AIUsageEvent.id)))).scalar_one()
         ok(count == 3, "execution heartbeat and client retry are idempotent")
         chat = (await session.execute(select(models.AIUsageEvent).where(
-            models.AIUsageEvent.conversation_id == "chat-1"))).scalar_one()
+            models.AIUsageEvent.reported_chat_session_id == "chat-1"))).scalar_one()
         ok(chat.total_tokens == 100, "stale cumulative retry cannot reduce counters")
         ok(chat.billing_user_id == user.id, "device identity owns chat usage")
         ok(chat.task_id == "", "device cannot link usage to another user's task")
-        ok(chat.source_type == "chat", "invalid task attribution falls back to chat")
+        ok(chat.source_type == "chat", "rejected task attribution preserves the original source")
         ok(chat.source_title == "周报整理与今日同步", "conversation title stored trimmed")
         chat_time = chat.occurred_at if chat.occurred_at.tzinfo else chat.occurred_at.replace(tzinfo=timezone.utc)
         ok(chat_time == chat_start,
@@ -120,7 +131,7 @@ async def main():
         ok(task_row.agent_key == "future-agent", "new agent names need no schema change")
         ok(task_row.total_tokens == 150, "effective task tokens preserved")
         cross_day = (await session.execute(select(models.AIUsageEvent).where(
-            models.AIUsageEvent.conversation_id == "cross-day"))).scalar_one()
+            models.AIUsageEvent.reported_chat_session_id == "cross-day"))).scalar_one()
         daily_rows = (await session.execute(select(models.AIUsageDaily).where(
             models.AIUsageDaily.usage_event_id == cross_day.id
         ).order_by(models.AIUsageDaily.day_key))).scalars().all()
@@ -134,7 +145,7 @@ async def main():
         ok(report["recent"][0]["user"] == "用量用户", "user display name resolved")
         titles = {row["sourceId"]: row["title"] for row in report["recent"]}
         ok(titles.get("chat-1") == "周报整理与今日同步",
-           "chat events show the reported conversation title")
+           "verified chat events show the synced conversation title")
         ok(all(t != "新建会话" for t in titles.values()),
            "legacy generic label never reappears")
         trend_total = sum(int(item["tokens"] or 0) for item in report["trend"])
