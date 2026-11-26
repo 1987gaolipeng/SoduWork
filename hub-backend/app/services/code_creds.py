@@ -109,6 +109,9 @@ def save(client, body: dict) -> str | None:
             cur.pop(f, None)               # Explicitly remove the secret.
             continue
         val = str(v).strip() if f in ("token", "gerrit_token") else str(v)
+        if f in ("token", "gerrit_token"):
+            if len(val) < 8:
+                return "令牌太短（至少 8 个字符），请检查是否复制完整"
         if f == "key":
             val = _normalize_key(val)
             if not _key_type(val):

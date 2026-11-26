@@ -329,8 +329,8 @@ class PublicBetaDownloadTests(_SqliteIsolated):
             for version in versions for platform, arch, suffix, _ in self.targets
         ]
 
-    async def test_beta_homepage_and_six_downloads_choose_latest_candidate(self):
-        versions = ["1.13.11-beta.9", "1.13.11-beta.21", "1.13.11-beta.530", "1.13.11"]
+    async def test_beta_homepage_and_six_downloads_choose_latest_version(self):
+        versions = ["1.13.15-beta.2", "1.13.20-beta.9", "1.13.20-beta.21", "1.13.20"]
         rows = self.releases(versions) + self.releases(["1.14.0"], channel="stable")
         app = await self._app(rows)
         with patch.object(download, "_public_channel", return_value="beta"), _trust_stub():
@@ -340,7 +340,7 @@ class PublicBetaDownloadTests(_SqliteIsolated):
                     with self.subTest(info=route):
                         info = (await client.get("/api/v1/download/client" + route)).json()
                         self.assertTrue(info["available"])
-                        self.assertEqual(info["version"], "1.13.11-beta.530")
+                        self.assertEqual(info["version"], "1.13.20")
                         for item in list(info.get("formats", {}).values()) + list(info.get("arches", {}).values()):
                             self.assertEqual(item["version"], info["version"])
                 for _, _, suffix, route in self.targets:
@@ -348,9 +348,9 @@ class PublicBetaDownloadTests(_SqliteIsolated):
                         response = await client.get("/api/v1/download/client" + route)
                         self.assertEqual(response.status_code, 200)
                         self.assertEqual(response.content, b"00")
-                        self.assertIn(f"SoduWork-1.13.11-beta.530-{suffix}",
+                        self.assertIn(f"SoduWork-1.13.20-{suffix}",
                                       response.headers["content-disposition"])
-                for version in ("1.13.11", "1.13.11-beta.21"):
+                for version in ("1.13.20", "1.13.15-beta.2"):
                     response = await client.get(f"/api/v1/download/client/releases/beta-{version}-Setup.exe")
                     self.assertEqual(response.status_code, 200)
                 response = await client.get("/api/v1/download/client/releases/stable-1.14.0-Setup.exe")

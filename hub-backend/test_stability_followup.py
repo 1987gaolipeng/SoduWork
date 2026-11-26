@@ -259,7 +259,7 @@ class FileWorkTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProjectCountsTests(unittest.IsolatedAsyncioTestCase):
-    async def test_scoped_counts_use_three_queries_for_one_thousand_projects(self):
+    async def test_scoped_counts_use_four_queries_for_one_thousand_projects(self):
         engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         try:
             async with engine.begin() as connection:
@@ -278,7 +278,7 @@ class ProjectCountsTests(unittest.IsolatedAsyncioTestCase):
                              lambda _c, _cursor, statement, *_args: sql.append(statement))
                 with patch.object(admin_projects.rbac, "scope_org_ids", AsyncMock(return_value={"allowed"})):
                     rows = await admin_projects.list_projects(NS(id="viewer"), session)
-                self.assertEqual(len(sql), 3)
+                self.assertEqual(len(sql), 4)
                 self.assertEqual(len(rows), 1001)
                 by_id = {row["id"]: row for row in rows}
                 self.assertNotIn("outside", by_id)

@@ -24,6 +24,10 @@ THINKING_FORMATS = (
 THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
 
 
+class ModelConfigTypeError(ValueError):
+    """A submitted model configuration is not a JSON object or legacy null."""
+
+
 def normalize_modality(value: str) -> str:
     modality = str(value or "chat").strip().lower()
     return modality if modality in MODEL_MODALITIES else "chat"
@@ -122,6 +126,8 @@ def _clean_thinking_config(value) -> dict:
 
 def clean_model_config(value, modality: str = "chat") -> dict:
     """Validate the small, non-secret per-model generation contract."""
+    if value is not None and not isinstance(value, dict):
+        raise ModelConfigTypeError("模型配置必须是 JSON 对象")
     modality = normalize_modality(modality)
     raw = dict(value) if isinstance(value, dict) else {}
     thinking = _clean_thinking_config(raw) if modality == "chat" else {}
@@ -130,6 +136,7 @@ def clean_model_config(value, modality: str = "chat") -> dict:
         image_routing = str(raw.get("imageRouting") or "").strip().lower()
         if image_routing not in IMAGE_ROUTINGS:
             raise ValueError("图片输入方式必须是自动、原生识图或视觉辅助")
+        raw["imageRouting"] = image_routing
     endpoint = _clean_relative_path(raw.get("endpointPath"), "生成接口路径")
     if not endpoint and modality in MEDIA_ENDPOINTS:
         endpoint = MEDIA_ENDPOINTS[modality]
@@ -173,4 +180,36 @@ def model_config(value, modality: str = "chat") -> dict:
     try:
         return clean_model_config(value, modality)
     except ValueError:
+        pass
+
+    if not isinstance(value, dict):
         return clean_model_config({}, modality)
+    raw = dict(value)
+    if isinstance(raw.get("capabilities"), dict):
+        raw["capabilities"] = {
+            key: state for key, state in raw["capabilities"].items()
+            if key in model_capabilities.CAPABILITIES and state in model_capabilities.STATES
+        }
+        # An explicit refusal wins over a conflicting historical native route.
+        # Never recover such a row by dropping the refusal and inferring support.
+        if (raw["capabilities"].get("imageInput") == "unsupported"
+                and str(raw.get("imageRouting") or "").strip().lower() == "native"):
+            raw["imageRouting"] = "vision-fallback"
+
+    recovered = {}
+    # Validate a fixed sequence of accumulated raw fields, then normalize once.
+    # Thinking fields share defaults and dependencies; independently normalized
+    # fragments could replace an explicit mode with an implicit "auto".
+    for key in ("thinkingMode", "thinkingAlwaysOn", "thinkingFormat",
+                "supportsReasoningEffort", "thinkingLevelMap", "reasoning",
+                "capabilities", "maxOutputTokens", "imageRouting",
+                "endpointPath", "statusPath", "resultPath", "defaults"):
+        if key not in raw:
+            continue
+        candidate = {**recovered, key: raw[key]}
+        try:
+            clean_model_config(candidate, modality)
+        except ValueError:
+            continue
+        recovered = candidate
+    return clean_model_config(recovered, modality)

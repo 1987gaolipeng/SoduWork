@@ -16,9 +16,10 @@ os.environ.setdefault("ADMIN_PASS", "isolated-notice-audience-admin")
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 
 from pathlib import Path
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app import models, realtime
+from app.schemas import task_to_api
 from app.services import receipts, notify
 
 
@@ -96,11 +97,39 @@ class NoticeAudienceRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.publish.await_args.kwargs["user_id"], "requester")
 
     async def test_external_request_keeps_creator_relay_without_manager_copy(self):
-        notices = await self.close(created_by="requester", requester_name="Customer")
+        contact = "a" * 55 + "@" + "b" * 60 + ".test"
+        notices = await self.close(created_by="requester", requester_name="Customer", requester_contact=contact)
         self.assertEqual([cid for cid, _ in notices], ["r1"])
         self.assertEqual(notices[0][1].get("recipientId"), "requester")
         self.assertIn("Customer", notices[0][1]["text"])
+        self.assertIn(contact, notices[0][1]["text"])
+        self.assertNotIn("fieldWarnings", notices[0][1])
+        receipt = (await self.session.scalars(select(models.TaskEvent)
+                   .where(models.TaskEvent.kind == "receipt"))).one()
+        self.assertEqual(receipt.detail["contact"], contact)
+        self.assertNotIn("fieldWarnings", receipt.detail)
         self.assertEqual(self.publish.await_args.kwargs["user_id"], "requester")
+
+    async def test_legacy_receipt_bounds_match_notice_and_keep_task_intact(self):
+        task = models.Task(id="legacy", title="工" * 201, status="done", owner_client_id="e1",
+                           created_by="requester", requester_name="N" * 65, requester_contact="c" * 201)
+        self.session.add(task)
+        await self.session.commit()
+        self.assertTrue(await receipts.notify_on_close(self.session, task, "e1"))
+        receipt = (await self.session.scalars(select(models.TaskEvent)
+                   .where(models.TaskEvent.kind == "receipt"))).one()
+        warnings = {"title": "truncated", "requesterName": "truncated", "contact": "omitted"}
+        self.assertEqual(task_to_api(task)["receiptFieldWarnings"], warnings)
+        self.assertEqual(receipt.detail["title"], "工" * 199 + "…")
+        self.assertEqual(receipt.detail["to"], "N" * 63 + "…")
+        self.assertEqual(receipt.detail["contact"], "")
+        self.assertEqual(receipt.detail["fieldWarnings"], warnings)
+        notice = self.publish.await_args.args[1]
+        self.assertEqual(notice["fieldWarnings"], warnings)
+        self.assertIn(receipt.detail["title"], notice["text"])
+        self.assertNotIn("cc", notice["text"])
+        await self.session.refresh(task)
+        self.assertEqual(task.requester_contact, "c" * 201)
 
     async def test_task_notice_does_not_follow_device_to_another_account(self):
         task = models.Task(id="private", title="Executor private", status="doing", owner_client_id="e1")

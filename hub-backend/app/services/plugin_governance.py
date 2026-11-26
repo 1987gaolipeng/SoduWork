@@ -8,8 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
 from ..models import Task
-from . import mcp_servers, plugin_service
-
+from . import mcp_servers, plugin_compat, plugin_service
 
 _ACTIVE_RUNS = {"queued", "dispatching", "running", "waiting_human",
                 "waiting_external", "rework"}
@@ -36,6 +35,42 @@ def _queue_item(kind: str, plugin: dict, version=None, **extra) -> dict:
     return row
 
 
+def _review_detail(version: am.PluginVersion, previous: am.PluginVersion | None) -> str:
+    parts = []
+    if previous is not None:
+        compatibility = plugin_compat.between(previous, version)
+        changes = compatibility["changes"]
+        if changes:
+            change = next((item for item in changes if item["level"] == compatibility["level"]),
+                          changes[0])
+            parts.append(f"相对 v{previous.version}：{change['message']}")
+
+    description = (version.manifest or {}).get("description")
+    if isinstance(description, str) and description.strip():
+        parts.append(" ".join(description.split()))
+    if not parts:
+        nodes = (version.workflow or {}).get("nodes") or []
+        names = []
+        for node in nodes:
+            if isinstance(node, dict):
+                name = node.get("name") or node.get("key")
+                if isinstance(name, str) and name.strip():
+                    names.append(name.strip())
+            if len(names) == 3:
+                break
+        if names:
+            parts.append("流程节点：" + "、".join(names))
+        elif previous is None:
+            parts.append(f"首次提交 v{version.version}，未提供版本说明")
+        else:
+            parts.append(f"v{version.version} 未提供版本说明；相对 v{previous.version} 的兼容性检查未报告变更")
+
+    unknown_key = (version.provenance or {}).get("signatureState") == "unknown-key"
+    hint = "发布者未登记，需先核对签名身份" if unknown_key else "导入已完成，尚未信任和开放"
+    suffix = "；" + hint
+    return "；".join(parts)[:240 - len(suffix)] + suffix
+
+
 async def overview(session: AsyncSession, org_ids: set[str] | None = None,
                    task_ids: set[str] | None = None) -> dict:
     """Build one bounded, organization-scoped control-plane read model."""
@@ -47,11 +82,13 @@ async def overview(session: AsyncSession, org_ids: set[str] | None = None,
             "summary": {
                 "total": 0, "available": 0, "pendingReview": 0,
                 "activeRuns": 0, "successRate": None, "attention": 0,
+                "pendingReviewVersions": 0, "attentionItems": 0,
             },
             "counts": {key: 0 for key in (
                 "review", "quality", "dependency", "runtime", "revoked")},
             "queues": {key: [] for key in (
                 "review", "quality", "dependency", "runtime", "revoked")},
+            "pluginCounts": {},
             "items": [],
         }
 
@@ -123,13 +160,9 @@ async def overview(session: AsyncSession, org_ids: set[str] | None = None,
         if not plugin:
             continue
         if version.trust_state == "quarantined":
-            provenance = dict(version.provenance or {})
             queues["review"].append(_queue_item(
                 "review", plugin, version,
                 title=f"{plugin['name']} v{version.version} 等待审核",
-                detail=("发布者未登记，需先核对签名身份"
-                        if provenance.get("signatureState") == "unknown-key"
-                        else "导入已完成，尚未信任和开放"),
                 severity="high", target="versions",
             ))
         elif version is latest_by_plugin.get(version.plugin_id) and (
@@ -213,11 +246,31 @@ async def overview(session: AsyncSession, org_ids: set[str] | None = None,
             at=_ms(run.finished_at or run.updated_at or run.created_at),
         ))
 
+    # Summary tiles count plugins; queue counts count actionable items. Compute
+    # both before limiting previews so neither depends on the display limit.
+    counts = {key: len(value) for key, value in queues.items()}
+    plugin_counts = {plugin_id: {"review": 0, "attention": 0}
+                     for plugin_id in plugin_ids}
+    for kind, queue in queues.items():
+        for item in queue:
+            plugin_counts[item["pluginId"]]["attention"] += 1
+            if kind == "review":
+                plugin_counts[item["pluginId"]]["review"] += 1
+
     for key in queues:
         queues[key].sort(
             key=lambda item: (item.get("severity") == "high", item.get("at") or 0),
             reverse=True)
         queues[key] = queues[key][:30]
+
+    # Compare only visible reviews with the preceding submission of the same plugin.
+    reviews = {item["versionId"]: item for item in queues["review"]}
+    previous_by_plugin = {}
+    for version in reversed(versions):
+        if version.id in reviews:
+            reviews[version.id]["detail"] = _review_detail(
+                version, previous_by_plugin.get(version.plugin_id))
+        previous_by_plugin[version.plugin_id] = version
 
     available = sum(1 for item in items if item.get("enabled") and
                     item.get("latestVersion") and
@@ -227,15 +280,18 @@ async def overview(session: AsyncSession, org_ids: set[str] | None = None,
     decided = [row for row in runs if row.state in {"succeeded", "failed"}]
     success_rate = (round(sum(row.state == "succeeded" for row in decided) * 100 /
                           len(decided), 1) if decided else None)
-    counts = {key: len(value) for key, value in queues.items()}
     return {
         "generatedAt": _ms(datetime.now(timezone.utc)),
         "summary": {
             "total": len(items), "available": available,
-            "pendingReview": counts["review"], "activeRuns": active_runs,
-            "successRate": success_rate, "attention": sum(counts.values()),
+            "pendingReview": sum(row["review"] > 0 for row in plugin_counts.values()),
+            "pendingReviewVersions": counts["review"], "activeRuns": active_runs,
+            "successRate": success_rate,
+            "attention": sum(row["attention"] > 0 for row in plugin_counts.values()),
+            "attentionItems": sum(counts.values()),
         },
         "counts": counts,
         "queues": queues,
+        "pluginCounts": plugin_counts,
         "items": items,
     }

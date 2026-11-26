@@ -1,7 +1,7 @@
 """Resolve configurable approval policies into explicit, auditable user-assignment snapshots."""
 from __future__ import annotations
 
-from sqlalchemy import delete, inspect as sa_inspect, select
+from sqlalchemy import and_, delete, inspect as sa_inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
@@ -131,6 +131,8 @@ async def _selector_users(session: AsyncSession, task: models.Task, selector: di
     if direct:
         return await _active_users(session, direct)
 
+    if kind not in {"role", "position", "permission"}:
+        return []
     users = list((await session.execute(select(models.User).where(
         models.User.is_active.is_(True)
     ))).scalars().all())
@@ -156,6 +158,12 @@ async def _selector_users(session: AsyncSession, task: models.Task, selector: di
     return out
 
 
+def _human_producer(artifact):
+    if artifact is not None and artifact.created_by_kind == "user":
+        return artifact.created_by_id
+    return None
+
+
 async def _implementer_ids(session: AsyncSession, task: models.Task,
                            artifact: am.ArtifactVersion | None) -> set[str]:
     """Identify users who actually produced the artifact. AI-task owners normally remain eligible
@@ -163,9 +171,9 @@ async def _implementer_ids(session: AsyncSession, task: models.Task,
     manual task without AI evidence.
     """
     out: set[str] = set()
-    if artifact is not None and str(artifact.created_by_kind or "") == "user":
-        if artifact.created_by_id:
-            out.add(str(artifact.created_by_id))
+    producer = _human_producer(artifact)
+    if producer:
+        out.add(producer)
     ai_executed = bool(await session.scalar(select(models.TaskEvent.id).where(
         models.TaskEvent.task_id == task.id,
         models.TaskEvent.kind.in_(_AI_EXECUTION_EVENTS),
@@ -178,32 +186,79 @@ async def _implementer_ids(session: AsyncSession, task: models.Task,
 async def _candidate_map(session: AsyncSession, task: models.Task, action: str,
                          rules: dict, artifact: am.ArtifactVersion | None = None
                          ) -> tuple[dict[str, dict], set[str]]:
-    # Requirement-pool delivery review is a business acceptance owned by the
-    # person who created the requirement.  Do not let a custom policy, a legacy
-    # snapshot, or a delivery.review permission turn the executor into an
-    # approver.  Other gates (baseline/merge/uat/deploy) retain their routed
-    # responsibilities.
     if action == "review":
-        creator_id = str(getattr(task, "created_by", None) or "").strip()
-        if not creator_id:
-            return {}, set()
-        users = await _active_users(session, {creator_id})
-        if not users:
-            return {}, set()
-        user = users[0]
-        return {creator_id: {
-            "user": user,
-            "sources": [{"type": "task_creator", "label": "需求创建人"}],
-        }}, set()
-    task_org_id = await _task_org_id(session, task)
-    excluded: set[str] = set()
-    if rules.get("separationOfDuties"):
-        excluded = await _implementer_ids(session, task, artifact)
+        return await _review_candidates(session, task, rules, artifact)
+    excluded = await _implementer_ids(session, task, artifact) if rules.get("separationOfDuties") else set()
+    candidates = await _selected_candidates(session, task, effective_selectors(action, rules),
+                                            await _task_org_id(session, task), excluded)
+    return candidates, excluded
+
+
+def _review_excluded(task, artifact):
+    """Fallback responsibility must be independent of the current executor and human producer."""
+    return {task.assignee_user_id or task.owner_user_id, _human_producer(artifact)} - {None, ""}
+
+
+async def _review_org(session, task):
+    org = await _task_org_id(session, task) or task.shared_org_id
+    if not org and task.created_by:
+        creator = await session.get(models.User, task.created_by)
+        org = creator.org_id if creator else None
+    return org
+
+
+async def _in_review_scope(session, user, org):
+    # An account with no organization cannot designate arbitrary members of other organizations.
+    return await _in_scope(session, user, org) if org else bool(user.is_super or not user.org_id)
+
+
+async def can_designate_reviewer(session, task, user):
+    from . import release_control
+    if user is None or not user.is_active:
+        return False
+    artifact = await release_control.latest_artifact(session, task.id)
+    org = await _review_org(session, task)
+    return user.id not in _review_excluded(task, artifact) and await _in_review_scope(session, user, org)
+
+
+async def _review_candidates(session, task, rules, artifact):
+    excluded = _review_excluded(task, artifact)
+    designated = task.review_recipient_user_id
+    creator = task.created_by
+    if not designated and creator:
+        user = await session.get(models.User, creator)
+        # In a single-account AI workflow the human creator can accept AI output.
+        if user is not None and user.is_active and _human_producer(artifact) != creator:
+            return {creator: {"user": user, "sources": _DEFAULT_SELECTORS["review"]}}, set()
+    org = await _review_org(session, task)
+    if designated:
+        user = await session.get(models.User, designated)
+        if user and user.is_active and designated not in excluded and await _in_review_scope(session, user, org):
+            return {designated: {"user": user, "sources": [{"type": "designated_reviewer", "label": "指定验收人"}]}}, excluded
+        return {}, excluded
+    tiers = [
+        [{"type": "requester", "label": "需求提出人"}],
+        [{"type": "project_owner", "label": "项目负责人"}],
+        [s for s in effective_selectors("review", rules)
+         if s.get("type") not in {"requester", "project_owner", "task_creator", "task_assignee", "owner_client"}],
+    ]
+    required = max(1, int(rules.get("required") or 1))
+    candidates = {}
+    for selectors in tiers:
+        tier = await _selected_candidates(session, task, selectors, org, excluded, review=True)
+        for uid, item in tier.items():
+            candidates.setdefault(uid, item)
+        if len(candidates) >= required:
+            break
+    return candidates, excluded
+
+
+async def _selected_candidates(session, task, selectors, task_org_id, excluded, *, review=False):
     candidates: dict[str, dict] = {}
-    for selector in effective_selectors(action, rules):
+    for selector in selectors:
         label = str(selector.get("label") or "流程指定审批人")
         for user in await _selector_users(session, task, selector, task_org_id):
-            if str(user.id) in excluded:
+            if str(user.id) in excluded or (review and not await _in_review_scope(session, user, task_org_id)):
                 continue
             item = candidates.setdefault(user.id, {"user": user, "sources": []})
             source = {"type": str(selector.get("type") or ""), "label": label}
@@ -212,23 +267,58 @@ async def _candidate_map(session: AsyncSession, task: models.Task, action: str,
                 source["id"] = str(source_id)
             if source not in item["sources"]:
                 item["sources"].append(source)
-    return candidates, excluded
+    return candidates
+
+
+async def review_block_reason(session, task, required, available):
+    if task.review_recipient_user_id:
+        user = await session.get(models.User, task.review_recipient_user_id)
+        if user is None:
+            why = "指定的验收人账号不存在"
+        else:
+            name = user.display_name or user.username
+            if not user.is_active:
+                why = f"指定的验收人「{name}」已停用"
+            elif not available:
+                why = f"指定的验收人「{name}」不符合本次验收的组织范围或职责分离要求"
+            else:
+                why = f"验收策略要求 {required} 人会签，目前仅指定了「{name}」"
+    elif not task.created_by:
+        why = "本条需求未记录创建人"
+    else:
+        creator = await session.get(models.User, task.created_by)
+        name = (creator.display_name or creator.username) if creator else task.created_by_name or task.created_by
+        if creator is None:
+            why = f"需求创建人「{name}」的账号不存在"
+        elif not creator.is_active:
+            why = f"需求创建人「{name}」的账号已停用"
+        elif not available:
+            why = f"需求创建人「{name}」不能验收自己的产出"
+        else:
+            why = f"验收策略要求 {required} 人会签，当前只有 {available} 名合适的验收人"
+    return why + "。请联系有权查看本需求的管理员指定验收人，或请管理员调整验收策略。"
+
+
+class ReviewAssignmentUnavailable(ValueError):
+    """No eligible set of reviewers can accept this delivery."""
 
 
 async def preview_assignments(session: AsyncSession, task: models.Task, action: str,
-                              rules: dict | None) -> dict:
+                              rules: dict | None, *, artifact: am.ArtifactVersion | None = None) -> dict:
     """Resolve a policy without creating a request, assignment, event or notification."""
     normalized = dict(rules or {})
     required = max(1, int(normalized.get("required") or 1))
     candidates, excluded = await _candidate_map(
-        session, task, action, normalized, artifact=None)
+        session, task, action, normalized, artifact)
     people = [{"userId": uid,
                "userName": item["user"].display_name or item["user"].username,
                "reasons": list(item["sources"])}
               for uid, item in candidates.items()]
-    return {"action": action, "required": required, "available": len(people),
-            "ok": len(people) >= required, "candidates": people,
-            "excluded": sorted(excluded)}
+    preview = {"action": action, "required": required, "available": len(people),
+               "ok": len(people) >= required, "candidates": people, "excluded": sorted(excluded)}
+    if action == "review":
+        preview["reason"] = "" if preview["ok"] else await review_block_reason(session, task, required, len(people))
+    return preview
 
 
 async def _clear_restored_review_issue(session: AsyncSession, task: models.Task,
@@ -258,55 +348,84 @@ async def _clear_restored_review_issue(session: AsyncSession, task: models.Task,
     task.work_routing = routing
 
 
+class ApprovalRerouteConflict(ValueError):
+    """Replacing the assignments would leave an approval without its quorum."""
+
+
+def unassigned_review(request_id, task_id):
+    """An automatic submission recorded as blocked before anyone received or voted on it."""
+    return and_(
+        ~select(am.ApprovalAssignment.id).where(am.ApprovalAssignment.request_id == request_id).exists(),
+        select(models.TaskEvent.id).where(models.TaskEvent.task_id == task_id,
+            models.TaskEvent.kind == "approval.unassigned",
+            models.TaskEvent.detail["requestId"].as_string() == request_id).exists(),
+        ~select(am.ApprovalDecision.id).where(am.ApprovalDecision.request_id == request_id).exists(),
+    )
+
+
+async def _eligible_snapshot(session, task, artifact, existing):
+    active = {user.id for user in await _active_users(session, {row.user_id for row in existing})}
+    excluded = _review_excluded(task, artifact)
+    producer = _human_producer(artifact)
+    eligible = []
+    for row in existing:
+        if row.user_id not in active or row.user_id == producer:
+            continue
+        creator = row.user_id == task.created_by and any(
+            source.get("type") == "task_creator" for source in row.sources or [])
+        if creator or row.user_id not in excluded:
+            eligible.append(row)
+    return eligible
+
+
 async def ensure_assignments(session: AsyncSession, task: models.Task,
-                             request: am.ApprovalRequest) -> list[am.ApprovalAssignment]:
+                             request: am.ApprovalRequest, *,
+                             replace: bool = False) -> list[am.ApprovalAssignment]:
     existing = list((await session.execute(select(am.ApprovalAssignment).where(
         am.ApprovalAssignment.request_id == request.id
     ).order_by(am.ApprovalAssignment.created_at))).scalars().all())
-    if request.action == "review" and request.status == "pending":
-        # Review has exactly one eligible person (the creator). Reconcile old
-        # pending requests that were materialized with executor/permission
-        # assignments before this rule existed, so inbox and detail reads do
-        # not keep exposing the old approver.
-        rules = dict(request.policy_snapshot or {})
+    pending_review = request.action == "review" and request.status == "pending"
+    rules = dict(request.policy_snapshot or {})
+    if request.action == "review" and not pending_review and rules.get("reviewRoutingVersion") != 2:
+        # Closed legacy gates never granted anyone except their original creator review rights.
+        return [row for row in existing if row.user_id == task.created_by]
+    if existing and not replace and rules.get("reviewRoutingVersion") == 2 and request.action == "review":
         artifact = await session.get(am.ArtifactVersion, request.artifact_version_id)
-        candidates, excluded = await _candidate_map(
-            session, task, request.action, rules, artifact)
-        desired = set(candidates)
-        if {str(row.user_id) for row in existing} != desired:
-            if existing:
-                await session.execute(delete(am.ApprovalAssignment).where(
-                    am.ApprovalAssignment.request_id == request.id))
-            existing = []
-        if existing:
+        eligible = await _eligible_snapshot(session, task, artifact, existing)
+        if not pending_review:
+            return eligible
+        if len(eligible) >= request.required_count:
             await _clear_restored_review_issue(session, task, request, artifact)
-            return existing
-        rows = []
-        for uid, item in candidates.items():
-            user = item["user"]
-            rows.append(am.ApprovalAssignment(
-                request_id=request.id, user_id=uid,
-                user_name=user.display_name or user.username,
-                sources=item["sources"],
-            ))
-        for row in rows:
-            session.add(row)
-        await session.flush()
-        if not rows:
-            await _record_unassigned(session, task, request, excluded)
-        else:
-            await _clear_restored_review_issue(session, task, request, artifact)
-        return rows
-    if existing:
-        if not dict(request.policy_snapshot or {}).get("separationOfDuties"):
+            return eligible
+        if await session.scalar(select(am.ApprovalDecision.id).where(
+                am.ApprovalDecision.request_id == request.id).limit(1)):
+            return eligible
+    if existing and not replace and not pending_review:
+        if not rules.get("separationOfDuties"):
             return existing
         artifact = await session.get(am.ArtifactVersion, request.artifact_version_id)
         excluded = await _implementer_ids(session, task, artifact)
         return [row for row in existing if str(row.user_id) not in excluded]
-    rules = dict(request.policy_snapshot or {})
+
     artifact = await session.get(am.ArtifactVersion, request.artifact_version_id)
     candidates, excluded = await _candidate_map(
         session, task, request.action, rules, artifact)
+    if replace and len(candidates) < request.required_count:
+        raise ApprovalRerouteConflict(
+            f"无法更换项目负责人：任务「{task.title}」的审批需要 {request.required_count} 人，"
+            f"但当前只能分配给 {len(candidates)} 人；请先处理该审批单")
+    if existing:
+        # Upgrade legacy review assignments before trusting them as a routing snapshot.
+        if not replace and {str(row.user_id) for row in existing} == set(candidates):
+            if pending_review:
+                for row in existing:
+                    row.sources = candidates[row.user_id]["sources"]
+                request.policy_snapshot = {**rules, "reviewRoutingVersion": 2}
+            await _clear_restored_review_issue(session, task, request, artifact)
+            return existing
+        await session.execute(delete(am.ApprovalAssignment).where(
+            am.ApprovalAssignment.request_id == request.id))
+
     rows = []
     for uid, item in candidates.items():
         user = item["user"]
@@ -320,6 +439,9 @@ async def ensure_assignments(session: AsyncSession, task: models.Task,
     await session.flush()
     if not rows:
         await _record_unassigned(session, task, request, excluded)
+    elif pending_review:
+        request.policy_snapshot = {**rules, "reviewRoutingVersion": 2}
+        await _clear_restored_review_issue(session, task, request, artifact)
     return rows
 
 
@@ -379,27 +501,17 @@ def assignment_api(row: am.ApprovalAssignment | None) -> dict | None:
 async def can_decide(session: AsyncSession, task: models.Task, request: am.ApprovalRequest,
                      actor) -> tuple[bool, str]:
     uid = actor_id(actor)
-    assignments = None
-    if request.action == "review":
-        # Reconcile a legacy pending assignment before checking the actor. This
-        # lets the first post-deploy inbox read move the ticket to the creator
-        # even when the service has not restarted through materialize_pending.
-        assignments = await ensure_assignments(session, task, request)
-        creator_id = str(getattr(task, "created_by", None) or "").strip()
-        if not creator_id:
-            return False, "这条需求没有记录创建人，无法判定审核权"
-        if uid != creator_id:
-            return False, "只有需求创建人可以审批交付成果"
     rules = dict(request.policy_snapshot or {})
     if request.action != "review" and rules.get("separationOfDuties"):
         artifact = await session.get(am.ArtifactVersion, request.artifact_version_id)
         implementers = await _implementer_ids(session, task, artifact)
         if uid in implementers:
             return False, "这项交付要求职责分离，需求执行负责人不能审阅或批准自己的产出"
-    if assignments is None:
-        assignments = await ensure_assignments(session, task, request)
+    assignments = await ensure_assignments(session, task, request)
     assigned = next((x for x in assignments if x.user_id == uid), None)
     if assigned is None:
+        if request.action == "review":
+            return False, "本次验收未分配给你，请由需求创建人或本次指定的验收人处理"
         return False, "这项审批没有分配给你；请由流程指定的负责人处理"
     return True, ""
 
@@ -411,10 +523,17 @@ async def preview_can_decide(session: AsyncSession, task: models.Task,
     opening a review panel.
     """
     uid = actor_id(actor)
-    if request.action == "review":
-        creator_id = str(getattr(task, "created_by", None) or "").strip()
-        return bool(creator_id and uid == creator_id)
     rules = dict(request.policy_snapshot or {})
+    if request.action == "review":
+        if rules.get("reviewRoutingVersion") == 2:
+            rows = list(await session.scalars(select(am.ApprovalAssignment).where(
+                am.ApprovalAssignment.request_id == request.id)))
+            eligible = await _eligible_snapshot(session, task, artifact, rows)
+            return any(row.user_id == uid for row in eligible)
+        if request.status and request.status != "pending":
+            return uid == task.created_by and bool(await assignment_for_user(session, request.id, uid))
+        candidates, _ = await _candidate_map(session, task, "review", rules, artifact)
+        return uid in candidates
     if rules.get("separationOfDuties"):
         if uid in await _implementer_ids(session, task, artifact):
             return False
@@ -466,10 +585,12 @@ async def can_read_task_evidence(session: AsyncSession, task: models.Task,
                am.ApprovalAssignment.user_id == user.id)
         .order_by(am.ApprovalRequest.created_at.desc())
     )).scalars().unique().all())
-    for request in requests:
-        allowed, _ = await can_decide(session, task, request, user)
-        if allowed:
-            return True
+    if requests:
+        artifact = await session.get(am.ArtifactVersion, artifact_version_id)
+        if artifact is not None and artifact.task_id == task.id:
+            for request in requests:
+                if await preview_can_decide(session, task, request, user, artifact):
+                    return True
     return False
 
 
@@ -478,18 +599,19 @@ async def reroute_pending_for_project(session: AsyncSession, project_id: str,
     """Explicitly reissue undecided approvals after project responsibilities change. Preserve any
     countersignature snapshot with an existing decision and audit all reassignment.
     """
-    task_ids = set((await session.execute(select(models.Task.id).where(
-        models.Task.project_id == project_id
-    ))).scalars().all())
-    if not task_ids:
+    # Decisions take the task lock first. Wait for in-flight votes before
+    # deciding which assignment snapshots can still be replaced.
+    pending_tasks = select(am.ApprovalRequest.task_id).where(am.ApprovalRequest.status == "pending")
+    task_rows = (await session.scalars(select(models.Task).where(
+        models.Task.project_id == project_id, models.Task.id.in_(pending_tasks)
+    ).order_by(models.Task.id).with_for_update())).all()
+    tasks = {row.id: row for row in task_rows}
+    if not tasks:
         return {"requests": 0, "assignments": 0, "skipped": 0}
     requests = list((await session.execute(select(am.ApprovalRequest).where(
-        am.ApprovalRequest.task_id.in_(task_ids),
+        am.ApprovalRequest.task_id.in_(tasks),
         am.ApprovalRequest.status == "pending",
     ))).scalars().all())
-    tasks = {row.id: row for row in (await session.execute(select(models.Task).where(
-        models.Task.id.in_(task_ids)
-    ))).scalars().all()}
     changed = assignments = skipped = 0
     for request in requests:
         decided = await session.scalar(select(am.ApprovalDecision.id).where(
@@ -498,10 +620,7 @@ async def reroute_pending_for_project(session: AsyncSession, project_id: str,
         if decided:
             skipped += 1
             continue
-        await session.execute(delete(am.ApprovalAssignment).where(
-            am.ApprovalAssignment.request_id == request.id
-        ))
-        rows = await ensure_assignments(session, tasks[request.task_id], request)
+        rows = await ensure_assignments(session, tasks[request.task_id], request, replace=True)
         assignments += len(rows)
         changed += 1
         session.add(models.TaskEvent(

@@ -419,6 +419,28 @@ for (const locale of ['zh-CN', 'en-US', 'ja-JP', 'ko-KR']) {
     assert.equal(page.nodes(node => node.type === 'b')[0].props.children, expected.unknown)
   })
 
+  test('badges distinguish an untested protocol from a model refusal in ' + locale, async t => {
+    setLocale(locale)
+    const model = {
+      capabilityProfile: { streaming: { state: 'unsupported', source: 'verified' } },
+      capabilityCheck: { checks: {
+        imageInput: { status: 'inconclusive', code: 'expected_output_missing' },
+        toolCalling: { status: 'inconclusive', code: 'protocol_not_tested' },
+        streaming: { status: 'unsupported', code: 'capability_not_supported' },
+      } },
+    }
+    const page = await createComponentHarness(new URL('../src/screens/ModelCapabilities.jsx', import.meta.url), {
+      exportName: 'CapabilityBadges', props: { model }, dependencies: { '../api.js': { api: {} } },
+    })
+    t.after(() => { page.unmount(); setLocale('zh-CN') })
+    assert.deepEqual(page.nodes(node => node.type === 'small').map(node => node.props.children), [
+      badgeCopy[locale].attempts.inconclusive, translateText('此协议暂无法自动检测', [], locale),
+    ])
+    assert.deepEqual(page.nodes(node => node.type === 'b').map(node => node.props.children), [
+      badgeCopy[locale].unknown, badgeCopy[locale].unknown, badgeCopy[locale].unsupported,
+    ])
+  })
+
   test('admin report phases and detailed failures render localized ' + locale + ' copy', async t => {
     setLocale(locale)
     const page = await createComponentHarness(new URL('../src/screens/ModelCapabilities.jsx', import.meta.url), {

@@ -3,7 +3,8 @@ import React, { useMemo, useState } from 'react'
 import { Icon } from '../ui.jsx'
 import { FilterInput, FilterSelect } from '../FilterControls.jsx'
 import { useViewportHeight } from '../viewport-height.js'
-import { CATALOG_FILTERS, pluginKind, selectCatalog } from './plugin-catalog-model.js'
+import { CATALOG_FILTERS, declaredAccess, pluginKind, selectCatalog } from './plugin-catalog-model.js'
+import { sourceState } from './plugin-distribution-state.js'
 import './plugin-catalog-cards.css'
 
 function CatalogIcon({ plugin, version, type }) {
@@ -30,7 +31,7 @@ function RecommendedMark() {
   </svg>
 }
 
-export default function PluginCatalogIndex({ items = [], queues, categories = [], selected, onSelect, actions,
+export default function PluginCatalogIndex({ items = [], queues, pluginCounts, categories = [], selected, onSelect, actions,
   canManage = false, onTogglePublication, onDelete }) {
   const listRef = useViewportHeight()
   const uiLocale = useLocale();
@@ -42,7 +43,7 @@ export default function PluginCatalogIndex({ items = [], queues, categories = []
   const [category, setCategory] = useState('all')
   const [sort, setSort] = useState('updated')
   const { shown, counts } = useMemo(() => selectCatalog(items, queues,
-    { query, status, source, kind, category, sort, catalogType }), [items, queues, query, status, source, kind, category, sort, catalogType, uiLocale])
+    { query, status, source, kind, category, sort, catalogType }, pluginCounts), [items, queues, pluginCounts, query, status, source, kind, category, sort, catalogType, uiLocale])
   const filtered = Boolean(query || status !== 'all' || source !== 'all' || kind !== 'all' || category !== 'all')
   const typeCount = items.filter(plugin => (pluginKind(plugin).key === 'app') === (catalogType === 'app')).length
   const countLabel = catalogType === 'app' ? tx(' 个应用') : tx(' 个插件')
@@ -99,9 +100,11 @@ export default function PluginCatalogIndex({ items = [], queues, categories = []
         <b>{items.length ? tx("没有匹配的插件") : tx("还没有企业插件")}</b>
         <p>{items.length ? tx("换一个关键词，或清除筛选条件。") : tx("在客户端制作并试用插件，再提交到企业审核；也可以导入已有插件包。")}</p>
       </div>}
-      {shown.map(({ plugin, publication, source: origin, kind: type, category: categoryKey, issues }) => {
+      {shown.map(({ plugin, publication, source: origin, kind: type, category: categoryKey, issueCount }) => {
         const version = plugin.latestVersion || {}
         const cap = version.capabilities || {}
+        const sourceEvidence = sourceState(version)
+        const evaluations = version.reviewedEvaluations
         const interactive = (version.manifest?.ui?.contributions || version.ui?.contributions || plugin.ui?.contributions || []).length > 0
         const categoryName = categories.find((item) => item.key === categoryKey)?.name || categoryKey
         const author = version.manifest?.author || version.provenance?.publisherName || plugin.createdBy || tx("未知作者")
@@ -125,9 +128,15 @@ export default function PluginCatalogIndex({ items = [], queues, categories = []
             onClick={() => onSelect(plugin.id)}>
             <span className="plugin-card-description">{plugin.description || tx("作者尚未补充用途说明。打开详情查看能力与使用方式。")}</span>
             {facts.length > 0 && <span className="plugin-card-capabilities">{facts.map(fact => <span key={fact}>{fact}</span>)}</span>}
+            <span className="plugin-card-evidence">
+              <span>{declaredAccess(version)}</span>
+              <span>{evaluations?.total ? tx('评测通过：{0}/{1}', [evaluations.passed, evaluations.total]) : tx('暂无评测结论')}</span>
+              {Number.isInteger(plugin.activeInstallCount) && <span>{tx('当前安装：{0}', [plugin.activeInstallCount])}</span>}
+              <span title={sourceEvidence.detail}>{sourceEvidence.title}</span>
+            </span>
             <span className="plugin-card-footer"><span title={version.provenance?.publisherName || origin.label}>{origin.label}</span>
               <span className="plugin-card-version">{version.version ? `v${version.version}` : tx("暂无版本")}</span>
-              {issues.length > 0 && <span className="plugin-card-attention">{issues.length}{tx(" 项待处理")}</span>}
+              {issueCount > 0 && <span className="plugin-card-attention">{issueCount}{tx(" 项待处理")}</span>}
               <Icon name="chevron" />
             </span>
           </button>

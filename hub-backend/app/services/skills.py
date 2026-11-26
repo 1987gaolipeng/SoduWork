@@ -474,9 +474,8 @@ async def load_cfg(session) -> dict:
     return cfg
 
 
-async def save_cfg(session, cfg: dict) -> dict:
-    from sqlalchemy import select, update
-    from .. import models
+async def prepare_policy_change(session, cfg: dict) -> tuple[dict, dict, list[dict]]:
+    """Validate and normalize the same proposed policy for preview and persistence."""
     if not isinstance(cfg, dict):
         raise PolicyChanged("企业能力开放策略格式无效，请刷新后重试")
     allowed = cfg.get("allowed", cfg.get("enabled", []))
@@ -507,6 +506,13 @@ async def save_cfg(session, cfg: dict) -> dict:
                         for key, value in by_repo.items()},
              "roots": [root[:400] for root in roots[:10]],
              "policyVersion": skill_policy.VERSION, "builtinDisabled": sorted(disabled)}
+    return current, clean, rows
+
+
+async def save_cfg(session, cfg: dict) -> dict:
+    from sqlalchemy import select, update
+    from .. import models
+    current, clean, rows = await prepare_policy_change(session, cfg)
     raw = (await session.execute(select(models.AppSetting.value).where(
         models.AppSetting.key == SETTING_KEY))).scalar_one_or_none()
     if skill_policy.revision(raw) != current["policyRevision"]:

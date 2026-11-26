@@ -60,7 +60,9 @@ async def cancel(attempt_id: str, client: Client = Depends(current_client),
 async def callback(state: str = Query("", max_length=256), code: str = Query("", max_length=8192),
                    error: str = Query("", max_length=200), session: AsyncSession = Depends(get_session)):
     try:
-        connected = await service.finish(session, state, code, bool(error))
+        # Some providers send ?error=false / ?error=0; only real error values mark failure.
+        has_error = bool(error) and error.strip().lower() not in {"false", "0"}
+        connected = await service.finish(session, state, code, has_error)
     except ValueError:
         connected = False
     text = "账号授权已完成，请返回 SoduWork。" if connected else "账号授权未完成，请返回 SoduWork 重新连接。"

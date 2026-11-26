@@ -92,7 +92,7 @@ test('scroll locks share ownership across a drawer and modal and restore the ori
 })
 
 test('initial focus prefers autofocus, then form input, then interactive content and container', async () => {
-  for (const kind of ['autofocus', 'input', 'button', 'empty']) {
+  for (const kind of ['autofocus', 'nested-default', 'input', 'button', 'empty']) {
     const { document, add } = environment()
     const trigger = add('button'); trigger.focus()
     const root = add('div', { tabindex: '-1' })
@@ -100,6 +100,7 @@ test('initial focus prefers autofocus, then form input, then interactive content
     if (kind !== 'empty') expected = add('button', {}, root)
     if (['autofocus', 'input'].includes(kind)) expected = add('input', {}, root)
     if (kind === 'autofocus') expected = add('textarea', { autofocus: '' }, root)
+    if (kind === 'nested-default') expected = add('button', { 'data-dialog-autofocus': '' }, root)
     const release = registerDialogLayer({ root, onClose() {} })
     await settle()
     assert.equal(document.activeElement, expected, kind)

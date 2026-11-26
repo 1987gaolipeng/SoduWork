@@ -19,12 +19,12 @@ from fastapi import FastAPI
 from sqlalchemy import create_engine, event, func, inspect, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app import automation_models, memory_record_models, models  # noqa: F401
+from app import automation_models, memory_record_models, models, project_context_models  # noqa: F401
 from app.api import tasks
 from app.db import Base, get_session
 from app.deps import current_client
 from app.schemas import task_to_api
-from app.services import task_access, task_notifications, task_requirements
+from app.services import receipts, task_access, task_notifications, task_requirements, task_status
 
 
 class TaskNotificationQueryTests(unittest.IsolatedAsyncioTestCase):
@@ -642,9 +642,130 @@ class TaskNotificationQueryTests(unittest.IsolatedAsyncioTestCase):
                 await task_notifications.deliver(claimed, sessions)  # ack lost after successful delivery
             async with sessions() as session:
                 rows = list(await session.scalars(select(models.TaskEvent).where(models.TaskEvent.kind == "receipt")))
-                self.assertEqual([row.id for row in rows], [claimed[0]])
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0].task_id, "closed")
             notices = [c for c in send.await_args_list if c.args[1].get("kind") == "task_receipt"]
             self.assertEqual(len(notices), 2, "one failed attempt and one success, no duplicate after ack loss")
+
+    async def test_concurrent_close_callbacks_share_one_persisted_receipt(self):
+        async with self.fixture() as (_, sessions, _):
+            async with sessions() as session:
+                session.add(models.Task(id="shared-close", status="done", requester_name="Customer"))
+                await session.commit()
+
+            async def complete():
+                async with sessions() as session:
+                    task = await session.get(models.Task, "shared-close")
+                    return await receipts.notify_on_close(session, task, None, raise_errors=True)
+
+            self.assertEqual(await asyncio.gather(complete(), complete()), [True, True])
+            async with sessions() as session:
+                self.assertEqual(await session.scalar(select(func.count()).select_from(models.TaskEvent)
+                    .where(models.TaskEvent.kind == "receipt")), 1)
+
+    async def test_delayed_close_jobs_retain_each_reopened_completion(self):
+        async with self.fixture() as (_, sessions, _):
+            async with sessions() as session:
+                task = models.Task(id="two-closes", status="todo", title="First", requester_user_id="u1")
+                session.add(task)
+                await session.commit()
+                for status in ("done", "todo", "done"):
+                    self.assertTrue(await task_status.mark(session, task, status,
+                        allow_incomplete=True, refresh_memory=False))
+                    if status == "done":
+                        task_notifications.enqueue(session, task, "task.updated", closed=True)
+                    else:
+                        task.title, task.requester_user_id = "Second", "u2"
+                    await session.commit()
+            # Both workers run after the second close; capture each assignment at enqueue time.
+            with patch.object(task_access.hub, "publish", new_callable=AsyncMock) as send:
+                self.assertTrue(await task_notifications.run_once(sessions))
+                self.assertTrue(await task_notifications.run_once(sessions))
+            notices = [c for c in send.await_args_list if c.args[1].get("kind") == "task_receipt"]
+            self.assertEqual([c.kwargs["user_id"] for c in notices], ["u2"])
+            self.assertIn("Second", notices[0].args[1]["text"])
+            async with sessions() as session:
+                task = await session.get(models.Task, "two-closes")
+                self.assertTrue(await receipts.notify_on_close(session, task, None))
+                rows = list(await session.scalars(select(models.TaskEvent)
+                    .where(models.TaskEvent.task_id == task.id,
+                           models.TaskEvent.kind.in_(("receipt", "status.reset_from_done")))
+                    .order_by(models.TaskEvent.at)))
+                self.assertEqual([r.kind for r in rows], ["receipt", "status.reset_from_done", "receipt"])
+                self.assertEqual([(r.detail["title"], r.detail["requesterUserId"], r.detail["via"])
+                    for r in (rows[0], rows[2])], [("First", "u1", "recorded"), ("Second", "u2", "box")])
+
+    async def test_preupgrade_delivered_job_and_direct_retry_keep_original_receipt(self):
+        async with self.fixture() as (_, sessions, _):
+            async with sessions() as session:
+                task = models.Task(id="old-close", status="done", requester_name="Customer")
+                session.add_all([task, models.TaskEvent(id="old-job-id", task_id=task.id, kind="receipt")])
+                await session.commit()
+                self.assertTrue(await receipts.notify_on_close(session, task, None,
+                    previous_job_id="old-job-id", closed_at=datetime.now(timezone.utc)))
+                self.assertTrue(await receipts.notify_on_close(session, task, None))
+                self.assertEqual(list(await session.scalars(select(models.TaskEvent.id))), ["old-job-id"])
+
+    async def test_direct_postcommit_callback_checks_the_current_recipient(self):
+        async with self.fixture() as (_, sessions, _):
+            async with sessions() as writer:
+                task = models.Task(id="changed-recipient", title="Original", status="todo",
+                                   requester_user_id="u1")
+                writer.add(task)
+                await writer.commit()
+                self.assertTrue(await task_status.mark(writer, task, "done",
+                    allow_incomplete=True, refresh_memory=False))
+                await writer.commit()
+                async with sessions() as editor:
+                    current = await editor.get(models.Task, task.id)
+                    current.requester_user_id, current.title = "u2", "Updated"
+                    await editor.commit()
+                with patch.object(task_access.hub, "publish", new_callable=AsyncMock) as send:
+                    self.assertTrue(await receipts.notify_on_close(writer, task, None))
+                send.assert_not_awaited()
+                event = await writer.scalar(select(models.TaskEvent).where(models.TaskEvent.kind == "receipt"))
+                self.assertEqual((event.detail["title"], event.detail["requesterUserId"], event.detail["via"]),
+                                 ("Original", "u1", "recorded"))
+
+    async def test_preupgrade_job_without_a_snapshot_cannot_impersonate_a_later_completion(self):
+        async with self.fixture() as (_, sessions, _):
+            async with sessions() as session:
+                before_reopen = datetime.now(timezone.utc) - timedelta(days=1)
+                task = models.Task(id="legacy-reopened", status="done", requester_user_id="u2")
+                session.add_all([task, models.TaskEvent(task_id=task.id, kind="status.reset_from_done"),
+                    models.TaskNotificationOutbox(id="obsolete-job", task_id=task.id, event_type="task.updated",
+                                                 payload={"closed": True}, created_at=before_reopen)])
+                await session.commit()
+                with patch.object(task_access.hub, "publish", new_callable=AsyncMock) as send:
+                    self.assertFalse(await receipts.notify_on_close(session, task, None,
+                        previous_job_id="obsolete-job", closed_at=before_reopen))
+                send.assert_not_awaited()
+                self.assertEqual(await session.scalar(select(func.count()).select_from(models.TaskEvent)
+                    .where(models.TaskEvent.kind == "receipt")), 0)
+
+    async def test_current_preupgrade_jobs_keep_unchanged_delivery_and_suppress_later_edits(self):
+        async with self.fixture() as (_, sessions, _):
+            async with sessions() as session:
+                queued = datetime.now(timezone.utc) - timedelta(minutes=1)
+                unchanged = models.Task(id="legacy-unchanged", status="done", title="Unchanged",
+                    requester_user_id="u1", updated_at=queued - timedelta(seconds=1))
+                edited = models.Task(id="legacy-edited", status="done", title="Current edited task",
+                    requester_user_id="u2", updated_at=queued + timedelta(seconds=1))
+                session.add_all([unchanged, edited])
+                for task in (unchanged, edited):
+                    session.add(models.TaskNotificationOutbox(id="job-" + task.id, task_id=task.id,
+                        event_type="task.updated", payload={"closed": True}, created_at=queued))
+                await session.commit()
+                with patch.object(task_access.hub, "publish", new_callable=AsyncMock) as send:
+                    for task in (unchanged, edited):
+                        self.assertTrue(await receipts.notify_on_close(session, task, None,
+                            previous_job_id="job-" + task.id, closed_at=queued))
+                send.assert_awaited_once()
+                self.assertEqual(send.await_args.kwargs["user_id"], "u1")
+                self.assertIn("Unchanged", send.await_args.args[1]["text"])
+                rows = list(await session.scalars(select(models.TaskEvent).where(models.TaskEvent.kind == "receipt")))
+                self.assertEqual({row.task_id: row.detail["via"] for row in rows},
+                                 {"legacy-unchanged": "box", "legacy-edited": "recorded"})
 
 
 class TaskNotificationMigrationTests(unittest.TestCase):

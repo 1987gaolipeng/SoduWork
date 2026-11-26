@@ -1,7 +1,7 @@
 """Request-independent single-task notifications with leased, retryable delivery.
 
-Only delivery metadata is queued. The worker projects the current authoritative
-task and permissions, so delayed jobs cannot replay old private task payloads.
+Task updates queue delivery metadata and project the current authorized task.
+Completion jobs also retain the bounded receipt snapshot for the audit timeline.
 Delivery is at least once; events retain the existing idempotent task IDs.
 """
 import asyncio
@@ -21,6 +21,16 @@ DELIVERY_SECONDS = 60
 
 
 def enqueue(session, task, event_type, **metadata):
+    if metadata.get("closed"):
+        from . import receipts
+        transition = getattr(task, "_close_receipt", None)
+        if transition:
+            receipt_id, closed_at, marker, snapshot = transition
+            metadata.update(receipt_id=receipt_id, closed_at=closed_at.isoformat(), instance_marker=marker)
+        else:
+            snapshot = receipts.completion_snapshot(task)
+            metadata["closed_at"] = datetime.now(timezone.utc).isoformat()
+        metadata["receipt_snapshot"] = snapshot
     metadata["memory_orgs"] = sorted({metadata.get("previous_org"),
                                       getattr(task, "shared_org_id", None)} - {None, ""})
     job = models.TaskNotificationOutbox(task_id=task.id, event_type=event_type,
@@ -54,7 +64,11 @@ async def claim(sessions=SessionLocal):
             if result.rowcount:
                 await session.commit()
                 job = await session.get(row, job_id)
-                return job.id, token, job.task_id, job.event_type, dict(job.payload), job.attempts
+                metadata = dict(job.payload)
+                if metadata.get("closed"):
+                    # Existing queued jobs predate per-completion receipt IDs.
+                    metadata.setdefault("closed_at", job.created_at.isoformat())
+                return job.id, token, job.task_id, job.event_type, metadata, job.attempts
         await session.rollback()
     return None
 
@@ -120,7 +134,8 @@ async def deliver(job, sessions=SessionLocal):
             if (task is not None and request is not None and request.task_id == tid
                     and request.action == "review" and request.status == "pending"
                     and not task.archived_at and not task.reviewed_at):
-                await code_delivery.notify_reviewer(session, task, "交付成果", publish=publish_reliably)
+                await code_delivery.notify_reviewer(session, task, request.artifact_version_id,
+                                                    "交付成果", publish=publish_reliably)
     if metadata.get("notification_id"):
         from . import task_assignment_notifications
         async with sessions() as session:
@@ -132,8 +147,11 @@ async def deliver(job, sessions=SessionLocal):
         async with sessions() as session:
             task = await session.get(models.Task, tid)
             if task is not None:
+                closed_at = metadata.get("closed_at")
                 await receipts.notify_on_close(session, task, metadata.get("closer"),
-                                                receipt_id=job_id, raise_errors=True)
+                    receipt_id=metadata.get("receipt_id", ""), previous_job_id=job_id,
+                    snapshot=metadata.get("receipt_snapshot"), instance_marker=metadata.get("instance_marker"),
+                    closed_at=datetime.fromisoformat(closed_at) if closed_at else None, raise_errors=True)
 
 
 async def publish_reliably(device_id, event, *, user_id):

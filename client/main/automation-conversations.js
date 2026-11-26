@@ -321,10 +321,10 @@ function createWorker({ identityOf, request, journal, conversation, catalog, loc
   return { tick, stop() { stopped = true; } };
 }
 
-function install({ app, ipcMain, identityOf, conversation, platformConnections }) {
+function install({ app, ipcMain, identityOf, conversation, platformConnections, safeStorage }) {
   require('./automation-preflight.cjs').install({ app, ipcMain, identityOf, platformConnections });
   const localAutomationModels = require('./local-automation-model-store.cjs');
-  localAutomationModels.configure({ app, safeStorage: require('electron').safeStorage });
+  localAutomationModels.configure({ app, safeStorage: safeStorage || require('electron').safeStorage });
   let worker, poller, unsubscribe, stopped = false;
   ipcMain.handle('automation-conversations-wake', async (event, input) => {
     if (stopped || !require('./platform-connections/index.cjs').trustedSender(event)) return { ok: false };

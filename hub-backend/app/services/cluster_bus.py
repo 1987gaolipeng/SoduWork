@@ -279,7 +279,8 @@ class ClusterBus:
         if strict and any(isinstance(result, BaseException) for result in results):
             raise ClusterUnavailable("Notification could not reach every Hub inbox")
 
-    async def request(self, node: str, method: str, data: dict, timeout: float = 60):
+    async def request(self, node: str, method: str, data: dict, timeout: float = 60,
+                      *, wait_timeout: float | None = None):
         if not self.healthy:
             raise ClusterUnavailable("Cluster is not ready")
         if len(self._pending) >= self.settings.cluster_max_inflight:
@@ -291,7 +292,7 @@ class ClusterBus:
             await self.send(node, {"type": "request", "id": rid, "method": method,
                                   "data": data, "deadline": time.time() + timeout},
                             ttl=max(120, int(timeout) + 30))
-            return await asyncio.wait_for(future, timeout)
+            return await asyncio.wait_for(future, wait_timeout if wait_timeout is not None else timeout)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -335,6 +336,11 @@ class ClusterBus:
             task = asyncio.create_task(self._answer(packet))
             self._handlers.add(task)
             task.add_done_callback(self._handlers.discard)
+            if (packet.get("method") == "runner.call"
+                    and isinstance(packet.get("data"), dict)
+                    and packet["data"].get("op") == "content.read"):
+                for _ in range(3):
+                    await asyncio.sleep(0)
 
     async def _read_loop(self):
         while True:

@@ -101,6 +101,13 @@ if (typeof electron === 'string') {
     win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_, done) => done({ cancel: true }));
     await win.loadFile(fixture); await until('window.fixtureReady===true'); win.webContents.debugger.attach('1.3'); await viewport(1100);
     assert.deepEqual(await js('window.errors'), []);
+    const repeated = snapshot([user('Summarize'), answer([text('First summary')]), user('Summarize again')], [], {
+      status: 'failed', execution: { running: false, reason: 'Working directory is unavailable' },
+    });
+    await publish(repeated, true);
+    assert.deepEqual(await visibleSummaryText('[data-chat-node="runtime-error"] .nbad-copy'), [repeated.execution.reason]);
+    assert.deepEqual(await visibleSummaryText('[data-chat-node="turn-metrics"] [data-thinking-label]'), ['执行失败']);
+    report.results.push('A failed repeat submission shows its own diagnostic and failure label after an earlier successful answer');
     const complete = doneState(), live = structuredClone(complete);
     live.status = 'streaming'; live.execution.running = true; live.messages[2].done = false;
     live.messages[2].blocks.forEach(block => block.done = false);

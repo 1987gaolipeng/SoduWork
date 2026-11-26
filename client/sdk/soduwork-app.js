@@ -101,6 +101,7 @@
   }
   async function saveLocalFile(file, options = {}) {
     if(!file || typeof file.slice!=='function')throw Error('请选择有效文件');
+    if(options.signal?.aborted)throw Error('文件保存已取消');
     const begin=await invoke('files.begin',{projectId:options.projectId,name:file.name||options.name||'image',type:file.type||'application/octet-stream',size:file.size});
     if(!begin?.ok)throw Object.assign(Error(begin?.reason||'文件保存未开始'),{code:begin?.code});
     if(!/^upload_[a-f0-9]{32}$/.test(begin.id||'') || !Number.isSafeInteger(begin.chunkBytes) || begin.chunkBytes<1 || begin.chunkBytes>512*1024)throw Error('文件上传回执无效');
@@ -108,11 +109,13 @@
       for(let offset=0;offset<file.size;offset+=begin.chunkBytes){
         if(options.signal?.aborted)throw Error('文件保存已取消');
         const data=new Uint8Array(await file.slice(offset,offset+begin.chunkBytes).arrayBuffer());
+        if(options.signal?.aborted)throw Error('文件保存已取消');
         const receipt=await invoke('files.append',{id:begin.id,offset,data});
         if(!receipt?.ok || receipt.offset!==offset+data.length)throw Error(receipt?.reason||'文件分块未确认');
         options.onProgress?.({loaded:receipt.offset,total:file.size});
         await new Promise(resolve=>setTimeout(resolve,0));
       }
+      if(options.signal?.aborted)throw Error('文件保存已取消');
       const result=await invoke('files.finish',{id:begin.id});
       if(!result?.ok||!result.file?.url)throw Error(result?.reason||'文件保存未完成');
       return result;

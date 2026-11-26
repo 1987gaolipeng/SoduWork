@@ -61,7 +61,7 @@ def initialize(state: Path, *, create: bool, port: int | None, origin: str | Non
         try:
             config = json.loads(file.read_text(encoding="utf-8"))
             if (not isinstance(config, dict) or config.get("schema") != SCHEMA or not re.fullmatch(r"soduwork-[a-f0-9]{12}", config.get("project", ""))
-                    or not 1024 <= config["port"] <= 65535
+                    or not 1024 <= config["port"] <= 65535 or not isinstance(config.get("imEnabled", False), bool)
                     or any(not re.fullmatch(r"[A-Za-z0-9_=-]{32,}", config.get(key, "")) for key in SECRET_KEYS)):
                 raise ValueError("Invalid deployment settings")
             if public_url(config["publicUrl"], config["port"]) != config["publicUrl"]:
@@ -78,7 +78,7 @@ def initialize(state: Path, *, create: bool, port: int | None, origin: str | Non
         raise StartupError("The directory is not empty and is not a SoduWork self-host instance.")
     chosen_port = 18989 if port is None else port
     config = {"schema": SCHEMA, "project": "soduwork-" + secrets.token_hex(6), "port": chosen_port,
-              "publicUrl": public_url(origin or "", chosen_port),
+              "publicUrl": public_url(origin or "", chosen_port), "imEnabled": False,
               "databasePassword": secrets.token_urlsafe(36), "adminPassword": secrets.token_urlsafe(24),
               "authSecret": secrets.token_urlsafe(48), "oauthKey": base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()}
     secure_directory(state)
@@ -97,7 +97,8 @@ def environment(config: dict) -> dict:
     env.update({"SODUWORK_DB_PASSWORD": config["databasePassword"],
                 "SODUWORK_ADMIN_PASSWORD": config["adminPassword"],
                 "SODUWORK_AUTH_SECRET": config["authSecret"], "SODUWORK_OAUTH_KEY": config["oauthKey"],
-                "SODUWORK_HTTP_PORT": str(config["port"]), "SODUWORK_PUBLIC_URL": config["publicUrl"]})
+                "SODUWORK_HTTP_PORT": str(config["port"]), "SODUWORK_PUBLIC_URL": config["publicUrl"],
+                "SODUWORK_IM_ENABLED": "true" if config.get("imEnabled") else "false"})
     return env
 
 

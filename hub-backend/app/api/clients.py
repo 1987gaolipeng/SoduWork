@@ -8,14 +8,14 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db import get_session
 from ..config import get_settings
+from ..db import get_session
 from ..deps import current_client, identity_only
 from ..models import Client, User
-from ..schemas import ClientRegister, client_to_api
+from ..schemas import AssignedTaskCreate, ClientRegister, TeamTaskCreate, client_to_api
+from ..services import client_access, device_auth, rbac
 from ..services import inbox as inbox_svc
 from ..services import team as team_svc
-from ..services import client_access, device_auth, rbac
 
 router = APIRouter(prefix="/api/v1", tags=["clients"])
 settings = get_settings()
@@ -24,45 +24,43 @@ settings = get_settings()
 @router.post("/clients/enroll")
 async def enroll(
     body: ClientRegister,
+    http_response: Response,
+    pairing: bool = False,
     x_device_key: str | None = Header(default=None, alias="X-Device-Key"),
     session: AsyncSession = Depends(get_session),
 ):
-    """Register metadata and issue a session only for an activated device.
-
-    New devices remain pending until an administrator binds and activates them.
-    The long-lived key is supplied by the Electron main process and stored only
-    as a SHA-256 digest on the Hub.
-    """
+    """Probe enrollment without reserving an ID. Only verified devices renew sessions."""
     try:
         device = device_auth.validate_device_id(body.device)
         key = device_auth.validate_secret(x_device_key or "")
     except device_auth.DeviceAuthError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
-    c = await session.get(Client, device)
+    http_response.headers["Cache-Control"] = "no-store"
+    c = await session.get(Client, device, with_for_update=True)
     digest = device_auth.hash_secret(key)
-    if c is None:
-        c = Client(id=device, secret_hash=digest, auth_state="pending")
-        session.add(c)
-    else:
-        if c.auth_state == "revoked":
-            raise HTTPException(status_code=403, detail="这台 SoduWork 已被停用，请联系管理员重新登记")
-        if c.secret_hash and not device_auth.secret_matches(c, key):
+    if c is not None and c.auth_state == "revoked":
+        raise HTTPException(status_code=403, detail="这台 SoduWork 已被停用，请联系管理员重新登记")
+    if c is None or not (c.secret_hash or c.secret):
+        result = {"id": device, "authState": "pending", "activationRequired": True}
+        if pairing:
+            result["pairingToken"] = device_auth.issue_pairing_token(
+                device, digest, c.auth_version if c else None, platform=body.platform)
+        return result
+    if c.secret_hash:
+        if not device_auth.secret_matches(c, key):
             raise HTTPException(status_code=401, detail="设备密钥不正确")
-        if not c.secret_hash:
-            legacy_ok = bool(c.secret and secrets.compare_digest(c.secret, key))
-            if c.secret and not legacy_ok:
-                raise HTTPException(status_code=401, detail="设备密钥不正确")
-            c.secret_hash = digest
-            c.secret = None
-            # An assigned row without a credential is not proof of possession.
-            # The new key must still pass an explicit administrator activation.
-            c.auth_state = "pending"
-        if c.auth_state == "active":
-            try:
-                await device_auth.assert_active_owner(session, c)
-            except device_auth.DeviceAuthError as exc:
-                raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    else:
+        if not secrets.compare_digest((c.secret or "").encode(), key.encode()):
+            raise HTTPException(status_code=401, detail="设备密钥不正确")
+        c.secret_hash = digest
+        c.secret = None
+        c.auth_state = "pending"
+    if c.auth_state == "active":
+        try:
+            await device_auth.assert_active_owner(session, c)
+        except device_auth.DeviceAuthError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
     if body.name is not None:
         c.name = body.name
@@ -75,8 +73,13 @@ async def enroll(
     c.last_seen_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(c)
+    if c.auth_state == "revoked" or not device_auth.secret_matches(c, key):
+        raise HTTPException(status_code=403, detail="设备授权已变化，请重新连接")
     response = client_to_api(c)
     response["activationRequired"] = c.auth_state != "active"
+    if pairing:
+        response["pairingToken"] = device_auth.issue_pairing_token(
+            device, digest, c.auth_version, platform=c.platform)
     if c.auth_state == "active":
         try:
             await device_auth.assert_active_owner(session, c)
@@ -104,26 +107,20 @@ async def register(
     x_soduwork_secret: str | None = Header(default=None, alias="X-Soduwork-Secret"),
     session: AsyncSession = Depends(get_session),
 ):
-    """Pre-v1 compatibility enrollment.
-
-    It may issue a key once to an old client, but the Hub persists only its
-    digest and the device remains pending until an administrator activates it.
-    """
+    """Update an existing pre-v1 installation after checking its original credential."""
     if not settings.device_auth_compat:
         raise HTTPException(status_code=404, detail="Legacy device registration is disabled")
     try:
         device = device_auth.validate_device_id(body.device)
     except device_auth.DeviceAuthError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
-    c = await session.get(Client, device)
-    issued = None
-    if c is None:
-        issued = secrets.token_urlsafe(32)
-        c = Client(id=device, secret_hash=device_auth.hash_secret(issued), auth_state="pending")
-        session.add(c)
-    elif c.auth_state == "revoked":
+    c = await session.get(Client, device, with_for_update=True)
+    if c is not None and c.auth_state == "revoked":
         raise HTTPException(status_code=403, detail="这台 SoduWork 已被停用")
-    elif c.secret_hash:
+    if c is None or not (c.secret_hash or c.secret):
+        raise HTTPException(status_code=403, detail={"code": "DEVICE_ENROLLMENT_REQUIRED",
+            "message": "请在当前版本的 SoduWork 中登录账号，或联系管理员配对设备"})
+    if c.secret_hash:
         if not device_auth.secret_matches(c, x_soduwork_secret or ""):
             raise HTTPException(status_code=401, detail="设备密钥不正确")
         c.secret = None
@@ -133,16 +130,10 @@ async def register(
             except device_auth.DeviceAuthError as exc:
                 raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
     else:
-        legacy = str(c.secret or "")
-        if legacy:
-            if not x_soduwork_secret or not secrets.compare_digest(legacy, x_soduwork_secret):
-                raise HTTPException(status_code=401, detail="设备密钥不正确")
-            c.secret_hash = device_auth.hash_secret(x_soduwork_secret)
-            c.secret = None
-        else:
-            issued = secrets.token_urlsafe(32)
-            c.secret_hash = device_auth.hash_secret(issued)
-            c.auth_state = "pending"
+        if not x_soduwork_secret or not secrets.compare_digest((c.secret or "").encode(), x_soduwork_secret.encode()):
+            raise HTTPException(status_code=401, detail="设备密钥不正确")
+        c.secret_hash = device_auth.hash_secret(x_soduwork_secret)
+        c.secret = None
     if body.name is not None:
         c.name = body.name
     if body.platform is not None:
@@ -156,10 +147,9 @@ async def register(
     c.last_seen_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(c)
-    resp = client_to_api(c)
-    if issued:
-        resp["secret"] = issued
-    return resp
+    if c.auth_state == "revoked" or not device_auth.secret_matches(c, x_soduwork_secret or ""):
+        raise HTTPException(status_code=403, detail="设备授权已变化，请重新连接")
+    return client_to_api(c)
 
 
 @router.get("/team")
@@ -195,7 +185,7 @@ async def team_tasks(
 
 @router.post("/team/tasks")
 async def create_team_task(
-    body: dict = Body(default_factory=dict),
+    body: TeamTaskCreate = Body(default_factory=dict),
     client: Client = Depends(current_client),
     session: AsyncSession = Depends(get_session),
 ):
@@ -205,9 +195,11 @@ async def create_team_task(
         msg = {"forbidden": "无团队管理权限", "no_title": "请填需求标题",
                "invalid_title": "title must be a string",
                "invalid_team_org_id": "teamOrgId must be a string of at most 36 characters",
+               "inbox_with_assignee": "团队收件箱任务不指定接收人；要交给个人，请使用成员指派",
                "no_assignee": "请选择指派成员", "out_of_scope": "该成员不在你的团队内",
                "no_box": "该成员还没有绑定 SoduWork，无法派需求", "inactive": "该成员已停用，无法派需求"}.get(r.get("reason"), "派需求失败")
-        raise HTTPException(status_code=400, detail=msg)
+        headers = {"X-Error-Code": "hub.input.inbox"} if r.get("reason") == "inbox_with_assignee" else None
+        raise HTTPException(status_code=400, detail=msg, headers=headers)
     return r
 
 
@@ -296,7 +288,6 @@ async def assign_inbox_task_from_box(
     if not target.is_active:
         raise HTTPException(status_code=400, detail="该成员已停用，无法分配需求")
     # The target must belong to the caller's department subtree.
-    from ..services import rbac
     scope = await rbac.subtree_org_ids(session, me.org_id) if me.org_id else set()
     if target.org_id not in (scope or set()):
         raise HTTPException(status_code=403, detail="该成员不在你的团队内")
@@ -463,7 +454,7 @@ async def handoff_my_task(
 
 @router.post("/tasks/assigned")
 async def create_assigned_task(
-    body: dict = Body(default_factory=dict),
+    body: AssignedTaskCreate = Body(default_factory=dict),
     client: Client = Depends(current_client),
     session: AsyncSession = Depends(get_session),
 ):

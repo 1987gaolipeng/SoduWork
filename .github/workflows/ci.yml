@@ -64,6 +64,12 @@ jobs:
       - name: Verify isolated HTTP startup, persistence, and shutdown
         if: runner.os != 'Windows'
         run: python tools/dev/verify_local_start.py
+      - name: Verify workspace titlebar palettes on macOS
+        if: runner.os == 'macOS'
+        working-directory: client
+        run: |
+          npm ci
+          ./node_modules/.bin/electron e2e/titlebar-modal-theme.cjs "$RUNNER_TEMP/titlebar-palettes"
       - name: Verify Windows desktop startup and install caches on another volume
         if: runner.os == 'Windows'
         shell: pwsh
@@ -126,19 +132,35 @@ jobs:
           python -m venv hub-backend/.venv
           if [ "$RUNNER_OS" = Windows ]; then
             hub-backend/.venv/Scripts/python.exe -m pip install -r hub-backend/requirements-test.txt
-            choco install ripgrep --no-progress --yes
-            echo 'C:\\ProgramData\\chocolatey\\bin' >> "$GITHUB_PATH"
-            rg --version
           else
             hub-backend/.venv/bin/python -m pip install -r hub-backend/requirements-test.txt
             sudo apt-get update
             sudo apt-get install -y xvfb xauth libgtk-3-0 libnss3 libasound2 ripgrep
-            rg --version
           fi
-      - name: Verify attachment storage names under native Windows rules
+      - name: Install ripgrep for Windows client tests
         if: runner.os == 'Windows'
-        run: .venv/Scripts/python.exe -m unittest -v test_attachment_storage_names
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: |
+          version=15.2.0
+          package="ripgrep-$version-x86_64-pc-windows-msvc"
+          curl --fail --location --retry 3 --output "$package.zip" \
+            "https://github.com/BurntSushi/ripgrep/releases/download/$version/$package.zip"
+          echo "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5  $package.zip" | sha256sum --check
+          python -m zipfile -e "$package.zip" .
+          cygpath -aw "$package" >> "$GITHUB_PATH"
+      - name: Verify ripgrep is on the client test PATH
+        run: rg --version
+      - name: Verify local attachment storage and live Hub upgrades
+        shell: bash
         working-directory: hub-backend
+        run: |
+          python=.venv/bin/python
+          if [ "$RUNNER_OS" = Windows ]; then python=.venv/Scripts/python.exe; fi
+          "$python" -m unittest -v test_attachment_storage_names
+          "$python" -m unittest -v test_cloud_conversations.CloudConversationTests.test_concurrent_submissions_keep_one_input_object
+          "$python" -m unittest -v test_requirement_maintenance
+          "$python" tests/local_storage_upgrade_http.py
       - run: npm ci
         working-directory: client
       - run: xvfb-run -a npm test
@@ -147,6 +169,10 @@ jobs:
       - run: npm test
         if: runner.os == 'Windows'
         working-directory: client
+      - name: Verify library storage under long Windows data directories
+        if: runner.os == 'Windows'
+        run: .venv/Scripts/python.exe -m unittest -v test_library_storage_long_paths
+        working-directory: hub-backend
 
   runner-compatibility:
     name: Runner TLS and process cleanup (${{ matrix.os }})
@@ -203,6 +229,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The PR merge commit's first parent is the base used by the lint comparison.
+          fetch-depth: 2
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
@@ -211,6 +239,17 @@ jobs:
           node-version: '22'
           package-manager-cache: false
       - run: python -m pip install -r hub-backend/requirements-test.txt
+      - name: Lint the Hub application
+        run: python -m ruff check app
+        working-directory: hub-backend
+      - name: Check for new lint violations in the pull request
+        if: github.event_name == 'pull_request'
+        run: python scripts/check_changed_lint.py HEAD^1
+        working-directory: hub-backend
+      - name: Report Hub type errors
+        continue-on-error: true
+        run: python -m mypy app
+        working-directory: hub-backend
       - run: python quality_gate.py --profile release --scope backend
         working-directory: hub-backend
       - name: Verify every Runner dialogue profile through real fixture subprocesses

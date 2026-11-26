@@ -58,7 +58,16 @@ export function useEscClose(onClose) {
   useEffect(() => registerDialogLayer({ onClose: () => close.current?.() }), [])
 }
 
-export function Modal({ title, icon, onClose, children, foot, footer, wide, size, scope = '', className = '' }) {
+function draftSnapshot(value) {
+  // Restoring a removed field may change key insertion order, but not the
+  // saved form. Preserve array order for editors that save ordered steps.
+  return JSON.stringify(value, (_, field) => {
+    if (!field || typeof field !== 'object' || Array.isArray(field)) return field
+    return Object.fromEntries(Object.keys(field).sort().map(key => [key, field[key]]))
+  })
+}
+
+export function Modal({ title, icon, onClose, children, foot, footer, wide, size, scope = '', className = '', draft, dirty = false, busy = false }) {
   const uiLocale = useLocale();
   const dialog = useRef(null)
   const titleId = useId()
@@ -68,7 +77,17 @@ export function Modal({ title, icon, onClose, children, foot, footer, wide, size
   const dialogSize = size || (wide ? 'wide' : '')
   const actions = foot !== undefined ? foot : footer
   const maskDown = useRef(false)
-  close.current = onClose
+  // Editors pass only their saved fields. Asynchronously loaded or independently
+  // saved forms can compare with their current server baseline via dirty instead.
+  const [initialDraft] = useState(() => draftSnapshot(draft))
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  if (busy && confirmDiscard) setConfirmDiscard(false)
+  function dismiss() {
+    if (busy || !onClose) return
+    if (dirty || (draft !== undefined && draftSnapshot(draft) !== initialDraft)) setConfirmDiscard(true)
+    else onClose()
+  }
+  close.current = dismiss
   useEffect(() => registerDialogLayer({ id: titleId, ancestors, root: dialog.current, onClose: () => close.current?.(), returnFocus: trigger.current }), [])
   const content = (
     <DialogAncestors.Provider value={[...ancestors, titleId]}>
@@ -80,32 +99,35 @@ export function Modal({ title, icon, onClose, children, foot, footer, wide, size
       onMouseDown={(e) => { maskDown.current = e.target === e.currentTarget }}
       onClick={(e) => {
         e.stopPropagation()
-        if (e.target === e.currentTarget && maskDown.current) onClose()
+        if (e.target === e.currentTarget && maskDown.current) dismiss()
       }}>
       <div ref={dialog} className={['modal', dialogSize && `modal-${dialogSize}`, scope, className].filter(Boolean).join(' ')}
         role="dialog" aria-modal={true} aria-labelledby={titleId} tabIndex={-1}>
         <div className="modal-head">
           {icon && <span className="int-ico" style={{ width: 26, height: 26 }}><Icon name={icon} /></span>}
-          <span id={titleId} className="modal-title">{title}</span><button type="button" className="mx" aria-label={tx("关闭")} onClick={onClose}>✕</button>
+          <span id={titleId} className="modal-title">{title}</span><button type="button" className="mx" aria-label={tx("关闭")} disabled={busy} onClick={dismiss}>✕</button>
         </div>
         <div className="modal-body">{children}</div>
-        {actions && <div className="modal-foot">{actions}</div>}
+        {actions && <div className="modal-foot">{typeof actions === 'function' ? actions(dismiss) : actions}</div>}
       </div>
     </div>
+    {confirmDiscard && <Confirm title={tx("放弃未保存的改动")} text={tx("关闭后，此次未保存的改动将丢失。")}
+      cancelText={tx("继续编辑")} confirmText={tx("放弃改动")} focusCancel danger
+      onClose={() => setConfirmDiscard(false)} onConfirm={() => { setConfirmDiscard(false); onClose?.() }} />}
     </DialogAncestors.Provider>
   )
   return typeof document !== 'undefined' && document.body ? createPortal(content, document.body) : content
 }
 
 /* Application confirmation dialog supports asynchronous onConfirm. */
-export function Confirm({ title, text, danger, confirmText = tx("确定"), onConfirm, onClose }) {
+export function Confirm({ title, text, danger, confirmText = tx("确定"), cancelText = tx("取消"), focusCancel, onConfirm, onClose }) {
   const uiLocale = useLocale();
   const [busy, setBusy] = useState(false)
   async function go() { setBusy(true); try { await onConfirm() } catch (e) { toast(tx("失败：") + (e.message || e)) } finally { setBusy(false) } }
   return (
-    <Modal size="compact" title={title || tx("确认操作")} icon="alert" onClose={onClose}
-      foot={<>
-        <button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+    <Modal size="compact" title={title || tx("确认操作")} icon="alert" onClose={onClose} busy={busy}
+      foot={dismiss => <>
+        <button className="btn btn-ghost" data-dialog-autofocus={focusCancel || undefined} disabled={busy} onClick={dismiss}>{cancelText}</button>
         <button className={'btn ' + (danger ? 'btn-danger' : 'btn-primary')} disabled={busy} onClick={go}>{busy ? tx("处理中…") : confirmText}</button>
       </>}>
       <div className="modal-confirm-copy">{text}</div>
@@ -124,7 +146,7 @@ export function Icon({ name, ...rest }) {
  * Controlled dropdown preserves select value/onChange semantics while rendering options
  * in-page for consistent styling.
  */
-export function SelectMenu({ value, onChange, children, className = '', disabled = false, autoFocus = false, style, id, 'aria-label': ariaLabel, 'aria-labelledby': ariaLabelledBy, 'aria-describedby': ariaDescribedBy, required = false, placeholder = tx("请选择"), clearable = false, resetValue = '', clearLabel, searchable = false, searchPlaceholder = tx("搜索部门名称或路径") }) {
+export function SelectMenu({ value, onChange, children, className = '', disabled = false, autoFocus = false, style, id, 'aria-label': ariaLabel, 'aria-labelledby': ariaLabelledBy, 'aria-describedby': ariaDescribedBy, required = false, placeholder = tx("请选择"), clearable = false, resetValue = '', clearLabel, searchable = false, searchPlaceholder = tx("搜索部门名称或路径"), emptyText = tx("没有匹配的部门") }) {
   const uiLocale = useLocale();
   const listboxId = React.useId()
   const [open, setOpen] = useState(false)
@@ -280,7 +302,7 @@ export function SelectMenu({ value, onChange, children, className = '', disabled
           {query.trim() && option.path && <small>{option.path}</small>}
         </button>)}
       </div>
-      {searchable && !visibleOptions.length && <div className="select-menu-empty" role="status">{tx("没有匹配的部门")}</div>}
+      {searchable && !visibleOptions.length && <div className="select-menu-empty" role="status">{emptyText}</div>}
     </div>}
 
   </div>
@@ -325,16 +347,24 @@ export function takeNav(screen) {
 /* ---------- toast ---------- */
 export function toast(msg) { window.dispatchEvent(new CustomEvent('soduwork-hub-toast', { detail: msg })) }
 export function ToastHost() {
-  const uiLocale = useLocale();
-  const [msg, setMsg] = useState(null)
+  const [notice, setNotice] = useState(null)
   useEffect(() => {
     let timer
-    const h = (e) => { setMsg(e.detail); clearTimeout(timer); timer = setTimeout(() => setMsg(null), 2400) }
-    window.addEventListener('soduwork-hub-toast', h)
-    return () => { window.removeEventListener('soduwork-hub-toast', h); clearTimeout(timer) }
+    let sequence = 0
+    const handleToast = event => {
+      setNotice({ id: ++sequence, message: event.detail })
+      clearTimeout(timer)
+      timer = setTimeout(() => setNotice(null), 2400)
+    }
+    window.addEventListener('soduwork-hub-toast', handleToast)
+    return () => {
+      window.removeEventListener('soduwork-hub-toast', handleToast)
+      clearTimeout(timer)
+    }
   }, [])
-  if (!msg) return null
-  return <div className="toast">{msg}</div>
+  return <div role="status" aria-live="polite" aria-atomic="true">
+    {notice && <div className="toast" key={notice.id}>{notice.message}</div>}
+  </div>
 }
 
 /* Data-loading hook. */
@@ -483,8 +513,8 @@ export function BoxPick({ clients, selected, onToggle, onSet }) {
       <div className="bp-bar">
         <div className="searchbox sm filter-input"><Icon name="search" /><input ref={searchRef} aria-label={tx("搜索 SoduWork")} value={q} onChange={(e) => setQ(e.target.value)} placeholder={tx("搜索 SoduWork…")} />{q && <button type="button" className="filter-clear" aria-label={tx("清空搜索 SoduWork")} title={tx("清空")} onClick={() => { setQ(''); searchRef.current?.focus() }}>×</button>}</div>
         <span className="muted xsm">{tx("已选 ")}{selected.length}</span>
-        {onSet && <a className="bp-act" onClick={() => onSet(onlineIds)}>{tx("全选在线")}</a>}
-        {onSet && selected.length > 0 && <a className="bp-act" onClick={() => onSet([])}>{tx("清空")}</a>}
+        {onSet && <button type="button" className="bp-act" onClick={() => onSet(onlineIds)}>{tx("全选在线")}</button>}
+        {onSet && selected.length > 0 && <button type="button" className="bp-act" onClick={() => onSet([])}>{tx("清空")}</button>}
       </div>
       <div className="box-pick scroll">
         {shown.length === 0 && <span className="muted">{tx("无匹配 SoduWork")}</span>}

@@ -48,7 +48,10 @@
       }
       return '#' + [...themeContext.getImageData(0, 0, 1, 1).data].slice(0, 3).map(n => n.toString(16).padStart(2, '0')).join('');
     };
-    return { backgroundColor: composite(style.backgroundColor), symbolColor: composite(style.color) };
+    // The sign-in gate covers the themed workspace bar, including during session recovery.
+    const signingIn = document.documentElement.classList.contains('soduwork-auth-pending');
+    return { backgroundColor: composite(signingIn ? '#ffffff' : style.backgroundColor),
+      symbolColor: composite(signingIn ? '#242427' : style.color) };
   }
   function syncTheme() {
     if (themeFrame || chrome.mode !== 'overlay') return;
@@ -297,7 +300,7 @@
       if (relevant) syncTheme();
     });
     themeObserver.observe(document.documentElement, { subtree: true, childList: true, attributes: true,
-      attributeFilter: ['class', 'style', 'data-theme', 'data-skin', 'open', 'hidden', 'data-workspace-view', 'data-desk-panel'] });
+      attributeFilter: ['class', 'style', 'data-theme', 'data-skin', 'data-character', 'open', 'hidden', 'data-workspace-view', 'data-desk-panel'] });
     new MutationObserver(syncSidebar).observe(document.documentElement, { attributes: true, attributeFilter: ['data-workspace-view', 'data-workspace-layout', 'data-desk-panel'] });
     void initTitlebar();
     void appInfo().then(() => { if (opened) renderPopup(); }).catch(() => {});

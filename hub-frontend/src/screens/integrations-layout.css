@@ -13,6 +13,9 @@
   flex: 1 1 440px; min-width: 0; max-width: 100%;
   white-space: normal; overflow-wrap: anywhere;
 }
+.integrations-hub .integration-toolbar > .integration-setup {
+  margin: 0; padding: 0; list-style: decimal inside;
+}
 .integrations-hub .integration-toolbar-actions {
   display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px;
   min-width: 0; max-width: 100%; margin-left: auto;
@@ -81,6 +84,7 @@
 .integrations-hub .ua-actions.admin-card-actions { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line-2); }
 .integrations-hub .integration-alert-card { display: flex; flex-direction: column; }
 .integrations-hub .integration-alert-body { padding: 16px 18px; }
+.integrations-hub .integration-alert-warning { margin: 8px 0 0; color: var(--warn); }
 .integrations-hub .integration-alert-actions { margin-top: auto; padding: 12px 18px; border-top: 1px solid var(--line-2); }
 .integrations-hub .integration-alert-controls {
   display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 6px;

@@ -217,7 +217,13 @@
     if (payload.source === 'rework' && task.canContinueExecution !== true) {
       throw new Error('只有执行人可以继续修正这条需求');
     }
-    if (task.canViewExecution === false) {
+    const reviewOnly = task.canViewExecution === false && task.canReview === true &&
+      payload.source === 'acceptance' && payload.acceptanceSession === true &&
+      !payload.reuseExecutionSession && !payload.acceptanceExecutionSession && text(payload.approvalId);
+    if (reviewOnly) {
+      // Resolve only an archive bound to this review below. Never reuse an execution chat ID.
+      payload.chatId = '';
+    } else if (task.canViewExecution === false) {
       if (global.RequirementsDetail && global.__deskPanel === 'workspace') return global.RequirementsDetail.open(id);
       return global.soduWorkAPI?.openDeskWindow?.({panel: 'workspace', view: 'history', requirementId: id}) || false;
     }

@@ -1,9 +1,11 @@
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
 import React from 'react'
 import { api } from '../api.js'
+import OperationsApprovalQueue from './OperationsApprovalQueue.jsx'
 import { AUTO, Icon, useAsync } from '../ui.jsx'
 import './operations-center.css'
 import { operationsText } from './operations-copy.js'
+import OperationsFailures from './OperationsFailures.jsx'
 
 const ACTIVE = ['queued', 'running', 'waiting_human', 'waiting_external']
 const sum = (obj, keys) => keys.reduce((n, key) => n + Number((obj || {})[key] || 0), 0)
@@ -23,10 +25,20 @@ function State({ ok, children }) {
 export default function OperationsCenter() {
   const uiLocale = useLocale();
   const query = useAsync(() => api.operationsOverview(), AUTO)
+  const [showApprovals, setShowApprovals] = React.useState(false)
   const data = query.data
   if (query.error) return <div className="ops-loading ops-load-error"><Icon name="alert" /><b>{tx("运行状态没有加载出来")}</b><small>{query.error.message}</small><button className="btn btn-ghost" onClick={query.reload}>{tx("重新加载")}</button></div>
   if (!data) return <div className="ops-loading"><span /><b>{tx("正在汇总平台运行状态")}</b><small>{tx("数据库、Runner 与执行链路会在同一张图里出现")}</small></div>
   const req = data.requests || {}
+  const requests = Number(req.requests || 0)
+  const healthy = requests ? (requests - Number(req.errors || 0)) / requests : null
+  const bounds = req.latencyBucketUpperBoundsMs || []
+  const p95Label = value => {
+    if (!requests) return '—'
+    // The legacy counter caps the overflow bucket at the final finite bound.
+    if (bounds.length > 1 && value >= bounds.at(-1)) return '> ' + bounds.at(-2) + ' ms'
+    return value + ' ms'
+  }
   const work = data.work || {}
   const runners = data.runners || { items: [] }
   const activeRuns = sum(work.workflow, ACTIVE)
@@ -40,10 +52,16 @@ export default function OperationsCenter() {
     <div className="ops-ledger">
       <article><span>{tx("正在运行")}</span><b>{activeRuns}</b><small>{tx("工作流 · ")}{activeSessions}{tx(" 个执行会话")}</small></article>
       <article><span>{tx("执行能力")}</span><b>{runners.accepting || 0}<em> / {runners.total || 0}</em></b><small>{tx("可接活 Runner · 当前负载 ")}{runners.busy || 0}</small></article>
-      <article><span>{tx("等待人审")}</span><b>{work.pendingApprovals || 0}</b><small>{tx("只有关键验收关需要人处理")}</small></article>
-      <article><span>{tx("请求健康")}</span><b>{Number(req.errorRate || 0) < .001 ? '99.9+' : (100 - Number(req.errorRate || 0) * 100).toFixed(1)}<em>%</em></b>
-        <small>{req.windowMinutes || 30}{tx(" 分钟 · P95 ≤ ")}{req.p95Ms || 0} ms</small></article>
+      <article><button type="button" className="ops-approval-trigger" aria-haspopup="dialog" onClick={() => setShowApprovals(true)}>
+        <span>{tx("等待人审")}</span><b>{work.pendingApprovals || 0}</b>
+        <small className={work.overdueApprovals ? 'ops-approval-overdue' : ''}>{work.overdueApprovals
+          ? tx("{0} 项审批已超时", [work.overdueApprovals]) : tx("查看待审列表")}</small>
+      </button></article>
+      <article><span>{tx("无服务端错误的请求")}</span><b>{healthy === null ? '—' : (healthy * 100).toLocaleString(undefined, { maximumFractionDigits: 3 })}<em>{healthy !== null && '%'}</em></b>
+        <small>{req.windowMinutes || 30}{tx(' 分钟')} · P95 {p95Label(req.p95Ms || 0)}</small></article>
     </div>
+
+    {showApprovals && <OperationsApprovalQueue onClose={() => setShowApprovals(false)} onChanged={query.reload} formatAge={ago} />}
 
     {(data.blockers || []).length > 0 && <div className="ops-alerts">{data.blockers.map((item, i) =>
       <article key={i} className={item.level}><Icon name="alert" /><div><b>{operationsText(item.title)}</b><span>{operationsText(item.detail)}</span></div></article>)}</div>}
@@ -77,24 +95,22 @@ export default function OperationsCenter() {
           <WorkRow label={tx("AI 会话")} data={work.executions} active={['queued', 'running']} failed="failed" />
           <WorkRow label={tx("环境发布")} data={work.deployments} active={['queued', 'running', 'verifying']} failed="failed" />
         </div>
-        <div className="ops-failures" tabIndex={0} role="region" aria-label={tx("最近失败")}><div className="ops-section-label">{tx("最近失败")}</div>
-          {(data.recentFailures || []).map((row) => <article key={row.id}><span className="ops-fail-dot" />
-            <div><b>{row.error || tx("流程执行失败")}</b><span>{tx("需求 ")}{row.taskId || '—'}</span></div></article>)}
-          {!(data.recentFailures || []).length && <div className="ops-empty compact">{tx("当前没有失败流程")}</div>}
-        </div>
+        <OperationsFailures rows={data.recentFailures || []} onChanged={query.reload} />
       </section>
 
       <section className="ops-panel ops-requests">
         <header><div><span>{tx("服务请求")}</span><h3>{tx("近 ")}{req.windowMinutes || 30}{tx(" 分钟")}</h3></div><small>{tx("已运行 ")}{ago(req.uptimeSeconds)}</small></header>
-        <div className="ops-request-summary"><span><b>{req.requests || 0}</b>{tx("请求")}</span><span><b>{req.errors || 0}</b>{tx("服务错误")}</span><span><b>{req.p95Ms || 0} ms</b>{tx("全接口 P95（分桶上界）")}</span></div>
+        <div className="ops-request-summary"><span><b>{req.requests || 0}</b>{tx("请求")}</span><span><b>{req.errors || 0}</b>{tx("服务错误")}</span><span><b>{p95Label(req.p95Ms || 0)}</b>{tx("全接口 P95（分桶上界）")}</span></div>
+        {bounds.length > 0 && <small>{tx("延迟分桶上限（毫秒）：")}{bounds.join(' / ')} / ∞</small>}
         <div className="ops-route-list" tabIndex={0} role="region" aria-label={tx("服务请求")}>{(req.routes || []).slice(0, 7).map((row) => {
           const timing = row.timing || {}
           const ttfb = timing.upstreamHeadersMs?.avgMs
           const admission = timing.admissionMs?.avgMs
           return <article key={row.method + row.route}>
-            <code>{row.method}</code><span title={row.route}>{row.route}</span>
+            <code>{row.method}</code><span>{row.route === '__unmatched__'
+              ? tx("未匹配到路由的请求（{0}%）", [requests ? Math.round(row.requests / requests * 100) : 0]) : row.route}</span>
             <b title={ttfb != null ? tx("上游响应头 ") + ttfb + ' ms' : undefined}>{row.avgMs} ms
-              <small>{tx("路由 P95 上界 ")}{row.p95Ms || 0} ms{ttfb != null ? tx(" · 上游响应头 ") + ttfb + ' ms' : ''}{admission != null ? tx(" · 调度 ") + admission + ' ms' : ''}</small>
+              <small>{tx("路由 P95 上界 ")}{p95Label(row.p95Ms || 0)}{ttfb != null ? tx(" · 上游响应头 ") + ttfb + ' ms' : ''}{admission != null ? tx(" · 调度 ") + admission + ' ms' : ''}</small>
             </b><em className={row.errors ? 'bad' : ''}>{row.errors || '—'}</em>
           </article>
         })}{!(req.routes || []).length && <div className="ops-empty compact">{tx("开始使用后会显示真实请求指标")}</div>}</div>

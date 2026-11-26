@@ -7,10 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
 from ..schemas import _ms
+from .receipts import bounded_detail
 
 
 def to_api(e: models.TaskEvent) -> dict:
-    return {"id": e.id, "kind": e.kind, "detail": e.detail or {}, "actor": e.actor, "at": _ms(e.at)}
+    detail = e.detail or {}
+    if e.kind == "receipt":
+        detail = bounded_detail(detail)
+    return {"id": e.id, "kind": e.kind, "detail": detail, "actor": e.actor, "at": _ms(e.at)}
 
 
 def record(session: AsyncSession, task_id: str, kind: str,

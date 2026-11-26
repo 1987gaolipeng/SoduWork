@@ -1,10 +1,11 @@
 import asyncio
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import create_engine, inspect
 from app.remote_screen_models import RemoteScreenGrant
 
+from app.api import remote_screen
 from app.api.remote_screen import _MediaHub
 from app.services.cluster_bus import PacketCodec
 
@@ -110,6 +111,15 @@ class RemoteScreenSchemaTests(unittest.TestCase):
 
 
 class RemoteScreenMediaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_auth_deadline_closes_socket_before_grant_lookup(self):
+        socket = AsyncMock()
+        socket.receive_json.side_effect = asyncio.Event().wait
+        with patch.object(remote_screen.device_auth, "WS_AUTH_FRAME_TIMEOUT", 0.01), \
+                patch.object(remote_screen, "SessionLocal") as database:
+            await asyncio.wait_for(remote_screen.screen_media(socket), timeout=2)
+        socket.close.assert_awaited_once_with(code=4403)
+        database.assert_not_called()
+
     async def test_one_source_fans_out_read_only_frames_and_stop_closes_all(self):
         media = _MediaHub()
         source = Socket()

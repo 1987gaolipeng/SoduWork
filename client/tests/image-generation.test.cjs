@@ -94,3 +94,43 @@ test('stopping an image turn also cancels its attachment download', async () => 
     assert.deepEqual(fs.readdirSync(path.join(cwd, 'outputs')), []);
   } finally { fs.rmSync(cwd, { recursive: true, force: true }); }
 });
+
+test('signed image downloads and cache hits must decode before publication', async t => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-hub-image-validation-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mPw01oLAAHvASadyK5SAAAAAElFTkSuQmCC', 'base64');
+  const corrupt = Buffer.from(png); corrupt[42] ^= 1;
+  const artifact = { kind: 'image', attachmentId: 'image-12345678', mimeType: 'image/png',
+    filename: 'cover.png', url: '/api/v1/attachments/image-12345678?ticket=short-lived', size: png.length };
+  let downloads = 0, body = corrupt;
+  const materialize = () => media.materialize(artifact, { hub: 'https://hub.test' }, cwd, async () => {
+    downloads++;
+    return new Response(body, { headers: { 'Content-Type': 'image/png' } });
+  });
+  await assert.rejects(materialize, /图片文件无效/);
+  assert.deepEqual(fs.readdirSync(path.join(cwd, 'outputs')), []);
+  body = png;
+  const first = await materialize();
+  assert.deepEqual(fs.readFileSync(first.path), png);
+  assert.equal((await materialize()).path, first.path);
+  assert.equal(downloads, 2);
+  fs.writeFileSync(first.path, corrupt);
+  const recovered = await materialize();
+  assert.equal(downloads, 3);
+  assert.deepEqual(fs.readFileSync(recovered.path), png);
+  assert.equal((await materialize()).path, recovered.path);
+  assert.equal(downloads, 3);
+});
+
+test('a missing local decoder prevents submitting a billed Hub request', async t => {
+  t.mock.method(fs, 'existsSync', () => false);
+  let calls = 0;
+  const result = await generate({
+    handle: { sessionId: 'stable', cwd: os.tmpdir(), appendTaskMessage() {}, appendTaskTool() {} },
+    identity: { hub: 'https://hub.test', session: 'ticket' }, choice: imageModel.imageKey({ providerId: 'mine', name: 'model' }),
+    text: 'poster', signal: new AbortController().signal, push() {}, emit() {}, fetchImpl: async () => { calls++; },
+  });
+  assert.equal(calls, 0);
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /校验组件不可用/);
+});

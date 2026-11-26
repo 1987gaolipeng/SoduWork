@@ -1,12 +1,31 @@
 """Pydantic API contracts for tasks and clients, using camelCase fields and millisecond timestamps.
 
 """
+import re
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    with_config,
+)
+from pydantic_core import PydanticCustomError
+from typing_extensions import TypedDict
 
-from .models import Client, Task
+from .auth import ACCOUNT_PASSWORD_MAX, ACCOUNT_PASSWORD_MIN
+from .models import (
+    REQUESTER_CONTACT_MAX,
+    REQUESTER_NAME_MAX,
+    REQUESTER_USER_ID_MAX,
+    TASK_TITLE_MAX,
+    Client,
+    Task,
+)
 
 
 def _ms(dt: datetime | None) -> int | None:
@@ -18,7 +37,11 @@ def _ms(dt: datetime | None) -> int | None:
 
 
 def task_to_api(t: Task) -> dict[str, Any]:
+    from .services.receipts import completion_snapshot
     from .services.task_requirements import fields as requirement_fields
+    receipt_warnings = None
+    if t.status == "done":
+        receipt_warnings = completion_snapshot(t).get("detail", {}).get("fieldWarnings")
     return {
         **requirement_fields(t),
         "id": t.id,
@@ -60,6 +83,7 @@ def task_to_api(t: Task) -> dict[str, Any]:
         "requesterUserId": getattr(t, "requester_user_id", None),
         "requesterName": getattr(t, "requester_name", None) or "",
         "requesterContact": getattr(t, "requester_contact", None) or "",
+        **({"receiptFieldWarnings": receipt_warnings} if receipt_warnings else {}),
         "recur": getattr(t, "recur", None),
         "recurAt": _ms(getattr(t, "recur_at", None)),
         "remindAt": _ms(getattr(t, "remind_at", None)),
@@ -100,6 +124,18 @@ def client_to_api(c: Client, offline_after: int = 30) -> dict[str, Any]:
     }
 
 
+def _reject_boolean_timestamp(value):
+    if isinstance(value, bool):
+        raise PydanticCustomError("hub.input.due", "A deadline must be a timestamp in milliseconds")
+    return value
+
+
+DueTimestamp = Annotated[int, BeforeValidator(_reject_boolean_timestamp)]
+RequesterUserId = Annotated[str, Field(max_length=REQUESTER_USER_ID_MAX)]
+RequesterName = Annotated[str, Field(max_length=REQUESTER_NAME_MAX)]
+RequesterContact = Annotated[str, Field(max_length=REQUESTER_CONTACT_MAX)]
+
+
 class TaskCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     kind: str = "requirement"
@@ -108,7 +144,7 @@ class TaskCreate(BaseModel):
     visibility: str = "related"
     workScenarioName: str = ""
     workRouting: dict[str, Any] = Field(default_factory=dict)
-    title: str = Field(default="未命名", max_length=200)
+    title: str = Field(default="未命名", min_length=1, max_length=TASK_TITLE_MAX)
     source: str = Field(default="", max_length=120)
     note: str = ""
     status: str = "todo"
@@ -119,7 +155,7 @@ class TaskCreate(BaseModel):
     # Task metadata.
     priority: str = "normal"                 # low|normal|high|critical
     start: Optional[int] = None              # Planned start time in milliseconds.
-    due: Optional[int] = None                # Due time in milliseconds.
+    due: Optional[DueTimestamp] = None       # Due time in milliseconds.
     actualStart: Optional[int] = None
     actualEnd: Optional[int] = None
     tags: list[str] = Field(default_factory=list)
@@ -129,9 +165,9 @@ class TaskCreate(BaseModel):
     remindAt: Optional[int] = None           # Reminder time in milliseconds.
     domainId: str = ""                       # Responsibility domain ID.
     workScenarioKey: str = ""                # Work type; the server captures other snapshot fields.
-    requesterUserId: Optional[str] = None    # Internal requester user ID for completion notifications.
-    requesterName: str = ""                  # External requester display name.
-    requesterContact: str = ""               # External contact details; empty for an internal requester.
+    requesterUserId: Optional[RequesterUserId] = None
+    requesterName: RequesterName = ""
+    requesterContact: RequesterContact = ""
     projectId: Optional[str] = None          # Associated project.
     repoId: str = ""                         # Target repository for workflows and Runner execution.
     progress: list[dict] = Field(default_factory=list)
@@ -147,6 +183,13 @@ class TaskSyncCreate(TaskCreate):
     """
     title: str = "未命名"
     source: str = ""
+    requesterUserId: Optional[str] = None
+    requesterName: str = ""
+    requesterContact: str = ""
+
+
+class ReviewRecipient(BaseModel):
+    userId: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=36)] | None
 
 
 class TaskUpdate(BaseModel):
@@ -160,7 +203,7 @@ class TaskUpdate(BaseModel):
     requirementVersion: Optional[int] = None
     workScenarioName: Optional[str] = None
     workRouting: Optional[dict[str, Any]] = None
-    title: Optional[str] = Field(default=None, max_length=200)
+    title: Optional[str] = Field(default=None, max_length=TASK_TITLE_MAX)
     source: Optional[str] = Field(default=None, max_length=120)
     note: Optional[str] = None
     status: Optional[str] = None
@@ -170,7 +213,7 @@ class TaskUpdate(BaseModel):
     result: Optional[str] = None
     priority: Optional[str] = None
     start: Optional[int] = None
-    due: Optional[int] = None
+    due: Optional[DueTimestamp] = None
     actualStart: Optional[int] = None
     actualEnd: Optional[int] = None
     tags: Optional[list[str]] = None
@@ -184,9 +227,9 @@ class TaskUpdate(BaseModel):
     progress: Optional[list] = None           # Replace the complete progress list.
     projectId: Optional[str] = None
     repoId: Optional[str] = None
-    requesterUserId: Optional[str] = None
-    requesterName: Optional[str] = None
-    requesterContact: Optional[str] = None
+    requesterUserId: Optional[RequesterUserId] = None
+    requesterName: Optional[RequesterName] = None
+    requesterContact: Optional[RequesterContact] = None
     deps: Optional[list[str]] = None
 
 
@@ -222,16 +265,27 @@ class DispatchCreate(BaseModel):
     handler: str = "me"
     priority: str = "normal"
     start: Optional[int] = None
-    due: Optional[int] = None
+    due: Optional[DueTimestamp] = None
     tags: list[str] = []
     domainId: str = ""
     workScenarioKey: str = ""
     projectId: Optional[str] = None
     deps: list[str] = []
     targets: list[str] = []
-    requesterUserId: Optional[str] = None
-    requesterName: str = ""
-    requesterContact: str = ""
+    requesterUserId: Optional[RequesterUserId] = None
+    requesterName: RequesterName = ""
+    requesterContact: RequesterContact = ""
+
+
+@with_config(ConfigDict(extra="allow"))
+class TeamTaskCreate(TypedDict, total=False):
+    """Preserve the team's dispatch and inbox options alongside its external requester fields."""
+    requesterName: Optional[RequesterName]
+    requesterContact: Optional[RequesterContact]
+
+
+class AssignedTaskCreate(TeamTaskCreate, total=False):
+    requesterUserId: Optional[RequesterUserId]
 
 
 # Shared aggregation contracts.
@@ -254,11 +308,22 @@ class Envelope(BaseModel):
     reporter: Optional[str] = None        # Requester who receives the completion notification.
 
 
-AdminName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+_NAME_CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]")
+
+
+def validate_name_characters(value: str) -> str:
+    if _NAME_CONTROLS.search(value):
+        raise ValueError("Name must be a single line without control or bidirectional formatting characters")
+    return value
+
+
+SingleLineName = Annotated[str, AfterValidator(validate_name_characters)]
+AdminName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64),
+                      AfterValidator(validate_name_characters)]
 
 
 class IntegrationCreate(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
     name: AdminName
     type: str = "generic"
     config: dict = {}                    # GitLab configuration stores base_url and project; tokens remain in environment variables.
@@ -285,18 +350,36 @@ class AssignBody(BaseModel):
 
 # Organization roles and users.
 
+def _org_sort(value: object) -> int:
+    """Preserve decimal-string clients without coercing booleans or floats."""
+    if isinstance(value, str):
+        import re
+        text = value.strip()
+        if re.fullmatch(r"[+-]?[0-9]+", text):
+            digits = text.lstrip("+-").lstrip("0") or "0"
+            if len(digits) <= 10:
+                value = int(digits) * (-1 if text.startswith("-") else 1)
+    if type(value) is not int or not -(2**31) <= value <= 2**31 - 1:
+        raise ValueError("sort must be an integer between -2147483648 and 2147483647")
+    return value
+
+
+OrgSort = Annotated[int, Field(ge=-(2**31), le=2**31 - 1), BeforeValidator(_org_sort)]
+
+
 class OrgCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: AdminName
     parentId: Optional[str] = None
-    sort: int = 0
+    dataSource: Literal["business", "test"] | None = None
+    sort: OrgSort = 0
 
 
 class OrgUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: Optional[AdminName] = None
     parentId: Optional[str] = None
-    sort: Optional[int] = None
+    sort: Optional[OrgSort] = None
 
 
 class RoleCreate(BaseModel):
@@ -317,11 +400,16 @@ class UserTokenQuota(BaseModel):
     limit: int = Field(default=0, ge=0, le=10_000_000_000_000, strict=True)
 
 
+AccountPassword = Annotated[str, StringConstraints(
+    min_length=ACCOUNT_PASSWORD_MIN, max_length=ACCOUNT_PASSWORD_MAX, pattern=r"\S")]
+
+
 class UserCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    username: str
-    password: str
-    displayName: str = ""
+    username: AdminName
+    password: AccountPassword
+    displayName: SingleLineName = ""
+    isTestAccount: Optional[bool] = None
     orgId: Optional[str] = None
     roleId: Optional[str] = None
     positions: Optional[list] = None
@@ -331,19 +419,34 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    displayName: Optional[str] = None
+    displayName: Optional[SingleLineName] = None
+    isTestAccount: Optional[bool] = None
     orgId: Optional[str] = None
     roleId: Optional[str] = None
     isActive: Optional[bool] = None
-    password: Optional[str] = None
+    password: Optional[AccountPassword] = None
     positions: Optional[list] = None
     domains: Optional[list[str]] = None
     tokenQuota: Optional[UserTokenQuota] = None
 
 
+class UserBatchUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    ids: list[Annotated[str, StringConstraints(min_length=1, max_length=36)]] = Field(
+        min_length=1, max_length=200)
+    isActive: bool | None = None
+    orgId: Annotated[str, StringConstraints(min_length=1, max_length=36)] | None = None
+
+
 class AssignUserBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
     userId: Optional[str] = None         # An empty user ID unassigns the client.
+    pairingToken: str | None = Field(default=None, max_length=2048)
+
+
+class ClientPairBody(BaseModel):
+    userId: str = Field(min_length=1, max_length=64)
+    pairingToken: str = Field(min_length=1, max_length=2048)
 
 
 # Legacy WorkflowCreate and FlowTemplate contracts are retired.
@@ -402,15 +505,21 @@ def integration_to_api(i, stats: dict | None = None,
     return d
 
 
+def attachment_role(a) -> str:
+    uploaded = str(getattr(a, "uploaded_by", None) or "")
+    role = getattr(a, "role", None) or "input"
+    if role == "input" and (uploaded.startswith("agent:") or uploaded.lower() in {"soduwork ai", "soduwork"}):
+        return "output"  # Legacy role defaults must not classify AI outputs as human inputs.
+    return role
+
+
 def attachment_to_api(a) -> dict[str, Any]:
     from .services import delivery_manifest, resource_access
 
     ct = a.content_type or ""
     uploaded = getattr(a, "uploaded_by", None) or ""
     by_agent = str(uploaded).startswith("agent:")
-    role = getattr(a, "role", None) or ("output" if by_agent else "input")
-    if role == "input" and (by_agent or str(uploaded).lower() in {"soduwork ai", "soduwork"}):
-        role = "output"  # Legacy role defaults must not classify AI outputs as human inputs.
+    role = attachment_role(a)
     evidence_meta = getattr(a, "evidence_meta", None) or {}
     explicit_category = str(evidence_meta.get("category") or "").strip().lower()
     category = explicit_category if explicit_category in {"primary", "supporting", "evidence", "internal"} else \

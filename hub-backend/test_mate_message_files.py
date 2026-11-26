@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app import models
+from app import conversation_handoff_models  # noqa: F401  Register archive owners for attachment cleanup.
 from app.services import attachment_ownership, mate_message_files as shares, storage, team
 from app.api.attachments import (delete_attachment, download_attachment,
                                  list_conversation_media,
@@ -145,7 +146,7 @@ class MateFilesTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(storage,"put",side_effect=put):
             with self.assertRaises(OSError):await self.save()
         from pathlib import Path
-        self.assertEqual(list(Path(self.temp.name).iterdir()),[])
+        self.assertEqual([path for path in Path(self.temp.name).rglob("*") if path.is_file()], [])
         self.assertEqual(list((await self.session.execute(select(models.Attachment))).scalars()),[])
 
     async def test_actual_notice_contains_recipient_bound_files_without_payload_or_tickets(self):

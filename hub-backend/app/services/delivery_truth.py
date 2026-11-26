@@ -281,7 +281,10 @@ async def _direct_truth(session: AsyncSession, task: models.Task,
                                "当前固定版本来自更早的会话，不能替这次执行通过验收。", "recover"))
     if artifact is not None and artifact.kind == "code":
         from . import deployments
-        if not await deployments.delivery_complete(session, task):
+        if artifact.state not in {"merged", "tested", "released"}:
+            blockers.append(_block("merge_pending", "代码尚未合并",
+                                   "当前代码版本需完成合并后才能交付。", "delivery"))
+        elif not await deployments.delivery_complete(session, task):
             blockers.append(_block("delivery_pending", "代码尚未交付到目标环境",
                                    "代码提交不是终点；还需完成合并及项目配置的交付边界。",
                                    "delivery"))

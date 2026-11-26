@@ -5,6 +5,7 @@ import asyncio
 import os
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 
 import httpx
@@ -34,13 +35,10 @@ class FakeGitLab:
     type = "gitlab"
     scheduled = False
 
-    def verify(self, config: dict) -> dict:
-        assert config.get("_auth_secret") == "saved-password"
-        return {"ok": True, "user": config.get("_auth_user"), "kind": config.get("_auth_kind")}
-
-    def list_repositories(self, config: dict) -> list[dict]:
-        assert config.get("token") == "runtime-only-token"
-        return [{
+    def __init__(self):
+        self.listing = threading.Event()
+        self.resume = threading.Event()
+        self.rows = [{
             "externalId": "repo-88",
             "fullName": "enterprise/analytics",
             "displayName": "analytics",
@@ -51,6 +49,19 @@ class FakeGitLab:
             "visibility": "private",
         }]
 
+    def verify(self, config: dict) -> dict:
+        assert config.get("_auth_secret") == "saved-password"
+        return {"ok": True, "user": config.get("_auth_user"), "kind": config.get("_auth_kind")}
+
+    def list_repositories(self, config: dict) -> list[dict]:
+        if "_auth_secret" in config:
+            assert config["_auth_secret"] == "saved-password"
+        else:
+            assert config.get("token") == "runtime-only-token"
+        self.listing.set()
+        assert self.resume.wait(timeout=10), "catalog smoke did not release the connector"
+        return self.rows
+
     def list_branches(self, config: dict, external_id: str) -> list[str]:
         assert config.get("token") == "runtime-only-token"
         assert external_id == "repo-88"
@@ -59,7 +70,7 @@ class FakeGitLab:
 
 async def main() -> None:
     original = REGISTRY.get("gitlab")
-    REGISTRY["gitlab"] = FakeGitLab()
+    fake = REGISTRY["gitlab"] = FakeGitLab()
     try:
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
@@ -71,6 +82,7 @@ async def main() -> None:
             client = models.Client(
                 id="client-http", name="Admin SoduWork", user_ref=user.id,
                 git_creds={"token": "runtime-only-token"})
+            second_client = models.Client(id="client-http-2", name="Second device", user_ref=user.id)
             integration = models.Integration(
                 id="integration-http", name="Enterprise GitLab", type="gitlab",
                 config={"base_url": "https://git.example"})
@@ -80,7 +92,7 @@ async def main() -> None:
             project_b = models.Project(
                 id="project-http-b", name="Analytics B", org_id=org.id,
                 owner_user_id=user.id)
-            session.add_all([org, user, client, integration, project_a, project_b])
+            session.add_all([org, user, client, second_client, integration, project_a, project_b])
             await session.commit()
 
         headers = {"Authorization": "Bearer " + sign_token("user-http")}
@@ -92,11 +104,22 @@ async def main() -> None:
             ok(empty.status_code == 200 and empty.json()["items"] == [],
                "catalog starts empty")
 
-            synced = await http.post(
-                "/api/v1/admin/integrations/integration-http/repositories/sync",
-                headers=headers, json={"clientId": "client-http"})
+            sync_url = "/api/v1/admin/integrations/integration-http/repositories/sync"
+            sync = asyncio.create_task(http.post(
+                sync_url, headers=headers, json={"clientId": "client-http"}))
+            try:
+                ok(await asyncio.to_thread(fake.listing.wait, 10), "connector reached listing")
+                progress = await http.get(sync_url, headers=headers)
+                ok(progress.status_code == 200 and progress.json() == {"stage": "listing"},
+                   "in-flight listing is observable through a separate request")
+                ok((await http.get(sync_url)).status_code == 401, "progress requires authentication")
+            finally:
+                fake.resume.set()
+                synced = await sync
             ok(synced.status_code == 200 and synced.json()["total"] == 1,
                "catalog sync works through HTTP")
+            ok((await http.get(sync_url, headers=headers)).json() == {"stage": None},
+               "completed sync no longer reports a live stage")
 
             catalog = await http.get(
                 "/api/v1/admin/repository-catalog?"
@@ -143,9 +166,24 @@ async def main() -> None:
             ok(duplicate_copy.status_code == 409,
                "duplicate copied mapping is rejected")
 
+            original_rows = fake.rows
+            fake.rows = [dict(fake.rows[0], externalId="tmp-repo"), {}]
+            failed = await http.post(sync_url, headers=headers, json={})
+            ok(failed.status_code == 409, "invalid catalog data fails the sync")
+            ok((await http.get(sync_url, headers=headers)).json() == {"stage": None},
+               "a failed sync releases its progress")
+            retained = (await http.get("/api/v1/admin/repository-catalog", headers=headers)).json()
+            ok([row["id"] for row in retained["items"]] == [catalog_id],
+               "phase updates never publish a partial catalog")
+            fake.rows = []
+            synced_empty = await http.post(sync_url, headers=headers, json={})
+            ok(synced_empty.status_code == 200 and synced_empty.json()["total"] == 0
+               and synced_empty.json()["inactive"] == 1, "empty sync has a successful zero count")
+
             account_url = "/api/v1/admin/integrations/integration-http/pull-account"
             saved = await http.post(account_url, headers=headers,
-                                    json={"user": "saved-account", "secret": "saved-password", "kind": "password"})
+                                    json={"orgId": "org-http", "user": "saved-account",
+                                          "secret": "saved-password", "kind": "password"})
             ok(saved.status_code == 200, "fixed account can be saved through HTTP")
             probe = await http.post(account_url + "/test", headers=headers,
                                     json={"user": "edited-account", "secret": None, "kind": ""})
@@ -164,8 +202,29 @@ async def main() -> None:
             ok(renamed.status_code == 200 and stored.json() == probe.json(),
                "saving the tested draft preserves exactly the same authentication fields")
 
+            fake.listing.clear()
+            fake.resume.clear()
+            fake.rows = original_rows
+            sync = asyncio.create_task(http.post(sync_url, headers=headers, json={"clientId": "client-http-2"}))
+            try:
+                ok(await asyncio.to_thread(fake.listing.wait, 10), "sync began with the saved account")
+                rotated = await http.post(account_url, headers=headers,
+                                          json={"user": "edited-account", "secret": "rotated-password"})
+                ok(rotated.status_code == 200, "the account can be rotated while the connector is listing")
+            finally:
+                fake.resume.set()
+                synced = await sync
+            ok(synced.status_code == 409, "an outdated sync reports a conflict")
+            catalog = await http.get("/api/v1/admin/repository-catalog", headers=headers)
+            ok(catalog.json()["items"] == [], "the outdated result did not reactivate catalog entries")
+
         async with SessionLocal() as session:
             integration = await session.get(models.Integration, "integration-http")
+            ok(integration.config["pullAuth"]["secret"] == "rotated-password"
+               and integration.config["credentialClientId"] == "client-http",
+               "the outdated sync preserved the rotated account and previous device selection")
+            ok(integration.repository_sync_ok and integration.repository_sync_count == 0,
+               "the outdated sync preserved the last published status")
             ok("token" not in dict(integration.config or {}),
                "runtime credential never reaches integration config")
             repos = list((await session.execute(

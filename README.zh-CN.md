@@ -14,7 +14,11 @@
 
 **多底座 · 多 Agent · 私有化部署**
 
+<img src="docs/assets/soduwork-demo.gif" alt="SoduWork 产品演示" width="100%" />
+
 支持 Pi · OpenCode · DeepSeek Harness · Qwen Code · Kimi Code · Codex Harness · Codex
+
+**从源码运行**
 
 ```sh
 git clone https://github.com/mdiri-ai/SoduWork
@@ -27,7 +31,9 @@ cd SoduWork
 | Windows PowerShell | `.\start.cmd --desktop` |
 | Windows 命令提示符 | `start.cmd --desktop` |
 
-[官网](https://soduwork.ai) | [在线体验](https://soduwork.ai) | [中文文档](docs/README.zh-CN.md) | [在线文档](https://dev.soduwork.ai/zh-CN/) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
+源码启动推荐使用 [Python 3.12.x](https://www.python.org/downloads/) 和 [Node.js 22.x](https://nodejs.org/)（22.19.0 及以上的 22 系列版本）。克隆命令需要 [Git](https://git-scm.com/downloads)。
+
+**[Windows 桌面版](https://github.com/mdiri-ai/SoduWork/releases/latest)** | [官网](https://soduwork.ai) | [在线体验](https://soduwork.ai) | [中文文档](docs/README.zh-CN.md) | [在线文档](https://dev.soduwork.ai/zh-CN/) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/mdiri-ai/SoduWork)](https://github.com/mdiri-ai/SoduWork/releases)
@@ -90,9 +96,11 @@ cd SoduWork
 
 > SoduWork 处于公开测试阶段，欢迎试用并反馈；用于生产环境前请先充分评估。
 
-准备好 Python 3.12+、Node.js 22.19+ 和 Git，两条命令跑起来：
+可以用 Git 克隆仓库，也可以解压源码包。环境要求见[源码启动指南](docs/getting-started.md)。
 
-在克隆后的目录里，macOS/Linux 运行 `sh start.sh --desktop`，Windows PowerShell 运行 `.\start.cmd --desktop`，命令提示符运行 `start.cmd --desktop`。
+在源码根目录下，macOS/Linux 运行 `sh start.sh --desktop`，Windows PowerShell 运行 `.\start.cmd --desktop`，命令提示符运行 `start.cmd --desktop`。
+
+如果 Windows 提示“不是内部或外部命令”，先看报错里写的是哪条命令。如果是 `git`、`python` 或 `node`，请确认对应工具已安装并加入 `PATH`，再重新打开命令提示符。详见[源码启动指南](docs/getting-started.md)。
 
 首次运行会自动安装依赖，在本机同时启动 Hub、管理端和桌面客户端。按提示为 `admin` 账号设置密码（12–128 位）。然后在管理端 **模型目录** 里接入模型服务，回到客户端新建对话，试一个小任务。Pi 已内置，开箱可用。
 
@@ -188,7 +196,7 @@ flowchart LR
 **Harness** 是实际执行任务的 Agent 运行时，不是模型。SoduWork 通过统一的 Harness 适配接口接入各个 Harness，上层的需求、插件和验收流程不依赖任何一个 Harness。同一会话中可以随时切换 Harness，对话记录和工作目录都保留；支持 Agent Client Protocol（ACP）的程序，登记一条目录声明即可接入。
 
 <details>
-<summary>已支持的 9 种 Harness</summary>
+<summary>已支持的 7 种 Harness</summary>
 
 | Harness | 使用的模型 | 接入方式 |
 | --- | --- | --- |

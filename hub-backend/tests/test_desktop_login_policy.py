@@ -4,9 +4,20 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app.db import Base
-from app.models import Client, User
+from app.models import AuditLog, Client, User
 from app.automation_models import RunnerNode
 from app.services import desktop_login_policy as policy
+
+
+class DesktopPlatformTests(unittest.TestCase):
+    def test_platform_classification_without_a_database(self):
+        for os_name in ("win32", "windows", "linux", "darwin", "macos"):
+            for platform in (os_name, f" {os_name.upper()} /x64"):
+                with self.subTest(platform=platform):
+                    self.assertTrue(policy.is_desktop_platform(platform))
+        for platform in (None, "", "android/arm64", "ios", "linuxlike/x64"):
+            with self.subTest(platform=platform):
+                self.assertFalse(policy.is_desktop_platform(platform))
 
 
 class DesktopLoginTests(unittest.IsolatedAsyncioTestCase):
@@ -14,7 +25,7 @@ class DesktopLoginTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as connection:
-            await connection.run_sync(lambda db: Base.metadata.create_all(db, tables=[User.__table__, Client.__table__, RunnerNode.__table__]))
+            await connection.run_sync(lambda db: Base.metadata.create_all(db, tables=[User.__table__, Client.__table__, RunnerNode.__table__, AuditLog.__table__]))
         async with self.sessions() as session:
             session.add_all([User(id="one", username="one", is_active=True), User(id="two", username="two", is_active=True)])
             for identity, platform, owner in [("new", "win32", "one"), ("old", "Windows", "one"),
@@ -47,27 +58,123 @@ class DesktopLoginTests(unittest.IsolatedAsyncioTestCase):
             await session.commit()
             self.assertEqual((await session.get(Client, "old")).auth_state, "active")
 
+    async def test_desktop_reporting_arch_suffix_replaces_previous_desktop(self):
+        # Desktop clients report "<os>/<arch>"; Client.platform stores that string
+        # verbatim, so the arch suffix must not stop a previous desktop signing out.
+        async with self.sessions() as session:
+            session.add(User(id="three", username="three", is_active=True))
+            for identity, platform in (("old-arm", "darwin/arm64"), ("new-arm", "darwin/arm64")):
+                session.add(Client(id=identity, name=identity, platform=platform,
+                                   user_ref="three", auth_state="active", auth_version=1))
+            await session.commit()
+        async with self.sessions() as session:
+            client = await session.get(Client, "new-arm")
+            self.assertEqual(await policy.replace_previous(session, client, SimpleNamespace(id="three")), ["old-arm"])
+            await session.commit()
+        async with self.sessions() as session:
+            previous = await session.get(Client, "old-arm")
+            self.assertEqual((previous.auth_state, previous.auth_version), ("pending", 2))
+
+    async def test_arch_suffixed_platform_still_matches_for_linux(self):
+        async with self.sessions() as session:
+            session.add(User(id="four", username="four", is_active=True))
+            for identity in ("old-linux2", "new-linux2"):
+                session.add(Client(id=identity, name=identity, platform="linux/x64",
+                                   user_ref="four", auth_state="active", auth_version=1))
+            await session.commit()
+        async with self.sessions() as session:
+            client = await session.get(Client, "new-linux2")
+            self.assertEqual(await policy.replace_previous(session, client, SimpleNamespace(id="four")),
+                             ["old-linux2"])
+            await session.commit()
+
+    async def test_arch_suffixed_phone_platform_is_not_treated_as_desktop(self):
+        async with self.sessions() as session:
+            session.add(Client(id="desk", name="desk", platform="linux/x64",
+                               user_ref="one", auth_state="active", auth_version=1))
+            await session.commit()
+        async with self.sessions() as session:
+            client = await session.get(Client, "phone")
+            client.platform = "android/arm64"
+            await session.commit()
+        async with self.sessions() as session:
+            client = await session.get(Client, "phone")
+            self.assertEqual(await policy.replace_previous(session, client, SimpleNamespace(id="one")), [])
+            await session.commit()
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(Client, "desk")).auth_state, "active")
+
     async def test_administrative_assignment_cannot_bypass_desktop_replacement(self):
         from app.api import admin
         for endpoint in (admin.assign_client, admin.activate_client):
             async with self.sessions() as session:
                 user = await session.get(User, "one")
                 current = await session.get(Client, "new")
-                current.secret_hash = "isolated-existing-key-hash"
+                current.secret_hash = admin.device_auth.hash_secret("desktop replacement fixture")
+                current.auth_state = "pending"
                 old = await session.get(Client, "old")
                 old.auth_state = "active"
                 await session.commit()
                 with patch.object(admin, "_assert_client_in_scope", AsyncMock()), \
                      patch.object(admin, "_assert_user_in_scope", AsyncMock()), \
-                     patch.object(admin.audit, "log", AsyncMock()), \
                      patch.object(admin.device_connections, "disconnect", AsyncMock()) as disconnect:
-                    response = await endpoint("new", SimpleNamespace(userId="one"), user, session)
+                    ticket = admin.device_auth.issue_pairing_token("new", current.secret_hash, current.auth_version)
+                    response = await endpoint("new", SimpleNamespace(userId="one", pairingToken=ticket), user, session)
                     self.assertTrue(response["ok"])
                     disconnect.assert_any_await("old", 4401)
                 await session.refresh(old)
                 self.assertEqual((old.auth_state, old.user_ref), ("pending", "one"))
                 for identity in ("phone", "cloud", "foreign"):
                     self.assertEqual((await session.get(Client, identity)).auth_state, "active")
+
+    async def test_delegated_assignment_excludes_superuser_owners(self):
+        from fastapi import HTTPException
+        from app.api import admin
+        async with self.sessions() as session:
+            actor = await session.get(User, "one")
+            target = await session.get(User, "two")
+            target.is_super = True
+            await session.commit()
+            with patch.object(admin.rbac, "scope_org_ids", AsyncMock(return_value=None)):
+                options = await admin.client_owner_options(actor, session)
+                self.assertEqual([row["id"] for row in options], [actor.id])
+                with self.assertRaises(HTTPException) as error:
+                    await admin.assign_client("new", SimpleNamespace(userId=target.id, pairingToken=None),
+                                              actor, session)
+                self.assertEqual((error.exception.status_code, error.exception.detail), (403, "无权管理该用户"))
+                self.assertEqual((await session.get(Client, "new")).user_ref, actor.id)
+
+    async def assert_platform_replacement(self, old_platform, new_platform, expected):
+        """Use a fresh transaction for each pair and read both devices back from the database."""
+        async with self.sessions() as session:
+            old = await session.get(Client, "old")
+            new = await session.get(Client, "new")
+            old.platform, new.platform = old_platform, new_platform
+            await session.flush()
+            replaced = await policy.replace_previous(session, new, SimpleNamespace(id="one"))
+            await session.refresh(old)
+            await session.refresh(new)
+            self.assertEqual(replaced, ["old"] if expected else [])
+            self.assertEqual((old.auth_state, old.auth_version), ("pending", 2) if expected else ("active", 1))
+            self.assertEqual((new.auth_state, new.auth_version), ("active", 1))
+
+    async def test_windows_bare_and_arch_replacement(self):
+        """Cover Windows arch-to-arch and both directions of a mixed-format login."""
+        for old, new in (("win32/x64", "win32/x64"), ("win32", "win32/x64"), ("win32/x64", "win32")):
+            with self.subTest(old=old, new=new):
+                await self.assert_platform_replacement(old, new, True)
+
+    async def test_platform_whitespace_matches_in_both_directions(self):
+        """Use each input as a new login and as an existing record against a known desktop."""
+        cases = (
+            (" WIN32 ", True), ("win32 /x64", True), ("\tLinux\r\n/arm64 ", True),
+            ("android/arm64", False), ("win32x/x64", False), ("win 32/x64", False),
+            ("", False), (" \t\n", False),
+        )
+        for platform, expected in cases:
+            for old, new in ((platform, "win32"), ("win32", platform)):
+                with self.subTest(old=old, new=new):
+                    await self.assert_platform_replacement(old, new, expected)
 
 
 if __name__ == "__main__":

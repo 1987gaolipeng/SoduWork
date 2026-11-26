@@ -4,11 +4,12 @@ if (typeof electron === 'string') {
   const result = require('child_process').spawnSync(electron, [__filename], { stdio: 'inherit', windowsHide: true });
   process.exit(result.status ?? 1);
 }
-const { app, BrowserWindow, ipcMain, nativeImage, net } = electron;
+const { app, BrowserWindow, ipcMain, nativeImage, net, safeStorage } = electron;
 const fs = require('fs'), path = require('path'), http = require('http'), assert = require('assert/strict');
 const root = path.resolve(__dirname, '../../outputs/image-generation-e2e');
 fs.mkdirSync(root, { recursive: true });
 const profile = fs.mkdtempSync(path.join(root, 'profile-'));
+app.setAppPath(path.resolve(__dirname, '..'));
 app.setPath('userData', profile);
 app.on('window-all-closed', () => {});
 const cwd = path.join(profile, 'workspace'); fs.mkdirSync(cwd);
@@ -38,6 +39,13 @@ app.whenReady().then(async () => {
     const data = body.length && contentType.includes('application/json') ? JSON.parse(body.toString()) : {};
     requests.push({ method: req.method, route, ...(data.prompt ? { prompt: data.prompt } : {}) });
     const json = value => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); };
+    if (route === '/api/v1/clients/enroll') return json({ authState: 'pending', activationRequired: true, expiresIn: 0 });
+    if (route === '/api/v1/client-auth/login') {
+      const now = Math.floor(Date.now() / 1000);
+      const claims = { typ: 'device', uid: data.account, cid: data.device, iat: now - 1, exp: now + 3600 };
+      return json({ authState: 'active', activationRequired: false, expiresIn: 3600, user: { id: data.account },
+        session: Buffer.from(JSON.stringify(claims)).toString('base64url') + '.' + 'a'.repeat(64) });
+    }
     if (route === '/api/v1/deliveries' && req.method === 'POST') {
       const form = await new Response(body, { headers: { 'content-type': contentType } }).formData();
       const manifest = JSON.parse(form.get('manifest'));
@@ -101,12 +109,13 @@ app.whenReady().then(async () => {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const hub = 'http://127.0.0.1:' + server.address().port;
-  const claims = { typ: 'device', uid: 'image-fixture-user', cid: 'image-test',
-    iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600 };
-  const identity = { hub, clientId: claims.cid,
-    session: Buffer.from(JSON.stringify(claims)).toString('base64url') + '.' + 'a'.repeat(64) };
-  // IPC and the UtilityProcess auth broker both revalidate the current owner.
-  // Supply the same isolated identity through the production runtime constructor.
+  require('../main/hub-endpoint.cjs').initialize(app, { SODUWORK_TEST_HUB_URL: hub, SODUWORK_USER_DATA: profile });
+  const auth = require('../main/device-auth');
+  auth.install({ app, ipcMain, safeStorage });
+  const login = await auth.login(app, { hub, account: 'image-fixture-user', password: 'synthetic-login-only',
+    workRoot: cwd, name: 'Image generation E2E', platform: process.platform });
+  assert.equal(login.ok, true, login.error);
+  const identity = await auth.authenticatedIdentity(app, hub);
   const processSession = require('../main/agent-runtime/process-session');
   const { createHostAuth } = require('../main/agent-runtime/process-auth');
   runtime = processSession.createProcessSession({
@@ -155,10 +164,11 @@ app.whenReady().then(async () => {
   await click('#nchatSend');
   await until('lastSnapshot?.messages?.some(m=>m.role==="user"&&m.text?.includes("第二张")) && lastSnapshot.status === "idle"');
   await until('document.querySelector(".noutput-image")');
-  assert.equal(await js('document.querySelectorAll("#messages .noutput-image img").length'),0);
+  await until('[...document.querySelectorAll("#messages .noutput-image img")].filter(img => img.naturalWidth === 64 && img.naturalHeight === 48).length === 2');
+  await click('#messages .noutput-image[aria-label*="海报-2.png"]');
   await until('ChatWorkbench.state().open && document.querySelector(".ncw-image img")?.naturalWidth > 0');
   assert.deepEqual(await js('(()=>{const img=document.querySelector(".ncw-image img");return {name:document.querySelector(".ncw-document-name b").textContent,width:img.naturalWidth,height:img.naturalHeight}})()'),
-    { name: '海报-2.png', width: 64, height: 48 }, 'the latest Chinese-named image is decoded in the right pane');
+    { name: path.join(cwd, 'outputs', '海报-2.png'), width: 64, height: 48 }, 'the latest Chinese-named image is decoded in the right pane');
   report.checks.push('new and existing conversation selectors expose personal image models; real click sends and generated image decodes in the right preview');
   await delay(250);
   await shot('generated-image');

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { detailText } from '../src/screens/audit-detail.js'
+import { actInfo, auditEnvironmentLabel, fmtT } from '../src/screens/audit-format.js'
 import { setLocale } from '../src/i18n.js'
 
 // The audit details column must render the recorded facts for every action.
@@ -43,8 +44,53 @@ test('unmapped actions fall back to a generic summary of the recorded facts', ()
   const long = detailText({ action: 'note', detail: { note: 'x'.repeat(120) } })
   assert.ok(long.length < 60, `long values must be truncated, got length ${long.length}`)
 
-  // Empty detail renders empty so the table falls back to the dash.
-  assert.equal(detailText({ action: 'org.delete', detail: {} }), '')
+  assert.equal(detailText({ action: 'org.delete', detail: {} }), '无附加信息')
+})
+
+test('audit preserves seconds and identifies known and future action codes', () => {
+  const at = second => new Date(2026, 10, 21, 11, 42, second).valueOf()
+  assert.equal(fmtT(at(4)), '2026/11/21 11:42:04')
+  assert.equal(fmtT(at(24)), '2026/11/21 11:42:24')
+  assert.equal(fmtT(null), '')
+  assert.equal(actInfo('org.delete').label, '删除部门')
+  assert.equal(actInfo('repository.sync').label, '同步仓库目录')
+  for (const code of ['future.operation', 'constructor', '__proto__']) {
+    assert.equal(actInfo(code).label, `未知操作（${code}）`)
+  }
+})
+
+test('department detail distinguishes a root, a recorded parent, absent facts and malformed records', () => {
+  assert.equal(detailText({ action: 'org.create', detail: { parentId: null } }), '上级部门：无')
+  assert.equal(detailText({ action: 'org.update', detail: { parentId: 'dept-a', sort: 0 } }), '上级部门 ID：dept-a · 排序 0')
+  assert.equal(detailText({ action: 'org.create', detail: {} }), '无附加信息')
+  assert.equal(detailText({ action: 'org.delete', detail: null }), '无附加信息')
+  for (const malformed of [false, '', [], 'legacy invalid detail']) {
+    assert.equal(detailText({ action: 'org.create', detail: malformed }), '详情格式异常')
+  }
+  assert.equal(detailText({ action: 'user.update', detail: { fields: 'name' } }), '详情格式异常')
+  assert.equal(detailText({ action: 'org.update', detail: { token: 'private' } }), '无可显示的附加信息')
+})
+
+test('translated environment badges describe only an explicitly configured non-production Hub', () => {
+  for (const value of ['production', 'customer', 'source-local', undefined]) {
+    assert.equal(auditEnvironmentLabel(value), '')
+  }
+  assert.equal(auditEnvironmentLabel('development'), '当前 Hub 为开发环境')
+  assert.equal(auditEnvironmentLabel('qa'), '当前 Hub 为测试环境')
+  try {
+    for (const [locale, action, fallback, environment] of [
+      ['en-US', 'Delete department', 'Unknown action (future.operation)', 'Test Hub'],
+      ['ja-JP', '部門を削除', '不明な操作（future.operation）', 'テスト環境の Hub'],
+      ['ko-KR', '부서 삭제', '알 수 없는 작업 (future.operation)', '테스트 환경 Hub'],
+    ]) {
+      setLocale(locale)
+      assert.equal(actInfo('org.delete').label, action)
+      assert.equal(actInfo('future.operation').label, fallback)
+      assert.equal(auditEnvironmentLabel('test'), environment)
+    }
+  } finally {
+    setLocale('zh-CN')
+  }
 })
 
 test('regression lock: unknown actions must never lose their detail dict', () => {

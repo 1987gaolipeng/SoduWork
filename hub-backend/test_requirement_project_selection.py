@@ -62,6 +62,30 @@ class RequirementProjectSelectionTests(unittest.IsolatedAsyncioTestCase):
         unauthenticated = await self.http.get("/api/v1/projects")
         self.assertEqual(unauthenticated.status_code, 401)
 
+    async def test_test_and_archived_records_are_excluded_from_new_task_choices(self):
+        from app.services.task_execution_options import _visible_repos
+        async with self.sessions() as session:
+            (await session.get(models.Project, "ancestor")).data_source = "test"
+            (await session.get(models.Project, "child")).is_archived = True
+            (await session.get(models.Repo, "own-repo")).is_archived = True
+            session.add_all([
+                models.Repo(id="test-repo", name="Test", project_id="own", data_source="test"),
+                models.Repo(id="regular", name="Regular", project_id="own", data_source="business"),
+                models.Repo(id="parent-test", name="Test parent", project_id="ancestor", data_source="business"),
+            ])
+            await session.commit()
+            client = await session.get(models.Client, "owner")
+            _, retained = await _visible_repos(session, client, retained_repo_id="own-repo")
+            self.assertEqual({r["id"] for r in retained}, {"regular", "own-repo"})
+        projects = await self.call("GET", "projects")
+        self.assertEqual({p["id"] for p in projects.json()}, {"own", "public"})
+        repos = await self.call("GET", "repos")
+        self.assertEqual({r["id"] for r in repos.json()["repos"]}, {"regular"})
+        for selection in ({"projectId": "ancestor"}, {"projectId": "child"},
+                          {"repoId": "own-repo"}, {"repoId": "test-repo"}, {"repoId": "parent-test"}):
+            response = await self.call("POST", "tasks", json={"title": "Unavailable selection", **selection})
+            self.assertEqual(response.status_code, 404, response.text)
+
     async def test_owner_can_select_replace_and_clear_with_version(self):
         for pid, version in (("own", 1), ("child", 2), (None, 3)):
             changed = await self.call("PATCH", "tasks/private", json={"projectId": pid, "requirementVersion": version})
@@ -158,14 +182,29 @@ class RequirementProjectSelectionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(changed.status_code, 200, changed.text)
                 self.assertEqual(changed.json()["projectId"], pid)
                 self.assertEqual(changed.json()["repoId"], "legacy-repository")
+        async with self.sessions() as session:
+            session.add_all([models.Repo(id="second-own-repo", project_id="own", name="Another repository"),
+                             models.Repo(id="inactive-repo", project_id="retired", name="Archived project"),
+                             models.Repo(id="restricted-repo", project_id="own", org_id="other", name="Restricted")])
+            await session.commit()
         for path in ("tasks", "tasks/offline-synthetic"):
+            method = "POST" if path == "tasks" else "PUT"
+            for invalid in ("missing", "other-repo", "inactive-repo", "restricted-repo"):
+                denied = await self.call(method, path, json={"title": "Invalid repo", "repoId": invalid})
+                self.assertEqual(denied.status_code, 404, denied.text)
             created = await self.call("POST" if path == "tasks" else "PUT", path,
-                json={"title": "Legacy repo-only", "repoId": "legacy-repository"})
+                json={"title": "Legacy repo-only", "repoId": " own-repo "})
             self.assertEqual(created.status_code, 200, created.text)
             self.assertIsNone(created.json()["projectId"])
-            changed = await self.call("PATCH", "tasks/" + created.json()["id"], json={"repoId": "other-legacy-repository"})
+            self.assertEqual(created.json()["repoId"], "own-repo")
+            route = "tasks/" + created.json()["id"]
+            for invalid in ("missing", "other-repo"):
+                denied = await self.call("PATCH", route, json={"repoId": invalid})
+                self.assertEqual(denied.status_code, 404, denied.text)
+                self.assertEqual((await self.call("GET", route)).json()["repoId"], "own-repo")
+            changed = await self.call("PATCH", route, json={"repoId": "second-own-repo"})
             self.assertEqual(changed.status_code, 200, changed.text)
-            self.assertEqual(changed.json()["repoId"], "other-legacy-repository")
+            self.assertEqual(changed.json()["repoId"], "second-own-repo")
         async with self.sessions() as session:
             imported = await tasks.create_task(session, "owner", {"title": "Administrative dispatch", "projectId": "foreign"},
                                                origin="dispatch", creator=("outsider", "Synthetic administrator"))

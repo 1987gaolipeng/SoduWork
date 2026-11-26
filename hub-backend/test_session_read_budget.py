@@ -5,9 +5,12 @@ os.environ["CLUSTER_REDIS_URL"] = ""
 
 import asyncio
 import base64
+import concurrent.futures
 import contextvars
 import hashlib
 import json
+import tempfile
+import threading
 import time
 import unittest
 from types import SimpleNamespace
@@ -16,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from fastapi import Depends, FastAPI
 from app.services import ai_exec, ai_local, ai_remote, cluster_runtime, conversation_content
+from app.services import access_policy
 from app.services import endpoint_events, runner_hub, session_read_budget as budget
 from app.services.cluster_bus import ClusterBus
 
@@ -214,6 +218,110 @@ class DeadlineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await http.get(PATH)).status_code, 504)
         self.assertEqual(len(timeouts), 2)
         self.assertLess(timeouts[1], timeouts[0] - 0.02)
+
+
+class LocalSnapshotTests(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory(prefix="soduwork-session-snapshot-")
+        self.addCleanup(folder.cleanup)
+        self.ref = "coherent-read-fixture"
+        self.run = {"state": "running", "cli": "codex-harness", "ws": folder.name,
+                    "lines": [], "error": "", "started": 100, "ended": 0,
+                    "model": "initial-model", "reasoningEffort": "low", "tokens": {},
+                    "usage": {"output": 7}}
+        self.patch = patch.dict(ai_local._RUNS, {self.ref: self.run})
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+
+    def read_during_change(self, reader, io_name, change):
+        reading, release = threading.Event(), threading.Event()
+
+        def archive(*_args):
+            reading.set()
+            if not release.wait(5):
+                raise AssertionError("The archive read was not released")
+            return []
+
+        with patch.object(ai_local, io_name, side_effect=archive), \
+                concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(reader)
+            try:
+                self.assertTrue(reading.wait(5), "The public read must reach the archive boundary")
+                with ai_local._LOCK:
+                    change(self.run)
+            finally:
+                release.set()
+            return future.result(timeout=5)
+
+    def test_session_read_keeps_running_state_and_diagnostics_when_execution_settles_during_io(self):
+        reply = self.read_during_change(lambda: ai_local.session_sync({}, self.ref), "_read_events",
+            lambda run: run.update(state="failed", error="Fixture home could not be created", ended=101))
+        self.assertEqual(reply["status"], "running")
+        self.assertEqual(reply["error"], "")
+        self.assertTrue(reply["canStop"])
+        self.assertEqual(reply["ended"], 0)
+        with patch.object(ai_local, "_read_events", return_value=[]):
+            settled = ai_local.session_sync({}, self.ref)
+        self.assertEqual(settled["status"], "failed")
+        self.assertEqual(settled["error"], "Fixture home could not be created")
+        self.assertFalse(settled["canStop"])
+
+    def test_session_read_binds_policy_model_usage_and_timing_to_the_same_turn(self):
+        policy = access_policy.normalize({"schema": access_policy.SCHEMA, "mode": "standard",
+            "revision": 1, "workspaceRoot": self.run["ws"]})
+        self.run.update(accessPolicy=policy, permissionWaiting=True)
+
+        def advance(run):
+            next_policy = access_policy.normalize({"schema": access_policy.SCHEMA, "mode": "standard",
+                "revision": 2, "workspaceRoot": run["ws"]})
+            run.update(permissionWaiting=False, accessPolicy=next_policy,
+                       model="next-model", reasoningEffort="high", round=2, started=200)
+            run["usage"]["output"] = 8
+
+        reply = self.read_during_change(lambda: ai_local.session_sync({}, self.ref), "_read_events", advance)
+        self.assertEqual(reply["status"], "waiting-permission")
+        self.assertEqual(reply["accessPolicy"]["revision"], 1)
+        self.assertEqual(reply["round"], 1)
+        self.assertEqual(reply["model"], "initial-model")
+        self.assertEqual(reply["activeExecutionSelection"]["reasoningEffort"], "low")
+        self.assertEqual(reply["usage"], {"output": 7})
+        self.assertEqual(reply["firstStarted"], 100)
+        self.assertEqual(reply["started"], 100)
+
+    def test_status_read_keeps_failure_state_and_error_when_delivery_io_overlaps_completion(self):
+        self.run.update(state="failed", error="Initial fixture failure", failureKind="fixture")
+        reply = self.read_during_change(lambda: ai_local.status_sync({}, self.ref, read_only=True),
+            "_fresh_entries", lambda run: run.update(state="done", error="", failureKind="",
+                round=2, segment=3, admissionKey="next-turn"))
+        self.assertEqual(reply["status"], "failed")
+        self.assertEqual(reply["error"], "Initial fixture failure")
+        self.assertEqual(reply["failureKind"], "fixture")
+        self.assertFalse(reply["running"])
+        self.assertTrue(reply["done"])
+        self.assertEqual(reply["round"], 1)
+        self.assertEqual(reply["segment"], 1)
+        self.assertEqual(reply["admissionKey"], "")
+
+    def test_status_messages_stay_with_the_captured_round_during_file_reads(self):
+        self.run.update(state="done", round=1, lines=[
+            {"kind": "say", "text": "preview", "full": "first answer"},
+            {"kind": "tool", "text": "verify"},
+        ])
+
+        def next_turn(run):
+            run["round"] = 2
+            run["lines"].append({"kind": "say", "text": "second answer"})
+
+        def status():
+            return ai_local.status_sync({}, self.ref, read_only=True)
+
+        first = self.read_during_change(status, "_fresh_entries", next_turn)
+        second = status()
+        fields = ("round", "finalText", "comments", "last")
+        self.assertEqual(tuple(first[key] for key in fields),
+                         (1, "first answer", 2, "preview / verify"))
+        self.assertEqual(tuple(second[key] for key in fields),
+                         (2, "second answer", 3, "preview / verify / second answer"))
 
 
 class patch_budget:

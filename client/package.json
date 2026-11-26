@@ -58,6 +58,7 @@
     "afterPack": "scripts/prepare-installer.cjs",
     "afterSign": "scripts/prepare-installer.cjs",
     "productName": "SoduWork",
+    "protocols": [{ "name": "SoduWork first chat", "schemes": ["soduwork"] }],
     "directories": {
       "output": "dist"
     },
@@ -97,6 +98,7 @@
     "extraResources": [
       { "from": "node_modules/openai", "to": "node_modules/openai" },
       { "from": "runtime-manifest.json", "to": "runtime-manifest.json" },
+      { "from": "../hub-backend/app/services/generated_image.py", "to": "generated_image.py" },
       { "from": ".runtime/node", "to": "node" },
       { "from": ".runtime/python", "to": "python", "filter": ["**/*", "!Lib/idlelib/help.html", "!**/__pycache__/**", "!**/*.pyc"] },
       {

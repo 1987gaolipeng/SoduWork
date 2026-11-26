@@ -1,7 +1,7 @@
 import './helpers/chinese-locale.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { pluginIssues, pluginKind, pluginPublication, pluginSource, selectCatalog } from '../src/screens/plugin-catalog-model.js'
+import { declaredAccess, pluginIssues, pluginKind, pluginPublication, pluginSource, selectCatalog } from '../src/screens/plugin-catalog-model.js'
 import { setLocale } from '../src/i18n.js'
 
 const make = (id, overrides = {}) => ({ id, name: id, enabled: true, updatedAt: 1,
@@ -98,4 +98,63 @@ test('governance duplicates and malformed queue groups do not inflate card issue
   const row = { id: 'q1', pluginId: 'a', target: 'versions' }
   assert.equal(pluginIssues({ one: [row], two: [row], unknown: 1 }).a.length, 1)
   assert.deepEqual(selectCatalog([], {}, { query: 'anything' }).shown, [])
+})
+
+test('declared access keeps unknown, low-access and mixed permissions distinct', () => {
+  assert.equal(declaredAccess({}), '未提供权限清单')
+  assert.equal(declaredAccess({ capabilities: { permissionSummary: { riskLevel: 'low' } } }), '未声明额外访问')
+  const summary = { runtime: ['files', 'terminal'], network: true, script: true, secretCount: 1 }
+  const access = declaredAccess({ capabilities: { mcpServers: ['one'], permissionSummary: summary } })
+  for (const label of ['本地文件读写', '命令执行', '连接网络', '密钥引用', '外部连接器']) assert.ok(access.includes(label))
+  assert.equal(access.split('命令执行').length, 2)
+})
+
+test('review counts count plugins without losing separate version actions', () => {
+  const p = make('a', { latestVersion: { trustState: 'quarantined' } })
+  const review = ['v1', 'v2'].map(versionId => ({ id: `review:${versionId}`, kind: 'review', pluginId: 'a', versionId }))
+  const result = selectCatalog([p], { review }, { status: 'pending' }, { a: { review: 2, attention: 2 } })
+  assert.equal(result.counts.all, 1)
+  assert.equal(result.counts.pending, 1)
+  assert.equal(result.counts.attention, 1)
+  assert.equal(result.shown[0].issueCount, 2)
+  assert.deepEqual(result.shown[0].issues.map(item => item.versionId), ['v1', 'v2'])
+})
+
+test('full governance counts keep plugins beyond the queue preview discoverable', () => {
+  const items = Array.from({ length: 40 }, (_, i) => make(`p${i}`))
+  const queues = { review: items.slice(0, 30).map(p => ({ id: p.id, kind: 'review', pluginId: p.id })) }
+  const pluginCounts = Object.fromEntries(items.map(p => [p.id, { review: 1, attention: 1 }]))
+  const result = selectCatalog(items, queues, { status: 'attention' }, pluginCounts)
+  assert.equal(result.counts.all, 40)
+  assert.equal(result.counts.pending, 40)
+  assert.equal(result.counts.attention, 40)
+  assert.equal(result.shown.length, 40)
+  const last = result.shown.find(row => row.plugin.id === 'p39')
+  assert.equal(last.issueCount, 1)
+  assert.equal(last.issues.length, 0)
+  const filtered = selectCatalog(items, queues, { status: 'pending', query: 'p39' }, pluginCounts)
+  assert.equal(filtered.counts.all, 1)
+  assert.deepEqual(filtered.shown.map(row => row.plugin.id), ['p39'])
+})
+
+test('older pending versions remain reviewable without changing latest publication', () => {
+  const p = make('a')
+  const queues = { review: [{ id: 'old', kind: 'review', pluginId: 'a', versionId: 'v0' }] }
+  for (const counts of [{ a: { review: 1, attention: 1 } }, undefined]) {
+    const result = selectCatalog([p], queues, { status: 'pending' }, counts)
+    assert.equal(result.counts.pending, 1)
+    assert.equal(result.counts.published, 1)
+    assert.equal(result.shown[0].publication.key, 'published')
+  }
+  const reviewed = selectCatalog([p], {}, {}, { a: { review: 0, attention: 0 } })
+  assert.equal(reviewed.counts.pending, 0)
+  assert.equal(reviewed.counts.attention, 0)
+})
+
+test('many action items on one plugin do not inflate catalog plugin counts', () => {
+  const result = selectCatalog([make('a')], {}, {}, { a: { review: 40, attention: 45 } })
+  assert.equal(result.counts.all, 1)
+  assert.equal(result.counts.pending, 1)
+  assert.equal(result.counts.attention, 1)
+  assert.equal(result.shown[0].issueCount, 45)
 })

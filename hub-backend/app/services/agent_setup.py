@@ -370,7 +370,7 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
     # Return history explicitly without mutating the stored record.
     if p:
         p = {**p, "historical": True}
-    return _decorate_agent({
+    agent = {
         "key": key,
         "name": prof.get("name") or key,
         "pkg": pkg,
@@ -403,7 +403,11 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
         "state": state,
         "why": why,
         "probe": p,                 # {ok, detail, at, steps:[...]}
-    })
+    }
+    if key == "dsh" and setup_state == "missing":
+        from .agent_installation import dsh_desktop_detected
+        agent["desktopAppDetected"] = dsh_desktop_detected()
+    return _decorate_agent(agent)
 
 
 def _config_ready(key: str) -> bool:

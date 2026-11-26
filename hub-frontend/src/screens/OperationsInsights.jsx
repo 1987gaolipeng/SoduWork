@@ -331,7 +331,7 @@ export default function OperationsInsights() {
         <div className="oi-panel-title"><span className="oi-panel-icon"><Icon name="plug" /></span><div><h3>{tx("插件使用")}</h3><p>{used}{tx(" 个近 30 天有使用 / 共 ")}{plugins.length}{tx(" 个插件")}</p></div></div>
         <div className="oi-plugin-tools">
           <FilterInput className="oi-search-field" type="search" placeholder={tx("搜索插件名称或标识")} value={search}
-            onChange={jump((e) => setSearch(e.target.value))} aria-label={tx("搜索插件")} />
+            onChange={jump((e) => setSearch(e.target.value))} aria-label={tx("按名称或标识筛选插件使用列表")} />
           <label className="admin-filter-field oi-plugin-filter"><span>{tx("筛选")}</span><FilterSelect
             value={idleOnly ? 'idle' : category ? `category:${category}` : ''} aria-label={tx("筛选")}
             onChange={jump((e) => {

@@ -3,6 +3,7 @@ html.soduwork-auth-pending body > :not(#soduWorkClientAuthGate) {
 }
 html.soduwork-auth-pending #soduWorkClientAuthGate {
   visibility: visible !important;
+  background: #fff;
 }
 body.soduwork-client-auth-open {
   overflow: hidden !important;
@@ -37,9 +38,11 @@ body.soduwork-client-auth-open {
   inset: 0;
   z-index: 2147483600;
   display: grid;
-  place-items: center;
+  place-items: safe center;
   padding: 32px;
   overflow: auto;
+  /* Use Chromium's native scrollbar instead of the workspace's painted 5px thumb. */
+  scrollbar-color: var(--ink-4, #8a94a6) transparent;
   color: var(--auth-ink);
   background:
     radial-gradient(circle at 18% 18%, rgba(77, 136, 255, .09), transparent 28%),
@@ -66,18 +69,20 @@ body.soduwork-client-auth-open {
   box-shadow: 0 28px 70px rgba(38, 56, 88, .14), 0 2px 8px rgba(38, 56, 88, .05);
   backdrop-filter: blur(24px);
 }
-/*
- * Custom WCO title bar: explicitly mark empty areas draggable and exempt every interactive
- * control.
- */
 .soduwork-auth-gate {
-  -webkit-app-region: drag;
   user-select: none;
 }
-.soduwork-auth-gate input,
-.soduwork-auth-gate button,
-.soduwork-auth-gate summary {
-  -webkit-app-region: no-drag;
+/* Reserve the native caption above the scrollport so it never covers form controls. */
+html:is([data-window-titlebar="overlay"], [data-window-titlebar="hidden-inset"]) .soduwork-auth-gate {
+  --auth-caption-height: max(28px, env(titlebar-area-height, 0px));
+  border-top: var(--auth-caption-height) solid transparent;
+}
+html:is([data-window-titlebar="overlay"], [data-window-titlebar="hidden-inset"]) .soduwork-auth-gate::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: var(--auth-caption-height);
+  -webkit-app-region: drag;
 }
 .soduwork-auth-brand {
   display: flex;
@@ -126,6 +131,35 @@ body.soduwork-client-auth-open {
 .soduwork-auth-form {
   display: grid;
   gap: 14px;
+}
+.soduwork-auth-preferences {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  -webkit-app-region: no-drag;
+}
+.soduwork-auth-preferences[hidden] { display: none; }
+.soduwork-auth-gate .soduwork-auth-preferences label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.soduwork-auth-form .soduwork-auth-preferences input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent, var(--auth-blue));
+}
+.soduwork-auth-preferences p {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3, var(--auth-muted));
 }
 .soduwork-auth-connection {
   padding: 12px 14px;

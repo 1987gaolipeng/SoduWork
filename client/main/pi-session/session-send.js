@@ -73,14 +73,14 @@ async send(text, turnAttachments, sendOptions) {
         }
         ctx.inFlight = true;
         ctx.failedLastTurn = false;
-        ctx.imageController = new AbortController();
+        ctx.directModelController = new AbortController();
         runControl.resetTurn(ctx.run, true);
         ctx.displayTitle = ctx.displayTitle || titleForTurn(rawText);
         ctx.updatedAt = Date.now();
         try {
           await ctx.beginTurnJournal(turn);
           const result = await require('./image-turn').generate({ handle: ctx.handle, identity: ctx.identity, choice: imageChoice,
-            text: rawText, submissionId: turn.submissionId, signal: ctx.imageController.signal,
+            text: rawText, submissionId: turn.submissionId, signal: ctx.directModelController.signal,
             push: ev => ctx.acc.push(ev), emit: ctx._emit });
           ctx.failedLastTurn = !result.ok;
           return (deliveryResult = result);
@@ -89,7 +89,7 @@ async send(text, turnAttachments, sendOptions) {
           await ctx.finishTurnJournal();
           const capture = ctx._captureDirectDelivery(turn, deliveryResult);
           if (capture) await capture;
-          ctx.imageController = null; ctx.inFlight = false;
+          ctx.directModelController = null; ctx.inFlight = false;
           ctx._emit({ kind: 'turn-finished' }); queueMicrotask(ctx._drainTurns);
         }
       }
@@ -291,13 +291,20 @@ async send(text, turnAttachments, sendOptions) {
         // Native recovery remains part of the original logical submission.
         if (!(turn.internal && turn.runtimeRecovery) || !ctx.run.pluginGenerationTurn) ctx.run.pluginGenerationTurn = {};
         const pluginGenerationTurn = ctx.run.pluginGenerationTurn;
-        const permissionRevision = ctx.accessPolicy?.revision;
-        const repairCancelled = () => interrupted() || ctx.closed || ctx.goalCancelled ||
-          ctx.liveAccess.changing() || Boolean(ctx.accessChanges.pending()) || ctx.accessPolicy?.revision !== permissionRevision;
+        const startingPolicy = ctx.accessPolicy;
+        const startingSession = ctx.piSession;
+        const samePermissions = () => ctx.accessPolicy?.revision === startingPolicy?.revision;
+        const approvedInPlace = () => startingPolicy?.mode === 'standard' && ctx.accessPolicy?.mode === 'full' &&
+          ctx.piSession === startingSession && ctx.accessPolicy.workspaceRoot === startingPolicy.workspaceRoot &&
+          ctx.accessPolicy.revision === startingPolicy.revision + 1;
+        const turnInterrupted = () => interrupted() || ctx.closed || ctx.goalCancelled ||
+          ctx.liveAccess.changing() || Boolean(ctx.accessChanges.pending());
+        const repairCancelled = () => turnInterrupted() || !samePermissions();
         pluginGate = await require('./plugin-generation-gate.cjs').begin({
           handle: ctx.handle, app: ctx.opts.app, identity: ctx.identity, logicalOwner: pluginGenerationTurn,
           selectedPluginIds: effectivePluginIds,
-          cancelled: () => repairCancelled() || Boolean(ctx.run.stopReason),
+          cancelled: () => turnInterrupted() || Boolean(ctx.run.stopReason) || (!samePermissions() && !approvedInPlace()),
+          validationAllowed: samePermissions,
           pauseConfirmed: () => Boolean(ctx.limitRequest) && !repairCancelled(),
           changed: () => ctx._emit({ kind: 'plugin-validation' }),
           repair: async prompt => {

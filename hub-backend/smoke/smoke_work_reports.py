@@ -74,6 +74,7 @@ async def main() -> None:
                         progress=[{"at": at("2026-08-10"), "by": "u-r", "status": "done",
                                    "text": "完成需求基线并确认验收口径"}]),
             models.Task(id="t-live", title="实现工作简报", status="doing", owner_client_id="c-r",
+                        created_at=datetime(2026, 8, 10),
                         progress=[{"at": at("2026-08-11"), "by": "u-r", "status": "doing",
                                    "text": "完成日报和周报统一接口"}]),
         ])
@@ -120,6 +121,7 @@ async def main() -> None:
                                {"at": at("2026-08-11"), "by": "u-b", "text": "小博协助验收"}]
         session.add(models.Task(
             id="t-b", title="小博私有需求", status="doing", owner_client_id="c-r",
+            created_at=datetime(2026, 8, 10),
             progress=[{"at": at("2026-08-11"), "text": "小博个人进展"},
                       {"at": at("2026-08-11"), "by": "u-r", "text": "小苏协助评审"}]))
         await session.commit()
@@ -162,6 +164,33 @@ async def main() -> None:
               [event["type"] for event in alice_socket.events] == ["notice", "work.report"]
               and alice_socket.events[1]["report"]["userId"] == "u-r"
               and bob_socket.events == [], (alice_socket.events, bob_socket.events))
+
+        from app.api import admin, reports
+
+        user.is_super = True
+        session.add(models.Task(id="future-task", title="Future work", status="todo",
+                                owner_client_id="c-r", created_at=datetime(2026, 8, 20)))
+        await session.commit()
+        anchor = "2026-08-18"
+        batch = await reports.generate_reports(
+            {"scope": "team", "anchor": anchor, "orgId": user.org_id}, device, session)
+        admin_batch = await admin.generate_daily_reports({"date": anchor}, user, session)
+        saved = await work_report.find_report(session, user.id, "daily", anchor)
+        check("Backlog-only reports retain their task evidence without claiming progress",
+              saved.active_count == saved.progress_count == 0
+              and all(item["taskId"] != "future-task" for item in saved.items)
+              and "Future work" not in saved.content
+              and any(item["taskId"] == "t-live" and item.get("backlogOnly")
+                      for item in saved.items), saved.items)
+        for receipt in (batch, admin_batch):
+            details = receipt.get("details", [])
+            org = next((row for row in details if row["orgId"] == user.org_id), {})
+            check("Batch generation returns the saved team's sources and next-focus items",
+                  len(details) == receipt["teamReports"] > 0
+                  and any(ref["id"] == saved.id for ref in org.get("sourceRefs", []))
+                  and any(row["text"] == "实现工作简报" and saved.id in row["sourceIds"]
+                          for row in org.get("summary", {}).get("nextFocus", []))
+                  and not org.get("summary", {}).get("inProgress"), org)
 
     api_source = (BACKEND / "app" / "api" / "reports.py").read_text(encoding="utf-8")
     check("客户端 API 同时保护个人与团队边界",

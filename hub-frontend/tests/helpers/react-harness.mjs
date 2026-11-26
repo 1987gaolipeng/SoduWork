@@ -63,9 +63,21 @@ export async function createComponentHarness(file, { dependencies = {}, exportNa
   // Geometry is covered separately in viewport-height.test.mjs. This logic host
   // has no DOM, so list refs are inert unless the test supplies its own adapter.
   const viewportHost = { useViewportHeight: () => () => {} }
+  // A stubbed Modal does not render its footer. Resolve editor-supplied actions
+  // as Modal would so host tests can exercise their buttons and save handlers.
+  const modalType = dependencies['../ui.jsx']?.Modal
+  const modalFooter = factory => (type, props, key) => {
+    if (modalType && type === modalType) {
+      for (const slot of ['foot', 'footer']) {
+        if (typeof props[slot] === 'function') props = { ...props, [slot]: props[slot](props.onClose) }
+      }
+    }
+    return factory(type, props, key)
+  }
+  const hostJsx = { ...jsxRuntime, jsx: modalFooter(jsxRuntime.jsx), jsxs: modalFooter(jsxRuntime.jsxs) }
   const imports = { './i18n.js': localeHost, '../i18n.js': localeHost, './dialog-focus.js': dialogFocus, './select-popover.js': selectPopover, './org-options.js': orgOptions, '../org-options.js': orgOptions,
     '../viewport-height.js': viewportHost, './polling.js': polling, '../polling.js': polling, './enlarge-theme.js': enlargeTheme, '../enlarge-theme.js': enlargeTheme,
-    'react-dom': { createPortal: (children) => children }, 'react/jsx-runtime': jsxRuntime, ...dependencies, react: hooks }
+    'react-dom': { createPortal: (children) => children }, 'react/jsx-runtime': hostJsx, ...dependencies, react: hooks }
   const module = { exports: {} }
   new Function('require', 'module', 'exports', code)((name) => {
     assert.ok(name in imports, `unknown test dependency: ${name}`)
@@ -93,7 +105,7 @@ export async function createComponentHarness(file, { dependencies = {}, exportNa
   }
   return {
     render,
-    nodes: (predicate) => walk(predicate, render(), []),
+    nodes: (predicate, root = render()) => walk(predicate, root, []),
     act(callback) { callback(); return render() },
     async flush() { await new Promise((resolve) => setImmediate(resolve)); return render() },
     unmount() { slots.forEach((slot) => slot?.cleanup?.()); mounted = false },

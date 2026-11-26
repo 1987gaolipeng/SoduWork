@@ -22,7 +22,7 @@ class EnvironmentSortValidationTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         tables = [model.__table__ for model in (
-            models.OrgUnit, models.Role, models.User, models.AuditLog, am.Environment,
+            models.OrgUnit, models.Role, models.User, models.AuditLog, am.Environment, am.SecretReference,
         )]
         async with self.engine.begin() as connection:
             await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
@@ -63,6 +63,28 @@ class EnvironmentSortValidationTests(unittest.IsolatedAsyncioTestCase):
         return await self.http.request(method, "/api/v1/admin/environments" + suffix,
                                        headers=headers, **kwargs)
 
+    async def test_system_secret_reference_probe_requires_super_admin(self):
+        from unittest.mock import AsyncMock, patch
+        async with self.sessions() as session:
+            session.add(am.SecretReference(id="system-secret", name="System secret"))
+            await session.commit()
+        with patch.object(environments.svc, "probe_secret_ref", new_callable=AsyncMock) as probe:
+            response = await self.http.post("/api/v1/admin/secret-references/system-secret/probe",
+                                            headers={"Authorization": "Bearer " + sign_token("manager", 1)})
+            self.assertEqual(response.status_code, 403, response.text)
+            probe.assert_not_awaited()
+
+    async def test_new_environment_requires_an_existing_organization(self):
+        async with self.sessions() as session:
+            session.add(models.User(id="super", username="super", is_super=True, is_active=True, auth_version=1))
+            await session.commit()
+        for org in ("missing", {"id": "wrong shape"}):
+            response = await self.request("POST", who="super", json={"key": "new-env", "orgId": org})
+            self.assertEqual(response.status_code, 400, response.text)
+        await self.assert_unchanged()
+        response = await self.request("POST", who="super", json={"key": "new-env", "orgId": "own-org"})
+        self.assertEqual(response.status_code, 200, response.text)
+
     async def assert_unchanged(self):
         async with self.sessions() as session:
             rows = (await session.execute(select(
@@ -75,6 +97,40 @@ class EnvironmentSortValidationTests(unittest.IsolatedAsyncioTestCase):
                 ("system", "system", "System", None, 9, {}),
             ])
             self.assertEqual(await session.scalar(select(func.count()).select_from(models.AuditLog)), 0)
+
+    async def test_environment_writes_reject_malformed_prerequisites_atomically(self):
+        async with self.sessions.begin() as session:
+            env = await session.get(am.Environment, "existing")
+            env.promotion_policy = {"requires": ["system"]}
+        bad_inputs = (12345, False, "system", 0, True, None, "", {}, {"system": True},
+                      ["system", 1], [None], [["system"]])
+        for method, path in (("PATCH", "/existing"), ("POST", "")):
+            for value in bad_inputs:
+                with self.subTest(method=method, requires=value):
+                    body = {"name": "Changed", "promotionPolicy": {"requires": value}}
+                    if method == "POST":
+                        body["key"] = "proposed"
+                    response = await self.request(method, path, json=body)
+                    self.assertEqual(response.status_code, 400, response.text)
+                    self.assertEqual(response.json()["detail"], "requires 必须是环境标识数组")
+                    self.assertEqual(response.headers.get("X-Error-Code"), "hub.input.promotion_requires")
+                    async with self.sessions() as session:
+                        env = await session.get(am.Environment, "existing")
+                        self.assertEqual((env.name, env.promotion_policy), ("Original", {"requires": ["system"]}))
+                        self.assertEqual(await session.scalar(select(func.count()).select_from(am.Environment)), 3)
+                        self.assertEqual(await session.scalar(select(func.count()).select_from(models.AuditLog)), 0)
+
+    async def test_valid_prerequisites_keep_normalization_and_legacy_policy_reads(self):
+        async with self.sessions.begin() as session:
+            env = await session.get(am.Environment, "existing")
+            env.promotion_policy = {"requires": None}
+        result = await self.request("POST", json={"key": "new-stage", "promotionPolicy": {"requiresApproval": True}})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()["promotionPolicy"]["requires"], [])
+        for values, expected in (([" SYSTEM ", "system"], ["system"]), ([], [])):
+            result = await self.request("PATCH", "/existing", json={"promotionPolicy": {"requires": values}})
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["promotionPolicy"]["requires"], expected)
 
     async def test_invalid_sort_returns_400_without_data_or_audit_writes(self):
         invalid = [

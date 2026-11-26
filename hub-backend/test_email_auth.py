@@ -114,6 +114,53 @@ class EmailAuthTests(unittest.IsolatedAsyncioTestCase):
             challenge = await session.get(EmailChallenge, proof["challengeId"])
             self.assertIsNotNone(challenge.consumed_at)
 
+    async def test_fresh_device_registers_only_after_its_own_email_proof(self):
+        proof = await self.proof(device=3)
+        async with SessionLocal() as session:
+            self.assertIsNone(await session.get(models.Client, "email-device-3"))
+        body = {**proof, "password": "Original-password-123", "consents": required_versions()}
+        other_key = await self.http.post("/api/v1/client-auth/register",
+            headers={"X-Device-Key": "4" * 48}, json={"device": "email-device-3", **body})
+        self.assertEqual(other_key.status_code, 400)
+        async with SessionLocal() as session:
+            self.assertIsNone(await session.get(models.Client, "email-device-3"))
+        verified = await self.post("/register", body, device=3)
+        self.assertEqual(verified.status_code, 200, verified.text)
+        self.assertTrue(verified.json()["session"])
+        async with SessionLocal() as session:
+            client = await session.get(models.Client, "email-device-3")
+            self.assertEqual(client.user_ref, verified.json()["user"]["id"])
+            self.assertTrue(device_auth.secret_matches(client, "3" * 48))
+
+    async def test_credentialless_device_requires_its_reserved_owner_to_sign_in(self):
+        registered, _ = await self.register()
+        async with SessionLocal() as session:
+            session.add(models.Client(id="email-device-3", user_ref=registered["user"]["id"]))
+            await session.commit()
+        other, _ = await self.register(email="other@example.test", device=2)
+        credentials = {"email": other["user"]["email"], "password": "Original-password-123"}
+        denied = await self.post("/login/password", credentials, device=3)
+        self.assertEqual(denied.status_code, 403)
+        async with SessionLocal() as session:
+            client = await session.get(models.Client, "email-device-3")
+            self.assertEqual(client.user_ref, registered["user"]["id"])
+            self.assertFalse(client.secret_hash)
+        accepted = await self.post("/login/password",
+            {**credentials, "email": registered["user"]["email"]}, device=3)
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+
+    async def test_concurrent_verified_signins_share_one_new_device(self):
+        registered, _ = await self.register()
+        body = {"email": registered["user"]["email"], "password": "Original-password-123"}
+        attempts = await asyncio.gather(*(self.post("/login/password", body, device=3) for _ in range(2)))
+        for response in attempts:
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["user"]["id"], registered["user"]["id"])
+        async with SessionLocal() as session:
+            client = await session.get(models.Client, "email-device-3")
+            self.assertEqual(client.user_ref, registered["user"]["id"])
+            self.assertTrue(device_auth.secret_matches(client, "3" * 48))
+
     async def test_consent_is_required_and_does_not_spend_code(self):
         proof = await self.proof()
         bad = await self.post("/register", {**proof, "password": "Original-password-123", "consents": {}})
@@ -130,6 +177,16 @@ class EmailAuthTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(response.status_code, (401, 422))
         async with SessionLocal() as session:
             self.assertEqual(await session.scalar(select(func.count()).select_from(MailOutbox)), 0)
+
+    async def test_compact_policy_preserves_registration_metadata_without_document_bodies(self):
+        full = (await self.http.get("/api/v1/client-auth/policy")).json()
+        compact = (await self.http.get("/api/v1/client-auth/policy?compact=true")).json()
+        docs = full.pop("legalDocuments")
+        self.assertTrue(docs and all(doc["content"] for doc in docs))
+        locales = compact.pop("legalDocumentLocales")
+        self.assertEqual(locales, [{key: doc[key] for key in ("key", "version", "locale", "defaultLocale")}
+                                   for doc in docs])
+        self.assertEqual(compact, full)
 
     async def test_mail_policy_unavailable_and_no_fake_send(self):
         async with SessionLocal() as session:

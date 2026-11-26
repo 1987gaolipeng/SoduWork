@@ -30,6 +30,7 @@ let _mdManagedDirty = false;
 let _mdLocalKeyIds = new Set();
 let _mdManagedNeedsReload = false;
 let _mdSaveFlight = null;
+let _mdLastSaveError = null;
 let _mdAddingModel = '';
 let _mdDeleteFlight = null;          /* Reopening waits for an admitted deletion to settle. */
 let _mdTest = {};                   /* providerId -> {state:'ing'|'ok'|'bad', detail} */
@@ -40,6 +41,7 @@ let _mdValidation = null;
 let _mdDeletePending = '';
 let _mdLoadId = 0;
 let _mdLoadState = 'idle';
+let _mdCatalogScope;
 let _mdRefreshFlight = null;
 
 const _MD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2"/>' +
@@ -47,6 +49,12 @@ const _MD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" 
 const _MD_TYPES = { chat: '对话模型', image: '图片生成', video: '视频生成' };
 function _mdType(value) { return _MD_TYPES[value] ? value : 'chat'; }
 function _mdCanEdit(provider) { return provider?.personal === true; }
+function _mdStorageErrorMessage(error) {
+  const raw = error && typeof error.message === 'string' ? error.message.trim() : '';
+  const cleaned = raw.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/i, '').trim();
+  if (!cleaned || !/系统安全存储不可用|本地模型配置|本地 Agent 默认模型存储|自动化本地模型选择|能力检测记录/.test(cleaned)) return '';
+  return cleaned.slice(0, 240);
+}
 function _mdTypeOptions(value) {
   const current = _mdType(value);
   return Object.keys(_MD_TYPES).map((key) => '<option value="' + key + '"' +
@@ -106,6 +114,7 @@ function openModelsPanel(options) {
 function closeModelsPanel() {
   _mdStopModelChecks();
   ++_mdLoadId;
+  _mdLastSaveError = null;
   if (typeof _mdCloseDeleteDialog === 'function') _mdCloseDeleteDialog();
   _mdLoadState = 'idle';
   const p = document.getElementById('mdPanel');
@@ -118,7 +127,9 @@ async function _mdLoad(options) {
   if (!box) return;
   if (!options?.saved) _mdStopModelChecks();
   const loadId = ++_mdLoadId;
-  const current = () => loadId === _mdLoadId && document.getElementById('mdBody') === box;
+  const scope = _mdCatalogScope = SoduWorkAPI.taskStorageKey?.('ops');
+  const current = () => loadId === _mdLoadId && scope === SoduWorkAPI.taskStorageKey?.('ops') &&
+    document.getElementById('mdBody') === box;
   const previous = { data: _mdData, keys: _mdKeyEdits, models: _mdMyModels,
     dirty: _mdDirty, localDirty: _mdLocalDirty, managedDirty: _mdManagedDirty,
     localKeyIds: _mdLocalKeyIds, managedNeedsReload: _mdManagedNeedsReload,
@@ -132,7 +143,7 @@ async function _mdLoad(options) {
     const r = await Promise.race([
       // The ordinary save calls this loader itself. Only its external reloads wait for it.
       Promise.resolve(options?.saved ? _mdDeleteFlight : _mdSaveFlight).catch(() => {})
-        .then(() => current() ? SoduWorkAPI.myModels() : null),
+        .then(() => current() ? SoduWorkAPI.myModels({ fresh: options?.saved === true || options?.fresh === true }) : null),
       new Promise((_, reject) => { timer = setTimeout(() => {
         const error = new Error('Model catalog load timed out');
         error.code = 'MODEL_LOAD_TIMEOUT'; reject(error);
@@ -174,25 +185,29 @@ async function _mdLoad(options) {
     _mdLocalKeyIds = previous.localKeyIds; _mdManagedNeedsReload = previous.managedNeedsReload;
     _mdEditor = previous.editor; _mdNew = previous.draft; _mdValidation = previous.validation;
     if (options?.saved) {
+      if (_mdData) _mdData = { ..._mdData, catalogRefreshFailed: true };
       _mdLoadState = 'ready';
       _mdRender();
       return false;
     }
     _mdLoadState = 'error';
+    const storageMessage = !rendering ? _mdStorageErrorMessage(error) : '';
     const message = rendering ? '页面显示遇到问题，请重试。已有模型配置未被修改。' :
       error?.code === 'MODEL_CATALOG_INVALID' ? '模型清单格式异常，请重试。已有模型配置未被修改。' :
       error?.status === 401 ? '登录状态已失效，请重新登录后重试。' :
       error?.status === 403 ? '暂时无法访问模型清单，请检查账号权限后重试。' :
       ['MODEL_LOAD_TIMEOUT', 'DEVICE_AUTH_INIT_TIMEOUT'].includes(error?.code) || error?.name === 'TimeoutError' || error?.name === 'AbortError' ?
-        '加载超时，请检查服务连接后重试。' : '暂时无法获取模型清单，请检查服务连接后重试。';
+        '加载超时，请检查服务连接后重试。' :
+      storageMessage || '暂时无法获取模型清单，请检查服务连接后重试。';
     box.innerHTML = '<div class="md-blank" role="alert" data-md-load-error>' + _MD_ICON +
-      '<b>模型页面未能加载</b><span>' + message + '</span>' +
+      '<b>模型页面未能加载</b><span>' + esc(message) + '</span>' +
       '<button class="md-addbtn" id="mdRetry">重新加载</button></div>';
-    document.getElementById('mdRetry')?.addEventListener('click', _mdLoad);
+    document.getElementById('mdRetry')?.addEventListener('click', () => _mdLoad({ fresh: true }));
     return false;
   } finally {
     clearTimeout(timer);
     if (current()) { box.removeAttribute('aria-busy'); _mdMark(); }
+    else if (loadId === _mdLoadId && scope !== SoduWorkAPI.taskStorageKey?.('ops')) _mdScopeChanged();
   }
 }
 
@@ -301,6 +316,10 @@ function _mdRender() {
     '<aside class="cfg-master md-master" aria-label="模型服务">' +
       '<div class="cfg-master-head"><div class="md-master-toolbar"><span>模型服务</span>' +
         '<button type="button" class="cfg-master-add" id="mdAddInline" aria-label="添加服务" title="添加服务"><span aria-hidden="true">＋</span> <span>添加</span></button></div>' +
+        (_mdData.managedCatalogUnavailable ? '<div class="md-hub-retry"><small>' +
+          _mdMessage('models.pi.hubOffline', 'Hub 模型清单暂时无法读取', {}) + '</small> ' +
+          '<button type="button" class="md-model-add" data-mdretrycatalog>' +
+          _mdMessage('models.pi.retry', '重新读取模型清单', {}) + '</button></div>' : '') +
         '<strong>' + _mdMessage('models.available', '{count} 个可选模型', { count: usable.length }) + '</strong></div>' +
       '<div class="cfg-master-actions">' +
         '<label class="cfg-master-search"><span>搜索模型服务</span>' +
@@ -371,6 +390,68 @@ function _mdNavItemHtml(p) {
     '</button>';
 }
 
+async function _mdRetryCatalog() {
+  const previous = _mdData, loadId = _mdLoadId, scope = SoduWorkAPI.taskStorageKey?.('ops');
+  const revision = previous.localRevision;
+  try {
+    const catalog = await SoduWorkAPI.myModels({ fresh: true });
+    if (previous !== _mdData || loadId !== _mdLoadId || scope !== SoduWorkAPI.taskStorageKey?.('ops') ||
+        revision !== _mdData.localRevision || _mdSaveFlight ||
+        !['usable', 'myModels', 'providers'].every(key => Array.isArray(catalog?.[key]))) return;
+    if (!_mdDirty) {
+      _mdData = catalog; _mdMyModels = catalog.myModels.slice(); _mdManagedNeedsReload = false;
+      _mdReconcileChecks(catalog); _mdRender();
+      return;
+    }
+    // Recover a previously missing Hub snapshot without submitting or replacing local drafts.
+    if (previous.managedCatalogUnavailable && !catalog.managedCatalogUnavailable && !_mdManagedDirty) {
+      const combine = (localRows, hubRows) => (localRows || []).filter(row => row.localOnly)
+        .concat((hubRows || []).filter(row => !row.localOnly));
+      _mdMyModels = combine(_mdMyModels, catalog.myModels);
+      _mdData = { ...previous, providers: combine(previous.providers, catalog.providers),
+        myModels: combine(previous.myModels, catalog.myModels), revision: catalog.revision };
+    }
+    _mdData = { ..._mdData, usable: catalog.usable, mediaUsable: catalog.mediaUsable,
+      managedCatalogUnavailable: catalog.managedCatalogUnavailable, catalogRefreshFailed: false };
+    _mdRender();
+  } catch { /* Keep the retry action and all current drafts. */ }
+}
+
+// Count the persisted chat catalog for this provider. Model definitions and
+// media choices can exist even when Pi cannot select a text model.
+function _mdPiGuidance(p) {
+  if (_mdNew?.id === p.id) return '';
+  const msg = (id, source, params = {}) => _mdMessage('models.pi.' + id, source, params);
+  const button = (attr, text) => '<button type="button" class="md-model-add" ' + attr +
+    '="' + esc(p.id) + '">' + text + '</button>';
+  let title, hint = '', action = '';
+  if (_mdData.catalogRefreshFailed || (!p.localOnly && _mdData.managedCatalogUnavailable)) {
+    title = msg('unknown', '暂时无法确认可选的对话模型');
+    action = button('data-mdretrycatalog', msg('retry', '重新读取模型清单'));
+  } else {
+    const compatible = !p.kind || p.kind === 'openai-compat';
+    const names = new Set((_mdData.usable || []).filter(row => compatible && row?.providerId === p.id &&
+      row.name && row.available !== false && row.unavailable !== true && row.enabled !== false &&
+      (!row.modality || row.modality === 'chat') && !/^(?:unavailable:|local:unavailable$)/.test(row.name))
+      .map(row => row.name));
+    title = msg('count', '本地 Pi 可选的对话模型：{count} 个', { count: names.size });
+    if (names.size) hint = msg('ready', '在本地 Pi 新对话的模型选择器中选择此服务的模型。');
+    else if (!compatible) hint = msg('protocol', '请使用支持此协议的 Agent，或为 Pi 配置 OpenAI 兼容服务。');
+    else if (!_mdCanEdit(p)) hint = msg('managed', '请联系管理员检查此服务的凭据并启用对话模型。');
+    else if (!p.baseUrl || !(p.keySet || p.myKeySet || p.authMode === 'none'))
+      hint = msg('credentials', '请先保存服务地址和凭据，或确认本机服务无需密钥。');
+    else if ((_mdData.myModels || []).some(row => row.providerId === p.id && _mdType(row.modality) === 'chat')) {
+      hint = msg('review', '已有对话模型尚未出现在选择器中，请检查模型配置。');
+      action = button('data-mdreviewchat', msg('reviewAction', '查看已有对话模型'));
+    } else {
+      hint = msg('empty', '服务已保存。添加一个对话模型后，即可在本地 Pi 对话中选择。');
+      action = button('data-mdaddchat', msg('add', '添加对话模型'));
+    }
+  }
+  return '<section class="md-pi-guidance"><div><b>' + title + '</b>' +
+    (hint ? '<p class="md-model-help">' + hint + '</p>' : '') + '</div>' + action + '</section>';
+}
+
 function _mdDetailHtml(p) {
   const state = _mdState(p);
   const models = _mdCatalogModels(p);
@@ -391,7 +472,7 @@ function _mdDetailHtml(p) {
       '<span><small>模型数量</small><b>' + _mdMessage('models.itemCount', '{count} 个', { count }) + '</b></span>' +
       '<span><small>凭据来源</small><b>' + esc(route) + '</b></span>' +
       '<span><small>连接状态</small><b>' + (test ? (test.state === 'ing' ? '正在验证' : test.state === 'ok' ? '连接通过' : '验证未通过') : '待验证') + '</b></span></div>' +
-    '<div class="cfg-detail-scroll">' +
+    '<div class="cfg-detail-scroll">' + _mdPiGuidance(p) +
       '<div class="md-editor-form st-' + state + '">' + _mdBodyHtml(p, state, models, own, test) + '</div>' +
     '</div>';
 }
@@ -519,6 +600,30 @@ function _mdMarkOwnedDirty(providerOrId) {
 }
 
 function _mdBind(box) {
+  box.querySelectorAll('[data-mdretrycatalog]').forEach(button => button.addEventListener('click', () => {
+    if (button.isConnected && !_mdSaveFlight) void _mdRetryCatalog();
+  }));
+  box.querySelectorAll('[data-mdreviewchat]').forEach(button => button.addEventListener('click', () => {
+    const pid = button.dataset.mdreviewchat;
+    const index = _mdMyModels.filter(row => row.providerId === pid).findIndex(row => _mdType(row.modality) === 'chat');
+    if (button.isConnected && index >= 0)
+      box.querySelector('[data-mdedit="' + CSS.escape(pid + '|' + index) + '"]')?.focus();
+  }));
+  box.querySelectorAll('[data-mdaddchat]').forEach(button => button.addEventListener('click', () => {
+    const pid = button.dataset.mdaddchat;
+    const editor = box.querySelector('[data-mdeditor]');
+    if (!button.isConnected || editor?.dataset.mdeditor !== pid || !_mdCanEdit(_mdProvider(pid))) return;
+    editor.open = true;
+    const draft = _mdDrafts.get(pid), type = editor.querySelector('[data-paddtype]');
+    // Keep an in-progress edit intact if the user returns via the shortcut.
+    if (draft?.original || (draft?.changed && type.value !== 'chat')) {
+      const source = '请先完成或取消当前模型编辑，再添加对话模型。';
+      petSay(globalThis.SoduWorkI18n?.t?.('models.pi.finishEdit', source) || source);
+    } else if (type.value !== 'chat') {
+      type.value = 'chat'; type.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    editor.querySelector('[data-padd]').focus();
+  }));
   // Re-rendering after search or service switching must not hide an unsaved key.
   box.querySelectorAll('[data-pkey]').forEach(el => { el.value = _mdKeyEdits[el.getAttribute('data-pkey')] || ''; });
   const addInline = document.getElementById('mdAddInline');
@@ -641,28 +746,50 @@ async function _mdDoTest(el) {
       !(p.modelDefs || p.modelNames || []).length) {
     _mdTest[pid] = { state: 'bad', detail: '请先添加一个模型 ID' }; _mdRender(); return;
   }
-  _mdTest[pid] = { state: 'ing' };
+  const pending = { state: 'ing' }, scope = SoduWorkAPI.taskStorageKey?.('ops');
+  _mdTest[pid] = pending;
+  let probeLoad;
+  const current = () => _mdTest[pid] === pending && scope === SoduWorkAPI.taskStorageKey?.('ops') &&
+    (probeLoad === undefined || probeLoad === _mdLoadId);
   _mdRender();
   try {
     if (_mdNeedsSave(pid)) {
-      if (!await _mdSave(false)) throw Error('请先保存模型配置，再检测能力');
+      if (!await _mdSave(false)) {
+        const saveError = _mdLastSaveError;
+        if (saveError && !saveError.providerId && _mdStorageErrorMessage(saveError)) throw saveError;
+        throw Error('请先保存模型配置，再检测能力');
+      }
     }
-    const testPid = pid === '__new__' ? (_mdNew && _mdNew.id) : pid;
-    const r = await SoduWorkAPI.testMyModel(testPid, { localOnly: p.localOnly === true });
-    _mdTest[testPid] = { state: r && r.ok ? 'ok' : 'bad',
-                     detail: (r && r.detail) || '没测出结果' };
+    if (!current()) return;
+    probeLoad = _mdLoadId;
+    const r = await SoduWorkAPI.testMyModel(p.id, { localOnly: p.localOnly === true });
+    if (!current()) return;
+    const outcome = { state: r?.ok ? 'ok' : 'bad', detail: r?.detail || '没测出结果' };
     if (r?.ok && _mdUsesLocalDiscovery(p) && Array.isArray(r.models)) {
       // The main-process probe persists discovered IDs atomically. Reload the
       // merged catalog instead of saving again with a stale local revision.
-      const latest = await SoduWorkAPI.myModels();
-      if (latest && Array.isArray(latest.providers) && Array.isArray(latest.myModels)) {
-        const pending = _mdMyModels.filter(row => row.providerId === _mdNew?.id);
-        _mdData = latest; _mdMyModels = latest.myModels.concat(pending); _mdReconcileChecks(latest);
-        if (globalThis.ComposeModelPicker?.refresh) await ComposeModelPicker.refresh(true);
+      const before = _mdData, snapshot = JSON.stringify(before);
+      let latest;
+      try { latest = await SoduWorkAPI.myModels({ fresh: true }); } catch { /* Offer a catalog retry below. */ }
+      if (!current()) return;
+      if (!Array.isArray(latest?.usable) || !Array.isArray(latest?.myModels) || !Array.isArray(latest?.providers)) {
+        _mdData = { ..._mdData, catalogRefreshFailed: true };
+      } else if (before === _mdData && snapshot === JSON.stringify(_mdData) && !_mdSaveFlight) {
+        if (!_mdDirty) {
+          _mdData = latest; _mdMyModels = latest.myModels.slice(); _mdReconcileChecks(latest);
+        } else {
+          // Only the persisted choice list is safe to replace while forms have unsaved changes.
+          _mdData = { ..._mdData, usable: latest.usable, mediaUsable: latest.mediaUsable };
+        }
+        await _mdRefreshSavedModels();
       }
     }
+    if (current()) _mdTest[pid] = outcome;
   } catch (e) {
+    if (!current()) return;
     _mdTest[pid] = { state: 'bad', detail: _humanErr(e, '没测成') };
+  } finally {
+    if (_mdTest[pid] === pending) delete _mdTest[pid];
   }
   _mdRender();
 }
@@ -735,9 +862,17 @@ function _mdProviderError(p) {
 function _mdSave(closeAfter) {
   if (_mdSaveFlight) return _mdSaveFlight;
   const loadId = _mdLoadId, scope = SoduWorkAPI.taskStorageKey?.('ops');
+  const newId = _mdNew?.id;
   _mdSaveFlight = Promise.resolve().then(() => _mdSaveChanges(closeAfter, loadId, scope)).finally(() => {
     _mdSaveFlight = null; _mdMark();
     if (_mdValidation) _mdFocusValidation();
+  }).then(saved => {
+    if (saved && newId && !_mdNew && _mdOpen === newId && !closeAfter &&
+        scope === SoduWorkAPI.taskStorageKey?.('ops') && _mdLoadState === 'ready') {
+      const next = document.getElementById('mdBody')?.querySelector?.('[data-mdaddchat]');
+      if (next?.dataset.mdaddchat === newId) next.focus();
+    }
+    return saved;
   });
   _mdMark();
   return _mdSaveFlight;
@@ -746,6 +881,7 @@ function _mdSave(closeAfter) {
 async function _mdSaveChanges(closeAfter, loadId, scope) {
   const current = () => loadId === _mdLoadId && scope === SoduWorkAPI.taskStorageKey?.('ops');
   if (!current()) return false;
+  _mdLastSaveError = null;
   let localSaved = false, skippedDraft = false;
   try {
     const p = _mdProvider(_mdOpen || _mdEditor);
@@ -788,6 +924,7 @@ async function _mdSaveChanges(closeAfter, loadId, scope) {
     _mdDirty = _mdLocalDirty || _mdManagedDirty || Object.keys(_mdKeyEdits).length > 0;
   } catch (e) {
     if (!current()) return false;
+    _mdLastSaveError = localSaved ? new Error('本地模型配置已保存，Hub 模型配置未保存，请重试。') : e;
     if (e.providerId) { _mdValidation = e; _mdOpen = e.providerId; }
     _mdDirty = _mdLocalDirty || _mdManagedDirty || Object.keys(_mdKeyEdits).length > 0;
     if (typeof petSay === 'function' && (localSaved || !e.providerId)) petSay(localSaved
@@ -865,7 +1002,18 @@ function _mdBackgroundRefresh() {
   return flight;
 }
 
-window.addEventListener?.('soduwork-data-scope-changed', _mdStopModelChecks);
+function _mdScopeChanged() {
+  _mdStopModelChecks();
+  if (_mdCatalogScope === SoduWorkAPI.taskStorageKey?.('ops')) return;
+  ++_mdLoadId;
+  _mdCatalogScope = SoduWorkAPI.taskStorageKey?.('ops');
+  _mdData = null; _mdMyModels = []; _mdKeyEdits = {}; _mdTest = {};
+  _mdNew = null; _mdValidation = null; _mdOpen = ''; _mdEditor = ''; _mdQuery = '';
+  _mdDeletePending = ''; _mdDrafts.clear(); _mdChecks.clear(); _mdLocalKeyIds.clear();
+  _mdDirty = _mdLocalDirty = _mdManagedDirty = _mdManagedNeedsReload = false;
+  if (document.getElementById('mdPanel')?.classList.contains('show')) void _mdLoad({ fresh: true });
+}
+window.addEventListener?.('soduwork-data-scope-changed', _mdScopeChanged);
 window.addEventListener?.('pagehide', _mdStopModelChecks);
 window.addEventListener?.('soduwork-domain-changed', event => {
   if (event.detail?.domain === 'models') void _mdBackgroundRefresh();
