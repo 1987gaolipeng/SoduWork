@@ -1,19 +1,19 @@
 """Verified database backup and guarded restore for SQLite and PostgreSQL."""
 from __future__ import annotations
 
-from contextlib import closing
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import sqlite3
 import subprocess
+import tempfile
+from contextlib import closing
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy.engine import URL, make_url
-
 
 MANIFEST_SUFFIX = ".manifest.json"
 
@@ -227,6 +227,18 @@ def verify_backup(backup_path: str | Path, *, allow_missing_manifest: bool = Fal
     return payload
 
 
+def _check_sqlite_restore_target(destination: Path, force: bool) -> None:
+    """Check that an offline file replacement will not inherit another database's journal."""
+    if destination.exists() and not force:
+        raise BackupError("Restore target already exists; pass force only after preserving it")
+    for suffix in ("-wal", "-shm", "-journal"):
+        if os.path.lexists(str(destination) + suffix):
+            raise BackupError(
+                f"SQLite restore target has a {suffix} sidecar. Preserve the database and its "
+                "sidecars together and restore to a new database path."
+            )
+
+
 def restore_database(
     backup_path: str | Path,
     target_url: str,
@@ -234,6 +246,7 @@ def restore_database(
     confirm_target: str,
     force: bool = False,
 ) -> None:
+    """Restore a verified backup; SQLite file replacement requires an offline target."""
     backup = Path(backup_path).resolve()
     payload = verify_backup(backup)
     target = make_url(target_url)
@@ -247,17 +260,15 @@ def restore_database(
 
     if payload.get("engine") == "sqlite" and target.get_backend_name() == "sqlite":
         destination = _sqlite_path(target)
-        if destination.exists() and not force:
-            raise BackupError("Restore target already exists; pass force only after preserving it")
+        _check_sqlite_restore_target(destination, force)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        temporary = destination.with_name(destination.name + ".restore-tmp")
-        try:
+        with tempfile.TemporaryDirectory(dir=destination.parent, prefix=".soduwork-restore-") as staging:
+            temporary = Path(staging) / "restore.db"
             shutil.copy2(backup, temporary)
             _sqlite_integrity(temporary)
+            # A large copy can take time. Recheck the destination immediately before publishing.
+            _check_sqlite_restore_target(destination, force)
             os.replace(temporary, destination)
-        except Exception:
-            temporary.unlink(missing_ok=True)
-            raise
         return
 
     if payload.get("engine") == "postgresql" and target.get_backend_name() == "postgresql":
