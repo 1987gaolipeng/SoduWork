@@ -33,6 +33,7 @@ if (typeof electron === 'string') {
   app.whenReady().then(async () => {
     ipcMain.handle('workspace-state-context', () => null);
     const contract = require('../main/client-update-contract'), updater = require('../main/client-updater');
+    const workloads = require('../main/update-workloads');
     const appPath = path.join(root, 'app'); fs.mkdirSync(appPath);
     const pair = crypto.generateKeyPairSync('ed25519'), key = pair.publicKey.export({ type: 'spki', format: 'der' }).subarray(-32).toString('base64');
     fs.writeFileSync(path.join(appPath, 'update-trust.json'), JSON.stringify({ schema: 1, keys: { 'fixture-key': key } }));
@@ -66,6 +67,7 @@ if (typeof electron === 'string') {
       ipcMain, BrowserWindow: { getAllWindows: () => [{ isDestroyed: () => false, webContents: { send: (_channel, state) => publish(state) } }] },
       identityOf: async () => ({ hub: 'http://127.0.0.1:' + server.address().port, clientId: 'fixture', session: 'isolated' }),
       getWindow: () => null, dialog: { showMessageBox: async () => { prompts++; return { response: 1 }; } },
+      setLocalDrain: workloads.setDraining,
       localWorkloads: () => ({ safe: !busyWork, blockers: busyWork ? [{ kind: 'conversation', id: 'fixture-chat', ref: 'fixture-ref', title: '正在生成的报告' }] : [] }),
       // Exercise the Linux update state machine with fixture package-manager results; never install system packages.
       linuxExec: async (file, args) => {
@@ -113,7 +115,10 @@ if (typeof electron === 'string') {
     const download = updater.check({ interactive: false });
     await until(() => states.some(row => row.phase === 'downloading' && row.receivedBytes >= artifact.length / 4), 'actual quarter download');
     await until('document.querySelector(".update-notice [data-update-percent]").textContent==="25%"', 'visible byte progress');
+    assert.equal(workloads.guard().ok, true);
     assert.equal(prompts, 0); assert.equal(await js('document.activeElement.id'), 'workInput');
+    await win.webContents.insertText('Draft typed during the download');
+    assert.equal(await js('document.getElementById("workInput").value'), 'Draft typed during the download');
     assert.equal(helperCalls, 0);
     await click('.update-notice [data-update-notes] summary');
     assert.equal(await js('document.querySelector(".update-notice [data-update-notes]").open'), true);
@@ -210,6 +215,7 @@ if (typeof electron === 'string') {
     await js('WorkspaceHost.open("create",{});');
     await click('#wsUpdate');
     await click('[data-update-action]'); await until(() => states.at(-1).state === 'waiting', 'real busy work drain');
+    assert.equal(workloads.guard().maintenance, true);
     await until('document.querySelector(".update-notice [data-update-title]").textContent.includes("等待")', 'waiting title');
     assert.equal(helperCalls, 0); await click('[data-update-action]');
     assert.equal(await js('WorkspaceHost.view'), 'settings');
@@ -219,6 +225,7 @@ if (typeof electron === 'string') {
     assert.ok(await js('(()=>{const r=document.querySelector("#clientUpdateAction").getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight})()'));
     assert.ok(await js('document.querySelector("#clientUpdateBlockers").textContent.includes("正在生成的报告")'));
     await click('#clientUpdateAction'); await until(() => states.at(-1).state === 'deferred', 'cancel waiting');
+    assert.equal(workloads.guard().ok, true);
     report.cases.push('实际工作阻塞时显示等待阶段、具体任务和取消等待；下载100%不会掩盖安全等待。');
     busyWork = false; await click('#clientUpdateAction'); await until(() => helperCalls === 1, 'safe handoff boundary');
     assert.ok(states.some(row => row.phase === 'verifying')); assert.ok(states.some(row => row.phase === 'restarting'));

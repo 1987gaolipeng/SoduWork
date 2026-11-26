@@ -389,7 +389,7 @@ async function check(options = {}) {
      * network or device authentication, eventually clearing pending state.
      */
     if (_readJson(_pendingFile(runtime.app))) await confirmPending();
-    _set({ state: 'checking', interactive, error: '', progress: 0, attemptId: '',
+    _set({ state: 'checking', interactive, error: '', rawError: '', actionMessage: '', progress: 0, attemptId: '',
       targetVersion: '', manifest: null, installerPath: '', blockers: [], waitingSince: '' });
     const current = runtime.app.getVersion();
     const query = await require('./update-target.cjs').query(current, { exec: runtime.linuxExec });
@@ -702,11 +702,15 @@ async function _installManual(installer, manifest) {
     await _report('failed', 100, { error: message });
     throw new Error(message);
   }
+  // The external installer now belongs to the user; no automatic install or quit is pending.
+  _setLocalDrain(false);
   _set({ state: 'deferred', progress: 100,
     actionMessage: '安装包已打开，请按系统提示完成安装，装好后重新启动 SoduWork。' });
   await _report('deferred', 100, { detail: { manualInstall: true } });
-  _notice('请完成安装', `SoduWork ${runtime.app.getVersion()} → ${manifest.version} 安装包已打开`,
-    '请按系统提示完成安装；装好后重新启动 SoduWork 即完成升级。');
+  if (process.platform !== 'linux') {
+    _notice('请完成安装', `SoduWork ${runtime.app.getVersion()} → ${manifest.version} 安装包已打开`,
+      '请按系统提示完成安装；装好后重新启动 SoduWork 即完成升级。');
+  }
   return _publicState();
 }
 

@@ -894,6 +894,7 @@ test('linux deb 更新走与 Windows 相同的静默升级链路（pkexec+apt-ge
       const result = await updater.installDownloaded();
       assert.equal(result.state, 'installing');
       assert.equal(result.phase, 'restarting');
+      assert.equal(ctx.drains.at(-1), true, 'managed installation holds the gate through restart');
     });
     assert.deepEqual(ctx.scheduled.map(s => s.ms), [100, 5000]);
     assert.deepEqual(ctx.relaunches, [{ execPath: process.execPath, args: [] }]);
@@ -954,6 +955,8 @@ test('linux 无 pkexec 或包管理器未登记时回落人工安装链路', { t
       assert.equal(opens.length, 1);
       assert.ok(opens[0].endsWith('SoduWork-1.2.13-linux-x64.deb'));
       assert.equal(ctx.events.at(-1).detail.manualInstall, true);
+      assert.deepEqual(ctx.drains, [true, false], 'manual handoff releases the local work gate');
+      assert.equal(ctx.prompts(), 0, 'Linux handoff leaves the parent window interactive');
     } finally { await ctx.restore(); }
   }
   /* Unregistered tarball installations select manual handling without probing managed installation. */
@@ -973,5 +976,13 @@ test('linux 无 pkexec 或包管理器未登记时回落人工安装链路', { t
       assert.equal(result.state, 'deferred');
     });
     assert.equal(opens.length, 2);
+    assert.deepEqual(ctx.drains, [true, false]);
+    await fsp.unlink(path.join(ctx.updateRoot, ctx.manifest.artifact.name));
+    const start = ctx.states.length;
+    await withPlatform('linux', () => updater.check({ testMode: true }));
+    const download = ctx.states.slice(start).filter(s => s.state === 'downloading');
+    assert.ok(download.length > 0);
+    assert.ok(download.every(s => !s.actionMessage), 'a fresh download must not claim the previous installer is open');
+    assert.equal(ctx.drains.at(-1), false);
   } finally { await ctx.restore(); }
 });
