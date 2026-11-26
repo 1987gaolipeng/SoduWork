@@ -461,6 +461,7 @@ RELEASE_SMOKES = tuple(sorted((
     "test_repository_issue_sync.py",
     "test_requirement_execution_claim.py",
     "test_requirement_plan_claim.py",
+    "test_ai_task_plan_fields.py",
     "test_requirement_edit_policy.py",
     "test_requirement_project_selection.py",
     "test_task_trace_lifecycle.py",
