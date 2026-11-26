@@ -144,7 +144,7 @@ class TaskCreate(BaseModel):
     visibility: str = "related"
     workScenarioName: str = ""
     workRouting: dict[str, Any] = Field(default_factory=dict)
-    title: str = Field(default="未命名", min_length=1, max_length=TASK_TITLE_MAX)
+    title: str = Field(default="未命名", max_length=TASK_TITLE_MAX)
     source: str = Field(default="", max_length=120)
     note: str = ""
     status: str = "todo"

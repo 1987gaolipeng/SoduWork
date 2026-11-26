@@ -400,6 +400,8 @@ async def update_environment(
         raise HTTPException(status_code=403, detail="系统环境只能由超级管理员修改")
     if scope is not None and row.org_id is not None and row.org_id not in scope:
         raise HTTPException(status_code=403, detail="这个环境不在你的组织范围内")
+    if "orgId" in body and body["orgId"] not in (row.org_id, row.org_id or ""):
+        raise HTTPException(status_code=422, detail="不能通过环境更新更改所属部门")
     try:
         safe = dict(body)
         if "sort" in safe:

@@ -360,8 +360,6 @@ async def _environment_selector(session: AsyncSession, value, org_id: str | None
 async def save_environment(session: AsyncSession, body: dict, row: am.Environment | None = None
                            ) -> am.Environment:
     creating = row is None
-    if row is not None and "orgId" in body and (body["orgId"] or None) != row.org_id:
-        raise ValueError("不能通过环境更新更改所属部门")
     key = _text(body.get("key"), 64).lower()
     tier = _text(body.get("tier"), 24).lower() or "custom"
     if tier not in {"dev", "development", "test", "qa", "quality", "staging",
