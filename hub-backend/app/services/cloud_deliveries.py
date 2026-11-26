@@ -224,7 +224,11 @@ async def archive_task(session, task_id, *, propagate=False):
 
 
 async def retry(session, client, task_id):
-    _task, _handoff, execution = await _authorized(session, client, task_id)
+    task, _handoff, execution = await _authorized(session, client, task_id)
+    if task.status == "cancel":
+        # delivery-state already reports cancelled for this terminal task. Proceeding would answer
+        # "running" and push a closed requirement back into the execution pipeline.
+        raise HTTPException(409, "需求已取消，不能发起交付")
     from . import artifact_version_guard
     await artifact_version_guard.reconcile_identical_pending(session, task_id)
     await session.commit()
