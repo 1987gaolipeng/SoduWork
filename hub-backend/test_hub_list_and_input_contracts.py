@@ -480,6 +480,11 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
                            json={"key": "testing", "tier": "unlisted"})
         env = await self.request("POST", "admin/environments", json={"key": "testing", "name": ""})
         self.assertEqual(env["name"], "testing")
+        endpoint = f"admin/environments/{env['id']}"
+        for body in ({"name": ""}, {"name": "  "}, {"orgId": "row-1", "name": "Changed"}):
+            await self.request("PATCH", endpoint, 422, json=body)
+        saved = await self.request("PATCH", endpoint, json={"orgId": env.get("orgId")})
+        self.assertEqual((saved["name"], saved.get("orgId")), ("testing", env.get("orgId")))
         await self.request("PATCH", f"admin/environments/{env['id']}", 400, json={"tier": "unlisted"})
         await self.request("POST", "admin/work-catalog/professions", 400,
                            json={"orgId": "row-0", "name": "Analyst", "category": "unlisted"})

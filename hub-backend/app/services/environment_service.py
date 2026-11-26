@@ -403,6 +403,8 @@ async def save_environment(session: AsyncSession, body: dict, row: am.Environmen
                 other.promotion_policy = {**pp, "requires": new_reqs}
     if "name" in body:
         name = str(body.get("name") or "").strip()
+        if not creating and not name:
+            raise ValueError("环境名称不能为空")
         if len(name) > 80:
             raise ValueError("环境名称不能超过 80 个字符")
         row.name = name or row.name
