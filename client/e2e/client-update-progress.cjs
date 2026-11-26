@@ -69,9 +69,9 @@ if (typeof electron === 'string') {
       localWorkloads: () => ({ safe: !busyWork, blockers: busyWork ? [{ kind: 'conversation', id: 'fixture-chat', ref: 'fixture-ref', title: '正在生成的报告' }] : [] }),
       // Exercise the Linux update state machine with fixture package-manager results; never install system packages.
       linuxExec: async (file, args) => {
-        if (file === 'dpkg-query') return { stdout: args[0] === '-L'
-          ? fs.realpathSync(process.execPath) : 'install ok installed' };
-        if (file === 'rpm') return { error: { code: 1 }, stdout: '' };
+        if (file === 'dpkg-query') return { stdout: args[0] === '-S'
+          ? 'soduwork: ' + fs.realpathSync(process.execPath) : 'install ok installed' };
+        if (file === 'rpm') return { error: { code: 'ENOENT' } };
         if (file === 'which') return { stdout: '/fixture/' + args[0] };
         if (file === '/fixture/pkexec') { helperCalls++; return { stdout: '' }; }
         throw Error('Unexpected fixture command: ' + file);

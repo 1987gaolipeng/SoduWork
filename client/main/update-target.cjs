@@ -4,10 +4,10 @@ const { realpath } = require('node:fs/promises');
 const { execFile } = require('node:child_process');
 const { current } = require('./distribution.cjs');
 
-function execute(file, args) {
+function execute(file, args, options) {
   return new Promise(resolve => execFile(file, args,
-    { encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024 },
-    (error, stdout) => resolve({ error, stdout: String(stdout || '') })));
+    { ...options, encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } },
+    (error, stdout, stderr) => resolve({ error, stdout, stderr })));
 }
 
 async function installedLinuxFormat(deps = {}) {
@@ -15,27 +15,35 @@ async function installedLinuxFormat(deps = {}) {
   const exec = deps.exec || execute;
   const env = deps.env || process.env;
   const packageName = (deps.profile || current()).linuxPackageName;
-  const binary = await resolve(deps.execPath || process.execPath).catch(() => '');
-  if (!binary) return 'tar.gz';
+  const binary = await resolve(deps.execPath || process.execPath);
   if (env.APPIMAGE && env.APPDIR) {
     const appDir = await resolve(env.APPDIR).catch(() => '');
     if (appDir && binary.startsWith(appDir + path.sep)) return 'appimage';
   }
   // A parallel system installation must not change a portable copy's format.
   // Query package ownership of this executable, not just the host's distro.
-  async function owns(file, args) {
-    try {
-      const result = await exec(file, args, { timeout: 5000 });
-      if (result.error) return false;
-      const files = String(result.stdout || '').split(/\r?\n/);
-      return files.some(file => path.isAbsolute(file) && path.normalize(file) === binary);
-    } catch (_) { return false; }
+  async function owners(file, args, noMatch) {
+    const result = await exec(file, args, { timeout: 5000 });
+    if (!result.error) return String(result.stdout || '').trimEnd().split(/\r?\n/);
+    const detail = [result.stderr, result.stdout].filter(Boolean).join('\n').trim();
+    if (result.error.code === 'ENOENT' || (result.error.code === 1 && detail === noMatch)) return [];
+    const reason = result.error.code ?? result.error.signal ?? 'error';
+    const message = (detail || result.error.message || '').slice(0, 1024);
+    throw new Error(`${file} (${reason}): ${message}`, { cause: result.error });
   }
-  const [deb, rpm] = await Promise.all([
-    owns('dpkg-query', ['-L', packageName]), owns('rpm', ['-ql', packageName]),
+  // dpkg-query interprets its operand as a shell-style search pattern.
+  const pattern = binary.replace(/[\\*?[]/g, '\\$&');
+  const [debOwners, rpmOwners] = await Promise.all([
+    owners('dpkg-query', ['-S', '--', pattern], 'dpkg-query: no path found matching pattern ' + pattern),
+    owners('rpm', ['-qf', '--qf', '%{NAME}\\n', '--', binary], 'file ' + binary + ' is not owned by any package'),
   ]);
-  if (deb !== rpm) return deb ? 'deb' : 'rpm';
-  return 'tar.gz';
+  const suffix = ': ' + binary;
+  const deb = debOwners.some(line => line.endsWith(suffix) && line.slice(0, -suffix.length)
+    .split(', ').some(owner => owner.split(':')[0] === packageName));
+  const rpm = rpmOwners.includes(packageName);
+  if (deb && rpm) throw new Error('Conflicting dpkg and RPM owners for ' + binary);
+  if (deb) return 'deb';
+  return rpm ? 'rpm' : 'tar.gz';
 }
 
 async function query(current, deps = {}) {

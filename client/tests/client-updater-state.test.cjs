@@ -813,7 +813,7 @@ test('a failed manual installer launch reports failure and drops the pending mar
     platform: 'linux', arch: 'x64',
     linuxExec: async (file, args) => {
       packageProbes.push({ file, args });
-      return { error: new Error('fixture executable is not package-managed'), stdout: '' };
+      return { error: { code: 'ENOENT' } };
     },
     shell: { openPath: async () => 'boom' },
   });
@@ -822,10 +822,10 @@ test('a failed manual installer launch reports failure and drops the pending mar
       await updater.check({ testMode: true });
       await assert.rejects(updater.installDownloaded(), /无法打开安装包/);
     });
-    const packageName = require('../main/distribution.cjs').current().linuxPackageName;
+    const binary = await fsp.realpath(process.execPath);
     assert.deepEqual(packageProbes, [
-      { file: 'dpkg-query', args: ['-L', packageName] },
-      { file: 'rpm', args: ['-ql', packageName] },
+      { file: 'dpkg-query', args: ['-S', '--', binary.replace(/[\\*?[]/g, '\\$&')] },
+      { file: 'rpm', args: ['-qf', '--qf', '%{NAME}\\n', '--', binary] },
     ], 'package ownership queries must use the isolated executor');
     assert.equal(ctx.events.at(-1).state, 'failed');
     assert.ok(!ctx.events.some((event) => event.state === 'deferred'));
@@ -869,7 +869,8 @@ function fakeLinuxExec(over = {}) {
     calls.push({ file, args, options });
     if (file === 'dpkg-query') return { error: null,
       // Match the updater's native async realpath, including Windows temp casing.
-      stdout: args[0] === '-L' ? await fsp.realpath(process.execPath) + '\n' : 'install ok installed', stderr: '' };
+      stdout: args[0] === '-S' ? 'soduwork:amd64: ' + await fsp.realpath(process.execPath) : 'install ok installed', stderr: '' };
+    if (file === 'rpm') return { error: { code: 'ENOENT' } };
     if (file === 'which') return { error: null, stdout: '/usr/bin/' + args[0] + '\n', stderr: '' };
     if (file === '/usr/bin/pkexec') {
       if (over.pkexec) return over.pkexec(args);
@@ -956,9 +957,10 @@ test('linux 无 pkexec 或包管理器未登记时回落人工安装链路', { t
       assert.equal(ctx.events.at(-1).detail.manualInstall, true);
     } finally { await ctx.restore(); }
   }
-  /* Unregistered tarball installations select manual handling without probing managed installation. */
+  /* A portable installation can run on a system without either package manager. */
   const quietExec = async (file) => {
-    throw new Error('probe must not run for tar.gz: ' + file);
+    assert.ok(['rpm', 'dpkg-query'].includes(file));
+    return { error: { code: 'ENOENT' } };
   };
   const ctx = await fixture('1.2.12', {
     platform: 'linux', arch: 'x64',
