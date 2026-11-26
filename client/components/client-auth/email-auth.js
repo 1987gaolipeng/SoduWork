@@ -409,7 +409,7 @@
         rememberAccount: rememberAccount.checked === true, autoLogin: autoLogin.checked === true,
       };
       if (action === 'register') payload.consentLocales = Object.fromEntries(['terms', 'privacy'].map(kind => {
-        const selected = ui.legalSelection?.(policy?.legalDocuments, kind, global.SoduWorkI18n?.getLocale?.() || 'zh-CN', policy?.requiredConsentVersions?.[kind]).document;
+        const selected = ui.legalSelection?.(policy?.legalDocuments || policy?.legalDocumentLocales, kind, global.SoduWorkI18n?.getLocale?.() || 'zh-CN', policy?.requiredConsentVersions?.[kind]).document;
         const read = legalLocales[kind];
         return [kind, (read?.version === policy?.requiredConsentVersions?.[kind] ? read.locale : selected?.locale) || ''];
       }));

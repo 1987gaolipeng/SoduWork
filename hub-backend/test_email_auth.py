@@ -178,6 +178,16 @@ class EmailAuthTests(unittest.IsolatedAsyncioTestCase):
         async with SessionLocal() as session:
             self.assertEqual(await session.scalar(select(func.count()).select_from(MailOutbox)), 0)
 
+    async def test_compact_policy_preserves_registration_metadata_without_document_bodies(self):
+        full = (await self.http.get("/api/v1/client-auth/policy")).json()
+        compact = (await self.http.get("/api/v1/client-auth/policy?compact=true")).json()
+        docs = full.pop("legalDocuments")
+        self.assertTrue(docs and all(doc["content"] for doc in docs))
+        locales = compact.pop("legalDocumentLocales")
+        self.assertEqual(locales, [{key: doc[key] for key in ("key", "version", "locale", "defaultLocale")}
+                                   for doc in docs])
+        self.assertEqual(compact, full)
+
     async def test_mail_policy_unavailable_and_no_fake_send(self):
         async with SessionLocal() as session:
             await account_mail.save_settings(session, {"enabled": False})

@@ -58,6 +58,7 @@
   var autoLoginInput = null;
   var loginReload = null;
   var policyRevision = 0;
+  var policyRetryTimer;
   var quotaNotice = null;
   var dismissedQuotaNotice = '';
   function translate(message) { return global.SoduWorkI18n?.translateText(message) || message; }
@@ -631,6 +632,7 @@
   }
 
   function activate(user, quota) {
+    clearTimeout(policyRetryTimer);
     updateIdentity(user, quota);
     if (!currentQuota?.exceeded) dismissedQuotaNotice = '';
     void global.LegalUpdates?.refresh();
@@ -1046,16 +1048,18 @@
     global.location.reload();
   }
 
-  async function loadPolicy() {
+  async function loadPolicy(retryDelay = 2000) {
+    clearTimeout(policyRetryTimer);
     var bridge = api(), request = ++policyRevision;
     function scope() {
       var identity = bridge?.clientAuthSnapshot?.() || {};
       return [bridge?.hubBase?.() || '', identity.clientId || '', identity.user?.id || ''].join('|');
     }
     var requestedScope = scope();
+    function current() { return request === policyRevision && bridge === api() && requestedScope === scope(); }
     try {
-      var next = await bridge.clientAuthPolicy();
-      if (request !== policyRevision || bridge !== api() || requestedScope !== scope()) return;
+      var next = await bridge.clientAuthPolicy({ compact: true });
+      if (!current()) return;
       policy = next;
       if (emailView) emailView.setPolicy(policy);
       var summary = gate && gate.querySelector('.soduwork-auth-first summary');
@@ -1064,8 +1068,14 @@
         summary.parentElement.hidden = true;
       }
     } catch (e) {
-      if (request !== policyRevision || bridge !== api() || requestedScope !== scope()) return;
+      if (!current()) return;
       emailView?.setPolicyError();
+      if (emailView && !gate.hidden && (!e?.status || e.status === 408 || e.status >= 500)) {
+        // Preserve the form and retry only the policy read, never a submission.
+        policyRetryTimer = setTimeout(function () {
+          if (current() && !gate.hidden) void loadPolicy(Math.min(retryDelay * 2, 60000));
+        }, retryDelay);
+      }
     }
   }
 

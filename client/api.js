@@ -3636,12 +3636,18 @@
       }
     },
 
-    async clientAuthPolicy() {
+    async clientAuthPolicy(options) {
       var restoration = restoreSavedHub(); if (restoration) await restoration;
-      var res = await hubFetch(apiUrl('/client-auth/policy'), { signal: _abortSignal(DEFAULT_TIMEOUT) });
-      var text = await res.text();
-      if (!res.ok) throw httpError(res, text);
-      return text ? parseJSON(text) : {};
+      var path = options?.compact ? '/client-auth/policy?compact=true' : '/client-auth/policy';
+      // The on-demand reader downloads all published translations.
+      var timeout = options?.compact ? DEFAULT_TIMEOUT : 60000;
+      var request = _requestAbort(undefined, timeout);
+      try {
+        var res = await hubFetch(apiUrl(path), { signal: request.signal });
+        var text = await res.text();
+        if (!res.ok) throw httpError(res, text);
+        return text ? parseJSON(text) : {};
+      } finally { request.dispose(); }
     },
 
     clientAuthSnapshot() {
