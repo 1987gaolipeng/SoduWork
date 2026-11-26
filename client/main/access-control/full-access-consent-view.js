@@ -34,7 +34,16 @@
   allow.addEventListener('click', () => answer('allow'));
   checkbox.addEventListener('change', () => { allow.disabled = !checkbox.checked; });
   // Report the natural content height so the window hugs its content.
-  function reportSize() {
+  function place(bounds) {
+    const style = document.querySelector('.consent').style;
+    style.position = 'absolute';
+    style.left = bounds.x + 'px';
+    style.top = bounds.y + 'px';
+    style.width = bounds.width + 'px';
+    style.height = bounds.height + 'px';
+  }
+  let measurement = 0;
+  async function reportSize() {
     if (!bridge.size) return;
     const el = document.querySelector('.consent');
     if (!el) return;
@@ -42,7 +51,10 @@
     el.style.height = 'auto';
     const natural = Math.ceil(el.getBoundingClientRect().height);
     el.style.height = prev;
-    if (natural > 0) bridge.size(natural + 4); // + body padding (2px top/bottom)
+    if (natural <= 0) return;
+    const current = ++measurement;
+    const reply = await bridge.size(natural + 4); // Includes the native window's body padding.
+    if (!finished && current === measurement && reply?.bounds) place(reply.bounds);
   }
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape') { event.preventDefault(); answer('cancel'); }
@@ -70,6 +82,12 @@
       adjustment: 'You can change access from the chat composer at any time.',
     };
     data = { ...fallback, ...data };
+    if (data.bounds) {
+      place(data.bounds);
+      document.body.classList.add('anchored');
+      window.addEventListener('resize', reportSize);
+      document.body.addEventListener('click', event => { if (event.target === document.body) answer('cancel'); });
+    }
     applyAppearance(newestTheme?.requestId === data.requestId ? newestTheme.appearance : data.appearance);
     document.documentElement.lang = data.lang;
     document.title = data.title;

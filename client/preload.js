@@ -559,7 +559,8 @@ const soduWorkBridge = {
   reportTheme: (snapshot) => ipcRenderer.send('client-theme', snapshot),
   accessPreferences: {
     get: () => timedPageInvoke('access-preferences-get'),
-    set: (mode, revision) => ipcRenderer.invoke('access-preferences-set', { mode, revision }),
+    set: (mode, revision, anchor) => ipcRenderer.invoke('access-preferences-set', { mode, revision,
+      ...(process.platform === 'linux' && anchor ? { anchor } : {}) }),
     remember: mode => ipcRenderer.invoke('access-preferences-remember', { mode }),
     onChange: callback => {
       const listener = (_event, value) => callback(value);
