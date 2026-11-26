@@ -370,14 +370,22 @@ async def admin_runner_enroll(request: Request, body: dict = Body(default_factor
     its key and invalidates the old key immediately.
     """
     rid = str(body.get("runnerId") or "").strip()
+    host = body.get("host", "")
+    if not isinstance(host, str):
+        raise HTTPException(status_code=422, detail="主机名必须是字符串",
+                            headers={"X-Error-Code": "hub.input.host_type"})
+    host = host.strip()
     row = await session.get(am.RunnerNode, rid) if rid else None
+    if row is None and not host:
+        raise HTTPException(status_code=422, detail="请填写主机名，否则无法识别这台执行节点",
+                            headers={"X-Error-Code": "hub.input.host_required"})
     if row is not None:
         row = await _admin_runner(session, user, rid, lock=True)
         require_generic_admin_mutation(row)
     org_id = await _assigned_org(session, user, str(body.get("orgId") or ""), row)
     try:
         out = await runner_enroll.enroll(
-            session, runner_id=rid, host=str(body.get("host") or ""),
+            session, runner_id=rid, host=host,
             tags=body.get("tags") or [], hub=str(body.get("hub") or ""),
             request_base=str(request.base_url).rstrip("/"),
             work_root=str(body.get("workRoot") or ""), org_id=org_id)
@@ -570,19 +578,9 @@ async def _ingest_delivery(r, message: dict) -> None:
 
 
 async def _reconcile_runner_restart(r) -> None:
-    """Publish authoritative interruption for queued work lost by a process restart."""
-    try:
-        async with SessionLocal() as session:
-            updates = await execution_sessions.reconcile_runner_restart(session, r)
-            await session.commit()
-        for item in updates:
-            if item.get("clientId"):
-                await _publish_task_owner(item["taskId"], {
-                    "type": "execution.updated", "taskId": item["taskId"],
-                    "session": item["session"],
-                })
-    except Exception as exc:  # noqa: BLE001 - recovery must not reject a healthy Runner
-        log.warning("执行机重启排队对账失败 %s: %s", r.id, type(exc).__name__)
+    """Wake the queued-lease monitor. The receive loop must stay free to read probe replies."""
+    from ..services import queued_dispatch_lease
+    queued_dispatch_lease.runner_connected(r)
 
 
 def _schedule_terminal_settlement(task_id: str, ref: str) -> None:

@@ -112,6 +112,56 @@ class BundledPolicyDefaults(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(set(response.json()["enabled"]), self.names)
 
+    async def test_policy_preview_is_read_only_and_counts_each_device_and_department_once(self):
+        self.write_skill(self.bundled, "office")
+        self.write_skill(self.host, "external")
+        cfg = (await self.admin_catalog())["cfg"]
+        cfg["allowed"] = ["mcp-tools", "external"]  # office remains mandatory.
+        async with self.sessions() as session:
+            bob = await session.get(models.Client, "device-bob")
+            bob.config = {skill_preferences.KEY: {"version": 1, "disabled": ["method-a", "method-b", "external"]}}
+            session.add(models.Client(id="another-device", user_ref="alice", auth_state="active",
+                                      skills=["method-a", "external", "external"]))
+            session.add(models.Client(id="revoked", user_ref="alice", auth_state="revoked"))
+            session.add(models.User(id="inactive", username="inactive", is_active=False))
+            session.add(models.Client(id="inactive-owned", user_ref="inactive", auth_state="active"))
+            await session.commit()
+        path = "/api/v1/admin/capabilities/policy/preview"
+        previous = await self.raw()
+        denied = await self.http.post(path, json={"cfg": cfg}, headers={
+            "Authorization": "Bearer " + self.tokens["ordinaryUser"]})
+        self.assertEqual(denied.status_code, 403)
+        response = await self.http.post(path, json={"cfg": cfg}, headers=self.admin_headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"added": ["external"], "removed": ["method-a", "method-b"],
+                                         "affectedClients": 2, "affectedDepartments": 1})
+        self.assertEqual(await self.raw(), previous)
+        saved = await self.save(cfg)
+        self.assertEqual(set(saved["cfg"]["allowed"]), {"office", "mcp-tools", "external"})
+        self.assertTrue(next(row["policyLocked"] for row in saved["skills"] if row["name"] == "office"))
+        stale = await self.http.post(path, json={"cfg": cfg}, headers=self.admin_headers)
+        self.assertEqual(stale.status_code, 409)
+
+    async def test_preview_counts_only_devices_using_the_company_copy(self):
+        self.write_skill(self.host, "external")
+        parsed = skill_packages.create("external", "Personal fixture", "Use the personal fixture.")
+        for owner in ["device-alice", "legacy-device"]:
+            skill_packages.install(parsed, "personal", owner)
+        index = skill_packages._load_index()
+        del next(row for row in index["items"] if row["ownerClientId"] == "legacy-device")["ownerClientId"]
+        skill_packages._save_index(index)
+        catalog = await self.admin_catalog()
+        self.assertCountEqual([item["ownerClientId"] for item in catalog["personalSubmissions"]], ["", "device-alice"])
+        cfg = catalog["cfg"]
+        cfg["allowed"].append("external")
+        response = await self.http.post("/api/v1/admin/capabilities/policy/preview",
+                                        json={"cfg": cfg}, headers=self.admin_headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"added": ["external"], "removed": [],
+                                         "affectedClients": 1, "affectedDepartments": 1})
+        saved = await self.save(cfg)
+        self.assertEqual(next(item["inUse"] for item in saved["skills"] if item["name"] == "external"), 1)
+
     async def test_legacy_upgrade_reopens_old_builtins_and_preserves_external_grants(self):
         self.write_skill(self.host, "external-approved")
         self.write_skill(self.host, "external-blocked")

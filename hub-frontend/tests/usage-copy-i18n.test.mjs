@@ -33,6 +33,90 @@ async function mount(t, file, options) {
   return host
 }
 
+test('the cost card preserves a priced zero when other records lack a price', async t => {
+  setLocale('zh-CN'); t.after(() => setLocale('zh-CN'))
+  const pulse = await mount(t, screen, { privateExports: ['Pulse'], exportName: 'Pulse', dependencies: dependencies({}), props: {
+    data: { summary: { sessions: 2, costMicrousd: 0 }, costQuality: {
+      records: 2, knownUsd: 1, knownMicrousd: 0, unknown: 1, unknownAnomalous: 1, unknownTokens: '1000000000000000001',
+    }, anomalies: { records: 1, tokenLimit: 1000000000 } },
+  } })
+  const costs = pulse.nodes(node => node.props.label === '已知模型成本')[0]
+  assert.equal(costs.props.value, '$0.00')
+  assert.equal(format.precise('1000000000000000001'), '1,000,000,000,000,000,001')
+})
+
+test('a manually entered rate and budget produce a separate, optional cost scenario', async t => {
+  setLocale('zh-CN'); t.after(() => setLocale('zh-CN'))
+  const estimate = await mount(t, screen, { privateExports: ['CostEstimate'], exportName: 'CostEstimate', dependencies: dependencies({}),
+    props: { costs: { knownMicrousd: 2000000, unknownTokens: '1500000' } },
+  })
+  const [rate, budget] = estimate.nodes(node => node.type === 'input')
+  const output = () => textOf(estimate.nodes(node => node.type === 'output')[0])
+  assert.equal(output(), '')
+  estimate.act(() => rate.props.onChange({ target: { value: '2' } }))
+  assert.match(output(), /未计价成本估算上限约 \$3\.00/)
+  estimate.act(() => budget.props.onChange({ target: { value: '4' } }))
+  assert.match(output(), /预算的 125%/)
+  estimate.act(() => budget.props.onChange({ target: { value: '0' } }))
+  assert.doesNotMatch(output(), /%|Infinity|NaN/)
+  estimate.act(() => rate.props.onChange({ target: { value: '-1' } }))
+  assert.equal(output(), '请输入有效的正数单价。')
+})
+
+test('diagnostic pages query all matching ledger records with the selected filters', async t => {
+  const calls = []
+  const filters = { days: 7, userId: 'member-a', source: 'chat', agent: 'codex' }
+  const deps = dependencies({})
+  deps['../api.js'].api.usageOverview = async query => {
+    calls.push(query)
+    return { recent: [{ id: 'fact-' + query.page }], detailPage: { total: 31, pageSize: 30, page: query.page } }
+  }
+  const diagnostic = await mount(t, screen, { privateExports: ['UsageDiagnostics'], exportName: 'UsageDiagnostics', dependencies: deps,
+    props: { mode: 'anomalous', filters, tokenLimit: 1000000000 },
+  })
+  await diagnostic.flush()
+  const ledger = () => diagnostic.nodes(node => node.type?.name === 'RecentLedger')[0]
+  assert.deepEqual(calls, [{ ...filters, detail: 'anomalous', page: 1 }])
+  assert.equal(ledger().props.rows[0].id, 'fact-1')
+  diagnostic.act(() => ledger().props.onPage(2))
+  await diagnostic.flush()
+  assert.deepEqual(calls[1], { ...filters, detail: 'anomalous', page: 2 })
+  assert.equal(ledger().props.rows[0].id, 'fact-2')
+})
+
+test('pricing inputs use the same successful snapshot as unpriced detail rows', async t => {
+  const current = { unknownTokens: '51000000', knownMicrousd: 124000 }
+  let finish
+  const deps = dependencies({})
+  deps['../api.js'].api.usageOverview = () => new Promise(resolve => { finish = resolve })
+  const diagnostic = await mount(t, screen, { privateExports: ['UsageDiagnostics'], exportName: 'UsageDiagnostics',
+    dependencies: deps,
+    props: { mode: 'unpriced', filters: { days: 7 } },
+  })
+  const estimate = () => diagnostic.nodes(node => node.type?.name === 'CostEstimate')[0]
+  assert.equal(estimate(), undefined)
+  finish({ recent: [], detailPage: { total: 0, pageSize: 30, page: 1 }, costQuality: current })
+  await diagnostic.flush()
+  assert.equal(estimate().props.costs, current)
+})
+
+test('trend keyboard readout matches the exact daily token and pricing status', async t => {
+  setLocale('zh-CN'); t.after(() => setLocale('zh-CN'))
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' })
+  const today = day.format(new Date()), yesterday = day.format(Date.now() - 86400000)
+  const trend = await mount(t, chart, { exportName: 'TrendPanel', dependencies: dependencies({}), props: { days: 2, points: [
+    { key: yesterday, sessions: 1, tokens: 100, knownUsd: 1, costMicrousd: 0 },
+    { key: today, sessions: 1, tokens: 1e18, tokensExact: '1000000000000000017', knownUsd: 0, costMicrousd: 0 },
+  ] } })
+  const svg = () => trend.nodes(node => node.type === 'svg' && node.props.onFocus)[0]
+  const tooltip = () => textOf(trend.nodes(node => node.props.className?.includes('ugc-chart-tip'))[0])
+  trend.act(() => svg().props.onFocus())
+  for (const display of [tooltip(), svg().props['aria-label']]) assert.match(display, /1,000,000,000,000,000,017 Tokens/)
+  trend.act(() => trend.nodes(node => node.type === 'button' && textOf(node) === '已知成本')[0].props.onClick())
+  trend.act(() => svg().props.onFocus())
+  for (const display of [tooltip(), svg().props['aria-label']]) assert.match(display, /— USD/)
+})
+
 test('usage and cost fixed copy has direct English, Japanese and Korean translations', t => {
   const required = new Set([...sources, 'Token 用量', '已知成本', '模型请求', '次'])
   for (const file of ['UsageCenter.jsx', 'usage-center-charts.jsx', 'usage-center-format.js']) {
@@ -98,9 +182,14 @@ for (const locale of ['zh-CN', 'en-US', 'ja-JP', 'ko-KR']) {
     assert.ok(labels.includes(tx('对话')))
     assert.ok(labels.includes('客户用药研发项目'))
     const recent = await mount(t, screen, { privateExports: ['RecentLedger'], exportName: 'RecentLedger', dependencies: dependencies({}), props: {
-      rows: [{ id: 'one', title: '客户用药研发项目', sourceType: 'task', sourceLabel: '需求执行', agent: 'pi', model: '客户模型', tokens: 1000 }],
+      rows: [
+        { id: 'one', title: '客户用药研发项目', sourceType: 'task', sourceLabel: '需求执行', agent: 'pi', model: '客户模型', tokens: 1000 },
+        { id: 'two', sourceType: 'chat', sourceVerification: 'unverified' },
+        { id: 'three', sourceType: 'chat', sourceVerification: 'verified', sourceId: 'session' },
+      ],
     } })
-    assert.ok(recent.nodes(node => node.type === 'small').some(node => textOf(node) === tx('需求执行')))
+    const details = recent.nodes(node => node.type === 'small').map(textOf)
+    for (const label of ['需求执行', '会话来源未核验', '会话来源已核验']) assert.ok(details.includes(tx(label)))
     assert.ok(recent.nodes(node => node.type === 'b').some(node => textOf(node) === '客户用药研发项目'))
     assert.ok(recent.nodes(node => node.type === 'b').some(node => textOf(node) === 'Pi'))
   })

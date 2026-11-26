@@ -18,6 +18,16 @@ def output_limit_exceeded(value) -> bool:
                 or OUTPUT_LIMIT_MESSAGE in raw)
 
 
+THINKING_DISABLED_MESSAGE = "该模型不支持关闭思考；请在模型高级设置把“思考能力”改为“始终开启”后重试"
+THINKING_DISABLED_RE = re.compile(
+    r"thinking(?:\.type| type)?[^.\n]{0,40}disabled[^.\n]{0,40}not supported", re.I)
+
+
+def thinking_disabled_unsupported(value) -> bool:
+    """Recognize a provider rejecting disabled thinking before leaking its payload."""
+    return bool(THINKING_DISABLED_RE.search(str(value or "")[:16000]))
+
+
 def billing_diagnostic(value) -> dict | None:
     """Keep only recognized billing codes, never provider text or arbitrary fields."""
     payload = value if isinstance(value, dict) else None
@@ -48,6 +58,43 @@ def billing_message(diagnostic: dict) -> str:
     # The established SDK recognizes billing failures even when it retains only message.
     return ("模型服务余额不足或计费额度不可用（billing_required" + code +
             "），请检查供应商账单、API Key 类型和接口地址；重试不会恢复额度")
+
+
+_GENERIC_FORBIDDEN = re.compile(
+    r"(?:(?:http\s+)?403|(?:(?:http\s+)?403\s*[:：-]?\s*)?"
+    r"(?:forbidden|request[ _-]rejected|request[ _-]denied|upstream_error|模型请求被拒绝))[.!。]?", re.I)
+_ACCESS_REFUSAL = re.compile(
+    r"credential|api[ _-]?key|authenticat|unauthori[sz]ed|permission|policy|access[ _-]denied|"
+    r"not (?:allowed|authori[sz]ed)|quota|balance|billing|content[ _-]filter|safety|"
+    r"凭据|密钥|权限|配额|额度|余额|无权|未授权|策略|内容审核", re.I)
+
+
+def forbidden_category(body: str) -> str:
+    """Only a complete, recognized neutral response qualifies as a generic refusal."""
+    raw = body.strip()
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        payload = raw
+    if isinstance(payload, dict):
+        if "error" in payload and set(payload) - {"error", "request_id", "requestId"}:
+            return "unclassified"
+        error = payload.get("error", payload)
+        if isinstance(error, dict):
+            values = [str(error[k]).strip() for k in ("code", "type", "status", "message", "detail")
+                      if error.get(k) is not None]
+            if _ACCESS_REFUSAL.search(" ".join(values)):
+                return "restricted"
+            if set(error) - {"code", "type", "status", "message", "detail", "request_id", "requestId"}:
+                return "unclassified"
+            return "generic" if values and all(_GENERIC_FORBIDDEN.fullmatch(v) for v in values) else "unclassified"
+        payload = error
+    if isinstance(payload, str):
+        if _ACCESS_REFUSAL.search(payload):
+            return "restricted"
+        if _GENERIC_FORBIDDEN.fullmatch(payload):
+            return "generic"
+    return "unclassified"
 
 
 def refusal_category(status: int, body: str) -> str:
@@ -103,12 +150,14 @@ def public_failure(value) -> str:
     suffix = f"（HTTP {status}）" if status else ""
     if status in (0, 400, 422) and output_limit_exceeded(raw):
         return OUTPUT_LIMIT_MESSAGE + suffix
+    if status in (0, 400, 422) and thinking_disabled_unsupported(raw):
+        return THINKING_DISABLED_MESSAGE + suffix
     if status == 404:
         return "模型服务地址或模型不存在" + suffix + "；请切换可用模型，或联系管理员核对服务地址与模型名称。"
     if status == 403:
         return "模型请求被拒绝" + suffix
     if status == 401:
-        return "模型服务拒绝了当前凭据或模型权限" + suffix + "；请检查模型授权或切换有权限的模型。"
+        return "模型服务拒绝了当前凭据或模型权限" + suffix + "。个人服务请在「我的模型」检查个人 Key，企业服务请联系管理员核对模型授权。"
     if status == 429:
         return "模型服务当前繁忙或额度受限" + suffix + "；请稍后重试或检查模型额度。"
     if status in {408, 425} or status >= 500 or re.search(

@@ -6,6 +6,7 @@ destinations. Persist the actual backend in metadata.
 from functools import lru_cache
 from hashlib import sha256
 from io import BytesIO
+import os
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -138,14 +139,31 @@ def _local_path(key: str) -> Path:
         candidate.relative_to(root)
     except ValueError as exc:
         raise LibraryStorageError("LIBRARY_STORAGE_UNAVAILABLE") from exc
-    return candidate
+    return _native_path(candidate)
+
+
+# Keys are about 150 characters (a SHA-256 owner prefix, a UUID and an object
+# id), and writes stage a ".part-<uuid>" sibling. Under the default Windows
+# data directory that exceeds MAX_PATH unless long paths are enabled system-wide.
+_WINDOWS_PATH_HEADROOM = 220
+
+
+def _native_path(path: Path) -> Path:
+    text = str(path)
+    if os.name != "nt" or len(text) < _WINDOWS_PATH_HEADROOM or text.startswith("\\\\?\\"):
+        return path
+    if text.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + text[2:])
+    return Path("\\\\?\\" + text)
 
 
 def _ensure_local_ready() -> bool:
-    root = _local_root()
     try:
-        root.mkdir(parents=True, exist_ok=True)
-        probe = root / (".soduwork-library-probe-" + uuid4().hex)
+        # The readiness probe must use the same long-path handling as object
+        # I/O, or a deep root reports "unavailable" although writes succeed.
+        root = _local_root().resolve()
+        _native_path(root).mkdir(parents=True, exist_ok=True)
+        probe = _native_path(root / (".soduwork-library-probe-" + uuid4().hex))
         probe.write_bytes(b"ok")
         probe.unlink(missing_ok=True)
     except Exception as exc:

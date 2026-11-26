@@ -100,5 +100,24 @@ test('CLI installation records partial content verification while default releas
   assert.equal(details.verificationMode, 'installation');
   assert.equal(details.contentCheckSkips.length, 1);
   assert.equal(details.contentCheckSkips[0].path, archive);
-  assert.match(result.stdout, /content check skipped/);
+  assert.ok(result.stdout.includes('content-skips=1 skipped=' + archive));
+});
+test('installation summary describes the files actually present in this payload', async t => {
+  const root = await fixture(t);
+  const script = path.resolve(__dirname, '../build/verify-payload.cjs');
+  const summary = () => {
+    const log = path.join(root, 'installer.log');
+    const result = spawnSync(process.execPath, [script, root, '', '--installation', '--result-log', log], {
+      encoding: 'utf8', windowsHide: true, timeout: 10000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const entry = fs.readFileSync(log, 'utf8');
+    fs.unlinkSync(log);
+    assert.equal(entry.trim(), 'payload-verification-summary ' + result.stdout.trim());
+    return entry;
+  };
+  assert.ok(summary().includes('content-skips=1 skipped=' + archive));
+  fs.unlinkSync(path.join(root, archive));
+  await inventory(root);
+  assert.match(summary(), /content-skips=0 static-text-differences=0 notice-differences=0/);
 });

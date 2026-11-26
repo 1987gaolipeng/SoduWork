@@ -61,10 +61,10 @@ export default function CloudRunnerManagement({ row, mode, onDone, onClose }) {
   }
 
   const command = setup?.commands?.[platform] || ''
-  return <Modal title={tx(transferring ? '重新分配云主机' : '安全接入云主机')} icon="monitor"
-    onClose={busy ? () => {} : onClose} className="cloud-runner-management"
-    footer={<>
-      <button className="btn" disabled={busy} onClick={onClose}>{tx(setup ? '关闭' : '取消')}</button>
+  return <Modal dirty={!setup && Boolean(target || confirmed || workRoot || hub)} title={tx(transferring ? '重新分配云主机' : '安全接入云主机')} icon="monitor"
+    busy={busy} onClose={onClose} className="cloud-runner-management"
+    footer={dismiss => <>
+      <button className="btn" disabled={busy} onClick={dismiss}>{tx(setup ? '关闭' : '取消')}</button>
       {!setup && <button className="btn btn-primary" disabled={busy || (transferring
         ? !target || loading : !confirmed || !workRoot.trim())} onClick={submit}>
         {busy ? tx('处理中…') : tx(transferring ? '确认分配' : '生成接入命令')}</button>}

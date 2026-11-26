@@ -54,10 +54,11 @@ test('catalog saves preserve other plans, the legacy default and revision withou
 
 test('individual assignments retain the assignment revision and do not issue a trial to an old account', () => {
   const member = { assignment: { revision: 8, hasTrial: false } }
-  assert.deepEqual(model.validateAssignment(member, { mode: 'inherit' }, choices), { revision: 8, mode: 'inherit' })
+  assert.deepEqual(model.validateAssignment(member, { mode: 'inherit' }, choices, 3), { revision: 8, catalogRevision: 3, mode: 'inherit' })
+  assert.deepEqual(model.validateAssignment(member, { mode: 'plan', planId: 'standard' }, choices, 3), { revision: 8, catalogRevision: 3, mode: 'plan', planId: 'standard' })
   assert.throws(() => model.validateAssignment(member, { mode: 'plan', planId: 'trial' }, choices), /可分配/)
-  assert.deepEqual(model.validateAssignment({ assignment: { revision: 9, hasTrial: true } }, { mode: 'plan', planId: 'trial' }, choices), { revision: 9, mode: 'plan', planId: 'trial' })
-  assert.deepEqual(model.validateAssignment(member, { mode: 'custom', custom: { ...baseAllowance, totalLimit: 0 } }, choices), { revision: 8, mode: 'custom', custom: { ...baseAllowance, totalLimit: 0 } })
+  assert.deepEqual(model.validateAssignment({ assignment: { revision: 9, hasTrial: true } }, { mode: 'plan', planId: 'trial' }, choices, 3), { revision: 9, mode: 'plan', planId: 'trial' })
+  assert.deepEqual(model.validateAssignment(member, { mode: 'custom', custom: { ...baseAllowance, totalLimit: 0 } }, choices, 3), { revision: 8, mode: 'custom', custom: { ...baseAllowance, totalLimit: 0 } })
   assert.throws(() => model.validateAssignment(member, { mode: 'unknown' }, choices), /额度规则/)
 })
 
@@ -107,7 +108,7 @@ test('quota validators preserve stable error keys for current-language presentat
 const footerButtons = page => page.nodes(node => node.type === 'Modal')[0].props.foot.props.children
 const fieldByLabel = (page, label) => page.nodes(node => node.type === 'label' && node.props.children?.[0]?.props.children === label)[0]?.props.children[1]
 
-async function planHarness(overrides = {}) {
+async function planHarness(overrides = {}, preview = () => ({})) {
   let currentConfig = structuredClone(config)
   const saves = [], notices = []
   const page = await createComponentHarness(new URL('../src/screens/QuotaEditors.jsx', import.meta.url), { exportName: 'PlanEditor', props: {}, dependencies: {
@@ -117,6 +118,7 @@ async function planHarness(overrides = {}) {
       ...overrides,
     } },
     '../ui.jsx': { Modal: 'Modal', SelectMenu: 'SelectMenu', toast: value => notices.push(value) },
+    './QuotaImpactPreview.jsx': { useQuotaImpactPreview: preview, QuotaImpactPreview: 'ImpactPreview' },
     './QuotaAllowanceFields.jsx': { __esModule: true, default: 'AllowanceFields', TotalLimitField: 'TotalLimitField' },
     './quota-model.js': model,
   } })
@@ -132,6 +134,73 @@ test('plan editor saves an edited trial with revision, full retained catalog, an
   assert.equal(saves.length, 1); assert.equal(saves[0].plans[0].durationDays, 14)
   assert.equal(saves[0].revision, 4); assert.equal(saves[0].plans[1].id, 'standard')
   assert.equal('models' in saves[0], false)
+  page.unmount()
+})
+
+test('plan edits require a preview of the current draft before saving', async () => {
+  const { page } = await planHarness({}, ({ draft }) => draft.durationDays === '14' ? { pending: true } : { data: {} })
+  assert.equal(footerButtons(page)[1].props.disabled, false)
+  page.act(() => fieldByLabel(page, '试用有效天数').props.onChange({ target: { value: '14' } }))
+  assert.equal(footerButtons(page)[1].props.disabled, true)
+  assert.equal(page.nodes(node => node.type === 'ImpactPreview')[0].props.trial, true)
+  page.unmount()
+})
+
+test('a transient preview failure allows a revision-checked plan save', async () => {
+  const { page, saves } = await planHarness({}, () => ({ error: 'offline' }))
+  assert.equal(footerButtons(page)[1].props.disabled, false)
+  page.act(() => footerButtons(page)[1].props.onClick())
+  await page.flush()
+  assert.equal(saves[0].revision, config.revision)
+  page.unmount()
+})
+
+test('preview ignores superseded results, retries failures and skips invalid drafts', async () => {
+  const requests = []
+  const props = { config, draft: trial, onConflict() {} }
+  const page = await createComponentHarness(new URL('../src/screens/QuotaImpactPreview.jsx', import.meta.url), {
+    exportName: 'useQuotaImpactPreview', props, dependencies: {
+      '../api.js': { api: { previewQuotaPlan: body => new Promise((resolve, reject) => requests.push({ body, resolve, reject })) } },
+      './quota-model.js': model,
+    },
+  })
+  const settle = () => new Promise(resolve => setTimeout(resolve, 300))
+  assert.ok(page.render().pending)
+  await settle()
+  const changed = { ...props, draft: { ...trial, totalLimit: '500' } }
+  assert.ok(page.render(changed).pending)
+  requests[0].resolve({ newLimit: 100000 })
+  assert.ok((await page.flush()).pending)
+  await settle()
+  assert.equal(requests[1].body.plan.totalLimit, 500)
+  requests[1].reject(Error('offline'))
+  const failed = await page.flush()
+  assert.equal(failed.error, 'offline')
+  failed.retry()
+  assert.ok(page.render().pending)
+  await settle()
+  requests[2].resolve({ newLimit: 500 })
+  assert.equal((await page.flush()).data.newLimit, 500)
+  assert.ok(page.render({ ...props, draft: { ...trial, totalLimit: '' } }).invalid)
+  await settle()
+  assert.equal(requests.length, 3)
+  page.unmount()
+})
+
+test('monthly summaries distinguish full pauses and exhausted model caps, while trial edits apply to new users', async () => {
+  const data = { affectedMembers: 3, previousLimit: 900, newLimit: 500, used: 750, remaining: 1000,
+    pausedMembers: 1, modelLimitedMembers: 2, scopeLimited: true }
+  const page = await createComponentHarness(new URL('../src/screens/QuotaImpactPreview.jsx', import.meta.url), {
+    exportName: 'QuotaImpactPreview', props: { impact: { data } }, dependencies: { '../api.js': {}, './quota-model.js': model },
+  })
+  const terms = () => page.nodes(node => node.type === 'dt').map(node => node.props.children)
+  assert.ok(terms().includes('调整后所有平台模型均暂停的成员'))
+  assert.ok(terms().includes('仅部分模型额度耗尽的成员'))
+  assert.ok(page.nodes(node => node.type === 'p').some(node => node.props.children.includes('所有已分配成员')))
+  page.render({ impact: { data: { ...data, affectedMembers: 0, remaining: 500, reason: 'model_exhausted' } }, trial: true })
+  assert.ok(terms().includes('新用户领取时可用（Tokens）'))
+  assert.ok(page.nodes(node => node.type === 'span').some(node => node.props.children === '新用户领取后，平台模型请求将暂停。'))
+  assert.equal(page.nodes(node => node.type === 'p').length, 0)
   page.unmount()
 })
 
@@ -162,7 +231,7 @@ test('quota inputs are removed from user editing and login policy saves cannot c
   assert.doesNotMatch(users, /tokenQuota|quotaMode|quotaLimit/)
   const calls = []
   const page = await createComponentHarness(new URL('../src/screens/ClientAccessPolicy.jsx', import.meta.url), { dependencies: {
-    '../api.js': { api: { clientAuthPolicy: async () => ({ allowSelfRegistration: true, defaultOrgId: '', defaultRoleId: '', tokenLimitEnabled: true, monthlyTokenLimit: 500 }), orgs: async () => [], roles: async () => [], saveClientAuthPolicy: async value => { calls.push(value); return value } } },
+    '../api.js': { api: { clientAuthPolicy: async () => ({ allowSelfRegistration: true, defaultOrgId: '', defaultRoleId: '', tokenLimitEnabled: true, monthlyTokenLimit: 500 }), orgs: async () => [], roleOptions: async () => [], saveClientAuthPolicy: async value => { calls.push(value); return value } } },
     '../ui.jsx': { Icon: 'Icon', SelectMenu: 'SelectMenu', toast() {} }, './client-access-policy.css': {},
   } })
   page.render(); await page.flush()
@@ -175,10 +244,11 @@ test('member search debounces requests, ignores stale responses and does not upd
   const pending = []
   const page = await createComponentHarness(new URL('../src/screens/QuotaMembers.jsx', import.meta.url), { props: { config, revision: 0 }, dependencies: {
     '../api.js': { api: { quotaMembers: args => new Promise(resolve => pending.push({ args, resolve })) } },
+    '../FilterControls.jsx': { FilterSelect: 'FilterSelect' },
     '../ui.jsx': { Icon: 'Icon' }, './QuotaEditors.jsx': { MemberEditor: 'MemberEditor' }, './quota-model.js': model,
   } })
   page.render(); await new Promise(resolve => setTimeout(resolve, 20)); await page.flush()
-  assert.equal(pending.length, 1); assert.equal(pending[0].args.limit, 50)
+  assert.equal(pending.length, 1); assert.equal(pending[0].args.limit, 50); assert.equal(pending[0].args.isActive, true)
   const input = () => page.nodes(node => node.type === 'input')[0]
   page.act(() => input().props.onChange({ target: { value: 'al' } }))
   page.act(() => input().props.onChange({ target: { value: 'alice' } }))
@@ -199,6 +269,7 @@ test('the member editor rejects invalid caps, saves a zero pause and retains unl
     '../api.js': { api: { assignQuota: async (id, body) => { calls.push([id, body]); return { ok: true } } } },
     '../ui.jsx': { Modal: 'Modal', SelectMenu: 'SelectMenu', toast() {} },
     './QuotaAllowanceFields.jsx': { __esModule: true, default: 'AllowanceFields', TotalLimitField: 'TotalLimitField' },
+    './QuotaImpactPreview.jsx': { useQuotaImpactPreview: () => ({}), QuotaImpactPreview: 'QuotaImpactPreview' },
     './quota-model.js': model,
   } })
   page.render()
@@ -212,6 +283,49 @@ test('the member editor rejects invalid caps, saves a zero pause and retains unl
   edit(null); page.act(() => footerButtons(page)[1].props.onClick()); await page.flush()
   assert.equal(calls[1][1].custom.totalLimit, null)
   page.unmount()
+})
+
+test('only super administrators can edit platform quotas while scoped managers can view and assign', async t => {
+  const scoped = { me: { isSuper: false, permissions: ['quota.manage'] } }
+  const superAdmin = { me: { isSuper: true } }
+  const page = await createComponentHarness(new URL('../src/screens/QuotaManagement.jsx', import.meta.url), {
+    props: scoped,
+    dependencies: {
+      '../api.js': { api: { quotaPlans: async () => config } },
+      '../ui.jsx': { Icon: 'Icon', Loading: 'Loading' },
+      './QuotaMembers.jsx': { __esModule: true, default: 'QuotaMembers' },
+      './QuotaEditors.jsx': { DefaultEditor: 'DefaultEditor', PlanEditor: 'PlanEditor' },
+      './quota-management.css': {},
+    },
+  })
+  t.after(() => page.unmount())
+  const nodes = type => page.nodes(node => node.type === type)
+  const button = label => nodes('button').find(node =>
+    (node.props['aria-label'] || [node.props.children].flat().at(-1)) === label)
+  const openTab = label => page.act(button(label).props.onClick)
+  page.render()
+  await page.flush()
+
+  assert.ok(nodes('h3').some(node => node.props.children === standard.name))
+  assert.equal(button('新建套餐'), undefined)
+  assert.equal(button('编辑套餐：Standard'), undefined)
+  assert.equal(nodes('small').some(node => node.props.children.includes('编辑套餐')), false)
+  openTab('成员额度')
+  assert.equal(nodes('QuotaMembers')[0].props.config, config)
+  openTab('原有账号默认规则')
+  assert.equal(nodes('strong')[0].props.children, '不限额')
+  assert.equal(button('调整默认额度'), undefined)
+
+  page.render(superAdmin)
+  page.act(button('调整默认额度').props.onClick)
+  assert.equal(nodes('DefaultEditor').length, 1)
+  page.act(nodes('DefaultEditor')[0].props.onClose)
+  openTab('套餐设置')
+  assert.ok(button('新建套餐'))
+  page.act(button('编辑套餐：Standard').props.onClick)
+  assert.equal(nodes('PlanEditor')[0].props.plan, standard)
+  page.render(scoped)
+  assert.equal(nodes('PlanEditor').length, 0)
 })
 
 test('page refresh reloads member quotas without changing the catalog revision, search or open editor', async () => {
@@ -233,7 +347,7 @@ test('page refresh reloads member quotas without changing the catalog revision, 
   page.act(() => page.nodes(node => node.props.id === 'qm-tab-members')[0].props.onClick())
   const memberProps = () => page.nodes(node => node.type === 'QuotaMembers')[0].props
   const members = await createComponentHarness(new URL('../src/screens/QuotaMembers.jsx', import.meta.url), { props: memberProps(), dependencies: {
-    '../api.js': { api }, '../ui.jsx': { Icon: 'Icon' },
+    '../api.js': { api }, '../ui.jsx': { Icon: 'Icon' }, '../FilterControls.jsx': { FilterSelect: 'FilterSelect' },
     './QuotaEditors.jsx': { MemberEditor: 'MemberEditor' }, './quota-model.js': model,
   } })
   const settleMembers = async () => { await new Promise(resolve => setTimeout(resolve, 280)); await members.flush() }

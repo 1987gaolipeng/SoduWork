@@ -110,6 +110,24 @@ def capability_save_blocker(s) -> str:
     return message
 
 
+async def _check_owner_client_org(session, s, org_ids):
+    """Ensure the owner client belongs to the authorized org scope."""
+    if org_ids is None:
+        return  # super admin or no scope restriction
+    client_id = str(getattr(s, "owner_client_id", "") or "")
+    if not client_id:
+        return
+    client = await session.get(models.Client, client_id)
+    if client is None:
+        raise ValueError("请先选择任务归属的 SoduWork")
+    # Resolve org through the client's user_ref
+    user_ref = str(getattr(client, "user_ref", "") or "")
+    if user_ref:
+        user = await session.get(models.User, user_ref)
+        if user and user.org_id and user.org_id not in org_ids:
+            raise ValueError("该 SoduWork 不在你的组织管辖范围内")
+
+
 async def validate_direct_execution(session: AsyncSession, s):
     """Validate policy and Skill availability without requiring a Runner online."""
     capabilities = clean_required_capabilities(
@@ -421,10 +439,12 @@ async def validate_execution(session: AsyncSession, s,
         if not str(getattr(s, "assignee_id", "") or ""):
             raise ValueError("个人插件自动化还需要选择执行 Agent")
         s.plugin_inputs = clean_plugin_inputs(getattr(s, "plugin_inputs", {}) or {})
+        await _check_owner_client_org(session, s, org_ids)
         await validate_selected_model(session, s, allow_missing_model=allow_missing_model)
         await validate_direct_execution(session, s)
         return None
     if not binding_id:
+        await _check_owner_client_org(session, s, org_ids)
         await validate_selected_model(session, s, allow_missing_model=allow_missing_model)
         await validate_direct_execution(session, s)
         return None

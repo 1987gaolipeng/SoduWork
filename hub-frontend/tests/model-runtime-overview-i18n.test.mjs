@@ -17,7 +17,8 @@ const fieldStart = runtime.indexOf('const FIELDS = localeMap')
 const fieldEnd = runtime.indexOf('export default function ModelRuntime', fieldStart)
 const fields = [...runtime.slice(fieldStart, fieldEnd).matchAll(/\['[^']+',\s*'([^']+)'/g)].map(match => match[1])
 const required = new Set([...literals(runtime), ...literals(catalog.slice(summaryStart, summaryEnd)),
-  ...fields, '已配置', '已启用模型'])
+  ...fields, '已配置', '已启用模型', '已配置但无模型', '无已启用的对话模型', '可对话（{0}）', '加第一个模型',
+  '需兼容 Agent（{0}）', '{0} 个已启用的对话模型需要使用支持此协议的 Agent。'])
 const directCatalogs = { 'en-US': messages, 'ja-JP': messagesByLocale['ja-JP'], 'ko-KR': messagesByLocale['ko-KR'] }
 
 test('runtime overview and concurrency controls have direct English, Japanese and Korean copy', t => {

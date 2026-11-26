@@ -136,8 +136,14 @@ app.whenReady().then(async()=>{
  await win.loadFile(path.join(__dirname,'fixtures/platform-connections.html'));
  const login=await run("soduWorkAPI.deviceAuthBootstrap({hub:'https://fixture.invalid',clientId:'device',legacySecret:'isolated-device-key-at-least-32-chars'})");
  assert.equal(login.ok,true,login.error);assert.equal(login.session,fixtures.one);
- const clearSession=async session=>{
+ const clearSession=async(session,expectedClear=true)=>{
   const cleared=await run(`soduWorkAPI.deviceAuthClearSession(${JSON.stringify({hub,clientId:login.clientId,expectedSession:session})})`);
+  assert.equal(cleared.cleared,expectedClear);
+ };
+ const expireSession=async session=>{
+  // Cache expiry renews the same account; renderer clear-session intentionally signs it out.
+  assert.equal(await deviceAuth.ensureSession(app,deviceAuth.identity(app)),session);
+  const cleared=deviceAuth.clearSession(app,{hub,clientId:login.clientId,expectedSession:session});
   assert.equal(cleared.cleared,true);
  };
  assert.equal((await run("soduWorkAPI.deviceAuthStatus() ")).sessionReady,true);
@@ -215,19 +221,21 @@ app.whenReady().then(async()=>{
  checks.push('Feishu reuses the older scoped ID only after a masked credential reaches the authenticated loopback proxy');
  const originalScope=runtime.scope(await identityOf());
  activeSession=fixtures.renewed;
- await clearSession(login.session);
+ await expireSession(login.session);
  assert.equal((await run("soduWorkAPI.platformConnections.status('feishu')")).connected,true);
  assert.equal(runtime.scope(await identityOf()),originalScope);
  assert.equal(enrollments,2);
+ await clearSession(login.session,false);
+ assert.equal((await run("soduWorkAPI.deviceAuthStatus()")).sessionReady,true);
  checks.push('session refresh uses real ensureSession; same user retains existing platform account');
  activeSession=fixtures.two;
- await clearSession(fixtures.renewed);
+ await expireSession(fixtures.renewed);
  const switched=await run("soduWorkAPI.platformConnections.status('feishu')");
  assert.equal(switched.ok,true);assert.equal(switched.connected,false);
  assert.notEqual(runtime.scope(await identityOf()),originalScope);
  checks.push('account switch cannot inherit previous user connection state');
  enrollmentAllowed=false;
- await clearSession(fixtures.two);
+ await expireSession(fixtures.two);
  await run("testOpen('wecom')");await until("document.getElementById('capPlatformState').dataset.state==='error'");
  assert.ok((await run("document.getElementById('capPlatformNote').textContent")).includes('登录 SoduWork'));
  assert.equal((await run("soduWorkAPI.platformConnections.connect('dingtalk')")).ok,false);

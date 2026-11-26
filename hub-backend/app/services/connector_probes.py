@@ -80,7 +80,11 @@ async def probe_managed(spec: dict, timeout: int = 25,
         mcp.validate_size(spec)
         one = mcp._clean_one(spec)
     except ValueError as exc:
-        return {**connector_health.result("error"), "ok": False, "error": str(exc)}
+        msg = str(exc)
+        # Strip exception class name to avoid leaking implementation details
+        if msg.startswith(("ValueError", "TypeError", "KeyError", "AttributeError", "RuntimeError")):
+            msg = msg.split(":", 1)[-1].strip() if ":" in msg else msg
+        return {**connector_health.result("error"), "ok": False, "error": msg or "配置不正确"}
     timeout = min(
         max(3, min(120, int(timeout or 25))),
         one["startupTimeoutSeconds"])

@@ -1,5 +1,13 @@
 // Capability policy and submission attribution copy.
 export default {
+  "无法预览开放策略：": "Could not preview the access policy: ",
+  "开放策略变更预览": "Review access policy changes",
+  "确认保存": "Confirm and save",
+  "预计影响 {0} 台客户端，涉及 {1} 个部门": "Estimated impact: {0} devices across {1} departments",
+  "按已激活客户端的 Skill 选择估算，每台只计一次。保存后，员工下次执行时应用新策略。": "Based on Skill selections on activated devices. Each device is counted once. The saved policy applies to employees’ next execution.",
+  "新增开放（{0}）": "Enable ({0})",
+  "移除开放（{0}）": "Disable ({0})",
+  "正在计算影响范围…": "Calculating impact…",
   "待保存开放数": "Enabled after save",
   "放弃改动": "Discard changes",
   "未匹配的开放项": "Unmatched policy entries",
@@ -41,10 +49,22 @@ export default {
   "公司能力库": "Company catalog",
   "本机技能库": "Local skill library",
   "通用目录": "Standard directory",
-  "SoduWork 内置": "Built into SoduWork"
+  "SoduWork 内置": "Built into SoduWork",
+  "原文": "Original text",
+  "查看原文": "View original text",
+  "始终开放": "Always enabled",
+  "开放 {0}": "Enable {0}"
 }
 
 export const ja = {
+  "无法预览开放策略：": "公開ポリシーをプレビューできません：",
+  "开放策略变更预览": "公開ポリシーの変更を確認",
+  "确认保存": "確認して保存",
+  "预计影响 {0} 台客户端，涉及 {1} 个部门": "影響の見込み：端末 {0} 台、部門 {1} 件",
+  "按已激活客户端的 Skill 选择估算，每台只计一次。保存后，员工下次执行时应用新策略。": "有効な端末の Skill 選択に基づく見積もりです。各端末を一度だけ数えます。保存したポリシーは従業員の次回実行から適用されます。",
+  "新增开放（{0}）": "公開する Skill（{0}）",
+  "移除开放（{0}）": "公開を取り消す Skill（{0}）",
+  "正在计算影响范围…": "影響範囲を計算中…",
   "待保存开放数": "保存後の公開数",
   "放弃改动": "変更を破棄",
   "未匹配的开放项": "カタログにない公開項目",
@@ -86,10 +106,22 @@ export const ja = {
   "公司能力库": "組織の能力ライブラリ",
   "本机技能库": "ローカル Skill ライブラリ",
   "通用目录": "共通ディレクトリ",
-  "SoduWork 内置": "SoduWork 内蔵"
+  "SoduWork 内置": "SoduWork 内蔵",
+  "原文": "原文",
+  "查看原文": "原文を表示",
+  "始终开放": "常に公開",
+  "开放 {0}": "{0} を公開"
 };
 
 export const ko = {
+  "无法预览开放策略：": "공개 정책을 미리 볼 수 없습니다: ",
+  "开放策略变更预览": "공개 정책 변경 미리보기",
+  "确认保存": "확인 후 저장",
+  "预计影响 {0} 台客户端，涉及 {1} 个部门": "예상 영향: 클라이언트 {0}대, 부서 {1}개",
+  "按已激活客户端的 Skill 选择估算，每台只计一次。保存后，员工下次执行时应用新策略。": "활성화된 클라이언트의 Skill 선택을 기준으로 각 기기를 한 번만 집계합니다. 저장한 정책은 직원의 다음 실행부터 적용됩니다.",
+  "新增开放（{0}）": "공개할 Skill ({0})",
+  "移除开放（{0}）": "공개 해제할 Skill ({0})",
+  "正在计算影响范围…": "영향 범위 계산 중…",
   "待保存开放数": "저장 후 공개 수",
   "放弃改动": "변경 사항 취소",
   "未匹配的开放项": "카탈로그에 없는 공개 항목",
@@ -131,5 +163,9 @@ export const ko = {
   "公司能力库": "조직 기능 라이브러리",
   "本机技能库": "로컬 Skill 라이브러리",
   "通用目录": "공통 디렉터리",
-  "SoduWork 内置": "SoduWork 기본 제공"
+  "SoduWork 内置": "SoduWork 기본 제공",
+  "原文": "원문",
+  "查看原文": "원문 보기",
+  "始终开放": "항상 활성화",
+  "开放 {0}": "{0} 활성화"
 };

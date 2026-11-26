@@ -641,7 +641,14 @@ class ExecutionLaunchIsolationTests(unittest.TestCase):
 
     def test_parent_exit_after_failed_tree_cleanup_cannot_release_the_launch(self):
         entered, release = threading.Event(), threading.Event()
-        proc = Mock(pid=22222, poll=Mock(return_value=0))
+        def poll():
+            # The host exits while a retry is waking the worker after its first poll.
+            if not self.kill.return_value:
+                self.kill.return_value = True
+                self.run['_launchPending']['retry'].set()
+                return None
+            return 0
+        proc = Mock(pid=22222, poll=Mock(side_effect=poll))
         self.kill.return_value = False
         def popen(*_args, **_kwargs):
             entered.set()
@@ -662,18 +669,17 @@ class ExecutionLaunchIsolationTests(unittest.TestCase):
                 self.assertEqual(self.run['state'], 'running')
                 self.assertTrue(self.run['stopping'])
                 self.assertIn('_hostCleanup', self.run)
-                attempts = self.kill.call_count
-                self.kill.return_value = True
                 self.run['_launchPending']['retry'].set()
                 self.assertFalse(local_stream.stop_sync({}, self.ref)['ok'])
                 self.assertFalse(self.finished.wait(.1), 'A dead-host retry replaced the failed tree receipt')
-                self.assertEqual(self.kill.call_count, attempts)
+                self.kill.assert_called_once()
             finally:
                 release.set()
                 # Invalidate only the disposable fixture owner to retire its
                 # blocked worker after verifying the production fence.
                 self.run['_workerIdentity'] = object()
-                self.run['_launchPending']['retry'].set()
+                if pending := self.run.get('_launchPending'):
+                    pending['retry'].set()
                 self.join_workers()
         self.finish.assert_not_called()
         proc.stdin.write.assert_not_called()

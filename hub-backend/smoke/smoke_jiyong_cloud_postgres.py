@@ -1,5 +1,9 @@
-"""Self-owned, loopback-only PostgreSQL integration. Never accepts a live DB URL."""
+"""Owned loopback PostgreSQL + S3 integration. Install moto[server]>=5,<6
+in the test environment alongside the Hub requirements. Uses the production
+MinIO client over HTTP; never accepts an external database or bucket.
+"""
 import asyncio
+from contextlib import contextmanager
 import copy
 import json
 import os
@@ -11,6 +15,33 @@ import subprocess
 import sys
 import tempfile
 import time
+
+
+@contextmanager
+def object_store():
+    from minio import Minio
+    from moto.server import ThreadedMotoServer
+    from secrets import token_hex
+    from unittest.mock import patch
+
+    server = ThreadedMotoServer(ip_address='127.0.0.1', port=0, verbose=False)
+    server.start()
+    try:
+        host, port = server.get_host_and_port()
+        endpoint = f'{host}:{port}'
+        access, secret = token_hex(10), token_hex(20)
+        bucket = 'smoke-assets'
+        client = Minio(endpoint, access_key=access, secret_key=secret, secure=False, region='us-east-1')
+        client.make_bucket(bucket)
+        with patch.dict(os.environ, {
+            'JIYONG_OBJECT_ENDPOINT': endpoint, 'JIYONG_OBJECT_ACCESS_KEY': access,
+            'JIYONG_OBJECT_SECRET_KEY': secret, 'JIYONG_OBJECT_BUCKET': bucket,
+            'JIYONG_OBJECT_REGION': 'us-east-1', 'JIYONG_OBJECT_SECURE': 'false',
+            'JIYONG_OBJECT_PREFIX': 'fixture',
+        }):
+            yield client, bucket
+    finally:
+        server.stop()
 
 
 def main():
@@ -61,10 +92,9 @@ def main():
             raise RuntimeError('temporary PostgreSQL start failed: ' + (root / 'control.log').read_text(errors='replace'))
         process = True
         print('Temporary PostgreSQL ready', flush=True)
-        if process:
+        with object_store() as (objects, bucket):
             os.environ['DATABASE_URL'] = 'sqlite+aiosqlite:///' + (root / '.smoke-hub.db').as_posix()
             os.environ['JIYONG_DATABASE_URL'] = f'postgresql+asyncpg://jiyong_test@127.0.0.1:{port}/smoke-jiyong'
-            os.environ['JIYONG_ASSET_DIR'] = str(root / 'assets')
             os.environ['AUTH_SECRET'] = 'isolated-integration-secret-' + 'a' * 40
             os.environ['ADMIN_PASS'] = 'isolated-test-only-password'
             asyncio.run(prepare(port, root))
@@ -74,11 +104,11 @@ def main():
             if result.returncode:
                 raise RuntimeError('isolated cloud migration failed: ' + result.stderr.decode(errors='replace'))
             print('Verifying cloud data behavior', flush=True)
-            asyncio.run(verify(root))
+            asyncio.run(verify(objects, bucket))
             if '--native' in sys.argv:
                 run_native(root, flags)
             print('Verifying independent database and asset backup restore', flush=True)
-            asyncio.run(backup_restore(binary, suffix, port, root, flags))
+            asyncio.run(backup_restore(binary, suffix, port, root, flags, objects, bucket))
         print(json.dumps({'ok': True, 'checks': ['independent Alembic migration', 'read-only readiness',
             'concurrent automatic provision', 'CAS and rollback', 'tombstones', 'append-only migration',
             'account and app isolation', 'cross-connection persistence', 'quota rollback', 'asset hash and readback',
@@ -147,7 +177,7 @@ async def prepare(port, root):
         await connection.close()
 
 
-async def verify(root):
+async def verify(objects, bucket):
     from sqlalchemy import text
     from app.services import jiyong_cloud_database as database, jiyong_cloud_storage as storage
     from app.services import jiyong_contract, jiyong_data_contract
@@ -162,7 +192,7 @@ async def verify(root):
         await database.check()
         async with database.engine().connect() as connection:
             assert await connection.scalar(text('SELECT count(*) FROM jiyong_spaces')) == 0
-        assert not (root / 'assets').exists(), 'readiness must not create files'
+        assert not list(objects.list_objects(bucket, recursive=True)), 'readiness must not write assets'
         # Exercise the actual endpoint and transport validators over ASGI,
         # keeping device/account authentication explicitly fixture-owned.
         import httpx
@@ -252,7 +282,7 @@ async def verify(root):
         await database.close()
 
 
-async def backup_restore(binary, suffix, port, root, flags):
+async def backup_restore(binary, suffix, port, root, flags, objects, bucket):
     import asyncpg
     from app.services import jiyong_cloud_database as database, jiyong_cloud_storage as storage, jiyong_contract
     from test_jiyong_cloud_data import declaration, seed
@@ -260,7 +290,20 @@ async def backup_restore(binary, suffix, port, root, flags):
     args = ['-h', '127.0.0.1', '-p', str(port), '-U', 'jiyong_test']
     subprocess.run([str(binary / ('pg_dump' + suffix)), *args, '-F', 'c', '-f', str(dump), 'smoke-jiyong'],
                    capture_output=True, timeout=30, check=True, creationflags=flags)
-    shutil.copytree(root / 'assets', root / 'restored-assets')
+    # Export bytes before restoring to a distinct bucket. No dependency on a
+    # shared object directory or a still-readable original bucket.
+    archived = []
+    for index, item in enumerate(objects.list_objects(bucket, recursive=True)):
+        path = root / f'object-{index}.backup'
+        objects.fget_object(bucket, item.object_name, str(path))
+        archived.append((item.object_name, path))
+    assert archived, 'asset backup must contain data'
+    restored = 'restored-assets'
+    objects.make_bucket(restored)
+    for key, path in archived:
+        objects.fput_object(restored, key, str(path))
+        objects.remove_object(bucket, key)
+    objects.remove_bucket(bucket)
     connection = await asyncpg.connect(host='127.0.0.1', port=port, user='jiyong_test', database='postgres')
     try:
         await connection.execute('CREATE DATABASE "smoke-jiyong-restored"')
@@ -270,7 +313,7 @@ async def backup_restore(binary, suffix, port, root, flags):
                    capture_output=True, timeout=30, check=True, creationflags=flags)
     settings = database.get_settings()
     settings.jiyong_database_url = settings.jiyong_database_url.rsplit('/', 1)[0] + '/smoke-jiyong-restored'
-    settings.jiyong_asset_dir = str(root / 'restored-assets')
+    settings.jiyong_object_bucket = restored
     initial = seed()
     initial['migrations'].append({'version': 2, 'seed': [{'collection': 'notes', 'id': 'next', 'value': {'status': 'example'}}]})
     schema = jiyong_contract.normalize(declaration())

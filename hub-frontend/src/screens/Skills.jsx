@@ -6,7 +6,7 @@ import { useViewportHeight } from '../viewport-height.js'
 import { useAsync, Loading, ErrorState, Icon, Modal, toast } from '../ui.jsx'
 import McpServers from './McpServers.jsx'
 import SkillSharing from './SkillSharing.jsx'
-import { buildSubmissionOrigins, summarizeCapabilityPolicy, sameCapabilityPolicy } from './capability-catalog-model.js'
+import { buildSubmissionOrigins, localizedSkillDescription, summarizeCapabilityPolicy, sameCapabilityPolicy } from './capability-catalog-model.js'
 import './capability-center.css'
 
 export default function Skills() {
@@ -17,6 +17,8 @@ export default function Skills() {
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [preview, setPreview] = useState(null)
+  const [policyPreview, setPolicyPreview] = useState(null)
+  const editsToRestore = useRef(null)
   const picker = useRef(null)
   // Measure the entire active body once. The two Skill sections share this
   // budget; neither list treats its sibling's changing height as page chrome.
@@ -24,7 +26,16 @@ export default function Skills() {
   const workspaceRef = useViewportHeight(workspaceMinimum)
 
   useEffect(() => {
-    if (data.data) setAllowed(new Set((data.data.cfg || {}).allowed || []))
+    if (!data.data) return
+    const next = new Set(data.data.cfg?.allowed || [])
+    if (editsToRestore.current) {
+      const { added, removed } = editsToRestore.current
+      const catalog = new Map((data.data.skills || []).map((item) => [item.name, item]))
+      for (const name of added) if (catalog.has(name)) next.add(name)
+      for (const name of removed) if (!catalog.get(name)?.policyLocked) next.delete(name)
+      editsToRestore.current = null
+    }
+    setAllowed(next)
   }, [data.data])
   if (data.error && !data.data) return <ErrorState msg={data.error.message} onRetry={data.reload} />
   if (data.loading || !allowed) return <Loading />
@@ -37,7 +48,7 @@ export default function Skills() {
   const { activeCount, unmatchedNames } = summarizeCapabilityPolicy(rows, allowed)
   const filtered = rows.filter((item) => {
     const needle = query.trim().toLowerCase()
-    return !needle || [item.name, item.description, sourceLabel(item, catalog)]
+    return !needle || [item.name, localizedSkillDescription(item, uiLocale), item.description, sourceLabel(item, catalog)]
       .some((value) => String(value || '').toLowerCase().includes(needle))
   })
 
@@ -53,16 +64,46 @@ export default function Skills() {
     setAllowed((current) => new Set([...current].filter((name) => !unmatchedNames.includes(name))))
   }
 
+  async function refreshAfterConflict(error, draft, reviewedChanges) {
+    if (error.status !== 409) return
+    const saved = new Set(config.allowed || [])
+    const proposed = new Set(draft.allowed)
+    editsToRestore.current = reviewedChanges || {
+      added: [...proposed].filter((name) => !saved.has(name)),
+      removed: [...saved].filter((name) => !proposed.has(name)),
+    }
+    if (!await data.reload()) editsToRestore.current = null
+  }
+
+  async function reviewPolicy() {
+    const cfg = { ...config, allowed: [...allowed] }
+    setPolicyPreview({ cfg })
+    setBusy(true)
+    try {
+      const impact = await api.previewCapabilityPolicy(cfg)
+      setPolicyPreview({ cfg, impact })
+    } catch (error) {
+      setPolicyPreview(null)
+      toast(tx("无法预览开放策略：") + error.message)
+      await refreshAfterConflict(error, cfg)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function save() {
     setBusy(true)
     try {
-      await api.saveCapabilityPolicy({ ...config, allowed: [...allowed] })
+      await api.saveCapabilityPolicy(policyPreview.cfg)
       toast(tx("公司开放策略已保存，员工下一次执行生效"))
-      data.reload()
+      await data.reload()
     } catch (error) {
       toast(tx("保存失败：") + error.message)
+      await refreshAfterConflict(error, policyPreview.cfg, policyPreview.impact)
+    } finally {
+      setPolicyPreview(null)
+      setBusy(false)
     }
-    setBusy(false)
   }
 
   async function pickSkill(event) {
@@ -137,8 +178,8 @@ export default function Skills() {
             {dirty && <><span className="cap-admin-dirty">{tx("开放策略有改动")}</span>
               <button className="btn btn-ghost btn-sm" disabled={busy}
                 onClick={() => setAllowed(new Set(config.allowed || []))}>{tx("放弃改动")}</button></>}
-            <button className="btn btn-primary btn-sm" disabled={busy || !dirty} onClick={save}>
-              {busy ? tx("保存中…") : tx("保存开放策略")}
+            <button className="btn btn-primary btn-sm" disabled={busy || !dirty} onClick={reviewPolicy}>
+              {tx("保存开放策略")}
             </button>
           </>
         )}
@@ -161,13 +202,17 @@ export default function Skills() {
       <div ref={workspaceRef} className="cap-admin-workspace"
         style={{ '--capability-min-height': `${workspaceMinimum}px` }}>
         {tab === 'skills' ? (
-          <SkillCatalog rows={filtered} allowed={allowed} legacy={catalog} onToggle={toggle}
+          <SkillCatalog rows={filtered} allowed={allowed} legacy={catalog} onToggle={toggle} disabled={busy}
             submissions={catalog.personalSubmissions || []} />
         ) : (
           <McpArea templates={catalog.mcpTemplates || []} />
         )}
       </div>
 
+      {policyPreview && (
+        <PolicyPreview impact={policyPreview.impact} busy={busy} onSave={save}
+          onClose={() => setPolicyPreview(null)} />
+      )}
       {preview && (
         <ImportPreview value={preview} busy={busy} existing={new Set(rows.map((item) => item.name))}
           onClose={() => setPreview(null)} onImport={importSkill} />
@@ -176,12 +221,39 @@ export default function Skills() {
   )
 }
 
+function PolicyPreview({ impact, busy, onSave, onClose }) {
+  return (
+    <Modal className="cap-policy-preview" title={tx("开放策略变更预览")} busy={busy} onClose={onClose}
+      foot={dismiss => <>
+        <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
+        <span className="ml-auto" />
+        <button className="btn btn-primary cap-policy-confirm" disabled={busy || !impact || !(impact.added.length || impact.removed.length)} onClick={onSave}>
+          {busy && impact ? tx("保存中…") : tx("确认保存")}
+        </button>
+      </>}>
+      {impact ? <>
+        <p><strong>{tx("预计影响 {0} 台客户端，涉及 {1} 个部门", [impact.affectedClients, impact.affectedDepartments])}</strong></p>
+        <p className="muted">{tx("按已激活客户端的 Skill 选择估算，每台只计一次。保存后，员工下次执行时应用新策略。")}</p>
+        {[[tx("新增开放（{0}）", [impact.added.length]), impact.added, 'cap-policy-added'],
+          [tx("移除开放（{0}）", [impact.removed.length]), impact.removed, 'cap-policy-removed']].map(([label, names, className]) => (
+          <section className={className} key={className}>
+            <strong>{label}</strong>
+            {names.length > 0 && <div className="cap-admin-unmatched-names" role="region" aria-label={label} tabIndex={0}>
+              {names.map((name) => <code key={name}>{name}</code>)}
+            </div>}
+          </section>
+        ))}
+      </> : <p role="status">{tx("正在计算影响范围…")}</p>}
+    </Modal>
+  )
+}
+
 function Metric({ value, label, tone = '' }) {
   const uiLocale = useLocale();
   return <span className={'cap-admin-metric ' + tone}><b>{Number(value || 0)}</b><small>{label}</small></span>
 }
 
-function SkillCatalog({ rows, allowed, legacy, onToggle, submissions }) {
+function SkillCatalog({ rows, allowed, legacy, onToggle, submissions, disabled }) {
   const uiLocale = useLocale();
   const origins = buildSubmissionOrigins(submissions)
   return (
@@ -197,23 +269,33 @@ function SkillCatalog({ rows, allowed, legacy, onToggle, submissions }) {
           <div className="cap-admin-grid" role="region" aria-label={tx("能力列表，可滚动")} tabIndex="0">
             {rows.map((item) => {
               const on = allowed.has(item.name)
+              const description = localizedSkillDescription(item, uiLocale)
               return (
-                <button key={item.name} className={'cap-admin-card' + (on ? ' on' : '')}
-                  onClick={() => onToggle(item.name)} aria-pressed={on}>
+                <article key={item.name} className={'cap-admin-card' + (on ? ' on' : '')}>
                   <span className="cap-admin-card-icon" aria-hidden="true"><b>{String(item.name || 'S').slice(0, 1).toUpperCase()}</b></span>
-                  <span className="cap-admin-card-main">
+                  <div className="cap-admin-card-main">
                     <span className="cap-admin-card-title"><b title={item.name}>{item.name}</b>
                       <em title={sourceLabel(item, legacy)}>{sourceLabel(item, legacy)}</em></span>
-                    <span className="cap-admin-card-desc" title={item.description || tx("暂无用途说明")}>{item.description || tx("暂无用途说明")}</span>
+                    <span className="cap-admin-card-desc">
+                      {!description && item.description && <small>{tx("原文")} </small>}
+                      {description || item.description || tx("暂无用途说明")}
+                    </span>
+                    {description && item.description && description !== item.description && (
+                      <details className="cap-admin-original">
+                        <summary>{tx("查看原文")}</summary>
+                        <p>{item.description}</p>
+                      </details>
+                    )}
                     <span className="cap-admin-passport">
-                      <i className={on ? 'ok' : ''}>{on ? tx("已开放") : tx("未开放")}</i>
+                      <i className={on ? 'ok' : ''}>{item.policyLocked ? tx("始终开放") : on ? tx("已开放") : tx("未开放")}</i>
                       <i>{item.inUse || 0}{tx(" 台 SoduWork 在用")}</i>
                       {!item.portable && <i title={tx("目标 Runner 也必须安装同名 Skill；建议导入公司能力库固化版本")}>{tx("需执行机同名能力")}</i>}
                       {item.compatibility && <i title={item.compatibility}>{tx("有环境要求")}</i>}
                     </span>
-                  </span>
-                  <span className="cap-admin-switch" />
-                </button>
+                  </div>
+                  <button type="button" className="cap-admin-switch" aria-label={tx("开放 {0}", [item.name])}
+                    disabled={disabled || item.policyLocked} onClick={() => onToggle(item.name)} aria-pressed={on} />
+                </article>
               )
             })}
           </div>
@@ -273,9 +355,9 @@ function ImportPreview({ value, busy, existing, onClose, onImport }) {
     return true
   })
   return (
-    <Modal wide title={tx("导入公司 Skill")} icon="plug" onClose={onClose}
-      foot={<>
-        <button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+    <Modal wide title={tx("导入公司 Skill")} icon="plug" busy={busy} onClose={onClose}
+      foot={dismiss => <>
+        <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
         <span className="ml-auto" />
         <button className="btn btn-primary" disabled={busy || !ready.length} onClick={onImport}>
           {busy ? tx("正在导入…") : tx("导入 ") + ready.length + tx(" 个 Skill")}
@@ -311,6 +393,8 @@ function ImportPreview({ value, busy, existing, onClose, onImport }) {
 }
 
 function sourceLabel(item, data) {
+  if (item.sourceKey === 'builtin') return tx("SoduWork 内置")
+  if (item.sourceKey === 'company') return tx("公司能力库")
   if (item.source) return item.source
   if (item.scope === 'company') return tx("公司能力库")
   const root = String(item.root || '')
@@ -349,6 +433,12 @@ export function RepoSkills({ repoId, repoName }) {
   const own = selected !== null
   const shown = own ? [...selected] : company
 
+  function discard() {
+    const saved = data.cfg?.byRepo?.[repoId]
+    setSelected(saved ? new Set(saved) : null)
+    setOpen(false)
+  }
+
   async function save(next) {
     setBusy(true)
     try {
@@ -380,10 +470,10 @@ export function RepoSkills({ repoId, repoName }) {
           <Icon name="pencil" />{tx("配置")}</button>
       </div>
       {open && (
-        <Modal wide title={'Skill · ' + (repoName || tx("这个工程"))} icon="plug" onClose={() => setOpen(false)}
-          foot={<>
+        <Modal draft={[...shown].sort()} wide title={'Skill · ' + (repoName || tx("这个工程"))} icon="plug" busy={busy} onClose={discard}
+          foot={dismiss => <>
             <button className="btn btn-ghost" disabled={busy} onClick={() => save(null)}>{tx("改回公司默认")}</button>
-            <span className="ml-auto" /><button className="btn btn-ghost" onClick={() => setOpen(false)}>{tx("取消")}</button>
+            <span className="ml-auto" /><button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
             <button className="btn btn-primary" disabled={busy}
               onClick={() => save(selected || new Set(company))}>{busy ? tx("保存中…") : tx("保存")}</button>
           </>}>

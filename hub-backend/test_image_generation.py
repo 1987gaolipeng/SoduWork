@@ -99,6 +99,20 @@ class ImageGenerationTests(unittest.IsolatedAsyncioTestCase):
                 await self.generate()
         self.assertEqual(request.await_count, 1)
 
+    async def test_upstream_image_errors_report_configuration_hints_without_leaking_provider_data(self):
+        cases = ((404, '/images/generations', '图片模型名称'), (404, '/v1/images/generations', '重复填写'),
+                 (401, '/images/generations', 'API Key'), (403, '/images/generations', '访问权限'),
+                 (400, '/images/generations', '请求格式'), (422, '/images/generations', '生成参数'))
+        for status, endpoint, expected in cases:
+            with self.subTest(status=status, endpoint=endpoint):
+                self.resolve.return_value = dict(CONF, config={'endpointPath': endpoint})
+                failure = image.UpstreamError(status, 'private-provider-response', 'private-provider-detail')
+                with patch.object(image, '_provider_request', AsyncMock(side_effect=failure)) as request:
+                    with self.assertRaisesRegex(ValueError, f'HTTP {status}.*' + expected) as raised:
+                        await self.generate(generationId=f'{status}-{endpoint}')
+                    request.assert_awaited_once()
+                self.assertNotIn('private-provider', str(raised.exception))
+
     async def test_same_device_different_accounts_never_reuse_each_others_media(self):
         request = AsyncMock(return_value=PNG)
         with patch.object(image, '_provider_request', request):
@@ -200,6 +214,19 @@ class ImageGenerationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(image.validate_image(buffer.getvalue()), mime)
         with self.assertRaises(ValueError):
             image.validate_image(PNG[:45] + b'bad pixels' + PNG[-12:])
+
+    def test_pixel_limits_and_single_frame_policy_apply_before_publication(self):
+        import struct
+        import zlib
+        header = b'IHDR' + struct.pack('>II', 8000, 8000) + PNG[24:29]
+        large = PNG[:12] + header + struct.pack('>I', zlib.crc32(header)) + PNG[33:]
+        with self.assertRaisesRegex(ValueError, '3200 万像素'):
+            image.validate_image(large)
+        animation = BytesIO()
+        first = Image.new('RGB', (4, 4), 'red')
+        first.save(animation, format='PNG', save_all=True, append_images=[Image.new('RGB', (4, 4), 'blue')])
+        with self.assertRaisesRegex(ValueError, '多帧'):
+            image.validate_image(animation.getvalue())
 
     async def test_real_http_transport_uses_image_endpoint_and_releases_capacity(self):
         from app.services import model_runtime, model_transport

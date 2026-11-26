@@ -137,6 +137,7 @@ def summary() -> dict:
         "windowMinutes": _WINDOW_MINUTES, "requests": total, "errors": errors,
         "errorRate": round(errors / total, 4) if total else 0,
         "p95Ms": _percentile(histogram, total, .95),
+        "latencyBucketUpperBoundsMs": [int(bound) for bound in _LATENCY_BUCKETS if math.isfinite(bound)],
         "uptimeSeconds": max(0, int(time.time() - _STARTED)),
         "startedAt": int(_STARTED * 1000), "routes": routes[:12],
         "recentErrors": list(_recent_errors),

@@ -1,6 +1,11 @@
 /* Agent Management surfaces (Korean). See en-US-agent-pages.js for key provenance. */
 (function (global) {
   const messages = {
+    "已检测到 DeepSeek Harness App。安装 dsh-acp 适配器后即可配置执行。": "DeepSeek Harness App을 찾았습니다. 작업을 구성하려면 dsh-acp 어댑터를 설치하세요.",
+    "缺少适配器": "어댑터 없음",
+    "安装适配器": "어댑터 설치",
+    "未找到命令行适配器 dsh-acp。": "dsh-acp 명령줄 어댑터를 찾을 수 없습니다.",
+    "如果你已安装 DeepSeek Harness App，还需安装命令行适配器，SoduWork 才能调用它。": "DeepSeek Harness App을 이미 설치한 경우에도 SoduWork에서 사용하려면 명령줄 어댑터를 설치하세요.",
     "无法确认 DeepSeek Harness 所选 Node 的平台和架构": "DeepSeek Harness에서 선택한 Node의 플랫폼과 아키텍처를 확인할 수 없습니다.",
     "无法确认 DeepSeek Harness 所选 Node 的 Linux libc": "DeepSeek Harness에서 선택한 Node의 Linux libc를 확인할 수 없습니다.",
     "DeepSeek Harness 运行时清单不完整：无法确认 DeepSeek Harness 所选 Node 的平台和架构": "DeepSeek Harness 런타임 매니페스트가 불완전합니다: DeepSeek Harness에서 선택한 Node의 플랫폼과 아키텍처를 확인할 수 없습니다.",

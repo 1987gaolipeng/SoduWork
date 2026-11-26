@@ -387,7 +387,7 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
       view.setVisible(!item.embeddedHost);
       hostFor(item).contentView.addChildView(view);
       if (item.appBridge) appOwner.associate(view.webContents, item);
-      item.composer = { view, loaded: false, dock: 'right', collapsed: false, expanded: false, hover: false, width: 0, railY: .5, railArrival: false, sessionId: '', theme: 'light' };
+      item.composer = { view, loaded: false, dock: 'right', collapsed: false, expanded: false, hover: false, width: 0, railY: .5, railArrival: false, theme: 'light' };
       layoutComposer(owner, item);
       item.composer.launching = view.webContents.loadFile(COMPOSER_LAUNCHER).catch(() => {});
     } catch (_) { /* Composer failure must not block the application window. */ }
@@ -717,24 +717,6 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
     return { ok: false };
   }
 
-  function composerState(payload) {
-    const tabId = cleanTabId((payload || {}).tabId);
-    const state = (payload || {}).state || {};
-    for (const owner of OWNERS.values()) {
-      const item = owner.views.get(tabId);
-      if (item && item.composer) {
-        /* Publish conversation changes to composer instances only when the active conversation changes. */
-        const sessionId = String(state.sessionId || '');
-        if (sessionId && sessionId !== item.composer.sessionId) {
-          item.composer.sessionId = sessionId;
-          try { item.composer.view.webContents.send('app-composer-session', { sessionId }); } catch (_) {}
-        }
-        return { ok: true };
-      }
-    }
-    return { ok: false };
-  }
-
   function composerSent(event) {
     const found = composerOwnerBySender(event.sender);
     if (!found) return { ok: false };
@@ -745,6 +727,6 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
   }
 
 
-  return { appConversationOrigin, openAppConversation, composerNavigationResult, composerActivity, showDetached: (event, raw) => showApplication(event, raw), showEmbedded: (event, raw) => showApplication(event, raw, true), embeddedBounds, windowDisplay, appContextFor, appContextForPlugin, isAppComposer: sender => !!composerOwnerBySender(sender), composerTurnSettled, composerControl, composerSend, composerHello, composerWidth, composerModeSet, chromeAction, composerDock, composerStep, composerState, composerSent };
+  return { appConversationOrigin, openAppConversation, composerNavigationResult, composerActivity, showDetached: (event, raw) => showApplication(event, raw), showEmbedded: (event, raw) => showApplication(event, raw, true), embeddedBounds, windowDisplay, appContextFor, appContextForPlugin, isAppComposer: sender => !!composerOwnerBySender(sender), composerTurnSettled, composerControl, composerSend, composerHello, composerWidth, composerModeSet, chromeAction, composerDock, composerStep, composerSent };
 }
 module.exports = { create };

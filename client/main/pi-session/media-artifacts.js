@@ -10,12 +10,13 @@
 
 const fs = require('fs');
 const path = require('path');
+const generatedImage = require('./generated-image.cjs');
 const { fetchWithDeviceAuthRetry } = require('../device-auth-request');
 
 // Keep the desktop ceiling aligned with the server's documented upper bound.
 // The server still applies the configured per-deployment VIDEO_MAX_MB limit.
 const MAX_BYTES = 2048 * 1024 * 1024;
-const IMAGE_MAX_BYTES = 32 * 1024 * 1024;
+const IMAGE_MAX_BYTES = generatedImage.MAX_BYTES;
 const ATTACHMENT_PATH = /^\/(?:api\/v1\/)?attachments\/[A-Za-z0-9-]{8,64}$/;
 const INDEX_NAME = '.soduwork-media-index.json';
 const outputQueues = new Map();
@@ -247,7 +248,7 @@ async function _readIndex(outputDir) {
   } catch (_) { return {}; }
 }
 
-async function _indexedFile(outputDir, artifact, origin) {
+async function _indexedFile(outputDir, artifact, origin, signal) {
   const aid = String(artifact && artifact.attachmentId || '');
   if (!aid) return null;
   const index = await _readIndex(outputDir);
@@ -264,6 +265,10 @@ async function _indexedFile(outputDir, artifact, origin) {
     const prefix = Buffer.alloc(16);
     const read = await handle.read(prefix, 0, prefix.length, 0).finally(() => handle.close());
     if (!_videoSignature(prefix.subarray(0, read.bytesRead), artifact.mimeType)) return null;
+    if (artifact.kind === 'image') {
+      if (stat.size > IMAGE_MAX_BYTES) return null;
+      await generatedImage.validate({ file: target, expectedType: artifact.mimeType, signal });
+    }
     return {
       path: target,
       name: path.basename(target),
@@ -274,7 +279,11 @@ async function _indexedFile(outputDir, artifact, origin) {
       artifactId: aid,
       mimeType: String(artifact.mimeType || 'video/mp4'),
     };
-  } catch (_) { return null; }
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (error.code === 'IMAGE_VALIDATOR_UNAVAILABLE') throw error;
+    return null;
+  }
 }
 
 async function _rememberFile(outputDir, attachmentId, target, origin) {
@@ -326,7 +335,7 @@ async function _materialize(artifact, identity, cwd, fetchImpl, abortSignal) {
   if (typeof fetchImpl !== 'function') throw new Error('当前运行环境不支持视频下载');
   const outputDir = path.resolve(String(cwd || ''), 'outputs');
   await fs.promises.mkdir(outputDir, { recursive: true });
-  const existing = await _indexedFile(outputDir, artifact, parsedUrl.origin);
+  const existing = await _indexedFile(outputDir, artifact, parsedUrl.origin, abortSignal);
   if (existing) {
     existing.relative = path.relative(String(cwd), existing.path).split(path.sep).join('/');
     return existing;
@@ -367,6 +376,7 @@ async function _materialize(artifact, identity, cwd, fetchImpl, abortSignal) {
         (advertised > 0 && size !== advertised)) {
       throw new Error('视频下载不完整，请重新获取成果');
     }
+    if (artifact.kind === 'image') await generatedImage.validate({ file: temp, expectedType, signal });
     await fs.promises.rename(temp, target);
     await _rememberFile(outputDir, artifact.attachmentId, target, parsedUrl.origin).catch(() => {});
     return {

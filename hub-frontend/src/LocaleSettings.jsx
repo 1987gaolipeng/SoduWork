@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Icon, SelectMenu } from './ui.jsx'
-import { localeOptions, setLocale, t, useLocale } from './i18n.js'
+import { localeOptions, setLocale, t, useLocaleSelection } from './i18n.js'
 import './locale-settings.css'
 
 export default function LocaleSettings({ floating = false, inline = false }) {
-  const locale = useLocale()
+  const { locale, remapped } = useLocaleSelection()
   const [open, setOpen] = useState(false)
   const root = useRef(null)
   const trigger = useRef(null)
@@ -29,7 +29,9 @@ export default function LocaleSettings({ floating = false, inline = false }) {
       {localeOptions().map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
     </SelectMenu>
   </label>
-  if (inline) return <div className="locale-settings is-inline">{languageField}</div>
+  if (inline) return <div className="locale-settings is-inline">{languageField}
+    {remapped && <p className="locale-remap-note" role="status">{t('account.languageFallback')}</p>}
+  </div>
   return <div ref={root} className={'locale-settings' + (floating ? ' is-floating' : '')}>
     <button ref={trigger} className="icon-btn locale-settings-trigger" type="button"
       onClick={() => setOpen(value => !value)} aria-expanded={open}
@@ -39,6 +41,7 @@ export default function LocaleSettings({ floating = false, inline = false }) {
     {open && <div className="locale-settings-popover" role="dialog" aria-label={t('account.settings')}>
       <b>{t('account.settings')}</b>
       {languageField}
+      {remapped && <p className="locale-remap-note" role="status">{t('account.languageFallback')}</p>}
     </div>}
   </div>
 }

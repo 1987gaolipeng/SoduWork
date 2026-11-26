@@ -13,6 +13,7 @@ log = logging.getLogger("uvicorn.error")
 _NL = chr(10)          # Join prompt lists with a literal newline to avoid fragile escaped source edits.
 
 from .. import models
+from ..pagination import Page, list_result, select_rows
 from ..realtime import hub
 from ..schemas import task_to_api
 from .task_parse_contract import _PARSE_SYSTEM, _apply_scene, _extract_json, _sanitize_parsed, _language_prompt
@@ -38,6 +39,73 @@ _FIELD_MAP = {
 # Keep content concurrency checks independent of execution progress.
 _REQ_CONTENT_KEYS = {"title", "note", "description", "acceptanceCriteria",
                      "kind", "priority", "tags", "deps"}
+_VALID_RECUR = {"daily", "weekly", "monthly"}
+_TAG_MAX = 20
+_DUE_MIN_MS = 0  # 1970-01-01
+_DUE_MAX_MS = 4102444800000  # 2100-01-01
+
+
+def _validate_tags(tags) -> list[str]:
+    """Deduplicate and cap task tags."""
+    if not isinstance(tags, list):
+        raise HTTPException(status_code=400, detail="tags 必须是数组")
+    seen = set()
+    result = []
+    for t in tags:
+        if not isinstance(t, str):
+            continue
+        t = t.strip()
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        result.append(t)
+    if len(result) > _TAG_MAX:
+        result = result[:_TAG_MAX]
+    return result
+
+
+def _validate_due(ms):
+    """Validate a due timestamp in milliseconds."""
+    if ms is None:
+        return None
+    try:
+        val = int(ms)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="due 必须是数字")
+    if val < _DUE_MIN_MS:
+        raise HTTPException(status_code=400, detail="due 不能早于 1970-01-01")
+    if val > _DUE_MAX_MS:
+        raise HTTPException(status_code=400, detail="due 不能晚于 2100-01-01")
+    return val
+
+
+def _validated_recur(value):
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail="recur 必须是 daily、weekly 或 monthly")
+    value = value.strip().lower()
+    if value not in _VALID_RECUR:
+        raise HTTPException(status_code=400, detail="recur 必须是 daily、weekly 或 monthly")
+    return value
+
+
+async def _validate_assignee(session: AsyncSession, owner_id: str, value):
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail="assigneeUserId 必须是字符串")
+    uid = value.strip()
+    target = await session.get(models.User, uid)
+    client = await session.get(models.Client, owner_id)
+    owner = await session.get(models.User, client.user_ref) if client and client.user_ref else None
+    if target is None or not target.is_active or owner is None:
+        raise HTTPException(status_code=400, detail="接收人不存在或已停用")
+    from . import rbac
+    scope = await rbac.subtree_org_ids(session, owner.org_id) if owner.org_id else set()
+    if target.org_id not in scope:
+        raise HTTPException(status_code=403, detail="接收人不在当前组织范围内")
+    return uid
 
 
 def stamp_progress(new_list, old_list, uid, uname):
@@ -108,13 +176,14 @@ def apply_detail(t: "models.Task", data: dict) -> None:
     if "start" in data:
         t.start_at = ms_to_dt(data.get("start"))
     if "due" in data:
-        t.due_at = ms_to_dt(data.get("due"))
+        due = _validate_due(data.get("due"))
+        t.due_at = ms_to_dt(due)
     if "actualStart" in data:
         t.actual_start_at = ms_to_dt(data.get("actualStart"))
     if "actualEnd" in data:
         t.actual_end_at = ms_to_dt(data.get("actualEnd"))
     if data.get("tags") is not None:
-        t.tags = list(data.get("tags") or [])
+        t.tags = _validate_tags(data.get("tags"))
     if data.get("assigneeUserId") is not None:
         t.assignee_user_id = data.get("assigneeUserId") or None
     if "recur" in data:
@@ -291,7 +360,7 @@ async def task_to_api_live(session: AsyncSession, task) -> dict:
 
 
 async def list_tasks(session: AsyncSession, owner_id: str,
-                     *, include_related: bool = False) -> list[dict]:
+                     *, include_related: bool = False, page: Page | None = None):
     """Executors list local tasks; employees also see tasks they participate in. Automation tasks
     appear in automation history and task details, outside the ordinary requirement pool. Hub
     retains them for single-task APIs and execution receipts."""
@@ -310,12 +379,8 @@ async def list_tasks(session: AsyncSession, owner_id: str,
         from . import task_requirements
         condition = await task_requirements.visible_clause(session, client)
         condition = condition & ~automation
-    res = await session.execute(
-        select(models.Task)
-        .where(condition)
-        .order_by(models.Task.created_at.desc())
-    )
-    rows = list(res.scalars().all())
+    query = select(models.Task).where(condition).order_by(models.Task.created_at.desc(), models.Task.id)
+    rows, total = await select_rows(session, query, page)
     out = [task_to_api(t) for t in rows]
     # Include AI state so cards identify automated work and its progress.
     ai = await ai_states(session, [t["id"] for t in out])
@@ -329,7 +394,7 @@ async def list_tasks(session: AsyncSession, owner_id: str,
         out = await task_access.decorate_many(session, rows, out, client)
         from . import task_requirements
         out = await task_requirements.decorate_many(session, client, rows, out)
-    return out
+    return list_result(out, total)
 
 
 async def get_task(session: AsyncSession, owner_id: str, tid: str,
@@ -449,24 +514,32 @@ async def create_task(
     from . import task_status, work_catalog
 
     data = await work_catalog.enrich_task_data(session, owner_id, data)
+    if "recur" in data:
+        data["recur"] = _validated_recur(data.get("recur"))
+    if data.get("assigneeUserId"):
+        data["assigneeUserId"] = await _validate_assignee(
+            session, owner_id, data.get("assigneeUserId"))
     status = str(data.get("status") or "todo")
     if status not in task_status.VALID:
         raise HTTPException(status_code=400, detail="需求状态不正确")
+    title = str(data.get("title") or "")
+    if not title.strip():
+        raise HTTPException(status_code=400, detail="请填写需求标题")
     identity = {"id": task_id} if task_id else {}
     t = models.Task(
         **identity,
         owner_client_id=owner_id,
-        title=data.get("title") or "未命名",
-        source=data.get("source") or "",
-        note=data.get("note") or "",
+        title=title[:500],
+        source=(data.get("source") or "")[:500],
+        note=(data.get("note") or "")[:50000],
         status=status,
         urgent=data.get("urgent"),
         important=data.get("important"),
-        handler=data.get("handler") or "me",
-        result=data.get("result") or "",
+        handler=(data.get("handler") or "me")[:200],
+        result=(data.get("result") or "")[:100000],
         origin=origin,
-        external_id=data.get("externalId"),
-        external_url=data.get("externalUrl"),
+        external_id=(data.get("externalId") or "")[:200],
+        external_url=(data.get("externalUrl") or "")[:2000],
     )
     from . import task_requirements
     data = dict(data)
@@ -559,6 +632,7 @@ async def update_task(session: AsyncSession, owner_id: str, tid: str, patch: dic
     from . import task_access
     await task_access.reserve_task_write(session, tid, owner_id)
     client = await session.get(models.Client, owner_id)
+    patch = dict(patch or {})
     t = (await session.execute(select(models.Task).where(
         models.Task.id == tid, task_access.owner_clause(client)
     ).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
@@ -569,12 +643,21 @@ async def update_task(session: AsyncSession, owner_id: str, tid: str, patch: dic
         from . import task_requirements
         if candidate is None or client is None or not await task_requirements.can_read(session, client, candidate):
             return None
-        return await task_requirements.update_shared(session, client, candidate, dict(patch or {}))
+        if "recur" in patch:
+            patch["recur"] = _validated_recur(patch.get("recur"))
+        if patch.get("assigneeUserId"):
+            patch["assigneeUserId"] = await _validate_assignee(
+                session, owner_id, patch.get("assigneeUserId"))
+        return await task_requirements.update_shared(session, client, candidate, patch)
     prev_status = t.status
     from . import requirement_timeline
     previous_definition = requirement_timeline.definition(t)
     previous_definition_version = int(t.requirement_version or 1)
-    patch = dict(patch or {})
+    if "recur" in patch:
+        patch["recur"] = _validated_recur(patch.get("recur"))
+    if patch.get("assigneeUserId"):
+        patch["assigneeUserId"] = await _validate_assignee(
+            session, owner_id, patch.get("assigneeUserId"))
     from . import task_requirements
     if patch.get("status") == "cancel" and t.status != "cancel":
         from . import task_maintenance
@@ -623,7 +706,7 @@ async def update_task(session: AsyncSession, owner_id: str, tid: str, patch: dic
         if k == "start":
             t.start_at = ms_to_dt(v)
         elif k == "due":
-            t.due_at = ms_to_dt(v)
+            t.due_at = ms_to_dt(_validate_due(v))
         elif k == "actualStart":
             t.actual_start_at = ms_to_dt(v)
         elif k == "actualEnd":
@@ -633,7 +716,7 @@ async def update_task(session: AsyncSession, owner_id: str, tid: str, patch: dic
         elif k == "remindAt":
             t.remind_at = ms_to_dt(v); t.reminded = False
         elif k == "tags":
-            t.tags = list(v or [])
+            t.tags = _validate_tags(v or [])
         elif k == "deps":
             t.deps = list(v or [])
         else:
@@ -707,14 +790,29 @@ async def purge_task_children(
     """
     if not tids:
         return {}, []
-    from sqlalchemy import delete as _del, update as _update
+    from sqlalchemy import delete as _del
+    from sqlalchemy import update as _update
+
     from .. import automation_models as am
+    from ..conversation_handoff_models import ConversationHandoff
 
     task_ids = list(dict.fromkeys(str(item) for item in tids if item))
     attachments = list((await session.execute(
         select(models.Attachment).where(models.Attachment.task_id.in_(task_ids))
     )).scalars().all())
     storage_refs = [(row.storage_key, row.backend) for row in attachments if row.storage_key]
+    # Retain each transfer's idempotency receipt, but end its ownership of the
+    # deleted task's archive in the same transaction as the attachment rows.
+    handoffs = await session.scalars(select(ConversationHandoff).where(
+        ConversationHandoff.task_id.in_(task_ids)).with_for_update())
+    for handoff in handoffs:
+        if handoff.storage_key:
+            storage_refs.append((handoff.storage_key, handoff.backend))
+            handoff.storage_key, handoff.backend = "", ""
+        pending = (handoff.options or {}).get("legacyBlob")
+        if isinstance(pending, dict) and pending.get("key") and pending.get("backend"):
+            # Content migration keeps this receipt until it completes post-commit cleanup.
+            storage_refs.append((pending["key"], pending["backend"]))
     run_ids = list((await session.execute(
         select(am.WorkflowRun.id).where(am.WorkflowRun.task_id.in_(task_ids))
     )).scalars().all())
@@ -726,6 +824,11 @@ async def purge_task_children(
     )).scalars().all())
 
     out: dict[str, int] = {}
+
+    # A claimed completion must not copy its former requester's snapshot onto a
+    # subsequently recreated task with the same client-provided ID.
+    jobs = models.TaskNotificationOutbox
+    await session.execute(_del(jobs).where(jobs.task_id.in_(task_ids), jobs.payload["closed"].as_boolean().is_(True)))
 
     # Keep the external Issue identity as a tombstone: polling must not recreate
     # a requirement the user deliberately deleted. Stop unsent start writeback.
@@ -784,10 +887,13 @@ async def purge_task_children(
     return out, storage_refs
 
 
-def _delete_task_storage(refs: list[tuple[str, str]]) -> None:
+async def _delete_task_storage(session: AsyncSession, refs: list[tuple[str, str]]) -> None:
     from . import storage
-    for key, backend in refs:
-        storage.delete(key, backend)
+    try:
+        await storage.delete_unreferenced_objects(session, refs)
+    except Exception as exc:
+        # Task deletion is committed. Keep the bytes if ownership cannot be checked.
+        log.warning("Task attachment cleanup deferred (%s)", type(exc).__name__)
 
 
 async def delete_task(session: AsyncSession, owner_id: str, tid: str) -> dict:
@@ -807,7 +913,7 @@ async def delete_task(session: AsyncSession, owner_id: str, tid: str) -> dict:
     task_notifications.enqueue(session, t, "task.deleted", recipients=[c.id for c in recipients],
         recipient_accounts={c.id: c.user_ref or "" for c in recipients}, previous_org=previous_org)
     await session.commit()
-    _delete_task_storage(storage_refs)
+    await _delete_task_storage(session, storage_refs)
     return {"ok": True}
 
 
@@ -834,15 +940,17 @@ async def clear_done(session: AsyncSession, owner_id: str) -> dict:
         task_notifications.enqueue(session, t, "task.deleted", recipients=[c.id for c in viewers],
             recipient_accounts={c.id: c.user_ref or "" for c in viewers})
     await session.commit()
-    _delete_task_storage(storage_refs)
+    await _delete_task_storage(session, storage_refs)
     return {"removed": len(ids)}
 
 
 async def batch_update(session: AsyncSession, owner_id: str, ids: list[str], patch: dict) -> dict:
-    count = rejected = 0
+    missing: list[str] = []
+    rejected = 0
     for tid in ids:
         result = await update_task(session, owner_id, tid, patch)
-        if result is not None:
-            count += 1
-            rejected += int(bool(result.get("statusTransition")))
-    return {"updated": count, "statusRejected": rejected}
+        if result is None:
+            missing.append(tid)
+        elif result.get("statusTransition"):
+            rejected += 1
+    return {"updated": len(ids) - len(missing), "statusRejected": rejected, "missing": missing}

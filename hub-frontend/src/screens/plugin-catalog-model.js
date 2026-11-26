@@ -27,6 +27,23 @@ export function pluginSource(plugin) {
   return { key: 'external', label: SOURCE_LABELS[plugin.sourceKind] || tx("外部导入") }
 }
 
+export function declaredAccess(version) {
+  const capabilities = version?.capabilities
+  const summary = capabilities?.permissionSummary
+  if (!summary) return tx('未提供权限清单')
+  const runtime = {
+    files: tx('本地文件读写'), repository: tx('仓库读写'), terminal: tx('命令执行'),
+    browser: tx('浏览与检索'), office: tx('办公文档'), computer: tx('操作电脑'),
+  }
+  const labels = (summary.runtime || []).map(key => runtime[key] || key)
+  if (summary.network) labels.push(tx('连接网络'))
+  if (summary.script) labels.push(tx('命令执行'))
+  if (summary.secretCount) labels.push(tx('密钥引用'))
+  if (summary.externalUiCount) labels.push(tx('外部页面'))
+  if (capabilities.mcpServers?.length) labels.push(tx('外部连接器'))
+  return labels.length ? tx('访问范围：{0}', [[...new Set(labels)].join(' · ')]) : tx('未声明额外访问')
+}
+
 export function pluginPublication(plugin) {
   const version = plugin.latestVersion
   if (!version) return { key: 'disabled', label: tx("暂无版本") }
@@ -56,15 +73,24 @@ export function pluginIssues(queues = {}) {
   return result
 }
 
-export function selectCatalog(items = [], queues = {}, filters = {}) {
+export function selectCatalog(items = [], queues = {}, filters = {}, pluginCounts = {}) {
   const { query = '', status = 'all', source = 'all', kind = 'all', category = 'all', sort = 'updated', catalogType = 'all' } = filters
   const issues = pluginIssues(queues)
   const needle = query.trim().toLocaleLowerCase()
-  const rows = items.map(plugin => catalogPlugin(plugin, getLocale())).map((plugin) => ({
-    plugin, source: pluginSource(plugin), kind: pluginKind(plugin),
-    category: String(plugin.catalogPolicy?.category || 'general'),
-    publication: pluginPublication(plugin), issues: issues[plugin.id] || [],
-  })).filter((row) => {
+  const rows = items.map(item => {
+    const plugin = catalogPlugin(item, getLocale())
+    const publication = pluginPublication(plugin)
+    const preview = issues[plugin.id] || []
+    const counts = pluginCounts[plugin.id]
+    const pending = counts?.review != null ? counts.review > 0
+      : publication.key === 'pending' || preview.some(issue => issue.kind === 'review')
+    return {
+      plugin, publication, pending, issues: preview,
+      source: pluginSource(plugin), kind: pluginKind(plugin),
+      category: String(plugin.catalogPolicy?.category || 'general'),
+      issueCount: counts?.attention ?? preview.length,
+    }
+  }).filter((row) => {
     if (catalogType === 'app' && row.kind.key !== 'app') return false
     if (catalogType === 'plugin' && row.kind.key === 'app') return false
     if (source !== 'all' && row.source.key !== source) return false
@@ -77,9 +103,13 @@ export function selectCatalog(items = [], queues = {}, filters = {}) {
       row.plugin.createdBy, row.category, ...(cap.skills || []), ...(cap.mcpServers || [])]
       .some((value) => String(value || '').toLocaleLowerCase().includes(needle))
   })
-  const matchesStatus = (row, key) => key === 'all' || (key === 'featured'
-    ? Boolean(row.plugin.catalogPolicy?.featured)
-    : key === 'attention' ? row.issues.length > 0 : row.publication.key === key)
+  function matchesStatus(row, key) {
+    if (key === 'all') return true
+    if (key === 'pending') return row.pending
+    if (key === 'attention') return row.issueCount > 0
+    if (key === 'featured') return Boolean(row.plugin.catalogPolicy?.featured)
+    return row.publication.key === key
+  }
   const counts = Object.fromEntries(CATALOG_FILTERS.map(([key]) => [key, rows.filter((row) => matchesStatus(row, key)).length]))
   const shown = rows.filter((row) => matchesStatus(row, status))
   shown.sort((a, b) => {

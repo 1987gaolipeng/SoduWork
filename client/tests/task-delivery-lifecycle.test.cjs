@@ -303,3 +303,74 @@ for (const [label, css, dependency] of [
   await assert.rejects(delivery.capture(f.handle, 'completed'), /不适合交付的路径/);
   assert.equal(fs.readFileSync(path.join(f.cwd, 'site/main.css'), 'utf8'), css);
 });
+
+test('only named current-turn files join inferred requirement delivery', async t => {
+  const f = workspace(t);
+  for (const name of ['report.md', 'check.py', 'helper.py', 'verify.py', 'old.py'])
+    f.write(name, 'test data', name === 'old.py' ? 1000 : Date.now());
+  const {outputPaths} = require('../main/pi-session/task-output-paths.cjs');
+  const paths = outputPaths({}, ['Deliver check.py as a standalone script.', 'Run helper.py to verify the report.',
+    'Do not deliver verify.py.', '请交付 old.py', 'Include helper.py in the test command.']);
+  const payload = await delivery.capture(f.handle, 'completed', {}, {paths});
+  assert.deepEqual(payload.files.map(file => file.name), ['check.py', 'report.md']);
+  assert.deepEqual([...paths.named].sort(), ['check.py', 'old.py']);
+  assert.deepEqual((await delivery.capture(f.handle, 'incomplete', {}, {paths})).files.map(file => file.name), ['report.md']);
+});
+
+test('a script can be the only requirement output, and absent mandatory members block partial submission', async t => {
+  const f = workspace(t);
+  f.write('tool.py', 'print(1)');
+  const {outputPaths} = require('../main/pi-session/task-output-paths.cjs');
+  const paths = outputPaths({expectedArtifacts: [{entry: 'tool.py'}, {path: 'optional.py', required: false}]}, []);
+  assert.deepEqual((await delivery.capture(f.handle, 'completed', {}, {paths})).files.map(file => file.name), ['tool.py']);
+  paths.required.add('missing.py');
+  await assert.rejects(delivery.capture(f.handle, 'completed', {}, {paths}), /missing\.py/);
+});
+
+test('settled Pi receipts use only their own completed journal to collect named files after the execution clock clears', async t => {
+  const f = workspace(t), journal = require('../main/conversation/file-change-journal');
+  f.write('older.py', '# historical');
+  const before = await journal.snapshot(f.cwd);
+  f.write('check.py', 'print(60)');
+  f.write('orders.csv', 'order,amount\nA,60');
+  const changes = journal.compare(before, await journal.snapshot(f.cwd), {turnId: 'first'});
+  const aliases = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-workspace-alias-'));
+  t.after(() => fs.rmSync(aliases, {recursive: true, force: true}));
+  const alias = path.join(aliases, 'work');
+  fs.symlinkSync(f.cwd, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  f.handle.cwd = alias;
+  const paths = require('../main/pi-session/task-output-paths.cjs').outputPaths({}, ['请交付 check.py、older.py。']);
+  f.handle.outputSnapshotAsync = async () => ({...await outputs.scanAsync(alias, 0, 0), fileChanges: changes});
+  const capture = async turnId => (await delivery.capture(f.handle, 'completed', {turnId}, {paths})).files.map(f => f.name).sort();
+  assert.deepEqual(await capture('first'), ['check.py', 'orders.csv']);
+  assert.deepEqual(await capture('next'), ['orders.csv']);
+  const originalRoot = changes.cwd;
+  changes.cwd = await fs.promises.realpath(aliases);
+  assert.deepEqual(await capture('first'), ['orders.csv']);
+  changes.cwd = originalRoot;
+  changes.truncated = true;
+  assert.deepEqual(await capture('first'), ['orders.csv']);
+});
+
+test('explicitly marked process files stay out of the submitted manifest', async t => {
+  const f = workspace(t);
+  f.write('check.py', 'print(1)'); f.write('summary.md', '# Report');
+  f.write('.soduwork/delivery.json', JSON.stringify({schemaVersion:1, deliverables:[{path:'summary.md'}], processFiles:['check.py']}));
+  const {outputPaths} = require('../main/pi-session/task-output-paths.cjs');
+  const paths = outputPaths({}, ['请交付 check.py']);
+  const payload = await delivery.capture(f.handle, 'completed', {}, {paths});
+  assert.deepEqual(payload.files.map(file => file.name), ['summary.md']);
+});
+
+test('named changed script omitted from a partial manifest is captured with its current bytes', async t => {
+  const f = workspace(t);
+  f.write('summary.md', '# Corrected report');
+  f.write('check.py', 'print("current")');
+  f.write('unused.py', 'print("private working note")');
+  f.write('.soduwork/delivery.json', JSON.stringify({schemaVersion:1, deliverables:[{path:'summary.md'}]}));
+  const {outputPaths} = require('../main/pi-session/task-output-paths.cjs');
+  const paths = outputPaths({}, ['`check.py` must run standalone']);
+  const result = await delivery.capture(f.handle, 'completed', {}, {paths});
+  assert.deepEqual(result.files.map(file => file.name), ['check.py', 'summary.md']);
+  assert.equal(Buffer.from(result.files[0].data, 'base64').toString(), 'print("current")');
+});

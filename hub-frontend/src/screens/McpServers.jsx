@@ -107,7 +107,7 @@ export default function McpServers({ templates = [] }) {
         </span>
         <span className="mcp-run-legend" aria-label={tx("连接器执行位置")}>
           <i><Icon name="grid" />{tx("HTTP 由 Hub 调用")}</i>
-          <i><Icon name="desktop" />{tx("stdio 由在线 Runner 执行")}</i>
+          <i><Icon name="monitor" />{tx("stdio 由在线 Runner 执行")}</i>
         </span>
         <span className="mcp-toolbar-actions">
           <input ref={importPicker} type="file" accept=".json,.toml,application/json"
@@ -214,9 +214,9 @@ function McpImportPreview({ value, busy, onClose, onImport }) {
   const summary = value.summary || {}
   const servers = value.servers || []
   return (
-    <Modal wide title={tx("导入连接器配置")} icon="plug" onClose={onClose}
-      foot={<>
-        <button className="btn btn-ghost" onClick={onClose}>{tx("取消")}</button>
+    <Modal wide title={tx("导入连接器配置")} icon="plug" busy={busy} onClose={onClose}
+      foot={dismiss => <>
+        <button className="btn btn-ghost" disabled={busy} onClick={dismiss}>{tx("取消")}</button>
         <span className="ml-auto" />
         <button className="btn btn-primary" disabled={busy || !summary.importable} onClick={onImport}>
           {busy ? tx("正在导入…") : tx("导入 ") + (summary.importable || 0) + tx(" 个连接")}

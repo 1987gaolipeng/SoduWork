@@ -46,6 +46,46 @@ class PersonalModelQuotaTests(unittest.IsolatedAsyncioTestCase):
         return await self.http.get("/api/v1/ai-proxy/config", headers=self.headers,
                                    params={"model": model, "agent": agent})
 
+    async def test_agent_provider_persists_through_setup_and_proxy_forwarding(self):
+        from app.api import agents
+        from app.services import multimodal_proxy
+        self.http._transport.app.include_router(agents.router)
+        second_key = secrets.token_urlsafe(24)
+        async with self.sessions.begin() as session:
+            session.add(models.ModelProvider(id="second", name="Second", kind="openai-compat",
+                base_url="http://127.0.0.1:1/v1", api_key=second_key, enabled=True))
+            session.add(models.ModelDef(id="second:shared-model", provider_id="second", name="shared-model"))
+        choice = {"key": "pi", "model": "shared-model", "providerId": "second"}
+        saved = await self.http.put("/api/v1/agent-setup/model", headers=self.headers, json=choice)
+        self.assertEqual(saved.status_code, 200, saved.text)
+        with patch.object(agents, "_machines", new=AsyncMock(return_value=[{"agents": [{"key": "pi"}], "execution": "runner", "env": {}}])):
+            setup = await self.http.get("/api/v1/agent-setup", headers=self.headers)
+        self.assertEqual(setup.status_code, 200, setup.text)
+        self.assertEqual(setup.json()["agents"][0]["modelProviderId"], "second")
+        self.assertEqual({row["providerId"] for row in setup.json()["models"] if row["name"] == "shared-model"},
+                         {"shared", "second"})
+        config = (await self.config("")).json()
+        self.assertEqual(config["providerKey"], "second")
+        response = SimpleNamespace(read=AsyncMock(return_value=b'{"choices":[]}'))
+        with patch.object(multimodal_proxy, "open_request", new=AsyncMock(return_value=response)) as forward:
+            sent = await self.http.post("/api/v1/ai-proxy/v1/chat/completions",
+                headers={"Authorization": "Bearer " + config["key"]},
+                json={"model": "shared-model", "messages": []})
+            self.assertEqual(sent.status_code, 200, sent.text)
+            routed, _, payload, _ = forward.await_args.args
+            self.assertEqual((routed["provider"], payload["model"]), ("second", "shared-model"))
+            self.assertTrue(routed["key"] == second_key)
+        async with self.sessions.begin() as session:
+            (await session.get(models.ModelProvider, "second")).enabled = False
+        for params in ({"agent": "pi"}, {"agent": "pi", "ignore_preference": "1"}):
+            unavailable = (await self.http.get("/api/v1/ai-proxy/config",
+                headers=self.headers, params=params)).json()
+            self.assertFalse(unavailable["ok"])
+            self.assertTrue(unavailable["providerPinned"])
+        cleared = await self.http.put("/api/v1/agent-setup/model", headers=self.headers, json={"key": "pi", "model": ""})
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual((await self.config("shared-model")).json()["providerKey"], "shared")
+
     async def receipt(self, count, *, key="mixed", token="", provider="shared", model="shared-model", **fields):
         return await self.http.post("/api/v1/usage/events", headers=self.headers, json={
             "sourceId": key, "provider": provider, "model": model, "agent": "pi",

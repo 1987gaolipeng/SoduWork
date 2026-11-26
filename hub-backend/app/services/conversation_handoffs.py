@@ -447,7 +447,8 @@ def public(row):
                       name=(target["runnerName"] or target["host"] or target["runnerId"]) +
                       " · " + agent.get("displayName", active["agentId"]))
 
-    return {"ok": True, "transferId": row.transfer_id, "taskId": row.task_id,
+    task_id = "" if row.phase == "aborted" and row.task_id == row.id else row.task_id
+    return {"ok": True, "transferId": row.transfer_id, "taskId": task_id,
             "accepted": bool(row.submitted_at),
             "acceptedAt": iso_utc(row.submitted_at) if row.submitted_at else "",
             "phase": row.phase, "status": receipt.get("state") or row.phase,
@@ -491,7 +492,8 @@ async def refresh(session, row):
                         row.phase, row.error = "prepared", "执行机已确认未启动，可重试或撤销交接"
                         row.receipt = {}
                     await session.commit()
-                elif probed.get("state") == "confirmed":
+                elif probed.get("state") == "confirmed" and await dispatch_reconcile.probe_result_current(
+                        session, candidate, probed):
                     # The Hub may have died between RPC acceptance and writing
                     # its receipt. A positive exact-ref probe repairs that gap.
                     task = await session.get(Task, row.task_id)
@@ -600,16 +602,22 @@ async def abort(session, client, transfer_id):
     row_id = identity(client.id, transfer_id)
     row = await session.get(Handoff, row_id)
     if not row:
+        # Reserve this transfer before prepare can publish a task. The internal
+        # fence key is distinct from the task ID allocated by prepare.
         row = Handoff(id=row_id, owner_client_id=client.id, owner_user_id=user.id,
-            transfer_id=transfer_id, task_id=str(uuid.uuid5(_NS, row_id + ":task")), phase="aborted")
+                      transfer_id=transfer_id, task_id=row_id, phase="aborted",
+                      request_hash="", options={}, source={})
         session.add(row)
         try:
             await session.commit()
             return public(row)
         except IntegrityError:
+            # A concurrent prepare or retry inserted the same transfer first.
             await session.rollback()
             await session.refresh(client)
-    row = await get(session, client, transfer_id)
+            row = await get(session, client, transfer_id)
+    if row.owner_user_id != client.user_ref:
+        raise HTTPException(403, "设备归属已变更")
     if row.phase == "aborted":
         return public(row)
     changed = await session.execute(update(Handoff).where(
@@ -619,9 +627,10 @@ async def abort(session, client, transfer_id):
         from .cloud_sync_notifications import mark
         mark(session, row.task_id, owner=row.owner_user_id)
     await session.commit()
-    if not changed.rowcount:
+    current = await get(session, client, transfer_id)
+    if not changed.rowcount and current.phase != "aborted":
         raise HTTPException(409, "云端已开始接管或尚在核对回执，不能恢复本地执行")
-    return public(await get(session, client, transfer_id))
+    return public(current)
 
 
 async def dispatch_record(session, task_id):
@@ -717,8 +726,11 @@ async def commit(session, client, transfer_id, sha256):
         conditions = [(Handoff.phase == "committing") &
                       (Handoff.commit_started_at < now - timedelta(minutes=2))]
     from sqlalchemy import or_
+    # SQLite reloads timestamps without tzinfo; evaluate the retry fence in SQL,
+    # then synchronize affected rows without a mixed Python datetime comparison.
     changed = await session.execute(update(Handoff).where(
-        Handoff.id == row.id, or_(*conditions)).values(phase="committing", commit_started_at=now, error="",
+        Handoff.id == row.id, or_(*conditions)).execution_options(synchronize_session="fetch").values(
+        phase="committing", commit_started_at=now, error="",
         submitted_at=row.submitted_at or now,
         receipt={"runnerBootId": picked.get("runnerBootId", ""), "runnerId": picked["runnerId"]}))
     if changed.rowcount:

@@ -22,7 +22,7 @@ async function mountRuntime(t) {
   t.mock.method(globalThis, 'clearInterval', (timer) => timers.delete(timer))
   const props = {
     providers: [], models: [],
-    catalogActions: React.createElement('button', { 'data-catalog-action': true }, '组织默认调用'),
+    catalogActions: React.createElement('button', { 'data-catalog-action': true }, '接一个服务'),
   }
   const dependencies = {
     '../api.js': { api: { modelRuntime() {

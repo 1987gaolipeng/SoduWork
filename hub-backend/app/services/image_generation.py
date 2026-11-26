@@ -11,47 +11,17 @@ import binascii
 import json
 import re
 import time
-from io import BytesIO
 from urllib.parse import urlparse
 
 import httpx
-from PIL import Image, UnidentifiedImageError
 
 from . import model_catalog, model_transport, storage, video_files, video_jobs
 from . import video_generation as media_network
+from .generated_image import MAX_BYTES, media_type, validate_image
 from .model_errors import UpstreamError
 
-MAX_BYTES = 32 * 1024 * 1024
 MAX_RESPONSE_BYTES = MAX_BYTES * 4 // 3 + 65536
 EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
-
-
-def validate_image(raw):
-    if not raw or len(raw) > MAX_BYTES:
-        raise ValueError("图片文件无效或超过 32MB")
-    try:
-        with Image.open(BytesIO(raw), formats=["PNG", "JPEG", "WEBP"]) as picture:
-            if picture.width * picture.height > 32_000_000 or getattr(picture, "n_frames", 1) != 1:
-                raise ValueError("图片分辨率超过 3200 万像素或包含多帧，请调整图片模型输出参数")
-            mime = Image.MIME[picture.format]
-            picture.verify()
-        # verify checks the container; load also detects incomplete pixel data.
-        with Image.open(BytesIO(raw), formats=["PNG", "JPEG", "WEBP"]) as picture:
-            picture.load()
-        return mime
-    except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError) as exc:
-        raise ValueError("图片文件无效或不完整，仅支持 PNG、JPEG、WebP") from exc
-
-
-def media_type(raw: bytes) -> str:
-    if raw.startswith(b"\x89PNG\r\n\x1a\n") and raw.endswith(b"\x00\x00\x00\x00IEND\xaeB`\x82"):
-        return "image/png"
-    if raw.startswith(b"\xff\xd8\xff") and raw.endswith(b"\xff\xd9"):
-        return "image/jpeg"
-    if len(raw) >= 20 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP" and \
-            int.from_bytes(raw[4:8], "little") + 8 == len(raw):
-        return "image/webp"
-    return ""
 
 
 def _payload(arguments, conf):
@@ -210,6 +180,15 @@ async def generate_image(session, client, arguments, *, conversation_id="", time
             if key:
                 await video_files.disk_call(storage.delete, key, backend)
         if isinstance(exc, UpstreamError):
+            if exc.status in (401, 403):
+                raise ValueError(f"图片生成服务返回 HTTP {exc.status}，请核对 API Key 和所选图片模型的访问权限") from exc
+            if exc.status in (400, 422):
+                raise ValueError(f"图片生成服务返回 HTTP {exc.status}，请核对图片模型 ID、请求格式和生成参数") from exc
+            if exc.status == 404:
+                base_path = urlparse(conf.get("base") or "").path.rstrip("/")
+                repeated = base_path and (endpoint == base_path or endpoint.startswith(base_path + "/"))
+                detail = "基础地址和生成接口路径包含相同的前缀，请检查是否重复填写" if repeated else "请核对基础地址、生成接口相对路径和该端点的图片模型名称"
+                raise ValueError(f"图片生成服务返回 HTTP 404，{detail}") from exc
             raise ValueError(f"图片模型服务调用失败（HTTP {exc.status}），请检查模型权限和图片接口参数") from exc
         if isinstance(exc, TimeoutError):
             raise ValueError("图片生成等待超时，请先检查服务端生成记录，避免重复扣费") from exc

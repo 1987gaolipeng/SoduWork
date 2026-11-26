@@ -106,6 +106,7 @@ const conversationSession = {
   revealOutput: (ref, p) => ipcRenderer.invoke('pi-session-reveal-output', ref, p),
   openOutputFolder: (ref) => ipcRenderer.invoke('pi-session-open-output-folder', ref),
   readOutput: (ref, p) => ipcRenderer.invoke('pi-session-read-output', ref, p),
+  skillFailureContext: (ref, id) => ipcRenderer.invoke('pi-session-skill-failure-context', ref, id),
   toolDetail: (ref, id) => ipcRenderer.invoke('pi-session-tool-detail', ref, id),
   writeOutput: (ref, p, text) => ipcRenderer.invoke('pi-session-write-output', ref, p, text),
   readOutputBinary: (ref, p) => ipcRenderer.invoke('pi-session-read-output-binary', ref, p),
@@ -192,7 +193,6 @@ const workPreview = {
   onComposerInbox: (cb) => ipcRenderer.on('work-preview-composer-inbox', (_e, msg) => { try { cb(msg || {}); } catch (_) {} }),
   onComposerHello: (cb) => ipcRenderer.on('work-preview-composer-hello', (_e, msg) => { try { cb(msg || {}); } catch (_) {} }),
   onComposerRefresh: (cb) => ipcRenderer.on('work-preview-composer-refresh', (_e, msg) => { try { cb(msg || {}); } catch (_) {} }),
-  composerState: (payload) => ipcRenderer.invoke('work-preview-composer-state', payload || {}),
   composerTurnSettled: () => ipcRenderer.invoke('work-preview-composer-turn-settled'),
   composerSubmitResult: payload => ipcRenderer.invoke('work-preview-composer-submit-result', payload),
   authorizeComposerAutomation: id => ipcRenderer.invoke('work-preview-composer-automation-authorize',id),
@@ -352,8 +352,9 @@ const soduWorkBridge = {
   selectHubEnvironment: (hub) => ipcRenderer.invoke('hub-environment-select', hub || ''),
   runtimeForm: () => { try { return ipcRenderer.sendSync('runtime-form'); } catch (e) { return 'packaged'; } },
   deviceAuthBootstrap: (payload) => timedPageInvoke('device-auth-bootstrap', payload || {}),
+  copyDevicePairingToken: scope => ipcRenderer.invoke('device-auth-copy-pairing', scope),
   deviceAuthMigrateLegacy: payload => timedPageInvoke('device-auth-migrate-legacy', payload),
-  clientDomainRead: (domain, scope) => timedPageInvoke('client-domain-read', domain, scope),
+  clientDomainRead: (domain, scope, fresh) => timedPageInvoke('client-domain-read', domain, scope, fresh === true),
   clientDomainInvalidate: (domain, scope) => ipcRenderer.invoke('client-domain-invalidate', domain, scope),
   onClientDomainChanged: callback => {
     const handler = (_event, value) => callback(value);

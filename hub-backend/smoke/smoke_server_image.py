@@ -60,6 +60,8 @@ ok("@anthropic-ai/claude-code" not in source,
 ok("opencode-ai" not in source and "fetch_opencode_assets" not in source,
    "server image must leave OpenCode installation to an explicit user action")
 
+ok("!hub-backend/requirements-image.txt" in ignored, "Docker context omits image dependencies")
+
 for required_ignore in ("**", "**/.git", "**/.env*", "**/node_modules", "**/*.db*"):
     ok(required_ignore in ignored, f"docker context does not exclude {required_ignore}")
 
@@ -86,8 +88,9 @@ if RUNTIME_MARKER in source:
         "apt-get install -y --no-install-recommends git openssh-client",
         "chromium fonts-noto-cjk",
         "postgresql-client-16",
+        "7zip aapt",
         "COPY --from=node-runtime /usr/local/lib/node_modules",
-        "COPY hub-backend/requirements.txt ./requirements.txt",
+        "COPY hub-backend/requirements.txt hub-backend/requirements-image.txt ./",
         "python -m pip install -r requirements.txt",
     ):
         ok(fragment in deps_stage, f"dependency base stage omits {fragment}")
@@ -99,7 +102,11 @@ if RUNTIME_MARKER in source:
            f"runtime stage rebuilds dependency layer ({forbidden}); it belongs in the deps stage")
     ok(deps_stage.count("python -m pip install -r requirements.txt") == 1,
        "dependency base must install its Python requirements exactly once")
-    requirements_copy = "COPY hub-backend/requirements.txt ./requirements.txt"
+    ok("command -v 7zz || command -v 7z" in runtime_stage
+       and "command -v aapt" in runtime_stage
+       and "rebuild the deps image or use HUB_BASE_IMAGE=deps" in runtime_stage,
+       "release image must reject dependency bases missing installer inspection tools")
+    requirements_copy = "COPY hub-backend/requirements.txt hub-backend/requirements-image.txt ./"
     ok(requirements_copy in runtime_stage,
        "release image keeps stale requirements from the published dependency base")
     runtime_install = re.search(

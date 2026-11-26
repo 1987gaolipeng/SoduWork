@@ -14,6 +14,7 @@ os.environ.setdefault("ADMIN_PASS", "repository-issue-isolated-test-password")
 from sqlalchemy import create_engine, delete, event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app import models, automation_models
+from app import conversation_handoff_models  # noqa: F401  Register archive owners for task deletion.
 from app.db import Base
 from app.repository_issue_models import RepositoryIssueLink, RepositoryIssueMember, RepositoryIssueSync
 from app.services import repository_issue_access as access, task_requirements, task_access, inbox

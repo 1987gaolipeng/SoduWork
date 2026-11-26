@@ -7,10 +7,12 @@ import hmac
 import json
 import re
 import time
-from types import SimpleNamespace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from starlette.websockets import WebSocket
@@ -18,7 +20,6 @@ from starlette.websockets import WebSocket
 from ..auth import sign_claims, verify_claims
 from ..models import AppSetting, Client, User
 from . import plugin_mcp_limits
-
 
 SESSION_TTL_SECONDS = 30 * 60
 AGENT_TTL_SECONDS = 12 * 60 * 60
@@ -101,6 +102,22 @@ def secret_matches(client: Client | None, secret: str) -> bool:
     return bool(have and secret and hmac.compare_digest(have, hash_secret(secret)))
 
 
+async def insert_new_device(session: AsyncSession, device: str, digest: str, *,
+                            platform: str | None = None) -> Client | None:
+    """Called only after account authentication or administrative pairing."""
+    insert = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+    return await session.scalar(insert(Client).values(
+        id=device, secret_hash=digest, auth_state="pending", platform=platform,
+    ).on_conflict_do_nothing(index_elements=[Client.id]).returning(Client))
+
+
+def issue_pairing_token(device: str, digest: str, auth_version: int | None, *,
+                        platform: str | None = None) -> str:
+    """The desktop hands this short-lived key commitment to an authorized administrator."""
+    return sign_claims({"cid": device, "digest": digest, "ver": auth_version, "platform": (platform or "")[:32]},
+                       token_type="device-pairing", ttl_seconds=600)
+
+
 def issue_session(client: Client) -> tuple[str, int]:
     if client.auth_state != "active" or not client.user_ref:
         raise DeviceAuthError("这台 SoduWork 还没有被管理员激活", 403)
@@ -112,14 +129,15 @@ def issue_session(client: Client) -> tuple[str, int]:
     return token, SESSION_TTL_SECONDS
 
 
-def issue_proxy_ticket(client: Client, *, quota_runtime: str = "", quota_binding: str = "") -> tuple[str, int]:
+def issue_proxy_ticket(client: Client, *, quota_runtime: str = "", quota_binding: str = "",
+                       provider_id: str = "") -> tuple[str, int]:
     if client.auth_state != "active" or not client.user_ref:
         raise DeviceAuthError("这台 SoduWork 还没有被管理员激活", 403)
     from .model_quota import managed_runtime
     runtime = managed_runtime(quota_runtime)
     token = sign_claims(
         {"cid": client.id, "uid": client.user_ref, "ver": int(client.auth_version or 1),
-         **({"quotaRuntime": runtime, "quotaBinding": quota_binding}
+         **({"quotaRuntime": runtime, "quotaBinding": quota_binding, "providerId": provider_id}
             if runtime and quota_binding else {})},
         ttl_seconds=AGENT_TTL_SECONDS,
         token_type="ai-proxy",
@@ -252,6 +270,7 @@ async def client_from_proxy_ticket(session: AsyncSession, token: str) -> Client:
         client = await _load_verified_client(session, principal, include_quota=True)
         client._proxy_quota_runtime = claims.get("quotaRuntime", "") if claims.get("quotaBinding") else ""
         client._proxy_quota_binding = claims.get("quotaBinding", "")
+        client._proxy_provider_id = claims.get("providerId", "")
         return client
     claims = verify_claims(token, token_type="ai-proxy")
     if not claims:
@@ -262,6 +281,7 @@ async def client_from_proxy_ticket(session: AsyncSession, token: str) -> Client:
     if client is not None:
         client._proxy_quota_runtime = claims.get("quotaRuntime", "") if claims.get("quotaBinding") else ""
         client._proxy_quota_binding = claims.get("quotaBinding", "")
+        client._proxy_provider_id = claims.get("providerId", "")
     return client
 
 

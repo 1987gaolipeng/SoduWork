@@ -26,6 +26,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base
 from .task_notification_models import TaskNotificationOutbox  # noqa: F401
 
+TASK_TITLE_MAX = 200
+REQUESTER_USER_ID_MAX = 36
+REQUESTER_NAME_MAX = 64
+REQUESTER_CONTACT_MAX = 200
+
 
 def _uuid() -> str:
     return str(uuid.uuid4())
@@ -158,7 +163,7 @@ class Task(Base):
     # New-entry limits belong to request validation, not lossy storage coercion.
     # SQLite does not enforce VARCHAR lengths; retain its historical declarations
     # so ORM metadata matches the migration without rebuilding referenced tables.
-    title: Mapped[str] = mapped_column(Text().with_variant(String(200), "sqlite"), default="未命名")
+    title: Mapped[str] = mapped_column(Text().with_variant(String(TASK_TITLE_MAX), "sqlite"), default="未命名")
     source: Mapped[str] = mapped_column(Text().with_variant(String(120), "sqlite"), default="")
     note: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(16), default="todo")  # todo|doing|done|cancel
@@ -186,14 +191,15 @@ class Task(Base):
     tags: Mapped[list] = mapped_column(JSON, default=list)
     created_by: Mapped[str | None] = mapped_column(String(36), default=None)        # Creator user ID.
     created_by_name: Mapped[str] = mapped_column(String(64), default="")            # Creator display-name snapshot.
+    review_recipient_user_id: Mapped[str | None] = mapped_column(String(36), default=None)
     assignee_user_id: Mapped[str | None] = mapped_column(String(36), default=None)  # Assigned or responsible user.
     # Requester identity used to send completion receipts to the person who raised the work.
     # Internal requesters use requester_user_id and receive direct client notifications.
     # External requesters use name/contact details; completion is relayed through the registrar.
     # When creator and assignee differ, default the requester to the creator unless explicitly specified.
-    requester_user_id: Mapped[str | None] = mapped_column(String(36), default=None)
-    requester_name: Mapped[str] = mapped_column(String(64), default="")             # Requester display name for internal or external requests.
-    requester_contact: Mapped[str] = mapped_column(String(200), default="")         # External email, phone, or ticket reference; empty for internal requesters.
+    requester_user_id: Mapped[str | None] = mapped_column(String(REQUESTER_USER_ID_MAX), default=None)
+    requester_name: Mapped[str] = mapped_column(String(REQUESTER_NAME_MAX), default="")  # Requester display name.
+    requester_contact: Mapped[str] = mapped_column(String(REQUESTER_CONTACT_MAX), default="")  # Email, phone, or ticket reference.
     recur: Mapped[str | None] = mapped_column(String(16), default=None)             # Recurrence: daily, weekly, monthly, or None.
     recur_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)  # Next recurrence deadline.
     remind_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)  # Time for a prominent desktop reminder.
@@ -257,7 +263,12 @@ def _freeze_task_owner_on_transfer(mapper, connection, task):
         _freeze_task_owner_on_insert(mapper, connection, task)
 
 
-class Project(Base):
+class BusinessRecord:
+    data_source: Mapped[str] = mapped_column(String(12), default="legacy", server_default="legacy")
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+
+
+class Project(BusinessRecord, Base):
     """Project grouping for tasks sharing a goal, with dependencies controlling execution order."""
     __tablename__ = "project"
 
@@ -278,7 +289,7 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class Repo(Base):
+class Repo(BusinessRecord, Base):
     """A code repository within a project. Store local_dir relative to each device's configured
     workspace and resolve absolute paths at dispatch. Keep repository credentials outside this
     business record.
@@ -482,7 +493,7 @@ class IntegrationBinding(Base):
 
 # Organizational structure, users, and RBAC roles.
 
-class OrgUnit(Base):
+class OrgUnit(BusinessRecord, Base):
     """Department-tree node; an empty parent_id identifies a root department."""
     __tablename__ = "org_unit"
 
@@ -504,7 +515,7 @@ class Role(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class Position(Base):
+class Position(BusinessRecord, Base):
     """Professional profile describing expertise independently of role permissions, workflow
     responsibilities, and executors.
     """
@@ -910,6 +921,7 @@ class User(Base):
     role_id: Mapped[str | None] = mapped_column(String(36), default=None)
     is_super: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_test_account: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     auth_version: Mapped[int] = mapped_column(Integer, default=1)
     # Professional positions are independent of permissions; multiple positions support workflow routing.
     positions: Mapped[list] = mapped_column(JSON, default=list)   # List of Position IDs.
@@ -945,6 +957,8 @@ class AIUsageEvent(Base):
     runner_id: Mapped[str] = mapped_column(String(80), default="", index=True)
     source_type: Mapped[str] = mapped_column(String(32), default="chat", index=True)
     source_id: Mapped[str] = mapped_column(String(180), default="", index=True)
+    # Device chat claims are resolved against the account conversation directory at read time.
+    reported_chat_session_id: Mapped[str | None] = mapped_column(String(180))
     # Client-reported conversation title, including later renames, for the recent AI work list.
     # Runner tasks fall back to the task title.
     source_title: Mapped[str] = mapped_column(String(200), default="")

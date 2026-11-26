@@ -599,12 +599,19 @@ async def create_team_task(session: AsyncSession, client: models.Client, data: d
         return {"ok": False, "reason": "no_title"}
     # Inbox mode creates an unassigned task in the selected team pool.
     if data.get("toInbox"):
+        if data.get("assigneeUserId") or data.get("assigneeUserIds"):
+            return {"ok": False, "reason": "inbox_with_assignee"}
         from . import inbox as inbox_svc
-        org_id = data.get("teamOrgId")
-        if org_id is not None and (not isinstance(org_id, str) or len(org_id) > 36):
+        raw_org_id = data.get("teamOrgId")
+        if raw_org_id is not None and (not isinstance(raw_org_id, str) or len(raw_org_id) > 36):
             return {"ok": False, "reason": "invalid_team_org_id"}
-        org_id = org_id or (me.org_id if me else None)
+        org_id = raw_org_id or (me.org_id if me else None)
         if not org_id:
+            return {"ok": False, "reason": "out_of_scope"}
+        if await session.get(models.OrgUnit, org_id) is None:
+            return {"ok": False, "reason": "out_of_scope"}
+        scope = await rbac.scope_org_ids(session, me)
+        if scope is not None and org_id not in scope:
             return {"ok": False, "reason": "out_of_scope"}
         me_name = me.display_name or me.username
         payload = {
@@ -624,7 +631,9 @@ async def create_team_task(session: AsyncSession, client: models.Client, data: d
     if not uids:
         return {"ok": False, "reason": "no_assignee"}
 
-    scope = await rbac.subtree_org_ids(session, me.org_id) if me.org_id else set()
+    # Superusers are unrestricted. Regular managers may dispatch only within
+    # their organization subtree.
+    scope = await rbac.scope_org_ids(session, me)
     me_name = me.display_name or me.username
     creator = (me.id, me_name)
     # Use ordinary tasks and requester receipts instead of the retired FlowTemplate assignment flow.
@@ -646,7 +655,7 @@ async def create_team_task(session: AsyncSession, client: models.Client, data: d
     created, skipped, assigned_users = [], [], 0
     for uid in uids:
         target = await session.get(models.User, uid)
-        if target is None or target.org_id not in (scope or set()):
+        if target is None or (scope is not None and target.org_id not in scope):
             skipped.append({"userId": uid, "reason": "out_of_scope"})
             continue
         if not target.is_active:

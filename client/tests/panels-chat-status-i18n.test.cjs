@@ -58,6 +58,26 @@ test('Runner admission positions and long startup diagnostics translate without 
   }
 });
 
+test('unconfirmed cloud queue notices translate in every supported locale and follow locale changes', () => {
+  const status = require('../components/panels/panels-chat-status');
+  const source = '排队回执尚未确认，已有任务已保留；请先核对执行机，避免重复安排。';
+  const expected = {
+    'zh-CN': source,
+    'en-US': 'The queue receipt is not yet confirmed. The existing task is preserved; check the Runner before assigning it again.',
+    'ja-JP': 'キューへの登録確認はまだ取れていません。既存のタスクは保持されています。再度割り当てる前に実行機を確認してください。',
+    'ko-KR': '대기열 접수가 아직 확인되지 않았습니다. 기존 작업은 보관됩니다. 다시 할당하기 전에 실행기를 확인하세요.',
+  };
+  const i18n = loadI18n('en-US');
+  for (const locale of ['zh-CN', 'en-US', 'ja-JP', 'ko-KR', 'en-US']) {
+    i18n.setLocale(locale, { persist: false, broadcast: false });
+    const snapshot = { status: 'queued', statusText: source, execution: { queuePosition: 3, running: false } };
+    assert.equal(status.work(snapshot), expected[locale]);
+    const view = status.createThinking(() => ({ snap: snapshot }));
+    assert.ok(view.statusHtml(true).includes(expected[locale]));
+    assert.doesNotMatch(view.metricsHtml(true), /处理中|tokens/);
+  }
+});
+
 test('completed summaries explain missing timing in every supported non-Chinese locale', () => {
   const summary = require('../components/panels/chat-turn-summary');
   const expected = {'en-US': 'Not recorded', 'ja-JP': '未記録', 'ko-KR': '미기록'};

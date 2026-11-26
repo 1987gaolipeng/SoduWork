@@ -110,6 +110,8 @@ function create(deps) {
     if (win && !win.isDestroyed()) win.webContents.send('file-open-pending');
   };
   function enqueue(files) {
+    // The existing quit policy owns handoff; this broker must not reveal an exiting workspace.
+    if (deps.deferLaunch?.(files)) return 0;
     for (const value of files || []) {
       const file = String(value || '');
       if (!file || !path.isAbsolute(file) || /[\x00-\x1f]/.test(file)) continue;

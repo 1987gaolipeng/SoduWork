@@ -751,6 +751,7 @@
     "请选择有效的时区": "Choose a valid time zone",
     '请选择分钟（00–59）': 'Choose a minute (00–59)',
     '请选择至少一个星期': 'Select at least one weekday',
+    '月底跨日后的执行日期因月份而异，请选择实际执行日期': 'The date after this evening varies by month. Select the actual execution dates.',
     '请选择至少一个月度日期': 'Select at least one day of the month',
     '月度无效日期处理方式无效': 'Invalid handling for unavailable month days',
     '请选择有效的执行日期和时间；夏令时跳过或重复的时刻请调整后重试': 'Choose a valid execution date and time. Adjust times skipped or repeated by daylight saving time and try again.',

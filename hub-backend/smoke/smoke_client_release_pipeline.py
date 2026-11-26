@@ -40,6 +40,7 @@ def main():
         from fastapi import FastAPI
         import uvicorn
         from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+        from app.account_models import EmailRateLimit
         from app.api import admin, client_release_notes, client_updates, download
         from app.auth import hash_password
         from app.db import Base, get_session
@@ -53,7 +54,7 @@ def main():
             async with engine.begin() as conn:
                 await conn.run_sync(lambda c: Base.metadata.create_all(c,
                     tables=[Role.__table__, User.__table__, ClientRelease.__table__, ClientReleaseNote.__table__,
-                            AuditLog.__table__]))
+                            AuditLog.__table__, EmailRateLimit.__table__]))
             async with sessions() as session:
                 session.add(Role(id="publisher-role", name="CI publisher", permissions=["client.update"]))
                 session.add(User(id="publisher-user", username="publisher", display_name="Fixture publisher",

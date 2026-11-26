@@ -402,9 +402,21 @@ async function run(root, reportFile, archive, extractor, options = {}) {
       if (report.retrySamples.length < 100) report.retrySamples.push(details);
     } });
     report.ok = true;
-    console.log('Checked ' + report.fileCount + ' files' +
-      (report.contentCheckSkips.length ? '; bootstrap archive content check skipped (existence-only)' : '') + (report.noticeDifferences.length ?
-      '; ' + report.noticeDifferences.length + ' public license notices verified from the verified redistribution bundle' : ''));
+    if (options.installationMode) {
+      const skipped = report.contentCheckSkips.map(item => item.path);
+      const summary = 'files=' + report.fileCount + ' content-skips=' + skipped.length +
+        (skipped.length ? ' skipped=' + skipped.join(',') : '') +
+        ' static-text-differences=' + report.staticTextDifferences.length +
+        ' notice-differences=' + report.noticeDifferences.length;
+      console.log(summary);
+      if (options.resultLog) {
+        try { fs.appendFileSync(options.resultLog, 'payload-verification-summary ' + summary + '\r\n'); }
+        catch (error) { console.error('Unable to append verification summary: ' + error.code); }
+      }
+    } else {
+      console.log('Checked ' + report.fileCount + ' files' + (report.noticeDifferences.length ?
+        '; ' + report.noticeDifferences.length + ' public license notices verified from the verified redistribution bundle' : ''));
+    }
   } catch (error) {
     report.error = { message: error.message, code: error.code, ...error.details };
     report.errorCount = error.errorCount || 1;
@@ -421,9 +433,11 @@ async function run(root, reportFile, archive, extractor, options = {}) {
 }
 module.exports = { verify, run, createProgressWriter, isNoticePath, noticeCandidate, NOTICE_BUNDLE, NOTICE_LIMIT, STATIC_TEXT_BUNDLE, isStaticTextPath };
 const progressArgument = process.argv.indexOf('--progress-file', 4);
+const resultLogArgument = process.argv.indexOf('--result-log', 4);
 if (require.main === module) run(path.resolve(process.argv[2]), process.argv[3], process.argv[4], process.argv[5], {
   installationMode: process.argv.slice(4).includes('--installation'),
   progressFile: progressArgument === -1 ? undefined : process.argv[progressArgument + 1],
+  resultLog: resultLogArgument === -1 ? undefined : process.argv[resultLogArgument + 1],
 }).then(code => {
   process.exitCode = code;
 }).catch(error => { console.error(error.message); process.exitCode = 2; });

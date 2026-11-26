@@ -29,6 +29,7 @@ async function checkGovernanceOverview({ win, js, waitFor, sleep, screenshot, ch
       { id: 'gov-disabled', name: integrationNames[2], type: 'generic', enabled: false, taskCount: 0 },
     ],
     '/admin/unassigned': [],
+    '/admin/operations/overview': { work: { pendingApprovals: 3 } },
     '/admin/delivery/board': { counts: { attention: 1 } },
   }
   const prior = new Map(Object.keys(replacement).map(key => [key, { exists: Object.hasOwn(fixtures, key), value: fixtures[key] }]))
@@ -65,9 +66,9 @@ async function checkGovernanceOverview({ win, js, waitFor, sleep, screenshot, ch
           labels: [...document.querySelectorAll('.gov-page h3,.gov-metric>span,.gov-metric>small,.gov-dept-head>span,.gov-attention-row b,.gov-attention-row small,.gov-network-ledger span')].map(el => el.textContent),
         }
       }.toString() + ')()')
-      record('governance attention contains only requirement risks ' + locale,
-        translated.attention.length === 2 && translated.attention.every(row => row.count === '1') &&
-        translated.risk === '2' && translated.attentionTotal.replace(/[^0-9]/g, '') === '2' && translated.attentionActions === 0,
+      record('governance shows pending approvals alongside distinct issue risks ' + locale,
+        translated.attention.map(row => row.count).join(',') === '3,1,1' &&
+        translated.risk === '2' && translated.attentionTotal.replace(/[^0-9]/g, '') === '5' && translated.attentionActions === 1,
         { rows: translated.attention, risk: translated.risk, total: translated.attentionTotal, actions: translated.attentionActions })
       record('governance does not request delivery board ' + locale,
         !requests.slice(requestStart).some(request => request.path === '/api/v1/admin/delivery/board'),

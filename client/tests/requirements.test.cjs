@@ -241,7 +241,7 @@ test('human attention distinguishes assigned work, running agents, returned resu
   const requester={...task,myRoles:['requester'],ai:{state:'done'}};
   assert.equal(R.actionable(requester),false,'a role alone does not grant review permission');
   assert.equal(R.actionable(requester,ctx),false,'an executor/requester cannot approve delivery review');
-  assert.equal(R.nextStep(requester,ctx).text,'等待需求创建人确认交付');
+  assert.equal(R.nextStep(requester,ctx).text,'已提交验收，等待验收人处理');
   const creator={...task,myRoles:['creator'],ai:{state:'done'}};
   assert.equal(R.actionable(creator,ctx),true,'the requirement creator can approve delivery review');
   assert.equal(R.stage(requester),'delivering','agent completion is not business completion');

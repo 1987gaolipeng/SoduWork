@@ -7,7 +7,9 @@ const AGENT_NAMES = {
 }
 
 export const numeric = (value) => Math.max(0, Number(value) || 0)
-export const precise = (value) => numeric(value).toLocaleString(getLocale())
+export const precise = (value) => (
+  typeof value === 'string' && /^\d+$/.test(value) ? BigInt(value) : numeric(value)
+).toLocaleString(getLocale())
 export const count = (value) => new Intl.NumberFormat(getLocale(), {
   notation: numeric(value) >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1,
 }).format(numeric(value))

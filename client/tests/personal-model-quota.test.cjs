@@ -114,7 +114,9 @@ test('Pi call tokens survive archival receipts but never appear in public models
   assert.equal(model.quotaScope, 'platform');
   const source = fs.readFileSync(path.join(__dirname, '../main/pi-session/ipc.js'), 'utf8');
   const startAt = source.indexOf('function _contextSnapshot('), endAt = source.indexOf('\nfunction _send(', startAt);
-  const contextSnapshot = vm.runInNewContext('(' + source.slice(startAt, endAt) + ')');
+  const contextSnapshot = vm.runInNewContext('(' + source.slice(startAt, endAt) + ')', {
+    require: require('node:module').createRequire(path.join(__dirname, '../main/pi-session/ipc.js')),
+  });
   for (const view of [model, acc.uiSnapshot(), acc.uiSnapshot({ messageLimit: 2000 }),
     require('../main/pi-session/snapshot-window').limitSnapshot(restored.snapshot()),
     contextSnapshot({}, restored.snapshot()), restored.snapshot().messages]) {

@@ -103,12 +103,19 @@ async def take_limits(session, limits):
         raise
 
 
+async def reserve_admin_login(session, account, remote_ip):
+    """Reserve failure slots atomically in the caller's transaction."""
+    current = now()
+    await _take_limit(session, "admin-login-ip:" + remote_ip, 30, 300, current)
+    await _take_limit(session, "admin-login-account:" + account, 10, 300, current)
+
+
 async def password_budget(session, account, device_id):
     await take_limits(session, [("password-account:" + account.lower(), 10, 300),
                                ("password-device:" + device_id, 30, 300)])
 
 
-async def request_challenge(session, *, email, purpose, device_id, user_id=None, remote_ip=""):
+async def request_challenge(session, *, email, purpose, device_id, user_id=None, remote_ip="", rate_device_id=None):
     from . import account_mail, client_access
     email = normalize_email(email)
     if purpose not in PUBLIC_PURPOSES | SENSITIVE_PURPOSES:
@@ -118,7 +125,7 @@ async def request_challenge(session, *, email, purpose, device_id, user_id=None,
     if not await account_mail.mail_ready(session):
         raise ClientAccessError("邮件服务尚未配置，请联系管理员", code="MAIL_NOT_READY", status=503)
     limits = [("send-cooldown:" + purpose + ":" + email, 1, RESEND_SECONDS),
-              ("send-email:" + email, 10, 3600), ("send-device:" + device_id, 30, 3600)]
+              ("send-email:" + email, 10, 3600), ("send-device:" + (rate_device_id or device_id), 30, 3600)]
     if remote_ip:
         limits.append(("send-ip:" + remote_ip, 60, 3600))
     await take_limits(session, limits)
@@ -216,9 +223,18 @@ async def verified_user(session, email):
                                                    User.email_verified_at.is_not(None)))
 
 
-async def public_policy(session):
+async def public_policy(session, *, compact=False):
     from .account_legal import documents
     legal = await documents(session)
-    return {"codeExpiresIn": CODE_TTL, "codeRetryAfter": RESEND_SECONDS,
-            "requiredConsentVersions": legal["requiredConsentVersions"],
-            "legalDocuments": legal["documents"]}
+    policy = {"codeExpiresIn": CODE_TTL, "codeRetryAfter": RESEND_SECONDS,
+              "requiredConsentVersions": legal["requiredConsentVersions"]}
+    if compact:
+        # Registration needs the locale of each current revision even before
+        # the user opens the document reader. Fetch the bodies on demand.
+        policy["legalDocumentLocales"] = [
+            {key: doc[key] for key in ("key", "version", "locale", "defaultLocale")}
+            for doc in legal["documents"]
+        ]
+    else:
+        policy["legalDocuments"] = legal["documents"]
+    return policy

@@ -1,3 +1,4 @@
+import * as catalogSearch from '../src/screens/repository-catalog-search.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createComponentHarness } from './helpers/react-harness.mjs'
@@ -7,7 +8,7 @@ const source = new URL('../src/screens/Repositories.jsx', import.meta.url)
 const button = (page, label) => page.nodes((node) => node.type === 'button' && node.props.children === label)[0]
 const username = (page) => page.nodes((node) => node.type === 'input' && node.props.type !== 'password')[0]
 const secret = (page) => page.nodes((node) => node.type === 'input' && node.props.type === 'password')[0]
-async function host(t, methods = {}, account = {}) {
+async function host(t, methods = {}, account = {}, expand = true) {
   setLocale('zh-CN')
   const notices = [], probes = [], saves = []
   let reloads = 0
@@ -18,13 +19,23 @@ async function host(t, methods = {}, account = {}) {
       testPullAccount: async (id, body) => { probes.push({ id, body }); return { ok: true, detail: 'Verified' } },
       savePullAccount: async (id, body) => { saves.push({ id, body }); return { ok: true } }, ...methods,
     } }, '../FilterControls.jsx': { FilterInput: 'input' }, '../ui.jsx': { Icon: 'svg', Loading: 'loading', Modal: 'dialog', SelectMenu: 'select', toast: (value) => notices.push(value) },
-    './project-governance.css': {}, './repositories.css': {}, './RepositoryIssueSync.jsx': { default: 'issue-dialog', RepositoryIssueSyncStatus: 'issue-status' } },
+    './repository-catalog-search.js': catalogSearch, './project-governance.css': {}, './repositories.css': {}, './RepositoryIssueSync.jsx': { default: 'issue-dialog', RepositoryIssueSyncStatus: 'issue-status' } },
   })
   t.after(() => page.unmount())
   page.render()
-  page.act(() => page.nodes((node) => node.type === 'button' && node.props.className?.startsWith('rc-acct'))[0].props.onClick())
+  if (expand && !username(page)) page.act(() => page.nodes((node) => node.type === 'button' && node.props.className?.startsWith('rc-acct'))[0].props.onClick())
   return { page, notices, probes, saves, reloads: () => reloads }
 }
+
+test('a source without an account offers its editable credentials on arrival', async (t) => {
+  const { page } = await host(t, {}, { pullAccountSet: false }, false)
+  assert.ok(secret(page))
+  const toggle = () => page.nodes((node) => node.props.className?.startsWith('rc-acct'))[0]
+  assert.equal(toggle().props['aria-expanded'], true)
+  page.act(() => toggle().props.onClick())
+  assert.equal(toggle().props['aria-expanded'], false)
+  assert.equal(secret(page), undefined)
+})
 
 test('renaming with a retained secret tests and saves the same account draft', async (t) => {
   const { page, probes, saves } = await host(t)
@@ -124,4 +135,29 @@ test('a save response after unmount cannot probe or refresh a different account 
   assert.deepEqual(notices, [])
   assert.deepEqual(probes, [])
   assert.equal(reloads(), 0)
+})
+
+test('the sync action describes scope and duration and distinguishes an empty successful scan', async (t) => {
+  const { page } = await host(t, {}, { repositorySyncAt: 1700000000000, repositorySyncOk: true, repositorySyncCount: 0 })
+  const action = page.nodes(node => node.type === 'button' && node.props.children?.includes?.('立即同步'))[0]
+  assert.match(action.props.title, /此代码源.*几分钟.*项目映射/)
+  assert.equal(page.nodes(node => node.props.id === action.props['aria-describedby'])[0].props.children, action.props.title)
+  assert.match(JSON.stringify(page.render()), /未发现仓库/)
+  page.render({ source: { id: 'source', type: 'gitlab', repositorySyncAt: 1700000000000, repositorySyncOk: true, repositorySyncCount: 2 },
+    syncError: 'request timed out' })
+  assert.match(JSON.stringify(page.render()), /同步成功/)
+  assert.equal(page.nodes(node => node.props.role === 'status')[0].props.children, '本次同步请求：request timed out')
+  assert.equal(page.nodes(node => node.props.role === 'alert').length, 0)
+})
+
+test('catalog progress names the reported stage and shows elapsed time apart from announcements', async (t) => {
+  setLocale('zh-CN')
+  const page = await createComponentHarness(source, { exportName: 'SyncProgress', privateExports: ['SyncProgress'],
+    dependencies: { '../api.js': {}, '../FilterControls.jsx': {}, '../ui.jsx': {},
+      './repository-catalog-search.js': catalogSearch, './project-governance.css': {}, './repositories.css': {}, './RepositoryIssueSync.jsx': {} } })
+  t.after(() => page.unmount())
+  assert.equal(page.nodes(node => node.props.role === 'status')[0].props.children, '等待同步结果')
+  page.render({ stage: 'listing' })
+  assert.equal(page.nodes(node => node.props.role === 'status')[0].props.children, '正在读取仓库列表')
+  assert.match(page.nodes(node => node.props.role === 'timer')[0].props.children, /已用 \d+ 秒/)
 })

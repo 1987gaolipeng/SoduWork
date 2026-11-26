@@ -104,6 +104,100 @@ class QuotaPlanTests(unittest.IsolatedAsyncioTestCase):
         await self.assign({"revision": 1, "mode": "inherit"})
         self.assertEqual((await self.status())["limit"], 99999)
 
+    async def test_plan_preview_aggregates_individual_balances_in_scope_without_saving(self):
+        catalog = await self.configure(200)
+        await self.assign()
+        await self.assign(uid="other")
+        self.assertEqual((await self.receipt(120)).status_code, 200)
+        plan = {**catalog["plans"][1], "totalLimit": 100}
+        body = {"revision": catalog["revision"], "plan": plan}
+        url = "/api/v1/admin/quotas/plans/preview"
+        response = await self.http.post(url, headers=self.headers, json=body)
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertEqual([result[k] for k in ("previousLimit", "newLimit", "affectedMembers", "used",
+                                              "remaining", "pausedMembers", "scopeLimited")],
+                         [200, 100, 2, 120, 100, 1, False])
+        scoped = {"Authorization": "Bearer " + sign_token("scoped")}
+        visible = (await self.http.post(url, headers=scoped, json=body)).json()
+        self.assertEqual((visible["affectedMembers"], visible["remaining"], visible["scopeLimited"]), (1, 0, True))
+        self.assertEqual((await self.status())["limit"], 200)
+        stale = await self.http.post(url, headers=self.headers, json={**body, "revision": 0})
+        self.assertEqual(stale.status_code, 409)
+        plan.update(totalLimit=None, models=[{"provider": "provider", "model": "a", "limit": 120}])
+        partial = (await self.http.post(url, headers=self.headers, json=body)).json()
+        self.assertEqual((partial["remaining"], partial["pausedMembers"], partial["modelLimitedMembers"]),
+                         (None, 0, 1))
+
+    async def test_preview_does_not_persist_settings_or_audit_events(self):
+        catalog = await self.configure(200)
+        await self.assign()
+        plan = {**catalog["plans"][1], "totalLimit": 100}
+        previews = (
+            ("plans/preview", {"revision": catalog["revision"], "plan": plan}),
+            ("members/owner/preview", {"revision": 1, "mode": "custom", "custom": {"totalLimit": 50}}),
+        )
+
+        async def persisted_state():
+            async with self.sessions() as session:
+                settings = dict((await session.execute(select(models.AppSetting.key, models.AppSetting.value))).all())
+                audit_count = await session.scalar(select(func.count()).select_from(models.AuditLog))
+                return settings, audit_count
+
+        before = await persisted_state()
+        for path, body in previews:
+            response = await self.http.post("/api/v1/admin/quotas/" + path, headers=self.headers, json=body)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(await persisted_state(), before)
+
+    async def test_preview_uses_original_trial_grant_and_target_usage_window(self):
+        async with self.sessions() as session:
+            await qp.register_trial(session, "owner")
+            session.add(models.AIUsageEvent(id="old-usage", idempotency_key="old-usage", billing_user_id="owner",
+                        total_tokens=70, occurred_at=datetime.now(timezone.utc) - timedelta(days=40)))
+            await session.commit()
+        await self.assign({"revision": 1, "mode": "plan", "planId": "standard"})
+        self.assertEqual((await self.receipt(30)).status_code, 200)
+        trial = {**qp.DEFAULT_CATALOG["plans"][0], "totalLimit": 80}
+        preview = await self.http.post("/api/v1/admin/quotas/plans/preview", headers=self.headers,
+                                        json={"revision": 0, "plan": trial})
+        self.assertEqual(preview.status_code, 200, preview.text)
+        future = preview.json()
+        self.assertEqual((future["affectedMembers"], future["used"], future["remaining"]), (0, 0, 80))
+        url = "/api/v1/admin/quotas/members/owner/preview"
+        restore = {"revision": 2, "mode": "plan", "planId": "trial"}
+        result = (await self.http.post(url, headers=self.headers, json=restore)).json()
+        self.assertEqual((result["newLimit"], result["used"], result["remaining"]), (100000, 100, 99900))
+        custom = {"revision": 2, "mode": "custom", "custom": {"totalLimit": None, "restrictModels": True,
+                  "models": [{"provider": "provider", "model": "a", "limit": 30}]}}
+        after = (await self.http.post(url, headers=self.headers, json=custom)).json()
+        self.assertEqual((after["previousLimit"], after["newLimit"], after["used"], after["remaining"],
+                          after["pausedMembers"], after["reason"]), (1000000, None, 30, None, 1, "model_exhausted"))
+        self.assertTrue(after["models"][0]["exceeded"])
+        self.assertEqual((await self.status())["planId"], "standard")
+        self.assertEqual((await self.http.post(url, headers={"Authorization": "Bearer " + sign_token("owner")},
+                                               json=custom)).status_code, 403)
+        denied = await self.http.post(url.replace("/owner/", "/other/"),
+                    headers={"Authorization": "Bearer " + sign_token("scoped")}, json=restore)
+        self.assertEqual(denied.status_code, 403)
+
+    async def test_member_assignment_cannot_save_a_plan_changed_since_preview(self):
+        url = "/api/v1/admin/quotas/members/owner"
+        body = {"revision": 0, "mode": "plan", "planId": "standard", "catalogRevision": 0}
+        before = await self.http.post(url + "/preview", headers=self.headers, json=body)
+        self.assertEqual(before.status_code, 200, before.text)
+        self.assertEqual(before.json()["newLimit"], 1000000)
+        catalog = await self.configure(75)
+        for call in (self.http.post(url + "/preview", headers=self.headers, json=body),
+                     self.http.put(url, headers=self.headers, json=body)):
+            self.assertEqual((await call).status_code, 409)
+        self.assertEqual((await self.http.get(url, headers=self.headers)).json()["assignment"]["revision"], 0)
+        body["catalogRevision"] = catalog["revision"]
+        refreshed = await self.http.post(url + "/preview", headers=self.headers, json=body)
+        self.assertEqual(refreshed.json()["newLimit"], 75)
+        await self.assign(body)
+        self.assertEqual((await self.status())["limit"], 75)
+
     async def test_default_trial_is_once_and_does_not_reset_on_login_or_month(self):
         start = datetime(2026, 1, 30, 12, tzinfo=timezone.utc)
         async with self.sessions() as session:
@@ -335,6 +429,19 @@ class QuotaPlanTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             audit = await session.scalar(select(models.AuditLog).where(models.AuditLog.action == "quota.member.assign"))
             self.assertEqual(audit.detail["after"]["custom"]["totalLimit"], 1)
+
+    async def test_member_offsets_past_filtered_results_return_empty_pages(self):
+        url = "/api/v1/admin/quotas/members"
+        params = {"q": "owner", "limit": 1}
+        first = await self.http.get(url, params=params, headers=self.headers)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(first.json()["total"], 1)
+        self.assertEqual([item["id"] for item in first.json()["items"]], ["owner"])
+        for offset in (1, 2**63 - 1, 2**63):
+            with self.subTest(offset=offset):
+                response = await self.http.get(url, params={**params, "offset": offset}, headers=self.headers)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json(), {"items": [], "total": 1, "offset": offset, "limit": 1})
 
     async def test_pagination_uses_bounded_group_queries_not_per_member(self):
         async with self.sessions() as session:

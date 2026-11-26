@@ -1,5 +1,7 @@
 """Legacy cloud bodies migrate even when their execution engines are disabled."""
 import asyncio
+import hashlib
+from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -11,7 +13,7 @@ from app.db import Base
 from app.models import Task, TaskEvent, Attachment
 from app.automation_models import RunnerNode
 from app.conversation_handoff_models import ConversationHandoff, ConversationMessageReceipt
-from app.services import conversation_content, conversation_content_migration as migration, runner_hub
+from app.services import conversation_content, conversation_content_migration as migration, runner_hub, storage
 from app.services.runner_content_store import Store
 
 
@@ -62,6 +64,22 @@ class CloudContentMigrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("pending next turn", str(pending.payload))
             self.assertEqual((await conversation_content.get_json(pending.payload["contentRef"], self.client.user_ref,
                 "message:message"))["text"], "pending next turn")
+
+    async def test_transferred_archive_remains_readable_by_another_attachment(self):
+        key, archive = "handoffs/retained/archive.zip", b"ordinary shared archive bytes"
+        with patch.object(storage, "_LOCAL_DIR", str(Path(self.root.name) / "uploads")):
+            async with self.sessions() as session:
+                handoff = await session.get(ConversationHandoff, "handoff")
+                handoff.storage_key = key
+                handoff.backend = storage.put(key, archive, "application/zip")
+                handoff.sha256 = hashlib.sha256(archive).hexdigest()
+                remaining = Attachment(task_id="", filename="snapshot.zip", storage_key=key,
+                                       backend=handoff.backend, size=len(archive))
+                session.add(remaining)
+                await session.commit()
+                self.assertTrue((await migration.handoff(session, self.client, handoff))["ok"])
+                self.assertEqual(handoff.storage_key, "")
+                self.assertEqual(storage.get(remaining.storage_key, remaining.backend), archive)
 
     async def test_changed_endpoint_owner_never_receives_legacy_content(self):
         async with self.sessions() as session:

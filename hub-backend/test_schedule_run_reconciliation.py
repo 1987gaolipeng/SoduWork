@@ -81,6 +81,41 @@ class ScheduleRunReconciliationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("请重新执行", self.run.error)
         self.assertIsNotNone(self.run.finished_at)
 
+    async def test_tick_pages_past_active_runs_and_wraps_for_new_arrivals(self):
+        self.plan.enabled = False
+        self.plan.every = "once"
+        self.plan.run_at = self.started + timedelta(days=1)
+        self.run.receipt = {"timing": schedule_timing.snapshot(self.plan)}
+        self.plan.run_at += timedelta(days=1)
+        current = {"timing": schedule_timing.snapshot(self.plan)}
+        self.session.add_all([
+            models.AiScheduleRun(id=f"active-{i:03}", schedule_id=self.plan.id,
+                                 trigger="timer", state="starting", receipt=current)
+            for i in range(200)
+        ])
+        legacy = models.AiScheduleRun(id="z-legacy", schedule_id=self.plan.id,
+                                     state="succeeded", task_id=self.task.id, started_at=self.started)
+        self.session.add(legacy)
+        await self.session.commit()
+
+        first = await schedules.tick(self.session)
+        self.assertEqual((self.run.state, legacy.state), ("starting", "succeeded"))
+        self.assertEqual(first["nextRunId"], "active-199")
+
+        # This row sorts before the cursor, so the next pass must pick it up.
+        arrived = models.AiScheduleRun(id="a-arrived", schedule_id=self.plan.id,
+                                      state="succeeded", workflow_run_id="old-workflow")
+        self.session.add(arrived)
+        await self.session.commit()
+        second = await schedules.tick(self.session, after_run_id=first["nextRunId"])
+        self.assertEqual(self.run.state, "cancelled")
+        self.assertEqual((legacy.state, legacy.task_id), ("failed", ""))
+        self.assertEqual(arrived.state, "succeeded")
+        self.assertEqual(second["nextRunId"], "")
+
+        await schedules.tick(self.session, after_run_id=second["nextRunId"])
+        self.assertEqual((arrived.state, arrived.workflow_run_id), ("failed", ""))
+
     async def test_native_starting_receipt_waits_for_actual_device_ack(self):
         await self.reconcile()
         self.assertEqual(self.run.state, "starting")

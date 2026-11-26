@@ -19,8 +19,13 @@ def remaining(default):
         return default
     left = deadline - asyncio.get_running_loop().time()
     if left <= 0:
-        raise TimeoutError("Session read deadline reached")
+        return 0.001
     return min(default, left)
+
+
+def deadline_active() -> bool:
+    """Return whether the current task belongs to a bounded session read."""
+    return _deadline.get() is not None
 
 
 class SessionReadBudgetMiddleware:
@@ -42,7 +47,8 @@ class SessionReadBudgetMiddleware:
             await send(message)
 
         try:
-            async with asyncio.timeout_at(deadline):
+            grace = min(0.2, max(0.01, READ_SECONDS * 2))
+            async with asyncio.timeout_at(deadline + grace):
                 await self.app(scope, receive, tracked_send)
         except TimeoutError:
             if started:

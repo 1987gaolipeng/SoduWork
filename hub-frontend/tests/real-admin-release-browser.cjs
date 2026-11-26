@@ -21,6 +21,43 @@ async function until(code, label) {
 async function input(selector, value) {
   await js(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event('input',{bubbles:true}))})()`);
 }
+const heldDownloads = new Map();
+async function checkParallelDownloads(isolated, origin) {
+  const button = filename => `document.querySelector('.cr-artifact[title="${filename}"]').closest('.cr-row').querySelector('.cr-actions button')`;
+  async function start(id, filename) {
+    assert.equal(await js(button(filename) + '.disabled'), false);
+    const request = new Promise(resolve => heldDownloads.set(origin + '/api/v1/admin/client-releases/' + id + '/download', resolve));
+    await js(button(filename) + '.click()');
+    return request;
+  }
+  async function finish(resume, id, filename) {
+    const destination = path.join(output, filename);
+    const saved = new Promise((resolve, reject) => isolated.once('will-download', (_event, item) => {
+      item.setSavePath(destination);
+      item.once('done', (_event, state) => state === 'completed' ? resolve() : reject(Error('Download did not complete: ' + state)));
+    }));
+    resume({ cancel: false });
+    await saved;
+    assert.equal(fs.readFileSync(destination, 'utf8'), '测试安装包 ' + id);
+    await until('!' + button(filename) + '.disabled', 'The completed installer download can be started again');
+  }
+  const first = await start('fixture-release', 'Fixture.exe');
+  const second = await start('fixture-deb', 'Fixture.deb');
+  assert.equal(await js(button('Fixture.exe') + '.disabled'), true);
+  assert.equal(await js(button('Fixture.deb') + '.disabled'), true);
+  assert.equal(await js(button('Fixture.dmg') + '.disabled'), false);
+  await finish(second, 'fixture-deb', 'Fixture.deb');
+  assert.equal(await js(button('Fixture.exe') + '.disabled'), true);
+  const interrupted = await start('fixture-deb', 'Fixture.deb');
+  interrupted({ cancel: true });
+  await until('!' + button('Fixture.deb') + '.disabled', 'The failed download can be retried');
+  assert.equal(await js(button('Fixture.exe') + '.disabled'), true);
+  const retry = await start('fixture-deb', 'Fixture.deb');
+  await finish(first, 'fixture-release', 'Fixture.exe');
+  assert.equal(await js(button('Fixture.deb') + '.disabled'), true);
+  await finish(retry, 'fixture-deb', 'Fixture.deb');
+  results.push({name:'Concurrent downloads keep their own buttons disabled, failed downloads can be retried, and downloaded files match the fixtures',ok:true});
+}
 async function login(username, password = 'fixture-password-only') {
   if (!await js('!!document.querySelector(".login-card")')) await js('document.querySelector(".public-nav-login").click()');
   await until('!!document.querySelector("[name=username]")', 'login form');
@@ -49,7 +86,15 @@ app.whenReady().then(async () => {
   const { origin } = JSON.parse(fs.readFileSync(ready));
   progress('backend ready');
   const isolated = session.fromPartition('real-admin-release-' + Date.now());
-  isolated.webRequest.onBeforeRequest((detail, done) => done({cancel:!detail.url.startsWith(origin + '/') && !detail.url.startsWith('data:')}));
+  isolated.webRequest.onBeforeRequest((detail, done) => {
+    const hold = heldDownloads.get(detail.url);
+    if (hold) {
+      heldDownloads.delete(detail.url);
+      hold(done);
+      return;
+    }
+    done({cancel:!detail.url.startsWith(origin + '/') && !detail.url.startsWith('blob:' + origin + '/') && !detail.url.startsWith('data:')});
+  });
   win = new BrowserWindow({show:false,width:1280,height:900,webPreferences:{session:isolated,offscreen:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}});
   win.webContents.on('console-message', event => { if (/Uncaught|React error/.test(event.message)) errors.push(event.message); });
   await win.loadURL('about:blank');
@@ -70,6 +115,7 @@ app.whenReady().then(async () => {
   assert.ok(await js('document.querySelector(".cr-notes").textContent.includes("中文发布说明")'));
   assert.equal(await js('document.querySelectorAll(".cr-notes img").length'),0);
   results.push({name:'Chinese first visit, failed login and real publisher login/list/notes',ok:true});
+  await checkParallelDownloads(isolated, origin);
   for (const [label,locale,summary] of [['English','en-US','English release notes'],['日本語','ja-JP','日本語の更新内容'],['한국어','ko-KR','한국어 업데이트']]) {
     await choose(label);
     await until(`document.documentElement.lang==='${locale}'`, 'translated page');
@@ -81,7 +127,8 @@ app.whenReady().then(async () => {
   }
   const anonymous = await js(`fetch('/api/v1/admin/client-release-notes').then(r=>r.status)`);
   assert.equal(anonymous,401);
-  await js('localStorage.clear();sessionStorage.clear()');await win.reload();
+  await js('localStorage.clear();sessionStorage.clear()');
+  await win.loadURL(origin + '/');
   await until('!!document.querySelector(".public-nav-login")','signed out');
   await login('fixture-reader');
   await until('!!localStorage.getItem("soduwork_hub_admin_token") && !document.querySelector(".login-card")','ordinary user login');

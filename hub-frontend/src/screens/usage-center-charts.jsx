@@ -21,7 +21,7 @@ const METRICS = localeMap(() => ({
 }))
 const shortDate = (key) => String(key).slice(5).replace('-', '/')
 
-export function TrendPanel({ points, days }) {
+export function TrendPanel({ points, days, recent = [] }) {
   const uiLocale = useLocale();
   const rows = useMemo(() => calendarTrend(points, days), [points, days, uiLocale])
   const [metric, setMetric] = useState('tokens')
@@ -33,6 +33,14 @@ export function TrendPanel({ points, days }) {
   const values = rows.map((row) => numeric(row[metric]) / (isCost ? 1000000 : 1))
   const peak = Math.max(0, ...values)
   const sum = values.reduce((a, b) => a + b, 0)
+  const activeDays = rows.filter(row => numeric(row.sessions) > 0).length
+  const peakDay = rows[values.indexOf(peak)]?.key
+  const concentrated = rows.length > 1 && peak > 0 && peak > sum / 2
+  const dayFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' })
+  const peakRecords = concentrated ? recent.filter(row => {
+    const time = Date.parse(row.occurredAt)
+    return Number.isFinite(time) && dayFormat.format(time) === peakDay
+  }) : []
   const unit = METRICS[metric].unit
   const step = 10 ** Math.floor(Math.log10(Math.max(isCost ? .01 : 1, peak / 4)))
   const rawTick = [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10].find((n) => n * step >= peak / 4) * step
@@ -46,7 +54,11 @@ export function TrendPanel({ points, days }) {
   const y = (value) => baseline - value / ceiling * (baseline - top)
   const selected = active == null || !rows.length ? null : Math.min(active, rows.length - 1)
   const labels = [...new Set([0, Math.floor((rows.length - 1) / 2), rows.length - 1])].filter((i) => i >= 0)
-  const display = (value) => isCost ? money(value * 1000000, tx("待对账")) : count(value)
+  const display = (value) => isCost ? money(value * 1000000, rows.some(row => row.knownUsd) ? '$0.00' : '—') : count(value)
+  const selectedRow = rows[selected]
+  const selectedValue = selectedRow && (isCost
+    ? money(selectedRow.costMicrousd, selectedRow.knownUsd ? '$0.00' : '—')
+    : precise(metric === 'tokens' ? selectedRow.tokensExact ?? selectedRow.tokens : selectedRow.requests))
   const axis = (value) => isCost ? '$' + (value >= 1000 ? count(value) : value.toLocaleString('en-US', { maximumFractionDigits: 2 })) : count(value)
 
   useEffect(() => {
@@ -78,7 +90,7 @@ export function TrendPanel({ points, days }) {
       <span>{tx("合计 ")}<b>{display(sum)}</b><em />{tx("单日最高 ")}<b>{display(peak)}</b></span></div>
     {!rows.length ? <Empty text={tx("暂无消耗趋势")} note={tx("调整筛选条件，或在产生用量后查看每日变化。")} /> :
       <div className="ugc-plot" ref={plot}>
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" tabIndex="0" aria-label={tx("{0}趋势，共 {1} 个日期；使用左右方向键查看，Home 和 End 跳到首尾。{2}", [METRICS[metric].label, rows.length, selected == null ? '' : `${rows[selected].key}，${isCost ? display(values[selected]) : precise(values[selected]) + ' ' + unit}。`])}
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" tabIndex="0" aria-label={tx("{0}趋势，共 {1} 个日期；使用左右方向键查看，Home 和 End 跳到首尾。{2}", [METRICS[metric].label, rows.length, selectedRow ? `${selectedRow.key}，${selectedValue} ${unit}。` : ''])}
           onMouseMove={inspect} onMouseLeave={() => setActive(null)} onFocus={() => setActive(rows.length - 1)} onBlur={() => setActive(null)} onKeyDown={keyDown}>
           <defs><linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--chart-color)" stopOpacity=".95" /><stop offset="100%" stopColor="var(--chart-color)" stopOpacity=".55" /></linearGradient></defs>
           {[0, 1, 2, 3, 4].map((i) => <g className="ugc-plot-grid" key={i}><line x1={left} x2={width - right} y1={y(ceiling * i / 4)} y2={y(ceiling * i / 4)} /><text x={left - 10} y={y(ceiling * i / 4) + 4} textAnchor="end">{axis(ceiling * i / 4)}</text></g>)}
@@ -87,9 +99,15 @@ export function TrendPanel({ points, days }) {
           {labels.map((i) => <text className="ugc-plot-date" key={i} x={x(i)} y={height - 4} textAnchor={i === 0 ? 'start' : i === rows.length - 1 ? 'end' : 'middle'}>{shortDate(rows[i].key)}</text>)}
         </svg>
         {selected != null && <div className={'ugc-chart-tip ' + (selected < rows.length / 2 ? 'from-left' : 'from-right')} style={{ left: x(selected) / width * 100 + '%' }}>
-          <span>{rows[selected].key}</span><b>{isCost ? money(rows[selected].costMicrousd, rows[selected].sessions ? tx("待对账") : '—') : precise(values[selected])}<small>{isCost ? 'USD' : unit}</small></b>
+          <span>{selectedRow.key}</span><b>{selectedValue}<small>{' '}{unit}</small></b>
           <small>{numeric(rows[selected].sessions) ? tx("{0} 条用量记录", [precise(rows[selected].sessions)]) : tx("当天暂无用量记录")}</small></div>}
       </div>}
+    {activeDays > 0 && activeDays < rows.length && <p className="ugc-chart-note">{tx("所选 {0} 天中有 {1} 天产生了记录。", [rows.length, activeDays])}</p>}
+    {concentrated && <details className="ugc-chart-note" key={peakDay}>
+      <summary>{tx("超过一半的用量集中在 {0}，查看当天的最近记录", [peakDay])}</summary>
+      {peakRecords.length ? <ul>{peakRecords.map(row => <li key={row.id}>{row.title || tx("AI 使用")} · {isCost ? money(row.costMicrousd, row.costKnown && row.currency === 'USD' ? '$0.00' : '—') : count(row[metric])} {unit}</li>)}</ul>
+        : <p>{tx("最近记录中没有这一天的明细。")}</p>}
+    </details>}
     <p className="ugc-chart-note">{isCost ? tx("仅展示已知价格的成本；未计价的用量仍会计入 Token。") : tx("悬停查看每日数据，或聚焦图表后使用方向键。")}</p>
   </section>
 }
@@ -109,7 +127,7 @@ export function SceneLedger({ rows, total, selected, onSelect }) {
         <div className="ugc-scene-lead"><small>{main ? tx("主要用量场景") : tx("尚无 Token 用量")}</small><b title={main ? sceneLabel(main.key, main.label) : undefined}>{main ? sceneLabel(main.key, main.label) : '—'}</b><span>{main ? share(main.tokens, total) : '0%'}<small>{tx("占当前范围")}</small></span></div></div>
       <div className="ugc-scene-list">{rows.map((row) => <button type="button" key={row.key} aria-pressed={selected === row.key}
         onClick={() => onSelect(selected === row.key ? '' : row.key)} style={{ '--scene-color': sceneColor(row.key) }}>
-        <i /><b title={sceneLabel(row.key, row.label)}>{sceneLabel(row.key, row.label)}</b><span title={`${precise(row.tokens)} Tokens`}>{count(row.tokens)}</span><em>{share(row.tokens, total)}</em><Icon name="chevron" />
+        <i /><b title={sceneLabel(row.key, row.label)}>{sceneLabel(row.key, row.label)}</b><span title={`${precise(row.tokensExact ?? row.tokens)} Tokens`}>{count(row.tokens)}</span><em>{share(row.tokens, total)}</em><Icon name="chevron" />
       </button>)}</div>
       <p className="ugc-chart-note">{tx("选择场景，查看对应成员与模型用量。")}</p>
     </div>}

@@ -490,6 +490,13 @@ test('live SDK zero usage never masks growing reasoning, final nested reasoning 
   assert.match(view.metricsHtml(false),/data-thinking-tokens>60<\/b>/);
   assert.match(view.metricsHtml(false),/data-thinking-estimate hidden/);
 });
+test('failed and empty turns have a failure label even when elapsed time is unavailable', () => {
+  for (const state of ['failed', 'no-output', 'unreachable', 'incomplete']) {
+    const view = status.createThinking(() => ({ snap: { status: state, messages: [{ role: 'user' }] } }));
+    assert.match(view.metricsHtml(false), /data-thinking-label>执行失败</);
+  }
+});
+
 test('cached prompt usage does not reduce the reported output count', () => {
   const view=status.createThinking(()=>({snap:{messages:[{role:'user'},{role:'assistant',done:true,usage:{input_tokens:100,cached_input_tokens:80,output_tokens:60,reasoning_tokens:40,total_tokens:160}}]}}));
   assert.match(view.metricsHtml(false),/data-thinking-tokens>60<\/b>/);
