@@ -104,10 +104,11 @@ function sessionSnapshot(session, scanned, recovered, candidates) {
   const historical = require('./runtime-artifacts.cjs').restore(session.cwd, session.artifactHistory);
   const historicalPaths = new Set(historical.map(file => path.resolve(file.path)));
   const currentAnswer = selection.turn(session.artifactState || {}).answer;
+  const mentioned = selection.linkMatcher(currentAnswer, session.cwd);
   const reused = historical.filter(file => file.historicalPrimary && !file.processEvidence &&
-    currentAnswer && selection.mentioned(currentAnswer, session.cwd, file)).map(file => ({ ...file, primary: true }));
+    currentAnswer && mentioned(file)).map(file => ({ ...file, primary: true }));
   const currentFile = file => !file.path || !historicalPaths.has(path.resolve(file.path)) ||
-    Boolean(currentAnswer && selection.mentioned(currentAnswer, session.cwd, file));
+    Boolean(currentAnswer && mentioned(file));
   const savedReports = require('./saved-report-artifacts');
   if (!recovered) recovered = recoveredFiles(session);
   if (!scanned) scanned = typeof session.outputSnapshot === 'function'

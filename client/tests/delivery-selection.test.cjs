@@ -207,6 +207,45 @@ function nativeTurn(acc, request, content) {
   acc.push({type:'agent_settled'});
 }
 
+for (const [filename, reply] of [
+  ['report final.md', '[Final report](<report final.md>)'],
+  ['report(final).md', '[Final report](report(final).md)'],
+  ['report(final).md', String.raw`[Final report](report\(final\).md)`],
+  ['report final.md', '[Final report](report%20final.md)'],
+]) {
+  test('a native final reply selects the same file as its rendered Markdown link: ' + reply, async t => {
+    const f = fixture(t), acc = require('../main/pi-session/event-stream').create();
+    f.handle.snapshot = () => acc.snapshot();
+    f.write('report.md', '# Intermediate revision');
+    f.write(filename, '# Final revised report');
+    nativeTurn(acc, 'Revise the report after feedback', [{kind:'text', text:reply}]);
+    const snapshot = runtime.snapshot(f.handle);
+    const html = require('../core/markdown').parse(reply, {gfm:true, breaks:false});
+    const href = html.match(/<a href="([^"]+)"/)[1];
+    assert.equal(require('../components/panels/chat-output-links').fileTarget(href, snapshot.items).relative, filename,
+      'the existing desktop Markdown/link resolver already recognizes this filename');
+    const result = await require('../main/conversation/delivery-package-worker').prepare(f.handle,
+      snapshot.delivery.items.map(item => item.artifactId));
+    assert.deepEqual(result.manifest.files.map(item => item.path), [filename]);
+    assert.equal(result.contentType, 'text/markdown', 'one final file must not become a ZIP containing the intermediate');
+    assert.equal(result.bytes.toString(), '# Final revised report');
+    assert.equal(fs.readFileSync(path.join(f.cwd, 'report.md'), 'utf8'), '# Intermediate revision');
+    assert.equal(snapshot.items.some(item => item.relative === 'report.md'), true, 'history stays addressable');
+  });
+}
+
+test('final-link matching retains exact local paths and embedded images', t => {
+  const { mentioned } = require('../main/conversation/delivery-selection');
+  const cwd = fixture(t).cwd, item = {relative:'report.md'};
+  for (const reply of ['[Report](report.md)', '[Report](./report.md)', '[Report](<' + path.join(cwd, 'report.md') + '>)']) {
+    assert.equal(mentioned(reply, cwd, item), true, reply);
+  }
+  assert.equal(mentioned('![Result](image.png)', cwd, {relative:'image.png'}), true);
+  for (const reply of ['report.md', '[Report](https://example.test/report.md)', '[Report](folder/report.md)', '[Report](report%zz.md)']) {
+    assert.equal(mentioned(reply, cwd, item), false, reply);
+  }
+});
+
 test('native rework final links exclude an edited intermediate document without erasing history', async t => {
   const f=fixture(t), acc=require('../main/pi-session/event-stream').create();
   f.handle.snapshot=()=>acc.snapshot();

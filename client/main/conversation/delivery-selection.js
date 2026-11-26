@@ -60,14 +60,25 @@ function requestsCaptures(request) {
   return /(?:交付|提供|生成|导出|保存|附上|需要|要).{0,20}(?:截图|效果图)|(?:deliver|provide|export|save|include).{0,30}(?:screenshot|screen capture)/i.test(request) &&
     !/(?:不要|不需要|无需).{0,12}(?:截图|效果图)|(?:do not|don't|without).{0,20}screenshot/i.test(request);
 }
+function linkMatcher(answer, cwd) {
+  let targets;
+  return item => {
+    if (!answer) return false;
+    if (!targets) {
+      targets = new Set();
+      const markdown = require('../../core/markdown');
+      markdown.walkTokens(markdown.lexer(answer), token => {
+        if (token.type !== 'link' && token.type !== 'image') return;
+        try { targets.add(normalize(decodeURIComponent(token.href))); } catch { /* Invalid URI. */ }
+      });
+    }
+    const relative = normalize(item.relative || item.name);
+    const absolute = normalize(path.resolve(cwd, relative));
+    return targets.has(relative) || targets.has('./' + relative) || targets.has(absolute);
+  };
+}
 function mentioned(answer, cwd, item) {
-  const relative = normalize(item.relative || item.name);
-  const absolute = normalize(path.resolve(cwd, relative));
-  // Only explicit local file links count; prose and verification transcripts do not.
-  return Array.from(answer.matchAll(/\[[^\]\n]*\]\(\s*<?([^\s)>]+)>?(?:\s+[^)]*)?\)/g)).some(match => {
-    let target; try { target = normalize(decodeURIComponent(match[1])); } catch { return false; }
-    return target === relative || target === './' + relative || target === absolute;
-  });
+  return linkMatcher(answer, cwd)(item);
 }
 function select(cwd, delivery, snapshot) {
   const { request, answer } = turn(snapshot);
@@ -82,9 +93,10 @@ function select(cwd, delivery, snapshot) {
     // bypass this rule, and source files remain available in the inventory.
     items = converted;
   } else if (delivery.source !== 'manifest') {
-    const linked = items.filter(item => item.changedInTurn && mentioned(answer, cwd, item));
+    const matches = linkMatcher(answer, cwd);
+    const linked = items.filter(item => item.changedInTurn && matches(item));
     if (linked.length) items = linked;
   }
   return { ...delivery, items };
 }
-module.exports = { select, turn, mentioned, requestedExtension, requestsCaptures, processRoles };
+module.exports = { select, turn, mentioned, linkMatcher, requestedExtension, requestsCaptures, processRoles };
