@@ -4,7 +4,8 @@ const fs = require('node:fs'), fsp = fs.promises, path = require('node:path'), c
 const {Readable} = require('node:stream');
 const contract = require('../core/app-files-contract.cjs');
 const settings = require('./app-settings-store.cjs');
-const uploads = new Map(), starting = new Map(), completed = new Map(),copies=new Map();
+const uploads = new Map(), starting = new Map(), opening = new Set(), completed = new Map(),copies=new Map();
+const UPLOAD_IDLE_MS = 10 * 60 * 1000;
 const sources=require('./app-local-sources.cjs');
 const hash = text => crypto.createHash('sha256').update(text).digest('hex');
 const projectKey = value => 'p_' + hash(value);
@@ -19,6 +20,20 @@ async function directory(app, scope, parts, create) {
     const st = await fsp.lstat(dir); if (!st.isDirectory() || st.isSymbolicLink()) throw Error('文件目录不可用');
   }
   return dir;
+}
+async function discardExpiredStaging(dir,scope,current) {
+  const expiredBefore=Date.now()-UPLOAD_IDLE_MS;
+  const names=await fsp.readdir(dir).catch(()=>[]);current();
+  for(const name of names){
+    if(!/^upload_[a-f0-9]{32}\.part$/.test(name))continue;
+    const temp=path.join(dir,name),key=scope+':'+name.slice(0,-5);
+    if(uploads.has(key)||opening.has(temp))continue;
+    const stat=await fsp.lstat(temp).catch(()=>null);current();
+    if(!stat?.isFile()||stat.isSymbolicLink()||stat.mtimeMs>expiredBefore)continue;
+    if(uploads.has(key)||opening.has(temp))continue;
+    // A failed cleanup must not prevent a new healthy save.
+    await fsp.rm(temp,{force:true}).catch(()=>{});current();
+  }
 }
 function url(binding, file) { return new URL('/_app-files/'+projectKey(file.projectId)+'/'+file.id+'/'+encodeURIComponent(file.name),binding.origin).href; }
 async function metadata(app, scope, project, id) {
@@ -58,9 +73,12 @@ async function execute(app,binding,method,input,assertCurrent=()=>{},options={})
     starting.set(scope,pending+1);
     try {
       const dir=await directory(app,scope,['uploads'],true);current();
-      const id=uuid('upload_'),temp=path.join(dir,id+'.part'),handle=await fsp.open(temp,'wx',0o600);
+      await discardExpiredStaging(dir,scope,current);current();
+      const id=uuid('upload_'),temp=path.join(dir,id+'.part');let handle;
+      opening.add(temp);
+      try{handle=await fsp.open(temp,'wx',0o600);}finally{opening.delete(temp);}
       function expire(){const row=uploads.get(scope+':'+id);if(!row)return;if(row.busy){row.expiry=setTimeout(expire,10000);row.expiry.unref();return;}uploads.delete(scope+':'+id);row.handle.close().then(()=>fsp.rm(row.temp,{force:true})).catch(()=>{});}
-      const expiry=setTimeout(expire,10*60*1000);expiry.unref();
+      const expiry=setTimeout(expire,UPLOAD_IDLE_MS);expiry.unref();
       uploads.set(scope+':'+id,{expiry,scope,id,temp,handle,projectId:p.projectId,name:p.name.replace(/.*[/\\]/,'')||'file',type:p.type.toLowerCase(),size:p.size,written:0,hash:crypto.createHash('sha256'),busy:false});
       return {ok:true,id,chunkBytes:contract.CHUNK_BYTES};
     } finally {
