@@ -115,6 +115,19 @@ function promptContext({ text: userText = '', files = [], materials = [], plugin
     prompt: [...header, '材料证据：', body, '</soduwork-conversation-input-understanding>'].join('\n'),
   };
 }
+function readSnippet(source) {
+  const fd = fs.openSync(source, 'r');
+  try {
+    const buffer = Buffer.alloc(MAX_SNIPPET * 4);
+    let length = 0;
+    while (length < buffer.length) {
+      const count = fs.readSync(fd, buffer, length, buffer.length - length, null);
+      if (!count) break;
+      length += count;
+    }
+    return buffer.toString('utf8', 0, length).slice(0, MAX_SNIPPET);
+  } finally { fs.closeSync(fd); }
+}
 function readSimpleMaterials(files) {
   const materials = [];
   for (const item of (Array.isArray(files) ? files : [])) {
@@ -123,7 +136,7 @@ function readSimpleMaterials(files) {
     let row = { attachmentId: item && (item.attachmentId || item.id || item.name), name: fileName(item), status: 'metadata' };
     if (source && ['.txt', '.md', '.markdown', '.csv', '.json', '.log'].includes(ext)) {
       try {
-        const value = fs.readFileSync(source, 'utf8');
+        const value = readSnippet(source);
         row = { ...row, status: 'read', text: value.slice(0, MAX_SNIPPET), coverage: `前 ${Math.min(value.length, MAX_SNIPPET)} 个字符` };
       } catch (_) { row = { ...row, status: 'unreadable' }; }
     } else if (source && !fs.existsSync(source)) row = { ...row, status: 'unreadable' };

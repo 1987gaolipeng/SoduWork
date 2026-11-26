@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs/promises');
+const { createReadStream } = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
@@ -58,6 +59,21 @@ async function readPrefix(file, limit) {
   } finally { await handle.close(); }
 }
 
+async function readText(file, limit, signal) {
+  const hash = crypto.createHash('sha256');
+  const prefix = [];
+  let bytes = 0, kept = 0;
+  for await (const chunk of createReadStream(file, { signal, highWaterMark: 64 * 1024 })) {
+    bytes += chunk.length;
+    hash.update(chunk);
+    if (kept < limit) {
+      const part = chunk.subarray(0, limit - kept);
+      prefix.push(part); kept += part.length;
+    }
+  }
+  return { prefix: Buffer.concat(prefix, kept), bytes, hash: hash.digest('hex') };
+}
+
 async function readMaterials(snapshot, options = {}) {
   const signal = options.signal;
   throwIfAborted(signal);
@@ -87,15 +103,16 @@ async function readMaterials(snapshot, options = {}) {
       const ext = path.extname(name).toLowerCase();
       try {
         if (TEXT_EXTENSIONS.has(ext)) {
-          const bytes = await fs.readFile(file, { signal: controller.signal });
-          const hash = crypto.createHash('sha256').update(bytes).digest('hex');
-          let text = bytes.toString('utf8').replace(/^\uFEFF/, '');
           const available = Math.max(0, totalLimit - totalText);
-          const partial = text.length > available || bytes.length > fileLimit;
-          if (bytes.length > fileLimit) text = bytes.subarray(0, fileLimit).toString('utf8').replace(/^\uFEFF/, '');
+          // Keep enough UTF-8 bytes for the character budget and an optional BOM;
+          // hashing still covers the complete source, without retaining it.
+          const { prefix, bytes, hash } = await readText(file,
+            Math.floor(Math.min(fileLimit, available * 4 + 3)), controller.signal);
+          let text = prefix.toString('utf8').replace(/^\uFEFF/, '');
+          const partial = text.length > available || bytes > prefix.length;
           if (text.length > available) text = text.slice(0, available);
           totalText += text.length;
-          materials.push({ ...base, status: partial ? 'partial' : 'read', kind: 'text', hash, text, bytes: bytes.length, sourceRanges: sourceRanges(text) });
+          materials.push({ ...base, status: partial ? 'partial' : 'read', kind: 'text', hash, text, bytes, sourceRanges: sourceRanges(text) });
         } else if (IMAGE_EXTENSIONS.has(ext)) {
           const stat = await fs.stat(file);
           const item = { ...base, status: 'read', kind: 'image', mime: entry.mime || `image/${ext.slice(1)}`, bytes: stat.size, visualUnderstanding: false };
