@@ -46,6 +46,7 @@ RELEASE_SMOKES = tuple(sorted((
     "test_runner_event_delivery.py",
     "test_runner_event_scope.py",
     "test_runner_stdio.py",
+    "test_spool_complete_writes.py",
     "test_runner_local_rpc.py",
     "test_runner_remote_rpc.py",
     "test_runner_inventory_scope.py",
