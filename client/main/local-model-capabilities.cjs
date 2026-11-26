@@ -100,7 +100,7 @@ function revision(model, secret, includeEpoch = true) {
   return crypto.createHmac('sha256', secret).update(JSON.stringify(contract.stable({ version: 2,
     ref: model.id, epoch: includeEpoch ? model.capabilityEpoch || '' : undefined,
     provider: model.provider, model: model.name, base: model.baseUrl, kind: model.kind,
-    authMode: model.authMode, key: model.key, params, contextWindow: model.ctxWindow || 0 }))).digest('hex');
+    authMode: model.authMode, key: model.key, params, contextWindow: model.ctxWindow || model.advertisedContextWindow || 0 }))).digest('hex');
 }
 function fields(model, snapshot, state, evidenceError = false) {
   if (model.modality && model.modality !== 'chat') return {};

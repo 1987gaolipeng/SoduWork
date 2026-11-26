@@ -20,7 +20,7 @@ test('editing a model preserves native vision and unrelated config; both routing
     exportName: 'ModelForm', privateExports: ['ModelForm'],
     props: { providerId: 'company', initial: { name: 'vision-alias', label: 'Vision', enabled: true, revision: 'original',
       config: { imageRouting: 'native', thinkingMode: 'controllable', thinkingFormat: 'qwen', thinkingLevelMap: { high: 'high' } } }, onClose() {}, onSaved() {} },
-    dependencies: { '../api.js': { api: { saveModelDef: async data => saved.push(data) } }, '../ui.jsx': ui,
+    dependencies: { '../api.js': { api: { discoverModels: async () => ({}), saveModelDef: async data => saved.push(data) } }, '../ui.jsx': ui,
       './ModelProviderDeletion.jsx': { __esModule: true, default: () => null },
       './LlmSettings.jsx': { default: () => null }, './ModelRuntime.jsx': { default: () => null }, './model-catalog-actions.css': {},
       './ModelCapabilities.jsx': capabilities, './model-capabilities.css': {} },
@@ -47,12 +47,12 @@ test('editing a model preserves native vision and unrelated config; both routing
   assert.equal(saved[2].config.imageRouting, 'native')
 });
 
-async function form(t, initial = null) {
+async function form(t, initial = null, discoverModels = async () => ({})) {
   const saved = [], errors = []
   const page = await createComponentHarness(new URL('../src/screens/ModelCatalog.jsx', import.meta.url), {
     exportName: 'ModelForm', privateExports: ['ModelForm'],
     props: { providerId: 'company', initial, onClose() {}, onSaved() {} },
-    dependencies: { '../api.js': { api: { saveModelDef: async data => saved.push(data) } }, '../ui.jsx': { ...ui, toast: text => errors.push(text) },
+    dependencies: { '../api.js': { api: { discoverModels, saveModelDef: async data => saved.push(data) } }, '../ui.jsx': { ...ui, toast: text => errors.push(text) },
       './ModelProviderDeletion.jsx': { __esModule: true, default: () => null },
       './LlmSettings.jsx': { default: () => null }, './ModelRuntime.jsx': { default: () => null }, './model-catalog-actions.css': {},
       './ModelCapabilities.jsx': capabilities, './model-capabilities.css': {} },
@@ -66,6 +66,24 @@ async function form(t, initial = null) {
   }
   return { page, saved, errors, change, save }
 }
+
+test('editing an estimated window keeps automatic mode and adopts only the exact provider candidate', async t => {
+  const initial = { name: 'alias', label: 'old', revision: 'r1', ctxWindow: 64000, contextWindowEstimated: true }
+  const f = await form(t, initial, async (provider, name) => {
+    assert.deepEqual([provider, name], ['company', 'alias'])
+    return { ok: true, providerRevision: 'p1', candidates: [
+      { id: 'other', advertisedContextWindow: 8192 }, { id: name, advertisedContextWindow: 1048576 }] }
+  })
+  assert.equal(f.page.nodes(n => n.props.id === 'model-context-window')[0].props.value, '')
+  await f.save()
+  assert.equal(f.saved[0].ctxWindow, 0)
+  assert.equal(f.saved[0].advertisedContextWindow, 1048576)
+  assert.equal(f.saved[0].discoveryProviderRevision, 'p1')
+  f.change('model-context-window', '64000')
+  await f.save()
+  assert.equal(f.saved[1].ctxWindow, 64000)
+  assert.equal(f.saved[1].advertisedContextWindow, undefined)
+})
 
 test('capability edits preserve config and use explicit integer limits', async t => {
   const f = await form(t, { name: 'custom', enabled: true, ctxWindow: 65536, config: { thinkingFormat: 'qwen', custom: 'retained' } })

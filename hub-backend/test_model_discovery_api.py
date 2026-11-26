@@ -91,6 +91,45 @@ class ModelDiscoveryEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["counts"], {"total": 3, "chat": 1, "unknown": 1})
         self.assertEqual(calls, [("GET", "https://gw.example/v1/models", "Bearer k")])
 
+    async def test_automatic_window_keeps_manual_and_provider_values_separate(self):
+        from app.services import model_catalog, model_discovery
+        name = "known-model"
+        upstream = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(
+            200, json={"data": [{"id": name, "context_length": "1048576"}]})))
+        with patch.object(model_discovery.httpx, "AsyncClient", return_value=upstream):
+            found = (await self.request("POST", "/model-providers/good/discover?model=" + name)).json()
+        advertised = found["candidates"][0]["advertisedContextWindow"]
+        self.assertEqual(advertised, 1048576)
+
+        async def catalog_row():
+            rows = (await self.request("GET", "/model-catalog")).json()["models"]
+            return next(row for row in rows if row["id"] == "good:" + name)
+
+        async def save(**fields):
+            row = await catalog_row()
+            return await self.request("PUT", "/model-defs", json={
+                "providerId": "good", "name": name, "expectedRevision": row["revision"], **fields})
+
+        self.assertEqual((await save(advertisedContextWindow=advertised,
+                                     discoveryProviderRevision="stale")).status_code, 409)
+        self.assertEqual((await save(ctxWindow=0, advertisedContextWindow=advertised,
+                                     discoveryProviderRevision=found["providerRevision"])).status_code, 200)
+        self.assertEqual((await save(label="renamed")).status_code, 200)
+        row = await catalog_row()
+        self.assertEqual((row["configuredContextWindow"], row["ctxWindow"], row["contextWindowSource"]),
+                         (0, advertised, "upstream"))
+        async with self.sessions() as session:
+            runtime = await model_catalog.resolve(session, None, name, provider_id="good")
+            self.assertEqual((runtime["contextWindow"], runtime["contextWindowSource"]), (advertised, "upstream"))
+        self.assertEqual((await save(ctxWindow=64000)).status_code, 200)
+        row = await catalog_row()
+        self.assertEqual((row["ctxWindow"], row["contextWindowSource"]), (64000, "configured"))
+        changed = await self.request("PUT", "/model-providers/good", json={
+            "baseUrl": "https://changed.example/v1", "expectedRevision": found["providerRevision"]})
+        self.assertEqual(changed.status_code, 200, changed.text)
+        row = await catalog_row()
+        self.assertEqual((row["configuredContextWindow"], row["advertisedContextWindow"]), (64000, None))
+
     async def test_discovery_never_writes_model_rows(self):
         from app.services import model_discovery
         with patch.object(model_discovery, "discover",

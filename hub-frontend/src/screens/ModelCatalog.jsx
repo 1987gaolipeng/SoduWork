@@ -524,7 +524,9 @@ function ModelForm({ providerId, initial, onClose, onSaved }) {
   const [thinkingFormat, setThinkingFormat] = useState(initial?.config?.thinkingFormat || '')
   const [imageRouting, setImageRouting] = useState(initial?.config?.imageRouting || 'auto')
   const [capabilities, setCapabilities] = useState(initial?.config?.capabilities || {})
-  const [ctxWindow, setCtxWindow] = useState(initial?.contextWindowKnown === false ? '' : initial?.ctxWindow || '')
+  const configuredWindow = initial?.configuredContextWindow ??
+    (initial?.contextWindowEstimated || initial?.contextWindowKnown === false ? 0 : initial?.ctxWindow)
+  const [ctxWindow, setCtxWindow] = useState(configuredWindow || '')
   const [maxOutputTokens, setMaxOutputTokens] = useState(initial?.config?.maxOutputTokens || '')
   const [supportsReasoningEffort, setSupportsReasoningEffort] = useState(
     initial?.config?.supportsReasoningEffort !== false
@@ -592,7 +594,18 @@ function ModelForm({ providerId, initial, onClose, onSaved }) {
     }
     setBusy(true)
     try {
+      let discovered = {}
+      if (modality === 'chat' && !Number(ctxWindow) && (!initial?.advertisedContextWindow || configuredWindow)) {
+        // Discovery is optional and runs outside the catalog write transaction.
+        const result = await api.discoverModels(providerId, name.trim()).catch(() => null)
+        const candidate = result?.candidates?.find(row => row.id === name.trim())
+        if (result?.ok && candidate && result.providerRevision) {
+          discovered = { advertisedContextWindow: candidate.advertisedContextWindow || 0,
+            discoveryProviderRevision: result.providerRevision }
+        }
+      }
       const saved = await api.saveModelDef({
+        ...discovered,
         expectedRevision: initial?.revision || 'new',
         providerId,
         name: name.trim(),
@@ -726,7 +739,8 @@ function DiscoverForm({ provider, onClose, onSaved }) {
         const metadata = new Map((r.candidates || []).map(item => [item.id, item]))
         const list = (r.models || []).map(name => {
           const candidate = metadata.get(name)
-          return { name, status: candidate?.status || 'unknown', purposes: candidate?.purposes || [], checked: false }
+          return { name, status: candidate?.status || 'unknown', purposes: candidate?.purposes || [], checked: false,
+            advertisedContextWindow: candidate?.advertisedContextWindow, providerRevision: r.providerRevision }
         })
         if (list.length === 0) { setPhase('empty'); return }
         setRows(list); setPhase('ready')
@@ -760,7 +774,9 @@ function DiscoverForm({ provider, onClose, onSaved }) {
     for (const row of picked) {
       try {
         const saved = await api.saveModelDef({ providerId: provider.id, name: row.name,
-          label: row.name, modality: purpose, expectedRevision: 'new', enabled: true })
+          label: row.name, modality: purpose, expectedRevision: 'new', enabled: true,
+          ...(purpose === 'chat' && row.advertisedContextWindow && row.providerRevision
+            ? { advertisedContextWindow: row.advertisedContextWindow, discoveryProviderRevision: row.providerRevision } : {}) })
         added.push(saved)
       } catch (e) { failed += 1 }
     }

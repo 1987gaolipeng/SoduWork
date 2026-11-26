@@ -108,6 +108,7 @@ async def init_db() -> None:
 # Compatibility columns used only during adoption of pre-Alembic databases.
 # Existing columns are unchanged; normal versioned upgrades use Alembic.
 _WANT_COLUMNS = {
+    "model_def": [("advertised_ctx_window", "INTEGER")],
     "ai_usage_event": [("reported_chat_session_id", "VARCHAR(180)")],
     "attachment": [
         # Associate new evidence with its execution and workflow node while retaining legacy compatibility.

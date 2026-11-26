@@ -5,6 +5,7 @@ import json
 
 import httpx
 
+from .context_window import advertised_length
 from .model_definition_contracts import MODEL_MODALITIES
 
 TIMEOUT_SECONDS = 15
@@ -83,7 +84,11 @@ def _candidate(name: str, rows: list[dict]) -> dict:
         status = "declared"
     elif declared == {"unsupported"}:
         status = "unsupported"
-    return {"id": name, "purposes": purposes, "status": status}
+    candidate = {"id": name, "purposes": purposes, "status": status}
+    windows = {n for row in rows if (n := advertised_length(row.get("context_length")))}
+    if len(windows) == 1:
+        candidate["advertisedContextWindow"] = windows.pop()
+    return candidate
 
 
 def _candidates(payload) -> list[dict] | None:

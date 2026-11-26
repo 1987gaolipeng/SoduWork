@@ -171,7 +171,8 @@ async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl 
       keyFrom: 'local', modelRef: local.modelRef,
       configRevision: local.configRevision, runtimeRevision: local.runtimeRevision,
       ...capabilities, modality: local.modality || 'chat',
-      ...contextWindow.resolveContextWindow({ contextWindow: local.ctxWindow, modelName: local.name, provider: local.provider }),
+      ...contextWindow.resolveContextWindow({ contextWindow: local.ctxWindow, advertisedContextWindow: local.advertisedContextWindow,
+        modelName: local.name, provider: local.provider }),
       ...thinking,
       ...(['none', 'always', 'controllable'].includes(config.thinkingMode) ? { thinkingMode: config.thinkingMode } : {}),
       ...(typeof config.thinkingAlwaysOn === 'boolean' ? { thinkingAlwaysOn: config.thinkingAlwaysOn } : {}),
@@ -291,7 +292,7 @@ async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl 
         // Gateways may omit model metadata. Resolve a conservative numeric
         // window so the meter and compaction logic work for every provider.
         ...contextWindow.resolveContextWindow({
-          contextWindow: d.contextWindow,
+          contextWindow: d.contextWindow, contextWindowSource: d.contextWindowSource,
           modelName: d.model,
           provider: d.providerName,
         }),

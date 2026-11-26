@@ -50,6 +50,15 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertEqual(result["models"], ["model-a", "model-b"])
         self.assertEqual(result["counts"], {"total": 2, "chat": 0, "unknown": 2})
 
+    def test_window_requires_a_consistent_valid_declaration_for_the_exact_id(self):
+        rows = [{"id": name, "context_length": size} for name, size in (
+            ("one", "1048576"), ("one", 1048576), ("two", 8192), ("two", 1024),
+            ("three", False), ("four", 8192.5), ("five", -1), ("six", "999999999999"))]
+        rows.append({"id": "seven", "max_output_tokens": 4096})
+        candidates = model_discovery._candidates(rows)
+        self.assertEqual([row.get("advertisedContextWindow") for row in candidates],
+                         [1048576, None, None, None, None, None, None])
+
     def test_candidates_count_declared_outputs_and_never_infer_from_ids_or_input(self):
         payload = {"data": [
             "vision-chat-model",

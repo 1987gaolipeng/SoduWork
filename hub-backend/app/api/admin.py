@@ -1663,7 +1663,7 @@ async def put_model_provider(
     """Update a provider; built-in providers may be disabled or reconfigured but not deleted. Empty
     apiKey preserves the stored key.
     """
-    from ..models import ModelProvider
+    from ..models import ModelDef, ModelProvider
     from ..services import model_config_guard
     new_key = str(body.get("apiKey") or "").strip()
     if len(new_key) > 400:
@@ -1674,6 +1674,7 @@ async def put_model_provider(
             raise HTTPException(status_code=400, detail="模型服务标识最多 48 个字符，请缩短后再保存")
         p = ModelProvider(id=pid, builtin=False)
         session.add(p)
+    prior_connection = (p.kind, p.base_url, p.api_key)
     if "name" in body:
         p.name = str(body.get("name") or "")[:64]
     if "kind" in body:
@@ -1689,6 +1690,9 @@ async def put_model_provider(
         p.note = str(body.get("note") or "")[:300]
     if new_key:
         p.api_key = new_key
+    if prior_connection != (p.kind, p.base_url, p.api_key):
+        await session.execute(update(ModelDef).where(ModelDef.provider_id == pid,
+                              ModelDef.advertised_ctx_window.is_not(None)).values(advertised_ctx_window=None))
     await session.commit()
     from ..services.client_domain_events import models_changed
     await models_changed(session)
@@ -1771,6 +1775,7 @@ async def test_model_provider_connection(body: dict = Body(default_factory=dict)
 @router.post("/model-providers/{pid}/discover")
 async def discover_model_provider(
     pid: str,
+    model: str | None = None,
     user: User = Depends(require_perm("integration.manage")),
     session: AsyncSession = Depends(get_session),
 ):
@@ -1778,7 +1783,7 @@ async def discover_model_provider(
     come back for review; importing them stays an explicit model-defs write.
     """
     from ..models import ModelDef, ModelProvider
-    from ..services import model_discovery
+    from ..services import model_config_guard, model_discovery
     p = await session.get(ModelProvider, pid)
     if p is None:
         raise HTTPException(status_code=404, detail="这个模型服务不存在")
@@ -1786,7 +1791,13 @@ async def discover_model_provider(
         return {"ok": False, "models": [], "known": [],
                 "code": "model.discovery.provider-incomplete",
                 "detail": "服务需要先启用，并填写地址与密钥后才能读取模型列表"}
+    provider_revision = model_config_guard.revision(p)
     result = await model_discovery.discover(p.base_url, p.api_key, p.kind)
+    result["providerRevision"] = provider_revision
+    if model is not None:
+        result["models"] = [name for name in result["models"] if name == model]
+        result["candidates"] = [row for row in result.get("candidates", []) if row["id"] == model]
+        return result
     existing = (await session.execute(
         select(ModelDef.name).where(ModelDef.provider_id == pid))).scalars().all()
     known = set(existing)
@@ -1850,6 +1861,12 @@ async def put_model_def(
         m.ctx_window = validate_limits(body.get("ctxWindow", m.ctx_window), m.config or {})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if model_catalog.normalize_modality(m.modality) != "chat":
+        m.advertised_ctx_window = None
+    elif "advertisedContextWindow" in body:
+        model_config_guard.verify(provider, body.get("discoveryProviderRevision"))
+        from ..services.context_window import advertised_length
+        m.advertised_ctx_window = advertised_length(body["advertisedContextWindow"]) or None
     receipt = {}
     if created and model_catalog.normalize_modality(m.modality) == "chat":
         receipt = await model_catalog.creation_receipt(session, provider, m)

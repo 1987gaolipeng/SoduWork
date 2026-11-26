@@ -581,7 +581,9 @@ async def proxy_config(
     # Catalog values may come from an administrator-edited JSON payload. Keep
     # a malformed optional value from breaking the whole config handshake.
     context_window = 0
-    for candidate in (hit.get("ctxWindow"), conf.get("contextWindow")):
+    source = None
+    for candidate, source in ((hit.get("ctxWindow"), hit.get("contextWindowSource")),
+                              (conf.get("contextWindow"), conf.get("contextWindowSource"))):
         try:
             context_window = max(0, int(candidate or 0))
         except (TypeError, ValueError):
@@ -589,7 +591,7 @@ async def proxy_config(
         if context_window:
             break
     resolved_context = model_catalog.context_window.resolve({
-        "contextWindow": context_window,
+        "contextWindow": context_window, "contextWindowSource": source,
         "modelName": conf.get("model"),
         "providerId": conf.get("provider"),
     })

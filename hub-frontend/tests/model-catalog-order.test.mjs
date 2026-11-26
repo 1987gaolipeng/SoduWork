@@ -136,6 +136,16 @@ test('discovery filters by purpose and preserves only explicitly selected models
   ])
 })
 
+test('batch chat imports forward the discovered window and provider revision with one discovery', async t => {
+  const form = await discovery(t, { ok: true, models: ['alpha'], providerRevision: 'p1',
+    candidates: [{ id: 'alpha', status: 'declared', purposes: ['chat'], advertisedContextWindow: 1048576 }] })
+  form.selectVisible()
+  await form.submit().onClick()
+  assert.equal(form.saved[0].advertisedContextWindow, 1048576)
+  assert.equal(form.saved[0].discoveryProviderRevision, 'p1')
+  assert.equal(form.saved[0].ctxWindow, undefined)
+})
+
 test('name-only discovery requires a separate confirmation for each unknown model', async t => {
   const form = await discovery(t, { ok: true, models: ['undocumented-a', 'undocumented-b'] })
   assert.ok(form.checks().every(row => row.disabled && !row.checked))

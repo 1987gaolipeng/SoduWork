@@ -129,6 +129,7 @@ class ModelDef(Base):
     builtin: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)       # Available for user selection.
     ctx_window: Mapped[int] = mapped_column(Integer, default=0)        # Zero means unknown.
+    advertised_ctx_window: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Output type determines chat, image, or video selection; media models must not appear as ordinary chat models.
     modality: Mapped[str] = mapped_column(String(16), default="chat", server_default="chat")
     # Media invocation path and defaults; credentials remain on the provider.

@@ -59,6 +59,35 @@ test('local model configuration is encrypted and resolves without a Hub identity
   assert.equal(result.model.baseUrl, resolved.baseUrl);
 });
 
+test('local discovery refreshes only the exact provider window and preserves historical overrides', async t => {
+  const f = fixture();
+  t.after(() => { store.configure(null); fs.rmSync(f.root, { recursive: true, force: true }); });
+  const providers = ['one', 'two'].map(id => ({ id, baseUrl: 'https://' + id + '.example/v1', authMode: 'none' }));
+  store.save({ providers, models: [{ providerId: 'two', name: 'alias', ctxWindow: 64000 }] });
+  const discover = (id, sizes) => store.test(id, '', async () => ({ ok: true, json: async () => ({
+    data: sizes.map(context_length => ({ id: 'alias', context_length })),
+  }) }));
+  await discover('one', ['1048576', 1048576]);
+  await discover('two', [262144]);
+  const first = store.get().myModels.find(row => row.providerId === 'one');
+  const second = store.get().myModels.find(row => row.providerId === 'two');
+  const runtime = await modelConfig.fetchModel(null, first.id, undefined, undefined, false, 'pi', { allowLocal: true });
+  assert.equal(runtime.model.contextWindow, 1048576);
+  assert.equal(runtime.model.contextWindowSource, 'upstream');
+  assert.equal(second.ctxWindow, 64000);
+  assert.equal(second.advertisedContextWindow, 262144);
+  const rev = store.get().revision;
+  await discover('one', [1048576]);
+  assert.equal(store.get().revision, rev);
+  store.save({ models: [{ ...first, label: 'new label', advertisedContextWindow: 7777 }, second] });
+  assert.equal(store.resolve(first.id).advertisedContextWindow, 1048576);
+  await discover('one', [1048576, 262144]);
+  assert.equal(store.resolve(first.id).advertisedContextWindow, undefined);
+  store.save({ providers: [providers[0], { ...providers[1], baseUrl: 'https://new.example/v1' }] });
+  assert.equal(store.resolve(second.id).ctxWindow, 64000);
+  assert.equal(store.resolve(second.id).advertisedContextWindow, undefined);
+});
+
 test('local provider URLs cannot embed credentials', async t => {
   const f = fixture();
   t.after(() => { store.configure(null); fs.rmSync(f.root, { recursive: true, force: true }); });

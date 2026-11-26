@@ -327,12 +327,15 @@ def _m_api(m) -> dict:
     modality = normalize_modality(getattr(m, "modality", "chat"))
     resolved = context_window.resolve({
         "contextWindow": getattr(m, "ctx_window", 0),
+        "advertisedContextWindow": getattr(m, "advertised_ctx_window", None),
         "modelName": getattr(m, "name", ""),
         "providerId": getattr(m, "provider_id", ""),
     })
     return {"revision": model_config_guard.revision(m), "id": m.id,
             "providerId": m.provider_id, "name": m.name,
             "label": m.label or m.name, "builtin": bool(m.builtin),
+            "configuredContextWindow": getattr(m, "ctx_window", 0) or 0,
+            "advertisedContextWindow": getattr(m, "advertised_ctx_window", None),
             "enabled": bool(m.enabled), "ctxWindow": resolved["contextWindow"],
             "contextWindowKnown": resolved["contextWindowKnown"],
             "contextWindowEstimated": resolved["contextWindowEstimated"],
@@ -637,6 +640,7 @@ async def resolve(session: AsyncSession, client, model_name: str = "",
     config = model_config(m.get("config"), wanted)
     resolved_window = context_window.resolve({
         "contextWindow": m.get("ctxWindow"), "modelName": m.get("name"),
+        "contextWindowSource": m.get("contextWindowSource"),
         "providerId": m.get("providerId"),
     })
     from . import model_quota

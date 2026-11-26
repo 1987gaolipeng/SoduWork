@@ -81,12 +81,22 @@ function infer(input) {
   return found ? found.value : 0;
 }
 
+function advertisedLength(value) {
+  if (typeof value === 'string' && /^[0-9]{1,8}$/.test(value.trim())) value = Number(value);
+  return Number.isSafeInteger(value) && value >= MIN_CONTEXT_WINDOW && value <= MAX_CONTEXT_WINDOW ? value : 0;
+}
+
 function resolveContextWindow(input) {
   const configured = explicit(input);
-  if (configured) return {
-    contextWindow: configured, contextWindowKnown: true,
-    contextWindowEstimated: false, contextWindowSource: 'configured',
-  };
+  if (configured) {
+    const source = ['upstream', 'catalog', 'safe-default'].includes(input?.contextWindowSource)
+      ? input.contextWindowSource : 'configured';
+    return { contextWindow: configured, contextWindowKnown: true,
+      contextWindowEstimated: source === 'catalog' || source === 'safe-default', contextWindowSource: source };
+  }
+  const advertised = advertisedLength(input?.advertisedContextWindow);
+  if (advertised) return { contextWindow: advertised, contextWindowKnown: true,
+    contextWindowEstimated: false, contextWindowSource: 'upstream' };
   const inferred = infer(input);
   if (inferred) return {
     contextWindow: inferred, contextWindowKnown: true,
@@ -100,5 +110,5 @@ function resolveContextWindow(input) {
 
 module.exports = {
   DEFAULT_CONTEXT_WINDOW, MIN_CONTEXT_WINDOW, MAX_CONTEXT_WINDOW,
-  normalize, resolveContextWindow,
+  normalize, advertisedLength, resolveContextWindow,
 };

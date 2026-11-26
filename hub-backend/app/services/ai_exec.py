@@ -371,6 +371,7 @@ def with_llm(ctx: dict, llm: dict | None) -> dict:
         return ctx
     resolved_window = context_window.resolve({
         "contextWindow": llm.get("contextWindow") or llm.get("ctxWindow"),
+        "contextWindowSource": llm.get("contextWindowSource"),
         "modelName": llm.get("model"),
         "provider": llm.get("provider") or llm.get("providerId"),
     })

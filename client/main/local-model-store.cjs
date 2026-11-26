@@ -5,6 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { replaceFileSync } = require('./verified-file-replace.cjs');
 const capabilities = require('./local-model-capabilities.cjs');
+const { advertisedLength } = require('./conversation/context-window.js');
 const capabilityContract = require('./model-capability-contract.cjs');
 
 const SCHEMA = 2;
@@ -68,7 +69,7 @@ function inheritedPolicy(model, current) {
     imageRouting: row.config?.imageRouting, maxOutputTokens: row.config?.maxOutputTokens });
   return JSON.stringify(capabilityContract.stable(policy(previous))) === JSON.stringify(capabilityContract.stable(policy(model)));
 }
-function normalize(input, { persisted = false, current } = {}) {
+function normalize(input, { persisted = false, discovery = false, current } = {}) {
   if (!record(input)) invalid('配置格式');
   const storedSchemaTwo = persisted && input.schema === SCHEMA;
   const rawProviders = input.providers ?? [], rawModels = input.models ?? [], rawKeys = input.keys ?? {};
@@ -121,6 +122,19 @@ function normalize(input, { persisted = false, current } = {}) {
     // that policy is edited, while keeping all structural checks on disk reads.
     if (modality === 'chat' && !persisted && !inheritedPolicy(model, current)) {
       capabilityContract.validate(model.config || {}, model.ctxWindow || 0);
+    }
+    if (modality === 'chat') {
+      let advertised = raw.advertisedContextWindow;
+      if (current && !discovery) {
+        // Only the stored declaration for this exact connection and model can survive a user edit.
+        const before = current.providers.find(p => p.id === providerId);
+        const after = providers.find(p => p.id === providerId);
+        const same = before && before.baseUrl === after.baseUrl && before.kind === after.kind &&
+          before.authMode === after.authMode && current.keys[providerId] === rawKeys[providerId];
+        advertised = same && current.models.find(m => m.providerId === providerId && m.name === name)?.advertisedContextWindow;
+      }
+      const size = advertisedLength(advertised);
+      if (size) model.advertisedContextWindow = size;
     }
     models.push(model);
     modelSeen.add(key);
@@ -243,7 +257,9 @@ function publicCatalog(value = readRaw()) {
     const provider = value.providers.find(row => row.id === model.providerId);
     return { id: model.id, providerId: model.providerId,
       name: model.id, modelName: model.name, label: model.label,
-      modality: model.modality, config: model.config || {}, ctxWindow: model.ctxWindow || 0,
+      modality: model.modality, config: model.config || {},
+      ctxWindow: model.ctxWindow || model.advertisedContextWindow || 0,
+      ...(model.advertisedContextWindow && !model.ctxWindow ? { contextWindowSource: 'upstream' } : {}),
       ...Object.fromEntries(['capabilityProfile', 'capabilityCheck', 'imageRouting', 'input', 'maxOutputTokens', 'compatibility',
         'configRevision', 'runtimeRevision', 'visionFallbackAvailable', 'capabilityEvidenceError'].filter(key => model[key] !== undefined).map(key => [key, model[key]])),
       providerName: provider.name, keyFrom: 'local', own: true, localOnly: true };
@@ -320,8 +336,17 @@ async function test(providerId, modelName, fetchImpl = global.fetch) {
     if (response.ok) {
       const body = await response.json().catch(() => null);
       const rows = Array.isArray(body?.data) ? body.data : [];
-      const discovered = [...new Set(rows.map(row => text(row?.id, 160))
-        .filter(name => MODEL_ID.test(name) && name.isWellFormed()))].slice(0, 200);
+      const windows = new Map();
+      for (const row of rows) {
+        const name = text(row?.id, 160);
+        if (!MODEL_ID.test(name) || !name.isWellFormed() || (!windows.has(name) && windows.size >= 200)) continue;
+        const size = advertisedLength(row.context_length);
+        const previous = windows.get(name);
+        // null records conflicting declarations for a duplicate ID.
+        if (previous === undefined) windows.set(name, size);
+        else if (size && previous !== null) windows.set(name, previous && previous !== size ? null : size);
+      }
+      const discovered = [...windows.keys()];
       // The request may finish after an endpoint or credential edit. Its result
       // must never validate or populate the replacement connection.
       const latest = readRaw();
@@ -332,14 +357,21 @@ async function test(providerId, modelName, fetchImpl = global.fetch) {
         const candidates = discovered.filter(name => !existing.has(name));
         const available = Math.max(0, 200 - latest.models.length);
         limited = candidates.length > available;
-        const nextModels = latest.models.concat(candidates.slice(0, available).map(name => ({
+        const refreshed = latest.models.map(row => {
+          if (row.providerId !== provider.id || row.modality !== 'chat' || !windows.has(row.name)) return row;
+          const size = windows.get(row.name) || 0;
+          return size === (row.advertisedContextWindow || 0) ? row : { ...row, advertisedContextWindow: size };
+        });
+        const nextModels = refreshed.concat(candidates.slice(0, available).map(name => ({
           providerId: provider.id, name, label: name.slice(0, 80), modality: 'chat', config: {},
+          advertisedContextWindow: windows.get(name) || 0,
         })));
-        if (nextModels.length !== latest.models.length) {
+        if (nextModels.some((row, i) => row !== latest.models[i])) {
           if (latest.revision === Number.MAX_SAFE_INTEGER) invalid('配置版本');
-          const next = identify(normalize({ providers: latest.providers, models: nextModels, keys: latest.keys }, { current: latest }), latest);
+          const next = identify(normalize({ providers: latest.providers, models: nextModels, keys: latest.keys }, { current: latest, discovery: true }), latest);
           next.revision = latest.revision + 1;
           write(next);
+          capabilities.changed(latest, next);
         }
       }
       return { ok: true, detail: limited ? '连接通过，模型列表已达 200 项上限，部分模型未添加' :

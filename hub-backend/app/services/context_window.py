@@ -42,6 +42,13 @@ def normalize(value) -> int:
     return number if MIN_CONTEXT_WINDOW <= number <= MAX_CONTEXT_WINDOW else 0
 
 
+def advertised_length(value) -> int:
+    """Accept an exact token count from a provider, never infer from a model ID."""
+    if isinstance(value, str) and re.fullmatch(r"[0-9]{1,8}", value.strip()):
+        value = int(value)
+    return value if type(value) is int and MIN_CONTEXT_WINDOW <= value <= MAX_CONTEXT_WINDOW else 0
+
+
 def _explicit(value: dict) -> int:
     row = value if isinstance(value, dict) else {}
     model = row.get("model") if isinstance(row.get("model"), dict) else {}
@@ -79,10 +86,18 @@ def _infer(value: dict) -> int:
 
 
 def resolve(value: dict | None = None) -> dict:
-    configured = _explicit(value or {})
+    row = value or {}
+    configured = _explicit(row)
     if configured:
+        source = row.get("contextWindowSource")
+        if source not in ("catalog", "safe-default", "upstream"):
+            source = "configured"
         return {"contextWindow": configured, "contextWindowKnown": True,
-                "contextWindowEstimated": False, "contextWindowSource": "configured"}
+                "contextWindowEstimated": source in ("catalog", "safe-default"), "contextWindowSource": source}
+    advertised = advertised_length(row.get("advertisedContextWindow"))
+    if advertised:
+        return {"contextWindow": advertised, "contextWindowKnown": True,
+                "contextWindowEstimated": False, "contextWindowSource": "upstream"}
     inferred = _infer(value or {})
     if inferred:
         return {"contextWindow": inferred, "contextWindowKnown": True,

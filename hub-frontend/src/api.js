@@ -420,7 +420,8 @@ export const api = {
   testModelProviderConnection: (body) => call('POST', '/admin/model-providers/test-connection', body),
   checkModelCapabilities: (body) => call('POST', '/admin/model-capabilities/check', body, 140000),
   saveModelProvider: (pid, b) => call('PUT', '/admin/model-providers/' + encodeURIComponent(pid), b),
-  discoverModels: (pid) => call('POST', '/admin/model-providers/' + encodeURIComponent(pid) + '/discover', {}, 30000),
+  discoverModels: (pid, model) => call('POST', '/admin/model-providers/' + encodeURIComponent(pid) + '/discover' +
+    (model ? '?model=' + encodeURIComponent(model) : ''), {}, 30000),
   modelProviderDeletionImpact: pid => call('GET', '/admin/model-providers/' + encodeURIComponent(pid) + '/deletion-impact'),
   deleteModelProvider: (pid, expectedRevision, expectedImpact, confirmId) => call('DELETE',
     '/admin/model-providers/' + encodeURIComponent(pid) + '?' + new URLSearchParams({ expectedRevision, expectedImpact, confirmId })),
