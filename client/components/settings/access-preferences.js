@@ -38,11 +38,14 @@
     }).catch(error => { paint(error.message, true); return { ...state }; }).finally(() => { pending = null; });
     return pending;
   }
-  async function choose(mode) {
+  async function choose(mode, button) {
     if (saving || !loaded || state.mode === mode) return;
     saving = true; ++serial; paint();
     try {
-      const reply = await api().set(mode, state.revision);
+      const rect = button.getBoundingClientRect();
+      const reply = await api().set(mode, state.revision, {
+        left: rect.left, top: rect.top, width: rect.width, height: rect.height,
+      });
       if (reply?.ok) accept(reply);
       else if (!reply?.cancelled) {
         if (reply?.mode) accept(reply);
@@ -62,7 +65,7 @@
   const host = document.getElementById('defaultAccessModes');
   host?.addEventListener('click', event => {
     const button = event.target.closest('[data-default-access]');
-    if (button && !button.disabled) void choose(button.dataset.defaultAccess);
+    if (button && !button.disabled) void choose(button.dataset.defaultAccess, button);
   });
   api()?.onChange?.(value => { ++serial; accept(value); });
   global.addEventListener?.('soduwork-locale-change', () => paint());

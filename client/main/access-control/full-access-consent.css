@@ -47,3 +47,5 @@ button:focus-visible,summary:focus-visible,.acknowledgement input:focus-visible+
 html[data-color-scheme="dark"]{color-scheme:dark;--consent-risk-label:#fa8e9b}
 @media(max-width:360px){.consent-header{padding:11px 13px 7px}.consent-content{padding:0 13px 8px}.consent-footer{padding:10px 13px 12px}h1{font-size:17px}.scope-summary{gap:8px}.scope-boundary{display:block}.scope-label{display:block}.permission-list>div{grid-template-columns:1fr;gap:2px;padding:6px 0}.consent-actions button{padding:0 10px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+body.anchored{background:rgba(0,0,0,.16)}

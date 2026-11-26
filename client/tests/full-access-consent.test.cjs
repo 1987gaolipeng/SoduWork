@@ -43,7 +43,21 @@ function fixture(options = {}) {
     }
   }
   const parent = new Window();
-  const confirm = create({ BrowserWindow: Window, ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
+  class TestView extends Window {
+    constructor(config) {
+      super(config);
+      this.webContents.loadFile = file => this.loadFile(file);
+      this.webContents.focus = () => this.focus();
+      this.webContents.isFocused = () => this.focused;
+      this.webContents.close = () => this.destroy();
+    }
+    setBackgroundColor() {}
+  }
+  if (options.withViews) parent.contentView = { children: [],
+    addChildView(view) { this.children.push(view); },
+    removeChildView(view) { this.children.splice(this.children.indexOf(view), 1); },
+  };
+  const confirm = create({ BrowserWindow: Window, WebContentsView: options.withViews ? TestView : undefined, ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
     screen: { getDisplayMatching: () => ({ workArea: options.area || { x: 0, y: 0, width: 1920, height: 1080 } }) },
     platform: options.platform || process.platform, linuxSession: options.linuxSession || 'wayland', timeoutMs: options.timeoutMs || 1000 });
   const event = window => ({ sender: window.webContents, senderFrame: window.webContents.mainFrame });
@@ -81,6 +95,60 @@ test('Linux X11 keeps the chat confirmation next to its trigger without waiting 
   const data = f.data(dialog);
   f.answer(dialog, { requestId: data.requestId, decision: 'cancel' });
   assert.equal(await result, false);
+});
+
+test('Windows and macOS keep the native confirmation and its original placement in settings and chat', async () => {
+  for (const platform of ['win32', 'darwin']) {
+    for (const scope of ['default', 'session']) {
+      const f = fixture({ platform, withViews: true, skipFirstPaint: true });
+      const anchor = { left: 850, top: 500, width: 80, height: 32 };
+      const request = f.confirm(f.parent, { scope, anchor, source: f.parent.webContents });
+      const dialog = f.windows.at(-1);
+      assert.equal(f.parent.contentView.children.length, 0);
+      assert.equal(dialog.options.parent, f.parent);
+      assert.equal(dialog.options.modal, true);
+      assert.equal(dialog.options.frame, false);
+      assert.equal(dialog.options.transparent, true);
+      assert.equal(dialog.shown, false);
+      assert.deepEqual([dialog.options.x, dialog.options.y], scope === 'default' ? [508, 270] : [898, 644]);
+      dialog.emit('ready-to-show');
+      assert.equal(dialog.shown, true);
+      assert.equal(f.data(dialog).bounds, undefined);
+      dialog.emit('closed');
+      assert.equal(await request, false);
+    }
+  }
+});
+
+test('Wayland anchors the isolated confirmation inside the owner and cancels when the view loses focus', async () => {
+  const f = fixture({ platform: 'linux', withViews: true });
+  f.parent.getBounds = () => { throw Error('Desktop coordinates unavailable'); };
+  const opts = { source: f.parent.webContents, anchor: { left: 850, top: 500, width: 80, height: 32 } };
+  const request = f.confirm(f.parent, opts);
+  const view = f.parent.contentView.children.at(-1);
+  assert.deepEqual(view.bounds, { x: 0, y: 0, width: 1000, height: 700 });
+  assert.deepEqual(f.data(view).bounds, { x: 616, y: 128, width: 384, height: 360 });
+  assert.equal(f.size(view, 280).bounds.y, 208);
+  assert.equal(view.options.webPreferences.sandbox, true);
+  view.webContents.emit('blur');
+  assert.equal(await request, false);
+  assert.equal(f.parent.contentView.children.length, 0);
+  assert.equal(view.isDestroyed(), true);
+
+  const next = f.confirm(f.parent, opts), active = f.parent.contentView.children.at(-1), data = f.data(active);
+  f.answer(active, { requestId: data.requestId, decision: 'allow', acknowledged: true });
+  assert.equal(await next, true);
+  assert.equal(f.parent.contentView.children.length, 0);
+});
+
+test('Wayland confines a zoomed embedded confirmation to its source and places it below a top-edge trigger', () => {
+  const place = require('../main/access-control/consent-position.cjs');
+  const source = { getZoomFactor: () => 1.25, isDestroyed: () => false };
+  const owner = { getContentSize: () => [1000, 700], contentView: { children: [
+    { webContents: source, getBounds: () => ({ x: 500, y: 45, width: 400, height: 600 }) },
+  ] } };
+  const position = place.create(owner, { source, anchor: { left: 10, top: 12, width: 24, height: 24 } }, null, true);
+  assert.deepEqual(position(320), { x: 512, y: 102, width: 376, height: 320 });
 });
 
 test('embedded consent uses native view bounds, stays above its icon through height/size changes, and revokes on source navigation', async () => {

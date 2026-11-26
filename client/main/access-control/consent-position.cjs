@@ -1,8 +1,13 @@
 'use strict';
 
 // CSS coordinates belong to the requesting WebContents, not its BrowserWindow.
-function sourceBounds(parent, source) {
-  const content = parent.getContentBounds?.() || parent.getBounds();
+function ownerArea(parent) {
+  const [width, height] = parent.getContentSize();
+  return { x: 0, y: 0, width, height };
+}
+
+function sourceBounds(parent, source, ownerRelative = false) {
+  const content = ownerRelative ? ownerArea(parent) : parent.getContentBounds?.() || parent.getBounds();
   if (!source || source === parent.webContents) return content;
   function find(view, x, y) {
     const bounds = view.getBounds();
@@ -18,14 +23,14 @@ function sourceBounds(parent, source) {
   return null;
 }
 
-function create(parent, options, screen) {
+function create(parent, options, screen, ownerRelative = false) {
   const source = options.source, anchor = options.anchor;
-  const initial = sourceBounds(parent, source);
+  const initial = sourceBounds(parent, source, ownerRelative);
   const embedded = source && source !== parent.webContents;
   return function position(naturalHeight) {
-    const content = sourceBounds(parent, source);
+    const content = sourceBounds(parent, source, ownerRelative);
     if (!content || (source && source.isDestroyed())) throw Error('Confirmation source is no longer attached');
-    const area = screen.getDisplayMatching(content).workArea;
+    const area = ownerRelative ? ownerArea(parent) : screen.getDisplayMatching(content).workArea;
     const region = embedded ? {
       x: Math.max(area.x, content.x), y: Math.max(area.y, content.y),
       right: Math.min(area.x + area.width, content.x + content.width),
@@ -33,28 +38,31 @@ function create(parent, options, screen) {
     } : { x: area.x, y: area.y, right: area.x + area.width, bottom: area.y + area.height };
     if (embedded && (region.right - region.x <= 24 || region.bottom <= region.y)) throw Error('Confirmation source has no visible space');
     const width = embedded ? Math.max(1, Math.min(384, region.right - region.x - 24))
-      : Math.min(384, Math.max(240, area.width - 32));
+      : Math.min(384, Math.max(ownerRelative ? 1 : 240, area.width - 32));
     const zoom = Number(source?.getZoomFactor?.()) || 1;
     const finite = key => anchor?.[key] != null && Number.isFinite(Number(anchor[key]));
-    const local = finite('left') && finite('top');
-    const absolute = !source && finite('screenX') && finite('screenY');
-    const anchored = local || absolute;
+    const relative = finite('left') && finite('top');
+    const absolute = !ownerRelative && !source && finite('screenX') && finite('screenY');
+    const anchored = relative || absolute;
     const left = absolute ? Number(anchor.screenX) : content.x + Number(anchor?.left || 0) * zoom;
     const rawTop = absolute ? Number(anchor.screenY) : content.y + Number(anchor?.top || 0) * zoom +
       (embedded && initial ? content.height - initial.height : 0);
     const top = embedded ? Math.max(region.y, Math.min(rawTop, region.bottom)) : rawTop;
     const anchorWidth = Math.max(0, Number(anchor?.width) || 0) * zoom;
     const anchorHeight = Math.max(0, Number(anchor?.height) || 0) * zoom;
-    const maxHeight = embedded ? Math.max(1, Math.min(region.bottom - region.y - 16, anchored ? top - region.y - 20 : Infinity)) : Math.max(1, area.height - 40);
+    // A control near the top of an embedded view may have room only below it.
+    const useBelow = ownerRelative && embedded && anchored && region.bottom - top - anchorHeight > top - region.y;
+    const room = useBelow ? region.bottom - top - anchorHeight : top - region.y;
+    const maxHeight = embedded ? Math.max(1, Math.min(region.bottom - region.y - 16, anchored ? room - 20 : Infinity)) : Math.max(1, area.height - 40);
     const height = Math.min(Math.max(220, Math.round(naturalHeight)), maxHeight);
     const preferredX = anchored ? Math.round(left + (anchorWidth - width) / 2)
       : Math.round(content.x + (content.width - width) / 2);
     const below = anchored ? Math.round(top + anchorHeight + 12) : Math.round(content.y + (content.height - height) / 2);
-    const preferredY = anchored && (embedded || below + height > area.y + area.height)
+    const preferredY = anchored && !useBelow && (embedded || below + height > area.y + area.height)
       ? Math.round(top - height - 12) : below;
     const margin = embedded ? 12 : 0;
     return { x: Math.round(Math.max(region.x + margin, Math.min(preferredX, region.right - width - margin))),
       y: Math.round(Math.max(region.y, Math.min(preferredY, region.bottom - height))), width, height };
   };
 }
-module.exports = { create, sourceBounds };
+module.exports = { create, sourceBounds, ownerArea };

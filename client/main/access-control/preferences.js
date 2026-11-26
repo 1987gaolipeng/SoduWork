@@ -83,7 +83,7 @@ function install({ app, ipcMain, BrowserWindow, confirmFullAccess = require('./f
       if (input.revision !== before.revision) return { ok: false, reason: '权限状态已变化，请重新选择', ...before };
       if (input.mode === before.mode) return { ok: true, ...before };
       if (input.mode === 'full') {
-        const allowed = await confirmFullAccess(BrowserWindow.fromWebContents(event.sender), { scope: 'default' });
+        const allowed = await confirmFullAccess(BrowserWindow.fromWebContents(event.sender), { scope: 'default', ...(input.anchor ? { source: event.sender, anchor: input.anchor } : {}) });
         if (allowed !== true) return { ok: false, cancelled: true, ...before };
       }
       if (!isTrusted(event) || snapshot(app).revision !== before.revision) return { ok: false, reason: '权限状态已变化，请重新选择' };
