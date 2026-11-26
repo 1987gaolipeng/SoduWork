@@ -15,7 +15,6 @@ from typing import Any
 
 from sqlalchemy.engine import URL, make_url
 
-
 MANIFEST_SUFFIX = ".manifest.json"
 
 
