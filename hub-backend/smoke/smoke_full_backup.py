@@ -101,6 +101,30 @@ with tempfile.TemporaryDirectory(prefix="soduwork-full-smoke-") as root_name:
     with closing(sqlite3.connect(embedded)) as connection:
         ok(connection.execute("SELECT count(*) FROM task").fetchone()[0] == 2,
            "database rows survive restoration")
+
+    # Each layout starts with identical source contents, including a user directory
+    # with the staging prefix and an empty directory for the explicit work parent.
+    for layout in ("explicit", "default"):
+        source = root / layout
+        work = source / "work"
+        work.mkdir(parents=True)
+        keep = Path("soduwork-full-user") / "keep.txt"
+        (source / keep.parent).mkdir()
+        (source / keep).write_bytes(b"fixture\n")
+        bundle = (root if layout == "explicit" else source) / f"{layout}.sfb"
+        create_bundle(database_url=sqlite_url(database), sources=[f"releases={releases}", f"uploads={source}"],
+                      output=bundle, key_file=key, work_dir=work if layout == "explicit" else None)
+        ok(verify_bundle(bundle, key)["ok"], f"{layout} staging layout verifies")
+        target = root / f"restored-{layout}"
+        extract_bundle(bundle, key, target, confirm_target=str(target.resolve()))
+        restored_source = target / "uploads"
+        paths = {path.relative_to(restored_source) for path in restored_source.rglob("*")}
+        ok(paths == {keep.parent, keep, Path("work")}, f"{layout} staging changed the restored source tree")
+        ok((restored_source / keep).read_bytes() == b"fixture\n", f"{layout} staging lost user content")
+        manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
+        summary = next(item for item in manifest["sources"] if item["name"] == "uploads")
+        ok((summary["files"], summary["bytes"]) == (1, 8), f"{layout} staging inflated the source inventory")
+
     wrong_key = generate_key(root / "wrong.key")
     try:
         verify_bundle(output, wrong_key)
