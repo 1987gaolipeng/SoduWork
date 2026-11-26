@@ -277,7 +277,8 @@ def restore_database(
         base_args, env = _pg_args(target)
         args = [
             _tool("pg_restore", "PG_RESTORE_BIN"),
-            "--exit-on-error",
+            # Roll back earlier DROP statements if a later restore step fails.
+            "--single-transaction",
             "--no-owner",
             "--no-acl",
             "--clean",
