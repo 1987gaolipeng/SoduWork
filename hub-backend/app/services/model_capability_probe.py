@@ -338,6 +338,7 @@ async def run(conf: dict, checks: list[str]) -> dict:
     results, reasoning = {}, False
     working, budget = compatibility(conf.get("compatibility")), _Budget()
     for check in dict.fromkeys(checks):
+        started = time.monotonic()
         stamp = now()
         phase = {"stage": "tool_call" if check == "toolCalling" else "stream" if check == "streaming" else "output"}
         detail = None
@@ -357,7 +358,8 @@ async def run(conf: dict, checks: list[str]) -> dict:
             status, code = "inconclusive", "timeout"
         except (ValueError, TypeError, KeyError, AttributeError, IndexError):
             status, code = "inconclusive", "invalid_response"
-        results[check] = {"status": status, "code": code, "checkedAt": stamp, **phase}
+        results[check] = {"status": status, "code": code, "checkedAt": stamp, **phase,
+                          "durationMs": round((time.monotonic() - started) * 1000, 2)}
         if status != "passed" and detail:
             results[check]["detailCode"] = detail
     return {"reportVersion": 3, "apiFamily": "chat-completions", "checkedAt": now(), "checks": results,

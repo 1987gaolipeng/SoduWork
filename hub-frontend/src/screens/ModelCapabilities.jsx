@@ -89,11 +89,15 @@ export function CapabilityReport({ result, model, disabled }) {
       const retained = key === 'imageInput' && retainedImage
       const rejected = retained && check.status === 'unsupported'
       const stage = knownMessage(STAGES, check.stage)
+      const duration = typeof check.durationMs === 'number' && Number.isFinite(check.durationMs) && check.durationMs >= 0
+        ? new Intl.NumberFormat(locale, { style: 'unit', unit: check.durationMs < 1000 ? 'millisecond' : 'second',
+          unitDisplay: 'short', maximumFractionDigits: 2 }).format(check.durationMs < 1000 ? check.durationMs : check.durationMs / 1000) : ''
       const detail = key === 'imageInput' && check.detailCode === 'expected_output_mismatch'
         ? deferredMessageKey('未收到与图片中六位数字完全一致的回复')
         : knownMessage(DETAIL_DIAGNOSTICS, check.detailCode) || knownMessage(DIAGNOSTICS, check.code)
       return <div key={key}><dt>{CAPABILITY_LABELS[key] || tx('服务连接')}</dt>
         <dd className={'is-' + check.status}>{tx(rejected ? '本次检测未通过' : STATUS[check.status] || STATUS.inconclusive)}</dd>
+        {duration && <small>{tx('耗时：{0}', [duration])}</small>}
         {stage && <small>{tx(stage)}</small>}
         {rejected ? <small>{tx('服务拒绝了本次图片请求。对话沿用上次通过的结果，你仍可发图。')}</small> : detail && <small>{tx(detail)}</small>}
         {retained && !rejected && <small>{tx('对话沿用上次通过的结果，你仍可发图。')}</small>}

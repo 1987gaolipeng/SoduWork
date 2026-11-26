@@ -289,7 +289,8 @@ class AutoSigningTests(unittest.IsolatedAsyncioTestCase):
     async def test_upload_signs_registers_each_package_and_preserves_enabled_retry(
         self,
     ):
-        response = await self.upload()
+        installer = package_bytes()
+        response = await self.upload(data=installer)
         self.assertEqual(response.status_code, 200, response.text)
         row = response.json()["release"]
         self.assertEqual(row["channel"], "beta")
@@ -304,13 +305,13 @@ class AutoSigningTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(contract.automatic_update_candidate(stored))
             stored.enabled = True
             await session.commit()
-        repeated = await self.upload()
+        repeated = await self.upload(data=installer)
         self.assertFalse(repeated.json()["created"])
         self.assertTrue(repeated.json()["release"]["enabled"])
         self.assertEqual(repeated.json()["release"]["id"], row["id"])
         next_package = await self.upload("9.8.8-beta.1", channel="beta")
         self.assertEqual(next_package.status_code, 200, next_package.text)
-        separate = await self.upload(channel="stable")
+        separate = await self.upload(data=installer, channel="stable")
         self.assertEqual(separate.status_code, 200, separate.text)
         self.assertNotEqual(separate.json()["release"]["id"], row["id"])
         conflict = await self.upload(data=package_bytes(extra=b"different bytes"))
@@ -327,8 +328,11 @@ class AutoSigningTests(unittest.IsolatedAsyncioTestCase):
             barrier.wait(timeout=10)
             return value
 
+        installer = package_bytes()
         with patch.object(signing, "_prepare", side_effect=prepare):
-            responses = await asyncio.gather(self.upload(), self.upload())
+            responses = await asyncio.gather(
+                self.upload(data=installer), self.upload(data=installer)
+            )
         self.assertEqual(
             [r.status_code for r in responses], [200, 200], [r.text for r in responses]
         )
