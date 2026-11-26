@@ -180,10 +180,11 @@ function create(handle, taskId, options = {}) {
             // supplying it on tool_execution_end. Match the unnamed start only;
             // never finish a different explicitly identified concurrent tool.
             if (index < 0 && explicit) index = active.findIndex(x => !x.explicit && (!item.tool || x.name === item.tool));
-            const id = index < 0 ? explicit || key : active.splice(index, 1)[0].id;
+            const id = index < 0 ? explicit || key : active[index].id;
             call('appendTaskTool', { type: 'tool_execution_end', toolCallId: id,
               toolName: item.tool || 'tool', result: { content: [{ type: 'text', text: raw }] },
               isError: item.isError === true, ...serviceFields(item), ...source }, taskId);
+            if (index >= 0) active.splice(index, 1);
           }
           pending.set(ref, active);
         }
