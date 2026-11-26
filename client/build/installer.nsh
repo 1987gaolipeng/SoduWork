@@ -13,7 +13,11 @@
     ; Package-check expands the payload macro in preInit, before the install
     ; Section. Declare its optional progress destination before either caller.
     Var soduWorkRoot
+    Var soduworkStage
+    Var soduworkStageToken
+    Var soduworkFreshEntry
     Var soduWorkStartedAt
+    !insertmacro soduworkRollbackFunctions
     !include "${PROJECT_DIR}\.runtime\installer\native-payload.nsh"
     !include "${BUILD_RESOURCES_DIR}\package-check.nsh"
     !define SODUWORK_INSTALL_CONTEXT_WRITER
@@ -200,4 +204,30 @@
   Pop $2
   Pop $1
   Pop $0
+!macroend
+
+!macro soduworkRollbackFunctions
+Function soduworkRollbackStage
+  SetOutPath "$PLUGINSDIR"
+  ${If} $soduworkStageToken == ""
+    Return
+  ${EndIf}
+  ${If} $soduworkFreshEntry == 2
+    Delete "$soduWorkRoot\${APP_EXECUTABLE_FILENAME}"
+    Delete "$soduWorkRoot\.soduwork-launcher"
+  ${EndIf}
+  System::Call 'kernel32::SetEnvironmentVariableW(w "SODUWORK_ROLLBACK_STAGE", w "$soduworkStage")'
+  System::Call 'kernel32::SetEnvironmentVariableW(w "SODUWORK_ROLLBACK_TOKEN", w "$soduworkStageToken")'
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\soduwork-rollback.ps1"'
+  Pop $2
+  Pop $1
+  !insertmacro soduworkLog "stage-rollback exit=$2"
+  StrCpy $soduworkStageToken ""
+FunctionEnd
+
+; NSIS File can abort the install section directly from its error dialog.
+Function .onInstFailed
+  Call soduworkRollbackStage
+  SetErrorLevel 2
+FunctionEnd
 !macroend

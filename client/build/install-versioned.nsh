@@ -2,7 +2,6 @@
 ; Payloads are immutable. Launcher and shortcut targets never disappear.
 ; installer.nsh is already loaded by the standard install section.
 InitPluginsDir
-Var /GLOBAL soduworkStage
 Var /GLOBAL soduworkStageName
 Var /GLOBAL soduworkLock
 Var /GLOBAL soduworkOldPointer
@@ -73,38 +72,38 @@ ${EndIf}
 ; Older launchers can bypass the install lock. Keep the same shortcut path and
 ; atomically replace its bytes; never unlink the live entry point.
 SetOutPath "$PLUGINSDIR"
+File /oname=soduwork-rollback.ps1 "${BUILD_RESOURCES_DIR}\rollback-stage.ps1"
 File /oname=soduwork-launcher.exe "${PROJECT_DIR}\.runtime\installer\SoduWorkLauncher.exe"
-ClearErrors
-CopyFiles /SILENT "$PLUGINSDIR\soduwork-launcher.exe" "$soduWorkRoot\.soduwork-launcher.next"
-${If} ${Errors}
-  !insertmacro soduworkLog "launcher-prepare-failed"
-  SetErrorLevel 2
-  Quit
-${EndIf}
-; Preserve the original pre-versioned application for interrupted migrations.
-; A subsequent launcher refresh must not replace that legacy recovery binary.
-StrCpy $soduworkLauncherBackup "$soduWorkRoot\SoduWork.previous.exe"
-${If} ${FileExists} "$soduWorkRoot\.soduwork-launcher"
-  StrCpy $soduworkLauncherBackup "$soduWorkRoot\.soduwork-launcher.previous.exe"
-${EndIf}
+!macro soduworkPrepareLauncher
+  ClearErrors
+  CopyFiles /SILENT "$PLUGINSDIR\soduwork-launcher.exe" "$soduWorkRoot\.soduwork-launcher.next"
+  ${If} ${Errors}
+    !insertmacro soduworkLog "launcher-prepare-failed"
+    Goto installFailed
+  ${EndIf}
+!macroend
+!macro soduworkMarkLauncher
+  FileOpen $0 "$soduWorkRoot\.soduwork-launcher" w
+  FileWrite $0 "1"
+  FileClose $0
+!macroend
+StrCpy $soduworkFreshEntry 1
 ${If} ${FileExists} "$appExe"
+  StrCpy $soduworkFreshEntry 0
+  !insertmacro soduworkPrepareLauncher
+  ; Preserve the original pre-versioned application across launcher refreshes.
+  StrCpy $soduworkLauncherBackup "$soduWorkRoot\SoduWork.previous.exe"
+  ${If} ${FileExists} "$soduWorkRoot\.soduwork-launcher"
+    StrCpy $soduworkLauncherBackup "$soduWorkRoot\.soduwork-launcher.previous.exe"
+  ${EndIf}
   !insertmacro soduworkReplaceLauncher "$appExe" "$soduWorkRoot\.soduwork-launcher.next" "$soduworkLauncherBackup"
-${Else}
-  StrCpy $2 "entry-create"
-  System::Call 'kernel32::MoveFileExW(w "$soduWorkRoot\.soduwork-launcher.next", w "$appExe", i 8) i .r0 ?e'
-  Pop $1
+  ${If} $0 == 0
+    !insertmacro soduworkLog "launcher-swap-failed operation=$2 win32=$1"
+    MessageBox MB_OK|MB_ICONEXCLAMATION "$(soduworkLauncherUpdateFailed)" /SD IDOK
+    Goto installFailed
+  ${EndIf}
+  !insertmacro soduworkMarkLauncher
 ${EndIf}
-${If} $0 == 0
-  ; Backup/ACL/rename failure leaves the live entry in place; no payload pointer
-  ; has been changed, so there is no destructive restore operation to race.
-  !insertmacro soduworkLog "launcher-swap-failed operation=$2 win32=$1"
-  MessageBox MB_OK|MB_ICONEXCLAMATION "$(soduworkLauncherUpdateFailed)" /SD IDOK
-  SetErrorLevel 2
-  Quit
-${EndIf}
-FileOpen $0 "$soduWorkRoot\.soduwork-launcher" w
-FileWrite $0 "1"
-FileClose $0
 ${If} ${Silent}
   ; Show a lightweight native progress window even when an old helper passed /S.
   ; Closing that window does not cancel the transaction.
@@ -122,10 +121,23 @@ CreateDirectory "$soduWorkRoot\.soduwork-versions"
 SetOutPath "$soduWorkRoot"
 GetTempFileName $soduworkStage "$soduWorkRoot\.soduwork-versions"
 Delete "$soduworkStage"
-CreateDirectory "$soduworkStage"
+System::Call 'kernel32::CreateDirectoryW(w "$soduworkStage", p 0) i .r0'
+${If} $0 == 0
+  Goto installFailed
+${EndIf}
+System::Call 'ole32::CoCreateGuid(g .r0) i .r1'
+${If} $1 != 0
+  RMDir "$soduworkStage"
+  Goto installFailed
+${EndIf}
+StrCpy $soduworkStageToken $0
+ClearErrors
 FileOpen $0 "$soduworkStage\.soduwork-stage" w
-FileWrite $0 "1"
+FileWrite $0 "$soduworkStageToken"
 FileClose $0
+${If} ${Errors}
+  Goto installFailed
+${EndIf}
 ${GetFileName} "$soduworkStage" $soduworkStageName
 SetOutPath "$soduworkStage"
 StrCpy $INSTDIR "$soduworkStage"
@@ -135,18 +147,18 @@ ClearErrors
 ${If} ${Errors}
   StrCpy $INSTDIR "$soduWorkRoot"
   !insertmacro soduworkLog "native-extraction-failed"
-  SetErrorLevel 2
   MessageBox MB_OK|MB_ICONEXCLAMATION "$(soduworkExtractionFailed)" /SD IDOK
-  Quit
+  Goto installFailed
 ${EndIf}
 File "/oname=${UNINSTALL_FILENAME}" "${UNINSTALLER_OUT_FILE}"
 StrCpy $INSTDIR "$soduWorkRoot"
-${IfNot} ${FileExists} "$soduworkStage\${APP_EXECUTABLE_FILENAME}"
+${If} ${Errors}
+${OrIfNot} ${FileExists} "$soduworkStage\${UNINSTALL_FILENAME}"
+${OrIfNot} ${FileExists} "$soduworkStage\${APP_EXECUTABLE_FILENAME}"
 ${OrIfNot} ${FileExists} "$soduworkStage\resources\app.asar"
   !insertmacro soduworkLog "payload-incomplete"
-  SetErrorLevel 2
   MessageBox MB_OK|MB_ICONEXCLAMATION "$(soduworkPayloadIncomplete)" /SD IDOK
-  Quit
+  Goto installFailed
 ${EndIf}
 ; Installation checks the Python bootstrap ZIP for existence only, as authorized.
 ; Other files and the default release/package verification remain unchanged.
@@ -167,9 +179,8 @@ ${If} $0 != 0
   FileSeek $9 0 END
   FileWrite $9 "verifier-exit=$0$\r$\n$1$\r$\n"
   FileClose $9
-  SetErrorLevel 2
   MessageBox MB_OK|MB_ICONEXCLAMATION "$(soduworkVerificationFailed)$\r$\n$soduWorkRoot\.soduwork-update.log$\r$\n$soduWorkRoot\.soduwork-update-details.json" /SD IDOK
-  Quit
+  Goto installFailed
 ${EndIf}
 !insertmacro soduworkLog "payload-verification-passed details=.soduwork-update-details.json"
 FileOpen $0 "$soduworkStage\.soduwork-release" w
@@ -185,8 +196,18 @@ SetOutPath "$soduWorkRoot"
 CopyFiles /SILENT "$soduworkStage\${UNINSTALL_FILENAME}" "$soduWorkRoot\${UNINSTALL_FILENAME}"
 ${If} ${Errors}
   !insertmacro soduworkLog "uninstaller-copy-failed"
-  SetErrorLevel 2
-  Quit
+  Goto installFailed
+${EndIf}
+; A first install has no live shortcuts. Publish its entry after verification.
+${If} $soduworkFreshEntry == 1
+  !insertmacro soduworkPrepareLauncher
+  System::Call 'kernel32::MoveFileExW(w "$soduWorkRoot\.soduwork-launcher.next", w "$appExe", i 8) i .r0'
+  ${If} $0 == 0
+    !insertmacro soduworkLog "launcher-create-failed"
+    Goto installFailed
+  ${EndIf}
+  StrCpy $soduworkFreshEntry 2
+  !insertmacro soduworkMarkLauncher
 ${EndIf}
 ; Never delete the active pointer before the atomic switch.
 StrCpy $soduworkOldPointer ""
@@ -202,15 +223,14 @@ FileWrite $0 "$soduworkStageName"
 FileClose $0
 ${If} ${Errors}
   !insertmacro soduworkLog "pointer-write-failed"
-  SetErrorLevel 2
-  Quit
+  Goto installFailed
 ${EndIf}
 System::Call 'kernel32::MoveFileExW(w "$soduWorkRoot\.soduwork-active.next", w "$soduWorkRoot\.soduwork-active", i 9) i .r0'
 ${If} $0 == 0
   !insertmacro soduworkLog "pointer-switch-failed"
-  SetErrorLevel 2
-  Quit
+  Goto installFailed
 ${EndIf}
+StrCpy $soduworkStageToken "" ; the stage is now active
 ; Preserve the installation scope explicitly when both user and machine installs exist.
 FileOpen $0 "$soduWorkRoot\.soduwork-install-mode" w
 FileWrite $0 "$installMode"
@@ -242,3 +262,9 @@ Exec '"$soduworkStage\${APP_EXECUTABLE_FILENAME}" "$soduworkStage\.soduwork-prun
 System::Call 'kernel32::SetEnvironmentVariableW(w "ELECTRON_RUN_AS_NODE", p 0)'
 SetErrorLevel 0
 ; Helper owns silent relaunch; manual setup retains the standard finish page.
+Goto installFinished
+installFailed:
+  Call soduworkRollbackStage
+  SetErrorLevel 2
+  Quit
+installFinished:
