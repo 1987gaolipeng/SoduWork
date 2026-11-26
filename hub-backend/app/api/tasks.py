@@ -1108,7 +1108,9 @@ async def put_milestones(
     keep: set[str] = set()
     for i, it in enumerate(items):
         if not isinstance(it, dict):
-            continue
+            # A skipped entry never reached ``keep``, so the cleanup pass below deleted stored
+            # milestones the caller never mentioned while still answering 200.
+            raise HTTPException(status_code=400, detail=f"第 {i + 1} 个里程碑格式不正确")
         title = str(it.get("title") or "").strip()[:300]
         if not title:
             continue
@@ -1142,6 +1144,8 @@ async def put_milestones(
             m.status = "planned"
         await session.flush()
         keep.add(m.id)
+    if items and not keep:
+        raise HTTPException(status_code=400, detail="里程碑标题不能全部为空")
     for mid, m in old.items():
         if mid not in keep:
             # #662: 已验收(done)里程碑不可删除

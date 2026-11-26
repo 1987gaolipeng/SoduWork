@@ -71,6 +71,20 @@ class CatalogWriteTests(unittest.IsolatedAsyncioTestCase):
                         column == (payload.get("key") or payload["name"])))
                     self.assertEqual(count, 1)
 
+    async def test_invalid_milestone_list_preserves_plan_until_explicit_clear(self):
+        route = "/api/v1/tasks/task/milestones"
+        response = await self.http.put(route, json={"items": [{"title": "Keep"}, {"title": ""}]})
+        self.assertEqual(response.status_code, 200)
+        saved = response.json()["items"]
+        self.assertEqual([item["title"] for item in saved], ["Keep"])
+        for items in (["Keep"], [{"title": "Changed"}, None], [{"title": ""}, {"title": "  "}]):
+            with self.subTest(items=items):
+                self.assertEqual((await self.http.put(route, json={"items": items})).status_code, 400)
+                self.assertEqual((await self.http.get(route)).json()["items"], saved)
+        cleared = await self.http.put(route, json={"items": []})
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual((await self.http.get(route)).json()["items"], [])
+
     async def test_milestone_edits_validate_every_reference_before_replacing_the_plan(self):
         route = "/api/v1/tasks/task/milestones"
         good = {"title": "First", "repoId": "visible", "agentId": "worker", "agentType": "agent", "model": "chat"}
