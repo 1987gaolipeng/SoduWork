@@ -100,6 +100,7 @@ if (typeof electron === 'string') {
     // Exercise the production workspace route as well as the settings lifecycle.
     // Calling openSettings alone leaves the previous page and navigation active.
     await js(`window.__deskPanel='workspace';
+      window.pageOpened=()=>{}; // The isolated fixture has no desktop loading screen to dismiss.
       window.OPENERS={settings:()=>openSettings(),create:()=>{document.querySelector('main').hidden=false;}};
       window.CLOSERS={create:'closeComposePanel',settings:'closeSettings'};
       window.closeComposePanel=()=>{document.querySelector('main').hidden=true;};
@@ -185,6 +186,11 @@ if (typeof electron === 'string') {
     report.cases.push('24 组就绪态布局：盒子/玻璃皮肤、紫/蓝/红/黑主题、320/480/1150 宽度、中英文；入口与按钮同主题色，无绿色底色混入，标题仅一处，下载/校验完成与待重启准确显示；日/韩文窄屏也无溢出。');
     win.setSize(1150, 850);
     await js(`document.documentElement.dataset.skin='glass';document.documentElement.dataset.theme='azure';SoduWorkI18n.setLocale('zh-CN');ClientUpdateView.present(${JSON.stringify(ready)},document.querySelector('#wsUpdate'));`);
+    await click('.update-notice [data-update-notes] summary');
+    await js(`ClientUpdateView.present(${JSON.stringify(ready)},document.querySelector('#wsUpdate'));`);
+    assert.equal(await js('document.querySelector(".update-notice [data-update-notes]").open'), true);
+    assert.equal(await js('document.querySelector(".update-notice [data-release-notes-body]").textContent'), manifest.notes);
+    assert.equal(await js('document.querySelector(".update-notice [data-release-notes-body] img")'), null);
     await click('[data-update-details]');
     assert.equal(await js('WorkspaceHost.view'), 'settings');
     assert.equal(await js('document.documentElement.dataset.workspaceView'), 'settings');
@@ -194,13 +200,7 @@ if (typeof electron === 'string') {
     assert.equal(await js('document.activeElement.id'), 'clientUpdateAction');
     assert.equal(await js('document.querySelector(".update-notice").hidden'), true);
     assert.equal(helperCalls, 0);
-    await click('#clientUpdateNotes summary');
-    assert.equal(await js('document.querySelector("#clientUpdateNotes").open'), true);
-    assert.equal(await js('document.querySelector("#clientUpdateNotes [data-release-notes-body]").textContent'), manifest.notes);
-    assert.equal(await js('document.querySelector("#clientUpdateNotes [data-release-notes-body] img")'), null);
-    await js(`_paintClientUpdateStatus(${JSON.stringify(ready)})`);
-    assert.equal(await js('document.querySelector("#clientUpdateNotes").open'), true);
-    report.cases.push('真实签名说明经过更新 IPC 到设置详情，鼠标展开后文本及换行完整、HTML 不执行、进度刷新保留展开。');
+    report.cases.push('更新提示保留展开的签名说明及其文本，点击查看详情可打开设置中的更新卡片。');
     // Reopening details while already in settings must still reveal the card.
     await js('document.querySelector("#settingsPanel").scrollTop=0;');
     await click('#wsUpdate'); await click('[data-update-details]');
