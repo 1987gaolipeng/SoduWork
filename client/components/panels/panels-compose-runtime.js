@@ -238,7 +238,7 @@
     const subheading = scope.querySelector('#cpRuntimePop .cp-runtime-heading small');
     if (subheading) subheading.textContent = location === 'cloud'
       ? _rtText('显示当前云端电脑的安装状态，可切换可用底座')
-      : _rtText('选择一个底座完成本次会话');
+      : _rtText(loadPromise && !catalog.some(row => row.id === 'codex') ? '正在读取可用 Agent…' : '选择一个底座完成本次会话');
     const count = scope.querySelector('#cpRuntimeCount');
     if (count && location === 'cloud') {
       const available = catalog.filter((row) => probes[probeKey(row.id)]?.ok).length;
@@ -261,9 +261,12 @@
         versionBadge.title = versionBadge.textContent;
         versionBadge.hidden = !version;
       }
-      const checking = row.classList.contains('checking');
-      row.classList.toggle('unavailable', Boolean(result && !result.ok));
-      if (result && result.reason) row.title = String(result.reason);
+      const localCodex = location === 'local' && adapterId === 'codex';
+      const loadingModels = localCodex && manualSelection?.id === adapterId && manualSelection.loadingModels;
+      const checking = row.classList.contains('checking') || localCodex &&
+        (pendingProbes.has(probeKey(adapterId)) || Boolean(loadPromise) || loadingModels);
+      row.classList.toggle('unavailable', !checking && Boolean(result && !result.ok));
+      if (!checking && result && result.reason) row.title = String(result.reason);
       else row.removeAttribute('title');
       const status = row.querySelector('[data-runtime-state]');
       if (check) check.hidden = !on || checking || Boolean(result && !result.ok);
@@ -275,7 +278,7 @@
         status.dataset.state = checking ? 'checking'
           : result == null ? 'unknown' : result.ok ? 'ready'
             : ['auth', 'unauthed', 'nollm'].includes(result.state) ? 'warning' : 'error';
-        status.textContent = checking ? _rtText('检测中')
+        status.textContent = loadingModels ? _rtText('正在加载模型…') : checking ? _rtText('检测中')
           : result == null ? _rtText('待检测')
             : result.ok ? _rtText('可用')
               : (['auth', 'unauthed'].includes(result.state) ? _rtText('需登录')
@@ -292,10 +295,10 @@
     }
   }
 
-  function bounded(promise) {
+  function bounded(promise, timeoutMs = 15000) {
     let timer;
     return Promise.race([Promise.resolve(promise), new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error('执行底座检测超时，请重试')), 15000);
+      timer = setTimeout(() => reject(new Error('执行底座检测超时，请重试')), timeoutMs);
     })]).finally(() => clearTimeout(timer));
   }
 
@@ -362,8 +365,11 @@
         paint(options.root);
       }
       return catalog;
-    }).finally(() => { if (loadPromise === job) loadPromise = null; });
+    }).finally(() => {
+      if (loadPromise === job) { loadPromise = null; paint(options.root); }
+    });
     loadPromise = job;
+    paint(options.root);
     return job;
   }
 
@@ -472,7 +478,8 @@
       return adapterId === 'pi';
     }
     try {
-      const result = await bounded(api.probe(adapterId));
+      // The local Codex adapter can retry one interrupted 15s Runner probe.
+      const result = await bounded(api.probe(adapterId), adapterId === 'codex' ? 32000 : 15000);
       if (!valid()) return false;
       probes[key] = result || { ok: false };
       paint(options.root);
@@ -538,6 +545,11 @@
         if (!await probe(adapterId, opts, true) || !valid()) return false;
         const target = catalog.find(item => item.id === adapterId);
         if (!target) return false;
+        if (target.id === 'codex' && location === 'local' && current !== target.id &&
+            global.ComposeModelPicker?.hasManualChoice?.()) {
+          manualSelection.loadingModels = true;
+          paint(root);
+        }
         const model = await global.ComposeModelPicker?.prepareRuntimeSwitch?.(target, valid, opts.say);
         if (model === false || !valid() || catalog.find(item => item.id === adapterId)?.modelMode !== target.modelMode) return false;
         if (!selectCurrent(adapterId)) return false;
@@ -558,7 +570,7 @@
         if (manualSelection?.job === job) manualSelection = null;
         paint(root);
       });
-      manualSelection = { job, valid };
+      manualSelection = { job, valid, id: adapterId };
       return job;
     });
     paint(root);

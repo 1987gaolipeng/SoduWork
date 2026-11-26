@@ -1,5 +1,7 @@
 (function (global) {
   const messages = {
+    "正在加载模型…": "Loading models…",
+    "暂无可用模型": "No models available",
     "模型目录暂时不可用": "The model catalog is temporarily unavailable",
     "使用底座账号默认模型": "Use the Agent account’s default model",
     "目标底座没有可明确选择的可用模型": "No model can be selected unambiguously for this Agent",
