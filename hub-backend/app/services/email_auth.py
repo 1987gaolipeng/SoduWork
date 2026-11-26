@@ -223,9 +223,18 @@ async def verified_user(session, email):
                                                    User.email_verified_at.is_not(None)))
 
 
-async def public_policy(session):
+async def public_policy(session, *, compact=False):
     from .account_legal import documents
     legal = await documents(session)
-    return {"codeExpiresIn": CODE_TTL, "codeRetryAfter": RESEND_SECONDS,
-            "requiredConsentVersions": legal["requiredConsentVersions"],
-            "legalDocuments": legal["documents"]}
+    policy = {"codeExpiresIn": CODE_TTL, "codeRetryAfter": RESEND_SECONDS,
+              "requiredConsentVersions": legal["requiredConsentVersions"]}
+    if compact:
+        # Registration needs the locale of each current revision even before
+        # the user opens the document reader. Fetch the bodies on demand.
+        policy["legalDocumentLocales"] = [
+            {key: doc[key] for key in ("key", "version", "locale", "defaultLocale")}
+            for doc in legal["documents"]
+        ]
+    else:
+        policy["legalDocuments"] = legal["documents"]
+    return policy

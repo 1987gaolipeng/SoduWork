@@ -521,6 +521,38 @@ test('policy HTTP failure exposes recheck, repeated failure remains visible, and
   assert.equal(f.gate.querySelector('[data-mail-message]').textContent, '');
 });
 
+test('a transient public policy failure recovers the draft without user input or sending a code', async () => {
+  const f = bootView();
+  f.gate.contains = node => node === f.mounted.accountInput;
+  const startup = f.window.ClientAuth.bootForTest();
+  f.finishEnrollment({ ok: true, activationRequired: true }); await startup;
+  f.mode('register'); f.mounted.accountInput.value = 'draft@example.test';
+  f.policyRequests[0].reject(new TypeError('network error')); await f.flush();
+  assert.equal(f.gate.querySelector('[data-send-code]').disabled, true);
+  await f.advance(2000);
+  assert.equal(f.policyRequests.length, 2);
+  f.policyRequests[1].resolve({ mailReady: true, allowSelfRegistration: true }); await f.flush();
+  assert.equal(f.gate.querySelector('[data-send-code]').disabled, false);
+  assert.equal(f.mounted.accountInput.value, 'draft@example.test');
+  assert.equal(f.calls.length, 0);
+  await f.advance(60000);
+  assert.equal(f.policyRequests.length, 2);
+});
+
+test('automatic retry stops after a permanent policy failure or a Hub change', async () => {
+  for (const status of [403, 503]) {
+    const f = bootView();
+    f.gate.contains = () => true;
+    const startup = f.window.ClientAuth.bootForTest();
+    f.finishEnrollment({ ok: true, activationRequired: true }); await startup;
+    f.policyRequests[0].reject(Object.assign(new Error('unavailable'), { status })); await f.flush();
+    if (status === 503) f.switchHub();
+    await f.advance(60000);
+    assert.equal(f.policyRequests.length, 1);
+    assert.equal(f.calls.length, 0);
+  }
+});
+
 test('failed policy recheck disables stale availability without losing the email draft', () => {
   const f = view(); f.mounted.setPolicy({ mailReady: true }); f.mounted.accountInput.value = 'draft@example.test';
   f.mounted.setPolicyError();

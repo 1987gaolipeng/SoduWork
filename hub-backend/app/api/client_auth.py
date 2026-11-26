@@ -164,6 +164,7 @@ def _update_device(client: Client, body: ClientLogin) -> None:
 @router.get("/client-auth/policy")
 async def public_policy(
     session: AsyncSession = Depends(get_session),
+    compact: bool = False,
 ):
     from ..services import account_mail, email_auth
     current = await client_access.policy(session)
@@ -174,7 +175,7 @@ async def public_policy(
         "passwordMinLength": 8,
         "mailReady": mail_ready,
         "loginMethods": ["password", "email-code"] if mail_ready else ["password"],
-        **await email_auth.public_policy(session),
+        **await email_auth.public_policy(session, compact=compact),
     }
 
 
