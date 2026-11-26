@@ -13,8 +13,24 @@ const metadataSnapshot = require('./metadata-snapshot.cjs');
 const root = app => path.join(app.getPath('userData'), 'conversation-runtime-segments');
 const location = (app, id) => path.join(root(app), crypto.createHash('sha256').update(String(id)).digest('hex') + '.json');
 const cache = new Map();
-const cacheStamps = new Map();
+const releasedRecords = new FinalizationRegistry(({ file, entry }) => {
+  if (cache.get(file) === entry) cache.delete(file);
+});
 const writes = new Map();
+
+function forgetCachedRecord(file) {
+  const entry = cache.get(file);
+  if (entry) releasedRecords.unregister(entry);
+  cache.delete(file);
+}
+function cacheRecord(file, record, revision) {
+  forgetCachedRecord(file);
+  // History listings keep only small projections. Their discarded full
+  // transcripts must not stay alive solely because they were read once.
+  const entry = { reference: new WeakRef(record), revision };
+  cache.set(file, entry);
+  releasedRecords.register(record, { file, entry }, entry);
+}
 
 function read(app, id) {
   if (!app?.getPath || !id) return null;
@@ -32,7 +48,8 @@ function snapshot(app, file) {
     // Prefix history can be large. A warm authority check hashes it in bounded
     // chunks and reuses the parsed manifest only when its bytes still match.
     const { revision, stat } = metadataSnapshot.digest(root(app), file);
-    if (cache.has(file) && cacheStamps.get(file) === revision) return { revision, record: cache.get(file) };
+    const cached = cache.get(file), record = cached?.reference.deref();
+    if (record && cached.revision === revision) return { revision, record };
     const observedSize = Number(stat.size);
     if (!Number.isSafeInteger(observedSize)) throw Error('Invalid runtime manifest size');
     const value = metadataSnapshot.read(root(app), file,
@@ -43,9 +60,9 @@ function snapshot(app, file) {
     if (row.version !== 1 || typeof row.id !== 'string' || !row.id ||
         location(app, row.id) !== file || !row.active?.adapterId || !row.active?.sessionId ||
         !Array.isArray(row.segments) || row.segments.length > 1000) throw Error('invalid');
-    cache.set(file, row); cacheStamps.set(file, revision); return { revision, record: row };
+    cacheRecord(file, row, revision); return { revision, record: row };
   } catch (error) {
-    cache.delete(file); cacheStamps.delete(file);
+    forgetCachedRecord(file);
     if (error.code === 'ENOENT') return { revision: 'missing', record: null };
     throw Error('无法读取会话的 Agent 切换记录，请检查本地存储');
   }
@@ -66,7 +83,7 @@ async function write(app, row) {
     }
     // A successful write is not a verified read snapshot. Revalidate its bytes
     // before caching so timestamp collisions cannot reuse an older authority.
-    cache.delete(file); cacheStamps.delete(file);
+    forgetCachedRecord(file);
   } finally { await fsp.unlink(temporary).catch(() => {}); }
 }
 function save(app, row) {
@@ -144,8 +161,7 @@ function mergeHistory(app, rows) {
 async function remove(app, id) {
   await flush(app, id);
   await fsp.unlink(location(app, id)).catch(e => { if (e.code !== 'ENOENT') throw e; });
-  cache.delete(location(app, id));
-  cacheStamps.delete(location(app, id));
+  forgetCachedRecord(location(app, id));
 }
 function brief(snapshot) {
   const lines = (snapshot.messages || []).filter(m => ['user', 'assistant'].includes(m.role)).map(m => {
