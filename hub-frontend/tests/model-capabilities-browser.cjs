@@ -112,6 +112,8 @@ app.whenReady().then(async()=>{
           response.verifiedChecks.imageInput = lastPass || image
           response.capabilityProfile.imageInput.checkStatus = image.status
         }
+        for (const [check, durationMs] of Object.entries({ connection: 125.5, imageInput: 3500, toolCalling: 7000, streaming: 0 }))
+          if (response.checks[check]) response.checks[check].durationMs = durationMs
         model.capabilityCheck=response;model.capabilityProfile=response.capabilityProfile
       }
       res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(response));return
@@ -154,10 +156,10 @@ app.whenReady().then(async()=>{
   await clickSelector('.model-cap-report > summary');await geometry('checked-zh')
   assert.ok((await js('document.querySelector(".model-cap-report").innerText')).includes('未收到与图片中六位数字完全一致的回复'))
   for (const [value, expected] of [
-    ['zh-CN', ['检测阶段：读取工具结果', '模型未正确确认工具执行结果', '上次验证：支持']],
-    ['en-US', ['Test stage: Reading the tool result', 'The model did not correctly confirm the tool result.', 'Previously verified: supported']],
-    ['ja-JP', ['検査段階：ツールの結果を確認', 'モデルがツールの実行結果を正しく確認しませんでした。', '前回の検証：対応']],
-    ['ko-KR', ['검사 단계: 도구 결과 확인', '모델이 도구 실행 결과를 올바르게 확인하지 않았습니다.', '이전 검증: 지원']],
+    ['zh-CN', ['检测阶段：读取工具结果', '模型未正确确认工具执行结果', '上次验证：支持', '耗时：7秒', '耗时：0毫秒']],
+    ['en-US', ['Test stage: Reading the tool result', 'The model did not correctly confirm the tool result.', 'Previously verified: supported', 'Elapsed: 7 sec', 'Elapsed: 0 ms']],
+    ['ja-JP', ['検査段階：ツールの結果を確認', 'モデルがツールの実行結果を正しく確認しませんでした。', '前回の検証：対応', '所要時間：7 秒', '所要時間：0 ms']],
+    ['ko-KR', ['검사 단계: 도구 결과 확인', '모델이 도구 실행 결과를 올바르게 확인하지 않았습니다.', '이전 검증: 지원', '소요 시간: 7초', '소요 시간: 0ms']],
   ]) {
     await locale(value)
     const copy = await js('document.querySelector(".model-cap-report").innerText')
@@ -165,7 +167,7 @@ app.whenReady().then(async()=>{
     assert.doesNotMatch(copy, /privateReceipt|private-tool-receipt|constructor|function Object|expected_output_missing/)
     assert.equal(await js('document.querySelectorAll(".model-cap-report img").length'), 0)
     assert.equal(await js(`[...document.querySelectorAll('.model-cap-report time')].every(n=>n.textContent===new Date(n.dateTime).toLocaleString(${JSON.stringify(value)}))`), true)
-    reportLocales.push({ locale: value, phase: expected[0], detail: expected[1] })
+    reportLocales.push({ locale: value, phase: expected[0], detail: expected[1], elapsed: expected.slice(3) })
   }
   await locale('zh-CN')
   const errorText = 'document.querySelector(".model-cap-error")?.textContent'

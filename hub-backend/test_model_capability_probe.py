@@ -4,6 +4,7 @@ import json
 import re
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.services import model_capabilities as caps, model_capability_probe as probe
@@ -79,6 +80,78 @@ def streamed_tool(value, *, name="soduwork_capability_echo", arguments=None, ext
 
 
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_check_durations_include_transport_reads_tool_round_trip_and_cleanup(self):
+        clock = [1000.0]
+
+        def handler(body):
+            clock[0] += 0.013
+            if has_tool_result(body):
+                response = stream_message(receipt(body))
+            elif body.get("tools"):
+                value = re.search(r"value ([a-f0-9]{16})", body["messages"][0]["content"])[1]
+                response = streamed_tool(value)
+            else:
+                response = stream_message() if body.get("stream") else message()
+            chunks, close = response.chunks, response.aclose
+
+            async def read():
+                clock[0] += 0.017
+                async for part in chunks():
+                    yield part
+
+            async def closed():
+                clock[0] += 0.019
+                await close()
+
+            response.chunks, response.aclose = read, closed
+            return response
+
+        with patch.object(probe, "time", SimpleNamespace(monotonic=lambda: clock[0])):
+            result = await self.run_probe(["connection", "toolCalling", "toolCalling", "streaming"], handler)
+        self.assertEqual(len(self.requests), 4)
+        self.assertEqual({key: value["durationMs"] for key, value in result["checks"].items()},
+                         {"connection": 49.0, "toolCalling": 98.0, "streaming": 49.0})
+        self.assertTrue(all(check["status"] == "passed" for check in result["checks"].values()))
+        self.assertEqual(result["checks"]["toolCalling"]["stage"], "tool_result")
+
+    async def test_failed_and_inconclusive_attempts_keep_their_own_elapsed_time(self):
+        for error, status, code in ((UpstreamError(401, '{"error":{"message":"synthetic refusal"}}'),
+                                    "failed", "credentials_or_access"),
+                                   (TimeoutError(), "inconclusive", "timeout"),
+                                   (ValueError("synthetic invalid response"), "inconclusive", "invalid_response")):
+            with self.subTest(code=code):
+                clock = [1000.0]
+
+                def handler(body):
+                    clock[0] += 0.025
+                    raise error
+
+                with patch.object(probe, "time", SimpleNamespace(monotonic=lambda: clock[0])):
+                    report = await self.run_probe(["connection", "streaming"], handler)
+                for check in report["checks"].values():
+                    self.assertEqual((check["status"], check["code"], check["durationMs"]), (status, code, 25.0))
+                self.assertFalse(report["reasoningStreamReported"])
+
+    async def test_duration_includes_compatibility_retry_without_timing_an_untested_protocol(self):
+        clock = [1000.0]
+
+        def handler(body):
+            clock[0] += 0.020
+            if "max_tokens" in body:
+                raise UpstreamError(400, '{"error":{"code":"unsupported_parameter","param":"max_tokens"}}')
+            return message()
+
+        with patch.object(probe, "time", SimpleNamespace(monotonic=lambda: clock[0])):
+            report = await self.run_probe(["connection"], handler)
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual(report["checks"]["connection"]["durationMs"], 40.0)
+        self.assertEqual(report["checks"]["connection"]["status"], "passed")
+        self.assertEqual(report["compatibility"]["maxTokensField"], "max_completion_tokens")
+        report = await self.run_probe(["connection"], handler, {**CONF, "kind": "anthropic"})
+        self.assertEqual(self.requests, [])
+        self.assertEqual(report["checks"]["connection"]["code"], "protocol_not_tested")
+        self.assertNotIn("durationMs", report["checks"]["connection"])
+
     async def test_plain_tools_retry_requires_a_matching_receipt_and_keeps_controls_out(self):
         for outcome, status in (("valid", "passed"), ("wrong receipt", "inconclusive"),
                                 ("refused", "unsupported")):

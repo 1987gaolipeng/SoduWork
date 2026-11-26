@@ -5,6 +5,46 @@ import { createComponentHarness } from './helpers/react-harness.mjs'
 import { setLocale, translateText } from '../src/i18n.js'
 import messages from '../src/locales/model-capabilities.js'
 
+test('capability reports show localized per-check elapsed time including a measured zero', async t => {
+  const page = await createComponentHarness(new URL('../src/screens/ModelCapabilities.jsx', import.meta.url), {
+    exportName: 'CapabilityReport', props: { result: {} }, dependencies: { '../api.js': { api: {} } },
+  })
+  t.after(() => { page.unmount(); setLocale('zh-CN') })
+  const result = { reportVersion: 3, checks: {
+    connection: { status: 'passed', code: 'verified', durationMs: 0 },
+    imageInput: { status: 'inconclusive', code: 'timeout', durationMs: 3500 },
+    toolCalling: { status: 'passed', code: 'verified', durationMs: 125.5 },
+  } }
+  const expected = {
+    'zh-CN': ['耗时：0毫秒', '耗时：3.5秒', '耗时：125.5毫秒'],
+    'en-US': ['Elapsed: 0 ms', 'Elapsed: 3.5 sec', 'Elapsed: 125.5 ms'],
+    'ja-JP': ['所要時間：0 ms', '所要時間：3.5 秒', '所要時間：125.5 ms'],
+    'ko-KR': ['소요 시간: 0ms', '소요 시간: 3.5초', '소요 시간: 125.5ms'],
+  }
+  const before = JSON.stringify(result)
+  for (const [locale, labels] of Object.entries(expected)) {
+    setLocale(locale)
+    const html = renderToStaticMarkup(page.render({ result }))
+    for (const label of labels) assert.ok(html.includes(label), locale + ': ' + label)
+    assert.ok(html.includes(translateText('未能确认', [], locale)), 'elapsed time does not change the verdict')
+  }
+  assert.equal(JSON.stringify(result), before)
+})
+
+test('legacy reports and invalid duration metadata do not display a fabricated elapsed time', async t => {
+  setLocale('zh-CN')
+  const page = await createComponentHarness(new URL('../src/screens/ModelCapabilities.jsx', import.meta.url), {
+    exportName: 'CapabilityReport', props: { result: {} }, dependencies: { '../api.js': { api: {} } },
+  })
+  t.after(() => page.unmount())
+  for (const durationMs of [undefined, null, true, '3500', -1, NaN, Infinity]) {
+    const result = { checks: { connection: { status: 'passed', code: 'verified', durationMs } } }
+    const html = renderToStaticMarkup(page.render({ result }))
+    assert.doesNotMatch(html, /耗时/)
+    assert.match(html, /检测通过/)
+  }
+})
+
 const reportPhases = {
   output: '检测阶段：检查回复内容', stream: '检测阶段：逐步接收回复',
   tool_call: '检测阶段：请求工具执行', tool_result: '检测阶段：读取工具结果',

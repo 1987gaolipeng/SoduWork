@@ -24,6 +24,38 @@ from app.services import device_auth, model_config_guard, runtime_images, ai_exe
 
 
 class CapabilityTests(IsolatedDatabase):
+    async def test_check_durations_survive_partial_recheck_and_saved_catalog_reload(self):
+        open_response = probe.model_transport.open_response
+
+        async def delayed(*args, **kwargs):
+            await asyncio.sleep(0.02)
+            return await open_response(*args, **kwargs)
+
+        with patch.object(probe.model_transport, "open_response", side_effect=delayed):
+            response = await self.check()
+        self.assertEqual(response.status_code, 200, response.text)
+        initial = response.json()
+        for check in initial["checks"].values():
+            self.assertGreaterEqual(check["durationMs"], 15)
+            self.assertEqual(check["status"], "passed")
+        self.assertGreaterEqual(initial["checks"]["toolCalling"]["durationMs"], 30)
+        async with self.sessions() as session:
+            saved = (await catalog.catalog(session))["models"][0]["capabilityCheck"]
+        self.assertEqual(saved["checks"], initial["checks"])
+
+        response = await self.check(checks=["streaming"])
+        self.assertEqual(response.status_code, 200, response.text)
+        updated = response.json()
+        self.assertEqual(updated["runSequence"], initial["runSequence"] + 1)
+        self.assertEqual(updated["runtimeRevision"], initial["runtimeRevision"])
+        for key in ("connection", "imageInput", "toolCalling"):
+            self.assertEqual(updated["checks"][key], initial["checks"][key])
+        self.assertGreaterEqual(updated["checks"]["streaming"]["durationMs"], 0)
+        self.assertNotEqual(updated["checks"]["streaming"]["checkedAt"], initial["checks"]["streaming"]["checkedAt"])
+        async with self.sessions() as session:
+            saved = (await catalog.catalog(session))["models"][0]["capabilityCheck"]
+        self.assertEqual(saved["checks"], updated["checks"])
+
     async def test_creation_receipt_precedes_a_concurrent_edit_after_commit(self):
         from app.api import admin
         from app.services import client_domain_events
